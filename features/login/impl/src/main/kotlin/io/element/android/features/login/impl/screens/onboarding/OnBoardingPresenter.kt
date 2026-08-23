@@ -83,7 +83,7 @@ class OnBoardingPresenter(
         val defaultAccountProvider = remember(linkAccountProvider) {
             // If there is a forced account provider, this is the default account provider
             // Else use the account provider passed in the params if any and if allowed
-            forcedAccountProvider ?: linkAccountProvider
+            forcedAccountProvider ?: linkAccountProvider ?: OnBoardingConfig.DEFAULT_HOMESERVER_URL
         }
         val canLoginWithQrCode by produceState(initialValue = false, linkAccountProvider) {
             value = linkAccountProvider == null

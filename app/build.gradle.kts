@@ -98,14 +98,12 @@ android {
         }
     }
 
-    val baseAppName = BuildTimeConfig.APPLICATION_NAME
     val buildType = if (isEnterpriseBuild) "Enterprise" else "FOSS"
-    logger.warnInBox("Building ${defaultConfig.applicationId} ($baseAppName) [$buildType]")
+    logger.warnInBox("Building ${defaultConfig.applicationId} (${BuildTimeConfig.APPLICATION_NAME}) [$buildType]")
 
     buildTypes {
         val oAuthRedirectSchemeBase = BuildTimeConfig.METADATA_HOST_REVERSED ?: "io.element.android"
         getByName("debug") {
-            resValue("string", "app_name", "$baseAppName dbg")
             resValue(
                 "string",
                 "login_redirect_scheme",
@@ -116,7 +114,6 @@ android {
         }
 
         getByName("release") {
-            resValue("string", "app_name", baseAppName)
             resValue(
                 "string",
                 "login_redirect_scheme",
@@ -153,7 +150,6 @@ android {
             initWith(release)
             applicationIdSuffix = ".nightly"
             versionNameSuffix = "-nightly"
-            resValue("string", "app_name", "$baseAppName nightly")
             resValue(
                 "string",
                 "login_redirect_scheme",
@@ -255,7 +251,7 @@ dependencies {
         implementation(projects.appicon.enterprise)
     } else {
         implementation(projects.features.enterprise.implFoss)
-        implementation(projects.appicon.element)
+        implementation(projects.appicon.yizhe)
     }
     allFeaturesImpl(project)
     implementation(projects.features.migration.api)
