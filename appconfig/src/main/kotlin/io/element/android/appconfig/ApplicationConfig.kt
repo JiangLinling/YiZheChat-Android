@@ -12,9 +12,10 @@ object ApplicationConfig {
     /**
      * Application name used in the UI for string. If empty, the value is taken from the resources `R.string.app_name`.
      * Note that this value is not used for the launcher icon.
-     * YiZheChat reads this value from `R.string.app_name` so Android can use a localized label.
+     * This value is also used in network protocol metadata, so it must remain ASCII.
+     * Android uses the localized `R.string.app_name` for the launcher label.
      */
-    const val APPLICATION_NAME: String = ""
+    const val APPLICATION_NAME: String = "YiZheChat"
 
     /**
      * Used in the strings to reference the Element client.
