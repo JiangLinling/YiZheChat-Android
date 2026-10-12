@@ -60,6 +60,11 @@ val yizheNextAndroidSigningCertificateSha256 = "9da04c7a7493a51552ef6030e40c8962
 // Next is deliberately opt-in. Its public configuration is kept outside the checkout so a
 // production properties file cannot accidentally make a Next artifact connect to Stable.
 val isNextBuildRequested = gradle.startParameter.taskNames.any { it.contains("next", ignoreCase = true) }
+val unifiedSourceManifest = rootProject.file("unified-source-manifest.json")
+val unifiedSourceManifestSha256 = if (isNextBuildRequested) {
+    check(unifiedSourceManifest.isFile) { "Next packaging requires the reviewed cumulative source manifest." }
+    HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(unifiedSourceManifest.readBytes()))
+} else ""
 val nextBuildProperties = Properties()
 fun nextBuildProperty(name: String): String = nextBuildProperties.getProperty(name)?.trim().orEmpty().also {
     check(it.isNotBlank() && !it.contains("replace", ignoreCase = true) && !it.contains("placeholder", ignoreCase = true)) {
@@ -185,6 +190,7 @@ android {
         targetSdk = Versions.TARGET_SDK
         versionCode = Versions.VERSION_CODE
         versionName = Versions.VERSION_NAME
+        manifestPlaceholders["yizheUnifiedSourceManifestSha256"] = ""
         manifestPlaceholders["yizheControlBaseUrl"] = providers.gradleProperty("yizhe.control.baseUrl").orElse("").get()
         manifestPlaceholders["yizheControlSigningKeyDerB64"] = providers.gradleProperty("yizhe.control.signingKeyDerB64").orElse("").get()
         manifestPlaceholders["yizheControlSigningKeyId"] = providers.gradleProperty("yizhe.control.signingKeyId").orElse("").get()
@@ -506,6 +512,7 @@ android {
                 applicationId = "com.yizhe.chat.next"
                 signingConfig = nextDebugSigningConfig
                 manifestPlaceholders.putAll(nextManifestValues)
+                manifestPlaceholders["yizheUnifiedSourceManifestSha256"] = unifiedSourceManifestSha256
                 buildConfigFieldStr("SHORT_FLAVOR_DESCRIPTION", "N")
                 buildConfigFieldStr("FLAVOR_DESCRIPTION", "YiZheChat Next")
             }

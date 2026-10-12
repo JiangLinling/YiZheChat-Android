@@ -147,6 +147,14 @@ class TimelineViewTest {
         )
         waitForIdle()
 
+        // First live entry intentionally starts at the latest message. Establish the
+        // user's history-reading viewport only after that entry placement has completed.
+        assertThat(lazyListState.firstVisibleItemIndex).isEqualTo(0)
+        runOnUiThread { lazyListState.requestScrollToItem(10, 17) }
+        waitForIdle()
+        assertThat(lazyListState.firstVisibleItemIndex).isEqualTo(10)
+        assertThat(lazyListState.firstVisibleItemScrollOffset).isEqualTo(17)
+
         runOnUiThread {
             val newItem = aTimelineItemEvent(
                 eventId = EventId("\$new_event"),
@@ -188,7 +196,10 @@ class TimelineViewTest {
                 eventSink = eventsRecorder,
             ),
         )
-        eventsRecorder.assertSingle(TimelineEvent.OnScrollFinished(firstIndex = 0))
+        eventsRecorder.assertList(listOf(
+            TimelineEvent.OnScrollFinished(firstIndex = 0, isUserVisible = false),
+            TimelineEvent.OnScrollFinished(firstIndex = 0, isUserVisible = true),
+        ))
     }
 
     @Test
@@ -203,7 +214,10 @@ class TimelineViewTest {
             forceJumpToBottomVisibility = true,
         )
 
-        eventsRecorder.assertSingle(TimelineEvent.OnScrollFinished(firstIndex = 0))
+        eventsRecorder.assertList(listOf(
+            TimelineEvent.OnScrollFinished(firstIndex = 0, isUserVisible = false),
+            TimelineEvent.OnScrollFinished(firstIndex = 0, isUserVisible = true),
+        ))
         eventsRecorder.clear()
 
         val contentDescription = activity!!.getString(CommonStrings.a11y_jump_to_bottom)
@@ -221,7 +235,10 @@ class TimelineViewTest {
             ),
         )
 
-        eventsRecorder.assertSingle(TimelineEvent.OnScrollFinished(firstIndex = 0))
+        eventsRecorder.assertList(listOf(
+            TimelineEvent.OnScrollFinished(firstIndex = 0, isUserVisible = false),
+            TimelineEvent.OnScrollFinished(firstIndex = 0, isUserVisible = true),
+        ))
         eventsRecorder.clear()
 
         val contentDescription = activity!!.getString(CommonStrings.a11y_jump_to_bottom)
@@ -261,7 +278,8 @@ class TimelineViewTest {
         onNodeWithContentDescription(contentDescription).performClick()
         eventsRecorder.assertList(
             listOf(
-                TimelineEvent.OnScrollFinished(0),
+                TimelineEvent.OnScrollFinished(0, isUserVisible = false),
+                TimelineEvent.OnScrollFinished(0, isUserVisible = true),
                 TimelineEvent.ShowShieldDialog(MessageShieldData(MessageShield.UnverifiedIdentity(true))),
             )
         )
@@ -278,7 +296,10 @@ class TimelineViewTest {
                 messageShield = aCriticalShield(),
             ),
         )
-        eventsRecorder.assertSingle(TimelineEvent.OnScrollFinished(firstIndex = 0))
+        eventsRecorder.assertList(listOf(
+            TimelineEvent.OnScrollFinished(firstIndex = 0, isUserVisible = false),
+            TimelineEvent.OnScrollFinished(firstIndex = 0, isUserVisible = true),
+        ))
         eventsRecorder.clear()
 
         clickOn(CommonStrings.action_ok)

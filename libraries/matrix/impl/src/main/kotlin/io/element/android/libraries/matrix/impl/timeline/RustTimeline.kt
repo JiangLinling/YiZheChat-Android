@@ -1981,16 +1981,9 @@ class RustTimeline(
                         // An explicit pre-enqueue cancel can retire only fully returned shares.
                         if ((cancelOwner?.requested == true && !cancelOwner.protectionInFlight) ||
                             currentCoroutineContext()[MediaSubmissionContext]?.keyStoreStarted != true) {
-                        preparedMedia.forEach { media ->
-                            check(protectedContentAdapter.destroyMedia(media, ContentAccessDestroyReason.ADMINISTRATIVE_REVOCATION)) {
-                                "Prepared media key cleanup acknowledgement is pending."
-                            }
-                        }
-                        preparedCaption?.let {
-                            check(protectedContentAdapter.destroyPrepared(it, ContentAccessDestroyReason.ADMINISTRATIVE_REVOCATION)) {
-                                "Prepared caption cleanup acknowledgement is pending."
-                            }
-                        }
+                            // Attempt every original returned share even if one authority acknowledgement fails.
+                            // This is pre-enqueue compensation only; it cannot prove an unknown native queue is empty.
+                            PreparedAttachmentCleanup(preparedMedia, preparedCaption, protectedContentAdapter).release()
                         }
                     }
                 } catch (cleanupFailure: Exception) {
