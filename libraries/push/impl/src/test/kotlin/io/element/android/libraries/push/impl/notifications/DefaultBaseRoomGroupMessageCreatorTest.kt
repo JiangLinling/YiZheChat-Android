@@ -12,7 +12,6 @@ import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.google.common.truth.Truth.assertThat
-import io.element.android.appconfig.NotificationConfig
 import io.element.android.features.enterprise.api.EnterpriseService
 import io.element.android.features.enterprise.test.FakeEnterpriseService
 import io.element.android.libraries.matrix.api.media.MediaSource
@@ -23,8 +22,6 @@ import io.element.android.libraries.matrix.ui.media.AVATAR_THUMBNAIL_SIZE_IN_PIX
 import io.element.android.libraries.matrix.ui.media.MediaRequestData
 import io.element.android.libraries.matrix.ui.media.test.FakeImageLoader
 import io.element.android.libraries.matrix.ui.media.test.FakeInitialsAvatarBitmapGenerator
-import io.element.android.libraries.push.impl.notifications.factories.MARK_AS_READ_ACTION_TITLE
-import io.element.android.libraries.push.impl.notifications.factories.QUICK_REPLY_ACTION_TITLE
 import io.element.android.libraries.push.impl.notifications.factories.aNotificationAccountParams
 import io.element.android.libraries.push.impl.notifications.factories.createNotificationCreator
 import io.element.android.libraries.push.impl.notifications.fixtures.aNotifiableMessageEvent
@@ -174,13 +171,12 @@ class DefaultBaseRoomGroupMessageCreatorTest {
         )
         assertThat(result.number).isEqualTo(2)
         assertThat(result.`when`).isEqualTo(A_TIMESTAMP + 10)
-        val actionTitles = result.actions?.map { it.title }
-        assertThat(actionTitles).isEqualTo(
-            listOfNotNull(
-                MARK_AS_READ_ACTION_TITLE.takeIf { NotificationConfig.SHOW_MARK_AS_READ_ACTION },
-                QUICK_REPLY_ACTION_TITLE.takeIf { NotificationConfig.SHOW_QUICK_REPLY_ACTION },
-            )
-        )
+        // The current notification projection exposes entry into the conversation,
+        // rather than action buttons or generated system replies. Keep this in sync
+        // with DefaultNotificationCreatorTest's current presentation contract.
+        assertThat(result.actions.orEmpty()).isEmpty()
+        assertThat(result.allowSystemGeneratedContextualActions).isFalse()
+        assertThat(result.contentIntent).isNotNull()
         assertThat(fakeImageLoader.getExecutedRequestsData()).isEmpty()
     }
 
@@ -201,12 +197,12 @@ class DefaultBaseRoomGroupMessageCreatorTest {
             existingNotification = null,
             threadId = null,
         )
-        val actionTitles = result.actions?.map { it.title }
-        assertThat(actionTitles).isEqualTo(
-            listOfNotNull(
-                MARK_AS_READ_ACTION_TITLE.takeIf { NotificationConfig.SHOW_MARK_AS_READ_ACTION }
-            )
-        )
+        // The current notification projection exposes entry into the conversation,
+        // rather than action buttons or generated system replies. Keep this in sync
+        // with DefaultNotificationCreatorTest's current presentation contract.
+        assertThat(result.actions.orEmpty()).isEmpty()
+        assertThat(result.allowSystemGeneratedContextualActions).isFalse()
+        assertThat(result.contentIntent).isNotNull()
         assertThat(fakeImageLoader.getExecutedRequestsData()).isEmpty()
     }
 

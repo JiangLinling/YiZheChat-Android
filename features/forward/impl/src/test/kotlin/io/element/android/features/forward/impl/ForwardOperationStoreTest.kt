@@ -11,8 +11,11 @@ import kotlinx.coroutines.test.runTest
 import io.mockk.every
 import io.mockk.spyk
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import java.util.UUID
 
+@RunWith(RobolectricTestRunner::class)
 class ForwardOperationStoreTest {
     @Test
     fun `shared vault rejects stale snapshot save instead of overwriting success`() = runTest {

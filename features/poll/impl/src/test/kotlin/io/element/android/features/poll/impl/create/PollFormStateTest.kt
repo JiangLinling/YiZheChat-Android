@@ -16,6 +16,16 @@ import org.junit.Test
 
 class PollFormStateTest {
     @Test
+    fun `loaded poll with duplicate original answer identities cannot be saved`() {
+        val state = PollFormState.Empty.copy(
+            question = "Owned test poll",
+            answers = listOf("Yes", "No").toImmutableList(),
+            answerIds = listOf("same-original-id", "same-original-id").toImmutableList(),
+        )
+        assertThat(state.isValid).isFalse()
+    }
+
+    @Test
     fun `editing rows retains identities when an earlier option is removed`() {
         val initial = PollFormState.Empty.copy(
             question = "Question",

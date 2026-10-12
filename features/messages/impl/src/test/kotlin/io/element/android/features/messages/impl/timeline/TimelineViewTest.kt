@@ -220,8 +220,9 @@ class TimelineViewTest {
         ))
         eventsRecorder.clear()
 
-        val contentDescription = activity!!.getString(CommonStrings.a11y_jump_to_bottom)
-        onNodeWithContentDescription(contentDescription).performClick()
+        onNodeWithTag("view_latest_messages").performClick()
+        waitForIdle()
+        eventsRecorder.assertEmpty()
     }
 
     @Test
@@ -241,8 +242,7 @@ class TimelineViewTest {
         ))
         eventsRecorder.clear()
 
-        val contentDescription = activity!!.getString(CommonStrings.a11y_jump_to_bottom)
-        onNodeWithContentDescription(contentDescription).performClick()
+        onNodeWithTag("view_latest_messages").performClick()
         eventsRecorder.assertSingle(TimelineEvent.JumpToLive)
     }
 

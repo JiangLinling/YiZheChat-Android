@@ -23,7 +23,7 @@ setupDependencyInjection()
 dependencies {
     releaseImplementation(libs.matrix.sdk)
     val isNextBuild = providers.gradleProperty("yizhe.next.enabled").orNull == "true"
-    val localRustSdk = file("${rootDir.path}/libraries/rustsdk/matrix-rust-sdk.aar")
+    val localRustSdk = file("${rootDir.path}/libraries/rustsdk/matrix-rust-sdk-next.aar")
     if (isNextBuild) {
         check(localRustSdk.exists()) {
             "Next debug builds require the reviewed local Rust SDK AAR."

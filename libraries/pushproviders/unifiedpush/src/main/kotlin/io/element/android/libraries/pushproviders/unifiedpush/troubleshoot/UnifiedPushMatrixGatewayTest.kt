@@ -16,10 +16,12 @@ import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.pushproviders.unifiedpush.UnifiedPushApiFactory
 import io.element.android.libraries.pushproviders.unifiedpush.UnifiedPushConfig
 import io.element.android.libraries.pushproviders.unifiedpush.UnifiedPushSessionPushConfigProvider
+import io.element.android.libraries.pushproviders.unifiedpush.R
 import io.element.android.libraries.troubleshoot.api.test.NotificationTroubleshootTest
 import io.element.android.libraries.troubleshoot.api.test.NotificationTroubleshootTestDelegate
 import io.element.android.libraries.troubleshoot.api.test.NotificationTroubleshootTestState
 import io.element.android.libraries.troubleshoot.api.test.TestFilterData
+import io.element.android.services.toolbox.api.strings.StringProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -31,11 +33,12 @@ class UnifiedPushMatrixGatewayTest(
     private val unifiedPushApiFactory: UnifiedPushApiFactory,
     private val coroutineDispatchers: CoroutineDispatchers,
     private val unifiedPushSessionPushConfigProvider: UnifiedPushSessionPushConfigProvider,
+    private val stringProvider: StringProvider,
 ) : NotificationTroubleshootTest {
     override val order = 450
     private val delegate = NotificationTroubleshootTestDelegate(
-        defaultName = "Test push gateway",
-        defaultDescription = "Ensure that the push gateway is valid.",
+        defaultName = stringProvider.getString(R.string.troubleshoot_notifications_test_push_gateway_title),
+        defaultDescription = stringProvider.getString(R.string.troubleshoot_notifications_test_push_gateway_description),
         visibleWhenIdle = false,
         fakeDelay = NotificationTroubleshootTestDelegate.SHORT_DELAY,
     )
@@ -55,7 +58,7 @@ class UnifiedPushMatrixGatewayTest(
             )
         } else {
             val diagnosticGatewayUrl = NextDeploymentConfig.clientReachablePushGatewayUrl(config.url)
-            // Check the client-reachable Matrix gateway, preserving its public proxy path.
+            // Checking if the client-reachable endpoint is a Matrix gateway.
             coroutineScope.launch(coroutineDispatchers.io) {
                 try {
                     val gatewayBaseUrl = matrixGatewayBaseUrl(diagnosticGatewayUrl)
@@ -64,18 +67,28 @@ class UnifiedPushMatrixGatewayTest(
                     val discoveryResponse = api.discover()
                     if (discoveryResponse.unifiedpush.gateway == "matrix") {
                         delegate.updateState(
-                            description = "${diagnosticGatewayUrl} is a Matrix gateway.",
+                            description = stringProvider.getString(
+                                R.string.troubleshoot_notifications_test_push_gateway_success,
+                                diagnosticGatewayUrl,
+                            ),
                             status = NotificationTroubleshootTestState.Status.Success
                         )
                     } else {
                         delegate.updateState(
-                            description = "${diagnosticGatewayUrl} is not a Matrix gateway.",
+                            description = stringProvider.getString(
+                                R.string.troubleshoot_notifications_test_push_gateway_not_matrix,
+                                diagnosticGatewayUrl,
+                            ),
                             status = NotificationTroubleshootTestState.Status.Failure()
                         )
                     }
                 } catch (throwable: Throwable) {
                     delegate.updateState(
-                        description = "Fail to check the gateway ${diagnosticGatewayUrl}: ${throwable.localizedMessage}",
+                        description = stringProvider.getString(
+                            R.string.troubleshoot_notifications_test_push_gateway_failure,
+                            diagnosticGatewayUrl,
+                            throwable.localizedMessage.orEmpty(),
+                        ),
                         status = NotificationTroubleshootTestState.Status.Failure()
                     )
                 }
@@ -87,7 +100,7 @@ class UnifiedPushMatrixGatewayTest(
 }
 
 /**
- * Retrofit base URLs preserve the public gateway proxy path and end with a slash.
+ * Retrofit base URLs must contain only the gateway origin and end with a slash.
  * Push endpoints may include query parameters (for example `?provider=coordinator`), so
  * trimming a fixed path suffix is not sufficient and can turn the query into the base path.
  */

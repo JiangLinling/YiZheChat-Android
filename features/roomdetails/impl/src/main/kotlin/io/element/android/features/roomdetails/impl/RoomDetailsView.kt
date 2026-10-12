@@ -105,6 +105,7 @@ fun RoomDetailsView(
         onProfileClick = onProfileClick,
         onFindChatContentClick = onFindChatContentClick,
         openMediaGallery = openMediaGallery,
+        openRoomNotificationSettings = openRoomNotificationSettings,
         onPinnedMessagesClick = onPinnedMessagesClick,
         onActionClick = onActionClick,
         openRoomMemberList = openRoomMemberList,
@@ -129,6 +130,7 @@ private fun ChatSettings(
     onProfileClick: (UserId) -> Unit,
     onFindChatContentClick: () -> Unit,
     openMediaGallery: () -> Unit,
+    openRoomNotificationSettings: () -> Unit,
     onPinnedMessagesClick: () -> Unit,
     onActionClick: (RoomDetailsAction) -> Unit,
     openRoomMemberList: () -> Unit,
@@ -218,6 +220,10 @@ private fun ChatSettings(
             }
             PreferenceCategory {
                 state.roomNotificationSettings?.let { settings ->
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.screen_room_details_notification_options)) },
+                        onClick = openRoomNotificationSettings,
+                    )
                     PreferenceSwitch(
                         icon = CompoundIcons.NotificationsOff(),
                         title = stringResource(R.string.screen_room_details_do_not_disturb),

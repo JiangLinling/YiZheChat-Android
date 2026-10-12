@@ -12,6 +12,7 @@ import com.google.common.truth.Truth.assertThat
 import io.element.android.tests.testutils.testCoroutineDispatchers
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -46,18 +47,19 @@ class DefaultCacheCleanerTest {
     }
 
     @Test
-    fun `clear cache fails silently`() = runTest {
-        // Set cache dir as unreadable, unwritable and unexecutable so that the deletion fails.
-        check(temporaryFolder.root.setReadable(false))
-        check(temporaryFolder.root.setWritable(false))
-        check(temporaryFolder.root.setExecutable(false))
-
-        aCacheCleaner().clearCache()
+    fun `clear cache handles unavailable child directories without throwing`() = runTest {
+        // A regular file cannot contain cache subdirectories on either Windows or Android.
+        // POSIX permission mutation cannot model this failure reliably on Windows.
+        val blockedCache = File(temporaryFolder.root, "blocked-cache").apply { writeText("owned test fixture") }
+        aCacheCleaner(cacheDir = blockedCache).clearCache()
+        runCurrent()
+        assertThat(blockedCache.isFile).isTrue()
+        assertThat(blockedCache.readText()).isEqualTo("owned test fixture")
     }
 
-    private fun TestScope.aCacheCleaner() = DefaultCacheCleaner(
+    private fun TestScope.aCacheCleaner(cacheDir: File = temporaryFolder.root) = DefaultCacheCleaner(
         coroutineScope = this,
         dispatchers = this.testCoroutineDispatchers(true),
-        cacheDir = temporaryFolder.root,
+        cacheDir = cacheDir,
     )
 }

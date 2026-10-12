@@ -55,10 +55,10 @@ import io.element.android.tests.testutils.test
 import io.element.android.tests.testutils.testCoroutineDispatchers
 import io.mockk.coEvery
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
@@ -256,7 +256,7 @@ class MediaViewerPresenterTest {
     }
 
     @Test
-    fun `present - cancel loading media cancels the actual loader job`() = runTest {
+    fun `present - cancel loading media retains the original owner until late result is released`() = runTest {
         val mediaLoader = CancellationAwareMediaLoader()
         val presenter = createMediaViewerPresenter(
             localMediaFactory = localMediaFactory,
@@ -271,23 +271,33 @@ class MediaViewerPresenterTest {
 
             state.eventSink(MediaViewerEvent.CancelLoadingMedia(data))
 
-            mediaLoader.cancelled.await()
+            runCurrent()
+            assertThat(mediaLoader.finished.isCompleted).isFalse()
+            // An admitted owner must account for its original result rather than
+            // being detached or retried when the UI waiter is cancelled.
+            mediaLoader.allowResult.complete(Unit)
+            mediaLoader.finished.await()
+            runCurrent()
+            verify(exactly = 1) { mediaLoader.returnedFile.close() }
         }
     }
 
     @Test
-    fun `present - segmented loads sharing init source keep independent jobs and cancellation`() = runTest {
+    fun `present - segmented loads sharing init source retain independent original owners and discard cancelled results`() = runTest {
         val playbackOwnerFactory = mockk<SegmentedVideoPlaybackOwnerFactory>()
         val callIndex = AtomicInteger(0)
         val started = List(2) { CompletableDeferred<Unit>() }
-        val cancelled = List(2) { CompletableDeferred<Unit>() }
+        val allowResult = List(2) { CompletableDeferred<Unit>() }
+        val finished = List(2) { CompletableDeferred<Unit>() }
+        val returnedFiles = List(2) { mockk<MediaFile>(relaxed = true) }
         coEvery { playbackOwnerFactory.create(any(), any()) } coAnswers {
             val index = callIndex.getAndIncrement()
             started[index].complete(Unit)
             try {
-                awaitCancellation()
+                allowResult[index].await()
+                returnedFiles[index]
             } finally {
-                cancelled[index].complete(Unit)
+                finished[index].complete(Unit)
             }
         }
         val presenter = createMediaViewerPresenter(
@@ -321,8 +331,22 @@ class MediaViewerPresenterTest {
 
             state.eventSink(MediaViewerEvent.CancelLoadingMedia(second))
 
-            cancelled[1].await()
-            assertThat(cancelled[0].isCompleted).isFalse()
+            runCurrent()
+            assertThat(finished[0].isCompleted).isFalse()
+            assertThat(finished[1].isCompleted).isFalse()
+            allowResult[1].complete(Unit)
+            finished[1].await()
+            runCurrent()
+            verify(exactly = 1) { returnedFiles[1].close() }
+            verify(exactly = 0) { returnedFiles[0].close() }
+            assertThat(finished[0].isCompleted).isFalse()
+            state.eventSink(MediaViewerEvent.CancelLoadingMedia(first))
+            allowResult[0].complete(Unit)
+            finished[0].await()
+            runCurrent()
+            verify(exactly = 1) { returnedFiles[0].close() }
+            verify(exactly = 1) { returnedFiles[1].close() }
+            assertThat(callIndex.get()).isEqualTo(2)
         }
     }
 
@@ -1067,7 +1091,9 @@ internal fun createMediaViewerEntryPointParams(
 
 private class CancellationAwareMediaLoader : MatrixMediaLoader by FakeMatrixMediaLoader() {
     val started = CompletableDeferred<Unit>()
-    val cancelled = CompletableDeferred<Unit>()
+    val allowResult = CompletableDeferred<Unit>()
+    val finished = CompletableDeferred<Unit>()
+    val returnedFile = mockk<MediaFile>(relaxed = true)
 
     override suspend fun downloadMediaFile(
         source: MediaSource,
@@ -1076,8 +1102,9 @@ private class CancellationAwareMediaLoader : MatrixMediaLoader by FakeMatrixMedi
         useCache: Boolean,
     ): Result<MediaFile> = try {
         started.complete(Unit)
-        awaitCancellation()
+        allowResult.await()
+        Result.success(returnedFile)
     } finally {
-        cancelled.complete(Unit)
+        finished.complete(Unit)
     }
 }

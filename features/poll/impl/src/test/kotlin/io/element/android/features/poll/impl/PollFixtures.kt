@@ -40,7 +40,7 @@ fun anOngoingPollContent() = aPollContent(
     answers = persistentListOf(
         PollAnswer("1", "Yes"),
         PollAnswer("2", "No"),
-        PollAnswer("2", "Maybe"),
+        PollAnswer("3", "Maybe"),
     ),
 )
 

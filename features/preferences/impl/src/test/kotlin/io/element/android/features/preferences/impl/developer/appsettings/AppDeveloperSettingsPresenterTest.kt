@@ -10,6 +10,7 @@
 package io.element.android.features.preferences.impl.developer.appsettings
 
 import com.google.common.truth.Truth.assertThat
+import io.element.android.appconfig.NextDeploymentConfig
 import io.element.android.features.preferences.impl.developer.tracing.LogLevelItem
 import io.element.android.features.rageshake.api.preferences.aRageshakePreferencesState
 import io.element.android.libraries.architecture.AsyncData
@@ -82,23 +83,24 @@ class AppDeveloperSettingsPresenterTest {
     }
 
     @Test
-    fun `present - custom element call base url`() = runTest {
+    fun `present - custom element call base url accepts only the current deployment endpoint`() = runTest {
+        val allowedUrl = if (NextDeploymentConfig.isNextDeployment) NextDeploymentConfig.rtcBaseUrl else "https://call.element.ahoy"
         val preferencesStore = InMemoryAppPreferencesStore()
         val presenter = createAppDeveloperSettingsPresenter(preferencesStore = preferencesStore)
         presenter.test {
             skipItems(1)
             awaitItem().also { state ->
                 assertThat(state.customElementCallBaseUrlState.baseUrl).isNull()
-                state.eventSink(AppDeveloperSettingsEvent.SetCustomElementCallBaseUrl("https://call.element.ahoy"))
+                state.eventSink(AppDeveloperSettingsEvent.SetCustomElementCallBaseUrl(allowedUrl))
             }
             awaitItem().also { state ->
-                assertThat(state.customElementCallBaseUrlState.baseUrl).isEqualTo("https://call.element.ahoy")
+                assertThat(state.customElementCallBaseUrlState.baseUrl).isEqualTo(allowedUrl)
             }
         }
     }
 
     @Test
-    fun `present - custom element call base url validator needs at least an HTTP scheme and host`() = runTest {
+    fun `present - custom element call base url validator preserves scheme and deployment isolation`() = runTest {
         val presenter = createAppDeveloperSettingsPresenter()
         presenter.test {
             skipItems(1)
@@ -107,7 +109,11 @@ class AppDeveloperSettingsPresenterTest {
             assertThat(urlValidator("test")).isFalse()
             assertThat(urlValidator("http://")).isFalse()
             assertThat(urlValidator("geo://test")).isFalse()
-            assertThat(urlValidator("https://call.element.io")).isTrue()
+            assertThat(urlValidator("https://call.element.io")).isEqualTo(!NextDeploymentConfig.isNextDeployment)
+            if (NextDeploymentConfig.isNextDeployment) {
+                assertThat(urlValidator(NextDeploymentConfig.rtcBaseUrl)).isTrue()
+                assertThat(urlValidator(NextDeploymentConfig.rtcBaseUrl + "../outside")).isFalse()
+            }
         }
     }
 

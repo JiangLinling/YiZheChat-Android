@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.v2.runAndroidComposeUiTest
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.element.android.features.roomdetails.impl.members.aRoomMember
@@ -322,6 +323,35 @@ class RoomDetailsViewTest {
             ),
         )
         onAllNodesWithText(activity!!.getString(CommonStrings.action_invite)).assertCountEquals(0)
+    }
+
+    @Test
+    fun `direct chat notification options opens existing notification settings`() = runAndroidComposeUiTest {
+        ensureCalledOnce { callback ->
+            setRoomDetailView(
+                state = aRoomDetailsState(
+                    roomType = RoomDetailsType.Dm(aDmRoomMember()),
+                    roomNotificationSettings = aRoomNotificationSettings(mode = RoomNotificationMode.ALL_MESSAGES),
+                    eventSink = EventsRecorder(expectEvents = false),
+                ),
+                openRoomNotificationSettings = callback,
+            )
+            onNodeWithText(activity!!.getString(R.string.screen_room_details_notification_options)).performScrollTo().performClick()
+        }
+    }
+
+    @Test
+    fun `group notification options opens existing notification settings`() = runAndroidComposeUiTest {
+        ensureCalledOnce { callback ->
+            setRoomDetailView(
+                state = aRoomDetailsState(
+                    roomNotificationSettings = aRoomNotificationSettings(mode = RoomNotificationMode.MENTIONS_AND_KEYWORDS_ONLY),
+                    eventSink = EventsRecorder(expectEvents = false),
+                ),
+                openRoomNotificationSettings = callback,
+            )
+            onNodeWithText(activity!!.getString(R.string.screen_room_details_notification_options)).performScrollTo().performClick()
+        }
     }
 
     @Test
