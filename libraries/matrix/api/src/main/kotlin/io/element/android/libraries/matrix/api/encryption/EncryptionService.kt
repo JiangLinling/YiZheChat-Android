@@ -38,6 +38,15 @@ interface EncryptionService {
     suspend fun doesBackupExistOnServer(): Result<Boolean>
 
     /**
+     * Read fresh SDK and server state used to prove that an identity reset has completed.
+     *
+     * Unlike [backupStateStateFlow], this does not depend on a state-flow notification or
+     * sync-state mapping. This matters while an identity reset is still running because the
+     * SDK operation can occasionally finish its server work without returning to its caller.
+     */
+    suspend fun getIdentityResetCompletionState(): Result<IdentityResetCompletionState>
+
+    /**
      * Note: accept both recoveryKey and passphrase.
      */
     suspend fun recover(recoveryKey: String): Result<Unit>
@@ -84,6 +93,18 @@ interface EncryptionService {
      * @param fallbackToServer whether to fallback to fetching the identity from the server if not known locally. Defaults to true.
      */
     suspend fun getUserIdentity(userId: UserId, fallbackToServer: Boolean = true): Result<IdentityState?>
+}
+
+data class IdentityResetCompletionState(
+    val backupState: BackupState,
+    val recoveryState: RecoveryState,
+    val isCurrentSessionVerified: Boolean,
+    val backupExistsOnServer: Boolean,
+) {
+    val isComplete: Boolean
+        get() = backupState == BackupState.ENABLED &&
+            isCurrentSessionVerified &&
+            backupExistsOnServer
 }
 
 /**

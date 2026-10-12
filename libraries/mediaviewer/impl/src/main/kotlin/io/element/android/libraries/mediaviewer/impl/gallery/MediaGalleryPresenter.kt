@@ -29,6 +29,8 @@ import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.designsystem.utils.snackbar.collectSnackbarMessageAsState
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.media.MatrixMediaLoader
+import io.element.android.security.contentprotection.api.KmsTransportPriority
+import io.element.android.security.contentprotection.api.KmsTransportSchedulingContext
 import io.element.android.libraries.matrix.api.room.BaseRoom
 import io.element.android.libraries.matrix.api.room.powerlevels.permissionsAsState
 import io.element.android.libraries.mediaviewer.api.local.LocalMedia
@@ -44,7 +46,9 @@ import io.element.android.libraries.mediaviewer.impl.model.mediaInfo
 import io.element.android.libraries.mediaviewer.impl.model.mediaPermissions
 import io.element.android.libraries.mediaviewer.impl.model.mediaSource
 import io.element.android.libraries.ui.strings.CommonStrings
+import io.element.android.security.dataprotection.api.DataProtectionActionDeniedException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @AssistedInject
 class MediaGalleryPresenter(
@@ -170,11 +174,13 @@ class MediaGalleryPresenter(
     }
 
     private suspend fun downloadMedia(mediaItem: MediaItem.Event): Result<LocalMedia> {
-        return mediaLoader.downloadMediaFile(
-            source = mediaItem.mediaSource(),
-            mimeType = mediaItem.mediaInfo().mimeType,
-            filename = mediaItem.mediaInfo().filename
-        )
+        return withContext(KmsTransportSchedulingContext(KmsTransportPriority.USER_MEDIA)) {
+            mediaLoader.downloadMediaFile(
+                source = mediaItem.mediaSource(),
+                mimeType = mediaItem.mediaInfo().mimeType,
+                filename = mediaItem.mediaInfo().filename
+            )
+        }
             .mapCatchingExceptions { mediaFile ->
                 localMediaFactory.createFromMediaFile(
                     mediaFile = mediaFile,
@@ -186,7 +192,7 @@ class MediaGalleryPresenter(
     private suspend fun saveOnDisk(mediaItem: MediaItem.Event) {
         downloadMedia(mediaItem)
             .mapCatchingExceptions { localMedia ->
-                localMediaActions.saveOnDisk(localMedia)
+                localMediaActions.saveOnDisk(localMedia).getOrThrow()
             }
             .onSuccess {
                 val snackbarMessage = SnackbarMessage(CommonStrings.common_file_saved_on_disk_android)
@@ -201,7 +207,7 @@ class MediaGalleryPresenter(
     private suspend fun share(mediaItem: MediaItem.Event) {
         downloadMedia(mediaItem)
             .mapCatchingExceptions { localMedia ->
-                localMediaActions.share(localMedia)
+                localMediaActions.share(localMedia).getOrThrow()
             }
             .onFailure {
                 val snackbarMessage = SnackbarMessage(mediaActionsError(it))
@@ -212,7 +218,7 @@ class MediaGalleryPresenter(
     private suspend fun openWith(mediaItem: MediaItem.Event) {
         downloadMedia(mediaItem)
             .mapCatchingExceptions { localMedia ->
-                localMediaActions.open(localMedia)
+                localMediaActions.open(localMedia).getOrThrow()
             }
             .onFailure {
                 val snackbarMessage = SnackbarMessage(mediaActionsError(it))
@@ -221,10 +227,11 @@ class MediaGalleryPresenter(
     }
 
     private fun mediaActionsError(throwable: Throwable): Int {
-        return if (throwable is ActivityNotFoundException) {
-            R.string.error_no_compatible_app_found
-        } else {
-            CommonStrings.error_unknown
+        return when (throwable) {
+            is ActivityNotFoundException -> R.string.error_no_compatible_app_found
+            is DataProtectionActionDeniedException.ContentExport -> io.element.android.libraries.mediaviewer.impl.R.string.error_content_export_disabled_by_policy
+            is DataProtectionActionDeniedException.ExternalShare -> io.element.android.libraries.mediaviewer.impl.R.string.error_external_share_disabled_by_policy
+            else -> CommonStrings.error_unknown
         }
     }
 }

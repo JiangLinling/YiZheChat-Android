@@ -12,5 +12,7 @@ data class FileInfo(
     val mimetype: String?,
     val size: Long?,
     val thumbnailInfo: ThumbnailInfo?,
-    val thumbnailSource: MediaSource?
+    val thumbnailSource: MediaSource?,
+    /** Original encrypted transport length, retained before authorized display metadata restoration. */
+    val protectedWireSize: Long? = null,
 )

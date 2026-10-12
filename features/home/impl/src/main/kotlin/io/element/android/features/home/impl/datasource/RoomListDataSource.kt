@@ -11,6 +11,8 @@ package io.element.android.features.home.impl.datasource
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import io.element.android.features.home.impl.model.RoomListRoomSummary
+import io.element.android.features.home.impl.model.deletedDirectPeerRecords
+import io.element.android.features.home.impl.model.referencesDeletedDirectPeer
 import io.element.android.libraries.androidutils.diff.DiffCacheUpdater
 import io.element.android.libraries.androidutils.diff.MutableListDiffCache
 import io.element.android.libraries.androidutils.system.DateTimeObserver
@@ -25,6 +27,10 @@ import io.element.android.libraries.matrix.api.roomlist.RoomListService
 import io.element.android.libraries.matrix.api.roomlist.RoomSummary
 import io.element.android.libraries.matrix.api.roomlist.updateVisibleRange
 import io.element.android.services.analytics.api.AnalyticsService
+import io.element.android.security.dataprotection.api.ProtectedPreviewAuthorizationGate
+import io.element.android.security.dataprotection.api.DeletedIdentityProjection
+import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleaner
+import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleanupTarget
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
@@ -34,9 +40,12 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -48,6 +57,7 @@ private const val PAGE_SIZE = 20
 private const val EXTENDED_VISIBILITY_RANGE_SIZE = 40
 private const val SUBSCRIBE_TO_VISIBLE_ROOMS_DEBOUNCE_IN_MILLIS = 300L
 private const val PAGINATION_THRESHOLD = 3 * PAGE_SIZE
+private val PROTECTED_PREVIEW_RETRY_DELAYS_MILLIS = longArrayOf(500L, 1_500L, 4_000L)
 
 @Inject
 @SingleIn(SessionScope::class)
@@ -60,12 +70,10 @@ class RoomListDataSource(
     private val sessionCoroutineScope: CoroutineScope,
     private val dateTimeObserver: DateTimeObserver,
     private val analyticsService: AnalyticsService,
+    private val protectedPreviewAuthorizationGate: ProtectedPreviewAuthorizationGate,
+    private val deletedIdentityProjection: DeletedIdentityProjection,
+    private val deletedIdentityProjectionCleaner: DeletedIdentityProjectionCleaner,
 ) {
-    init {
-        observeNotificationSettings()
-        observeDateTimeChanges()
-    }
-
     private val roomList = roomListService.createRoomList(
         pageSize = PAGE_SIZE,
         source = RoomList.Source.All,
@@ -77,6 +85,18 @@ class RoomListDataSource(
     private val diffCache = MutableListDiffCache<RoomListRoomSummary>()
     private val diffCacheUpdater = DiffCacheUpdater<RoomSummary, RoomListRoomSummary>(diffCache = diffCache, detectMoves = true) { old, new ->
         old?.roomId == new?.roomId
+    }
+    private var protectedPreviewRetryJob: Job? = null
+    private var protectedPreviewRetrySignature: List<Pair<RoomId, Long>> = emptyList()
+    private var protectedPreviewRetryAttempt = 0
+
+    init {
+        // Start observers only after roomList and retry state are initialized. Device-trust and
+        // app-unlock StateFlows may emit immediately during construction.
+        observeNotificationSettings()
+        observeDateTimeChanges()
+        observeProtectedPreviewAccess()
+        observeDeletedIdentities()
     }
 
     val roomSummariesFlow: Flow<ImmutableList<RoomListRoomSummary>> = _roomSummariesFlow
@@ -145,10 +165,64 @@ class RoomListDataSource(
             .launchIn(sessionCoroutineScope)
     }
 
+    private fun observeProtectedPreviewAccess() {
+        combine(
+            protectedPreviewAuthorizationGate.accessState.map { it.allowsPreviewAttempt },
+            protectedPreviewAuthorizationGate.authorizationRevision,
+        ) { previewAllowed, _ -> previewAllowed }
+            .onEach { previewAllowed ->
+                if (previewAllowed) {
+                    // Rebuild from the SDK-owned encrypted event after unlock or a signed policy/
+                    // vault authorization revision. Never revive an old UI plaintext string.
+                    roomList.rebuildSummaries()
+                } else {
+                    // Immediately replace every cached UI preview with the protected placeholder.
+                    rebuildAllRoomSummaries()
+                }
+            }
+            .launchIn(sessionCoroutineScope)
+    }
+
+    private fun observeDeletedIdentities() {
+        deletedIdentityProjection.revision
+            .drop(1)
+            .onEach { rebuildAllRoomSummaries() }
+            .launchIn(sessionCoroutineScope)
+    }
+
     private suspend fun replaceWith(roomSummaries: List<RoomSummary>) = withContext(coroutineDispatchers.computation) {
-        lock.withLock {
+        val protectedSignature = lock.withLock {
             diffCacheUpdater.updateWith(roomSummaries)
             buildAndEmitAllRooms(roomSummaries)
+            diffCache.indices().mapNotNull { index ->
+                diffCache.get(index)
+                    ?.takeIf { it.latestEvent is io.element.android.features.home.impl.model.LatestEvent.Protected }
+                    ?.let { it.roomId to it.latestEventTimestamp }
+            }
+        }
+        scheduleProtectedPreviewRetry(protectedSignature)
+    }
+
+    private fun scheduleProtectedPreviewRetry(protectedSignature: List<Pair<RoomId, Long>>) {
+        if (protectedSignature.isEmpty() || !protectedPreviewAuthorizationGate.canAttemptPreview()) {
+            protectedPreviewRetryJob?.cancel()
+            protectedPreviewRetryJob = null
+            protectedPreviewRetrySignature = emptyList()
+            protectedPreviewRetryAttempt = 0
+            return
+        }
+        if (protectedSignature != protectedPreviewRetrySignature) {
+            protectedPreviewRetryJob?.cancel()
+            protectedPreviewRetryJob = null
+            protectedPreviewRetrySignature = protectedSignature
+            protectedPreviewRetryAttempt = 0
+        }
+        if (protectedPreviewRetryJob?.isActive == true || protectedPreviewRetryAttempt >= PROTECTED_PREVIEW_RETRY_DELAYS_MILLIS.size) return
+
+        val retryDelayMillis = PROTECTED_PREVIEW_RETRY_DELAYS_MILLIS[protectedPreviewRetryAttempt++]
+        protectedPreviewRetryJob = sessionCoroutineScope.launch {
+            delay(retryDelayMillis)
+            roomList.rebuildSummaries()
         }
     }
 
@@ -158,7 +232,7 @@ class RoomListDataSource(
 
         val cachingResults = mutableMapOf<RoomId, MutableList<CacheResult>>()
 
-        val roomListRoomSummaries = diffCache.indices().mapNotNull { index ->
+        val unfilteredRoomListRoomSummaries = diffCache.indices().mapNotNull { index ->
             if (useCache) {
                 diffCache.get(index)?.let { cachedItem ->
                     // Add the cached item to the caching results
@@ -185,6 +259,21 @@ class RoomListDataSource(
                 buildAndCacheItem(roomSummaries, index)
             }
         }
+        unfilteredRoomListRoomSummaries
+            .flatMap { summary ->
+                summary.deletedDirectPeerRecords(deletedIdentityProjection).map { record -> record to summary.roomId }
+            }
+            .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+            .forEach { (record, roomIds) ->
+                deletedIdentityProjectionCleaner.clear(
+                    DeletedIdentityProjectionCleanupTarget(
+                        deletedIdentity = record,
+                        roomIds = roomIds.mapTo(linkedSetOf()) { it.value },
+                    )
+                )
+            }
+        val roomListRoomSummaries = unfilteredRoomListRoomSummaries
+            .filterNot { it.referencesDeletedDirectPeer(deletedIdentityProjection) }
 
         // TODO remove once https://github.com/element-hq/element-x-android/issues/5031 has been confirmed as fixed
         val duplicates = cachingResults.filter { (_, operations) -> operations.size > 1 }

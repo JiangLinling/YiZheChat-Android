@@ -27,16 +27,24 @@ import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.encryption.BackupState
 import io.element.android.libraries.matrix.api.encryption.BackupUploadState
 import io.element.android.libraries.matrix.api.encryption.EncryptionService
+import io.element.android.libraries.push.api.PushService
 import io.element.android.libraries.workmanager.api.WorkManagerScheduler
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.security.MessageDigest
 
 @Inject
 class LogoutPresenter(
     private val matrixClient: MatrixClient,
     private val encryptionService: EncryptionService,
+    private val pushService: PushService,
     private val workManagerScheduler: WorkManagerScheduler,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
 ) : Presenter<LogoutState> {
     @Composable
     override fun present(): LogoutState {
@@ -44,6 +52,7 @@ class LogoutPresenter(
         val logoutAction: MutableState<AsyncAction<Unit>> = remember {
             mutableStateOf(AsyncAction.Uninitialized)
         }
+        var showUnbackedKeysWarning by remember { mutableStateOf(false) }
 
         val backupUploadState: BackupUploadState by remember {
             encryptionService.waitForBackupUploadSteadyState()
@@ -77,13 +86,20 @@ class LogoutPresenter(
         fun handleEvent(event: LogoutEvents) {
             when (event) {
                 is LogoutEvents.Logout -> {
-                    if (logoutAction.value.isConfirming() || event.ignoreSdkError) {
+                    if (!event.ignoreSdkError && backupUploadState != BackupUploadState.Done) {
+                        showUnbackedKeysWarning = true
+                    } else if (logoutAction.value.isConfirming() || event.ignoreSdkError) {
                         localCoroutineScope.logout(logoutAction, event.ignoreSdkError)
                     } else {
                         logoutAction.value = AsyncAction.ConfirmingNoParams
                     }
                 }
+                LogoutEvents.ConfirmLogoutWithoutBackup -> {
+                    showUnbackedKeysWarning = false
+                    localCoroutineScope.logout(logoutAction, ignoreSdkError = false)
+                }
                 LogoutEvents.CloseDialogs -> {
+                    showUnbackedKeysWarning = false
                     logoutAction.value = AsyncAction.Uninitialized
                 }
             }
@@ -96,6 +112,7 @@ class LogoutPresenter(
             recoveryState = recoveryState,
             backupUploadState = backupUploadState,
             waitingForALongTime = waitingForALongTime,
+            showUnbackedKeysWarning = showUnbackedKeysWarning,
             logoutAction = logoutAction.value,
             eventSink = ::handleEvent,
         )
@@ -112,10 +129,28 @@ class LogoutPresenter(
         ignoreSdkError: Boolean,
     ) = launch {
         suspend {
-            // Cancel any pending work (e.g. notification sync)
-            workManagerScheduler.cancel(matrixClient.sessionId)
-
-            matrixClient.logout(userInitiated = true, ignoreSdkError)
+            appOperationalStateCoordinator.perform(
+                lifecycleOperationRequest(
+                    lifecycleId = FullAppLifecycleId.LC_22,
+                    trigger = "remove_local_account",
+                    accountIdHash = matrixClient.sessionId.value.sha256Hex(),
+                    matrixDeviceIdHash = matrixClient.deviceId.value.sha256Hex(),
+                )
+            ) {
+                // Do this before Matrix logout destroys the client/session. A failure preserves
+                // the management token and stops logout so the nested LC-19 device revocation
+                // can retry without turning this local account removal into global destruction.
+                pushService.getCurrentPushProvider(matrixClient.sessionId)
+                    ?.unregister(matrixClient)
+                    ?.getOrThrow()
+                // Cancel any pending work (e.g. notification sync)
+                workManagerScheduler.cancel(matrixClient.sessionId)
+                matrixClient.logout(userInitiated = true, ignoreSdkError)
+            }
         }.runCatchingUpdatingState(logoutAction)
     }
+
+    private fun String.sha256Hex(): String = MessageDigest.getInstance("SHA-256")
+        .digest(encodeToByteArray())
+        .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 }

@@ -40,8 +40,8 @@ class SessionKtTest {
         assertThat(result.loginType).isEqualTo(LoginType.PASSWORD)
         assertThat(result.loginTimestamp).isNotNull()
         assertThat(result.passphrase).isEqualTo(A_SECRET)
-        assertThat(result.sessionPath).isEqualTo("/a/file")
-        assertThat(result.cachePath).isEqualTo("/a/cache")
+        assertThat(result.sessionPath).isEqualTo(File("/a/file").absolutePath)
+        assertThat(result.cachePath).isEqualTo(File("/a/cache").absolutePath)
     }
 
     @Test
@@ -86,8 +86,8 @@ class SessionKtTest {
         assertThat(result.loginType).isEqualTo(LoginType.PASSWORD)
         assertThat(result.loginTimestamp).isNotNull()
         assertThat(result.passphrase).isEqualTo(A_SECRET)
-        assertThat(result.sessionPath).isEqualTo("/a/file")
-        assertThat(result.cachePath).isEqualTo("/a/cache")
+        assertThat(result.sessionPath).isEqualTo(File("/a/file").absolutePath)
+        assertThat(result.cachePath).isEqualTo(File("/a/cache").absolutePath)
     }
 
     @Test

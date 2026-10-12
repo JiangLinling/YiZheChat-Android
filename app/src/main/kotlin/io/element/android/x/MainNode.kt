@@ -13,7 +13,6 @@ import android.content.Intent
 import android.os.Parcelable
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.lifecycleScope
 import com.bumble.appyx.core.composable.Children
 import com.bumble.appyx.core.modality.BuildContext
 import com.bumble.appyx.core.navigation.model.permanent.PermanentNavModel
@@ -24,7 +23,6 @@ import io.element.android.appnav.RootFlowNode
 import io.element.android.libraries.architecture.createNode
 import io.element.android.libraries.di.DependencyInjectionGraphOwner
 import io.element.android.libraries.di.annotations.ApplicationContext
-import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
 
 class MainNode(
@@ -51,10 +49,8 @@ class MainNode(
         Children(navModel = navModel)
     }
 
-    fun handleIntent(intent: Intent) {
-        lifecycleScope.launch {
-            waitForChildAttached<RootFlowNode>().handleIntent(intent)
-        }
+    suspend fun handleIntent(intent: Intent) {
+        waitForChildAttached<RootFlowNode>().handleIntent(intent)
     }
 
     @Parcelize

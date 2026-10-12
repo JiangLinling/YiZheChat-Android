@@ -91,6 +91,7 @@ fun aShareLocationState(
     hasLocationPermission: Boolean = false,
     canShareLiveLocation: Boolean = false,
     appName: String = APP_NAME,
+    shareStaticLocationAction: AsyncAction<Unit> = AsyncAction.Uninitialized,
     startLiveLocationAction: AsyncAction<Unit> = AsyncAction.Uninitialized,
     eventSink: (ShareLocationEvent) -> Unit = {},
 ): ShareLocationState {
@@ -102,6 +103,7 @@ fun aShareLocationState(
         hasLocationPermission = hasLocationPermission,
         canShareLiveLocation = canShareLiveLocation,
         appName = appName,
+        shareStaticLocationAction = shareStaticLocationAction,
         startLiveLocationAction = startLiveLocationAction,
         eventSink = eventSink
     )

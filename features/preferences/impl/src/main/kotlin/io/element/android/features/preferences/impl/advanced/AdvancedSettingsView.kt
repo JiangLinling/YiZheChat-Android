@@ -28,6 +28,7 @@ import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import im.vector.app.features.analytics.plan.Interaction
 import io.element.android.compound.theme.ElementTheme
+import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.preferences.impl.R
 import io.element.android.libraries.architecture.coverage.ExcludeFromCoverage
 import io.element.android.libraries.designsystem.components.dialogs.ListDialog
@@ -43,6 +44,7 @@ import io.element.android.libraries.designsystem.preview.ElementPreviewLight
 import io.element.android.libraries.designsystem.preview.PreviewWithLargeHeight
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.designsystem.text.stringWithLink
+import io.element.android.libraries.designsystem.theme.components.IconSource
 import io.element.android.libraries.designsystem.theme.components.ListItem
 import io.element.android.libraries.designsystem.theme.components.ListSectionHeader
 import io.element.android.libraries.designsystem.theme.components.ListSupportingText
@@ -65,6 +67,9 @@ fun AdvancedSettingsView(
     state: AdvancedSettingsState,
     onBackClick: () -> Unit,
     onOpenAppSettingsClick: () -> Unit,
+    showAnalyticsSettings: Boolean = false,
+    onOpenAnalytics: () -> Unit = {},
+    onOpenLockScreenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val analyticsService = LocalAnalyticsService.current
@@ -210,6 +215,18 @@ fun AdvancedSettingsView(
                     state.eventSink(AdvancedSettingsEvents.SetLiveLocationMinimumDistanceUpdate(value))
                 },
                 onOpenAppPermissionsClick = onOpenAppSettingsClick,
+            )
+        }
+        ListItem(
+            headlineContent = { Text(stringResource(id = CommonStrings.common_screen_lock)) },
+            leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Lock())),
+            onClick = onOpenLockScreenSettings,
+        )
+        if (showAnalyticsSettings) {
+            ListItem(
+                headlineContent = { Text(stringResource(id = CommonStrings.common_analytics)) },
+                leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Chart())),
+                onClick = onOpenAnalytics,
             )
         }
     }
@@ -429,7 +446,10 @@ private fun ContentToPreview(state: AdvancedSettingsState) {
     AdvancedSettingsView(
         state = state,
         onBackClick = { },
-        onOpenAppSettingsClick = {}
+        onOpenAppSettingsClick = {},
+        showAnalyticsSettings = true,
+        onOpenAnalytics = {},
+        onOpenLockScreenSettings = {},
     )
 }
 

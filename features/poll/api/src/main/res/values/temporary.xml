@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_poll_card_title">Group poll</string>
+    <string name="screen_poll_ended">Ended</string>
+    <string name="screen_poll_open">Open</string>
+    <string name="screen_poll_single_choice">Choose one option</string>
+    <string name="screen_poll_submit_failed">Submission failed. Your selection is retained.</string>
+    <string name="screen_poll_submitting">Submitting…</string>
+    <string name="screen_poll_pending">Submitted. Waiting for the result to sync.</string>
+    <string name="screen_poll_voted">Voted</string>
+    <string name="screen_poll_vote">Vote</string>
+    <string name="screen_poll_change_vote">Confirm changed vote</string>
+    <string name="screen_poll_disclosed_hint">Single choice · Results visible</string>
+    <string name="screen_poll_undisclosed_hint">Results shown after the poll ends</string>
+    <string name="screen_poll_view_results">View results</string>
+    <string name="screen_poll_go_vote">Vote now</string>
+    <string name="screen_interaction_discard_title">Discard your changes?</string>
+    <string name="screen_interaction_discard_content">Your content has not been submitted. Leaving now will discard it.</string>
+    <string name="screen_interaction_continue">Keep editing</string>
+    <string name="screen_interaction_discard">Discard and leave</string>
+    <string name="screen_poll_selection_hint">Selected: %1$s. Confirm below to submit.</string>
+    <string name="screen_poll_more_options">Show %1$d more options</string>
+    <string name="screen_poll_collapse_options">Collapse options</string>
+</resources>

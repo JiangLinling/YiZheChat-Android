@@ -132,6 +132,35 @@ class PinnedMessagesListPresenterTest {
     }
 
     @Test
+    fun `present - room state removes an unpinned event while pinned timeline is stale`() = runTest {
+        val pinnedEventsTimeline = createPinnedMessagesTimeline()
+        val baseRoom = FakeBaseRoom(
+            roomPermissions = roomPermissions(),
+        ).apply {
+            givenRoomInfo(aRoomInfo(pinnedEventIds = listOf(AN_EVENT_ID)))
+        }
+        val room = FakeJoinedRoom(
+            baseRoom = baseRoom,
+            createTimelineResult = { Result.success(pinnedEventsTimeline) },
+        )
+        val presenter = createPinnedMessagesListPresenter(room = room)
+
+        presenter.test {
+            skipItems(3)
+            assertThat(awaitItem()).isInstanceOf(PinnedMessagesListState.Filled::class.java)
+
+            baseRoom.givenRoomInfo(aRoomInfo(pinnedEventIds = emptyList()))
+
+            var refreshedState = awaitItem()
+            while (refreshedState != PinnedMessagesListState.Empty) {
+                refreshedState = awaitItem()
+            }
+            assertThat(refreshedState).isEqualTo(PinnedMessagesListState.Empty)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `present - unpin event`() = runTest {
         val successUnpinEventLambda = lambdaRecorder { _: EventId? -> Result.success(true) }
         val failureUnpinEventLambda = lambdaRecorder { _: EventId? -> Result.failure<Boolean>(AN_EXCEPTION) }

@@ -10,6 +10,7 @@ package io.element.android.appnav.loggedin
 
 sealed interface LoggedInEvents {
     data class CloseErrorDialog(val doNotShowAgain: Boolean) : LoggedInEvents
+    data object RetryPushRegistration : LoggedInEvents
     data object CheckSlidingSyncProxyAvailability : LoggedInEvents
     data object LogoutAndMigrateToNativeSlidingSync : LoggedInEvents
 }

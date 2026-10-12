@@ -44,6 +44,8 @@ data class NotifiableMessageEvent(
     override val isUpdated: Boolean = false,
     val type: String = EventType.MESSAGE,
     val hasMentionOrReply: Boolean = false,
+    val isNtfyDelivery: Boolean = false,
+    val isPreviewHidden: Boolean = false,
 ) : NotifiableEvent {
     override val description: String = body ?: ""
 
@@ -51,4 +53,15 @@ data class NotifiableMessageEvent(
     // content://io.element.android.x.debug.notifications.fileprovider/downloads/temp/notif/matrix.org/XGItzSDOnSyXjYtOPfiKexDJ
     val imageUri: Uri?
         get() = imageUriString?.toUri()
+
+    fun redactPresentation(genericBody: String, keepSender: Boolean): NotifiableMessageEvent = copy(
+        isPreviewHidden = true,
+        senderDisambiguatedDisplayName = senderDisambiguatedDisplayName.takeIf { keepSender },
+        body = genericBody,
+        imageUriString = null,
+        imageMimeType = null,
+        roomName = null,
+        roomAvatarPath = null,
+        senderAvatarPath = null,
+    )
 }

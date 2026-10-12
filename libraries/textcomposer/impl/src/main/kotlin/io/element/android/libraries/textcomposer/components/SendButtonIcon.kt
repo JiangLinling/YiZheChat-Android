@@ -13,19 +13,23 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.designsystem.theme.components.Icon
 import io.element.android.libraries.designsystem.theme.components.IconButton
+import io.element.android.libraries.designsystem.theme.components.Text
+import io.element.android.libraries.textcomposer.R
 
 /**
  * Send button for the message composer.
@@ -36,6 +40,7 @@ internal fun SendButtonIcon(
     canSendMessage: Boolean,
     isEditing: Boolean,
     modifier: Modifier = Modifier,
+    label: String? = null,
 ) {
     val iconVector = when {
         isEditing -> CompoundIcons.Check()
@@ -52,23 +57,28 @@ internal fun SendButtonIcon(
     }
     Box(
         modifier = modifier
-            .clip(CircleShape)
-            .size(36.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .size(width = 72.dp, height = 38.dp)
             .background(backgroundColor)
     ) {
-        Icon(
-            modifier = Modifier
-                .padding(start = iconStartPadding)
-                .align(Alignment.Center),
-            imageVector = iconVector,
-            // Note: accessibility is managed in TextComposer.
-            contentDescription = null,
-            tint = if (canSendMessage) {
-                ElementTheme.colors.iconOnSolidPrimary
-            } else {
-                ElementTheme.colors.iconQuaternary
-            }
-        )
+        if (isEditing) {
+            Icon(
+                modifier = Modifier
+                    .padding(start = iconStartPadding)
+                    .size(24.dp)
+                    .align(Alignment.Center),
+                imageVector = iconVector,
+                contentDescription = null,
+                tint = if (canSendMessage) ElementTheme.colors.iconOnSolidPrimary else ElementTheme.colors.iconQuaternary,
+            )
+        } else {
+            Text(
+                modifier = Modifier.align(Alignment.Center),
+                text = label ?: stringResource(R.string.text_composer_send),
+                style = ElementTheme.typography.fontBodyMdMedium.copy(fontSize = 16.sp),
+                color = if (canSendMessage) ElementTheme.colors.iconOnSolidPrimary else ElementTheme.colors.iconQuaternary,
+            )
+        }
     }
 }
 

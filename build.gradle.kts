@@ -15,6 +15,7 @@ plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.android.library) apply false
     alias(libs.plugins.kotlin.android) apply false
+    alias(libs.plugins.huawei.agconnect) apply false
     alias(libs.plugins.compose.compiler) apply false
     alias(libs.plugins.ksp) apply false
     alias(libs.plugins.dependencycheck) apply false
@@ -25,6 +26,8 @@ plugins {
     alias(libs.plugins.dependencygraph)
     alias(libs.plugins.sonarqube)
 }
+
+apply(from = "gradle/unified-source-gate.gradle")
 
 tasks.register<Delete>("clean").configure {
     delete(rootProject.layout.buildDirectory)
@@ -185,8 +188,22 @@ tasks.register("runQualityChecks") {
         // tasks.findByName("buildHealth")?.let { dependsOn(it) }
     }
     dependsOn("checkDocs")
+    dependsOn("checkSecurityBaseline")
     // Make sure all checks run even if some fail
     gradle.startParameter.isContinueOnFailure = true
+}
+
+tasks.register("checkSecurityBaseline", Exec::class.java) {
+    inputs.files(
+        "app/build.gradle.kts",
+        "docs/security/sensitive-data-inventory.md",
+        "libraries/featureflag/api/src/main/kotlin/io/element/android/libraries/featureflag/api/FeatureFlags.kt",
+        "libraries/network/src/main/kotlin/io/element/android/libraries/network/interceptors/DynamicHttpLoggingInterceptor.kt",
+        fileTree("security") { include("**/*.kt") },
+        fileTree("tools/security") { include("*.json", "*.py") },
+    )
+    val pythonExecutable = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) "python" else "python3"
+    commandLine(pythonExecutable, "tools/security/check_security_baseline.py")
 }
 
 // Register Markdown documentation check task.

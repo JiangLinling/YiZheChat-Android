@@ -24,6 +24,7 @@ import io.element.android.libraries.matrix.api.timeline.item.event.LiveLocationC
 import io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
 import io.element.android.libraries.matrix.api.timeline.item.event.PollContent
 import io.element.android.libraries.matrix.api.timeline.item.event.ProfileChangeContent
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedOperationContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RedactedContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RoomMembershipContent
 import io.element.android.libraries.matrix.api.timeline.item.event.StateContent
@@ -62,6 +63,7 @@ class DefaultTimelineEventFormatter(
             is CallNotifyContent -> {
                 sp.getString(CommonStrings.common_call_started)
             }
+            is ProtectedOperationContent -> null
             RedactedContent,
             is LegacyCallInviteContent,
             is StickerContent,

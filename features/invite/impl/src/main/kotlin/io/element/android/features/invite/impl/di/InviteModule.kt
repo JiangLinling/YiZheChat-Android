@@ -35,6 +35,7 @@ interface InviteModule {
             return factory.getOrCreate(
                 matrixClient.sessionId,
                 matrixClient.sessionCoroutineScope,
+                matrixClient.deviceId.value,
             )
         }
     }

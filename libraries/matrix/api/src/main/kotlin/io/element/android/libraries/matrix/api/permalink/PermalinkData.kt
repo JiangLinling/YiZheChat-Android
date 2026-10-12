@@ -31,8 +31,11 @@ sealed interface PermalinkData : Parcelable {
         val roomIdOrAlias: RoomIdOrAlias,
         val eventId: EventId? = null,
         val threadId: ThreadId? = null,
-        val viaParameters: ImmutableList<String> = persistentListOf()
-    ) : PermalinkData
+        val viaParameters: ImmutableList<String> = persistentListOf(),
+        val invitationToken: String? = null,
+    ) : PermalinkData {
+        override fun toString(): String = "RoomLink(roomIdOrAlias=$roomIdOrAlias, invitation=${invitationToken != null})"
+    }
 
     /*
      * &room_name=Team2

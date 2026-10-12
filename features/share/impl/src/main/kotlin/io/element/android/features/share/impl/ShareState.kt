@@ -8,10 +8,10 @@
 
 package io.element.android.features.share.impl
 
+import io.element.android.features.share.api.ShareResult
 import io.element.android.libraries.architecture.AsyncAction
-import io.element.android.libraries.matrix.api.core.RoomId
 
 data class ShareState(
-    val shareAction: AsyncAction<List<RoomId>>,
+    val shareAction: AsyncAction<ShareResult>,
     val eventSink: (ShareEvents) -> Unit
 )

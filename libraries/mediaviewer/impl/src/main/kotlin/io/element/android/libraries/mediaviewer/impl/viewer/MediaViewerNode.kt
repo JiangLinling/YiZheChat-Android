@@ -9,6 +9,7 @@
 package io.element.android.libraries.mediaviewer.impl.viewer
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -29,6 +30,8 @@ import io.element.android.libraries.architecture.inputs
 import io.element.android.libraries.audio.api.AudioFocus
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.di.RoomScope
+import io.element.android.libraries.designsystem.utils.snackbar.LocalSnackbarDispatcher
+import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.media.MatrixMediaLoader
@@ -37,8 +40,13 @@ import io.element.android.libraries.mediaviewer.api.MediaViewerEntryPoint
 import io.element.android.libraries.mediaviewer.api.local.LocalMediaFactory
 import io.element.android.libraries.mediaviewer.impl.datasource.FocusedTimelineMediaGalleryDataSourceFactory
 import io.element.android.libraries.mediaviewer.impl.datasource.TimelineMediaGalleryDataSource
+import io.element.android.libraries.mediaviewer.impl.local.isOfficeDocument
+import io.element.android.libraries.mediaviewer.impl.local.office.OfficePreviewService
 import io.element.android.libraries.mediaviewer.impl.model.hasEvent
+import io.element.android.libraries.mediaviewer.impl.segmented.product.SegmentedVideoPlaybackOwnerFactory
 import io.element.android.services.toolbox.api.systemclock.SystemClock
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import java.security.MessageDigest
 
 @ContributesNode(RoomScope::class)
 @AssistedInject
@@ -50,13 +58,18 @@ class MediaViewerNode(
     focusedTimelineMediaGalleryDataSourceFactory: FocusedTimelineMediaGalleryDataSourceFactory,
     mediaLoader: MatrixMediaLoader,
     localMediaFactory: LocalMediaFactory,
+    segmentedVideoPlaybackOwnerFactory: SegmentedVideoPlaybackOwnerFactory,
     coroutineDispatchers: CoroutineDispatchers,
     systemClock: SystemClock,
     pagerKeysHandler: PagerKeysHandler,
     private val textFileViewer: TextFileViewer,
     private val audioFocus: AudioFocus,
     private val sessionId: SessionId,
+    private val matrixClient: MatrixClient,
+    private val room: io.element.android.libraries.matrix.api.room.JoinedRoom,
     private val enterpriseService: EnterpriseService,
+    private val officePreviewService: OfficePreviewService,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
 ) : Node(buildContext, plugins = plugins),
     MediaViewerNavigator {
     private val callback: MediaViewerEntryPoint.Callback = callback()
@@ -120,12 +133,20 @@ class MediaViewerNode(
         dataSource = MediaViewerDataSource(
             mode = inputs.mode,
             coroutineScope = lifecycleScope,
+            downloadScope = matrixClient.sessionCoroutineScope,
+            downloadDispatcher = coroutineDispatchers.io,
             dispatcher = coroutineDispatchers.computation,
             galleryDataSource = mediaGallerySource,
             mediaLoader = mediaLoader,
             localMediaFactory = localMediaFactory,
+            segmentedVideoPlaybackOwnerFactory = segmentedVideoPlaybackOwnerFactory,
             systemClock = systemClock,
             pagerKeysHandler = pagerKeysHandler,
+            appOperationalStateCoordinator = appOperationalStateCoordinator,
+            accountIdHash = sessionId.value.sha256Hex(),
+            matrixDeviceIdHash = matrixClient.deviceId.value.sha256Hex(),
+            roomId = room.roomId.value,
+            allowReusableOriginalCache = !inputs.isOneTimeView,
         )
     )
 
@@ -134,20 +155,44 @@ class MediaViewerNode(
         val colors by remember {
             enterpriseService.semanticColorsFlow(sessionId = sessionId)
         }.collectAsState(SemanticColorsLightDark.default)
-        ForcedDarkElementTheme(
-            colors = colors,
-        ) {
-            val state = presenter.present()
-            MediaViewerView(
-                state = state,
-                textFileViewer = textFileViewer,
-                modifier = modifier,
-                audioFocus = audioFocus,
-                onBackClick = callback::onDone,
-            )
+        val state = presenter.present()
+        val isOfficeDocument = (state.listData.getOrNull(state.currentIndex) as? MediaViewerPageData.MediaViewerData)
+            ?.mediaInfo
+            .isOfficeDocument()
+        // The overlay posts to its own queue; dismissals must clear that same queue.
+        CompositionLocalProvider(LocalSnackbarDispatcher provides presenter.snackbarDispatcher) {
+            ForcedDarkElementTheme(
+                colors = colors,
+                lightStatusBar = isOfficeDocument,
+            ) {
+                MediaViewerView(
+                    state = state,
+                    textFileViewer = textFileViewer,
+                    modifier = modifier,
+                    audioFocus = audioFocus,
+                    onBackClick = callback::onDone,
+                    isOneTimeView = inputs.isOneTimeView,
+                    // Only one-time media ends its viewing session at EOF. Ordinary media must
+                    // remain open for replay/seek instead of navigating back after every clip.
+                    onPlaybackEnded = {
+                        callback.onVideoPlaybackEnded(inputs.isOneTimeView)
+                    },
+                    officePreviewService = officePreviewService,
+                    officePreviewAccountId = sessionId.value,
+                    officePreviewDeviceId = matrixClient.deviceId.value,
+                )
+            }
         }
     }
 }
+
+internal fun MediaViewerEntryPoint.Callback.onVideoPlaybackEnded(isOneTimeView: Boolean) {
+    if (isOneTimeView) onPlaybackEnded()
+}
+
+private fun String.sha256Hex(): String = MessageDigest.getInstance("SHA-256")
+    .digest(encodeToByteArray())
+    .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
 internal fun MediaViewerEntryPoint.MediaViewerMode.getTimelineMode(): Timeline.Mode? {
     return when (this) {

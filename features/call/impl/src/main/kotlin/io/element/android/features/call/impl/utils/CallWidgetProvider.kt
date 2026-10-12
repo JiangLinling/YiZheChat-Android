@@ -8,9 +8,11 @@
 
 package io.element.android.features.call.impl.utils
 
+import io.element.android.features.call.impl.security.CallProtectionSession
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.widget.MatrixWidgetDriver
+import io.element.android.libraries.matrix.api.room.JoinedRoom
 
 interface CallWidgetProvider {
     suspend fun getWidget(
@@ -20,10 +22,15 @@ interface CallWidgetProvider {
         clientId: String,
         languageTag: String?,
         theme: String?,
+        operationId: String,
+        isIncoming: Boolean = false,
     ): Result<GetWidgetResult>
 
     data class GetWidgetResult(
         val driver: MatrixWidgetDriver,
         val url: String,
+        val protectionSession: CallProtectionSession? = null,
+        // Owned by the current-client driver; final invitation checks read its live timeline.
+        val invitationRoom: JoinedRoom? = null,
     )
 }

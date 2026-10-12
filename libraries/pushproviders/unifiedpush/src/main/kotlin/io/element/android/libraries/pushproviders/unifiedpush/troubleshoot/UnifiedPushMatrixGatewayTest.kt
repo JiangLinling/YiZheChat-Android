@@ -9,6 +9,7 @@
 package io.element.android.libraries.pushproviders.unifiedpush.troubleshoot
 
 import dev.zacsweers.metro.ContributesIntoSet
+import io.element.android.appconfig.NextDeploymentConfig
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.di.SessionScope
 import io.element.android.libraries.matrix.api.core.SessionId
@@ -22,6 +23,7 @@ import io.element.android.libraries.troubleshoot.api.test.TestFilterData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.net.URI
 
 @ContributesIntoSet(SessionScope::class)
 class UnifiedPushMatrixGatewayTest(
@@ -52,26 +54,28 @@ class UnifiedPushMatrixGatewayTest(
                 status = NotificationTroubleshootTestState.Status.Failure()
             )
         } else {
-            val gatewayBaseUrl = config.url.removeSuffix("/_matrix/push/v1/notify")
-            // Checking if the gateway is a Matrix gateway
+            val diagnosticGatewayUrl = NextDeploymentConfig.clientReachablePushGatewayUrl(config.url)
+            // Check the client-reachable Matrix gateway, preserving its public proxy path.
             coroutineScope.launch(coroutineDispatchers.io) {
-                val api = unifiedPushApiFactory.create(gatewayBaseUrl)
                 try {
+                    val gatewayBaseUrl = matrixGatewayBaseUrl(diagnosticGatewayUrl)
+                        ?: error("Invalid push gateway URL")
+                    val api = unifiedPushApiFactory.create(gatewayBaseUrl)
                     val discoveryResponse = api.discover()
                     if (discoveryResponse.unifiedpush.gateway == "matrix") {
                         delegate.updateState(
-                            description = "${config.url} is a Matrix gateway.",
+                            description = "${diagnosticGatewayUrl} is a Matrix gateway.",
                             status = NotificationTroubleshootTestState.Status.Success
                         )
                     } else {
                         delegate.updateState(
-                            description = "${config.url} is not a Matrix gateway.",
+                            description = "${diagnosticGatewayUrl} is not a Matrix gateway.",
                             status = NotificationTroubleshootTestState.Status.Failure()
                         )
                     }
                 } catch (throwable: Throwable) {
                     delegate.updateState(
-                        description = "Fail to check the gateway ${config.url}: ${throwable.localizedMessage}",
+                        description = "Fail to check the gateway ${diagnosticGatewayUrl}: ${throwable.localizedMessage}",
                         status = NotificationTroubleshootTestState.Status.Failure()
                     )
                 }
@@ -81,3 +85,20 @@ class UnifiedPushMatrixGatewayTest(
 
     override suspend fun reset() = delegate.reset()
 }
+
+/**
+ * Retrofit base URLs preserve the public gateway proxy path and end with a slash.
+ * Push endpoints may include query parameters (for example `?provider=coordinator`), so
+ * trimming a fixed path suffix is not sufficient and can turn the query into the base path.
+ */
+internal fun matrixGatewayBaseUrl(endpoint: String): String? = runCatching {
+    val uri = URI(endpoint)
+    require(uri.scheme == "http" || uri.scheme == "https")
+    require(!uri.rawAuthority.isNullOrBlank())
+    require(uri.rawPath.endsWith(MATRIX_PUSH_PATH))
+    val prefix = uri.rawPath.removeSuffix(MATRIX_PUSH_PATH).trimEnd('/')
+    val basePath = if (prefix.isEmpty()) "/" else "$prefix/"
+    URI(uri.scheme, uri.rawAuthority, basePath, null, null).toASCIIString()
+}.getOrNull()
+
+private const val MATRIX_PUSH_PATH = "/_matrix/push/v1/notify"

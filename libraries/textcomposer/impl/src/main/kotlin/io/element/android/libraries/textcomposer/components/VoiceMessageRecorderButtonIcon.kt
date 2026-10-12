@@ -41,11 +41,11 @@ private fun StartButton(
     modifier: Modifier = Modifier,
 ) {
     Icon(
-        modifier = modifier.size(24.dp),
-        imageVector = CompoundIcons.MicOnSolid(),
+        modifier = modifier.size(26.dp),
+        imageVector = CompoundIcons.MicOn(),
         // Note: accessibility is managed in TextComposer.
         contentDescription = null,
-        tint = ElementTheme.colors.iconSecondary,
+        tint = ElementTheme.colors.iconPrimary,
     )
 }
 
@@ -55,7 +55,7 @@ private fun StopButton(
 ) {
     Box(
         modifier
-            .size(36.dp)
+            .size(38.dp)
             .background(
                 color = ElementTheme.colors.bgActionPrimaryRest,
                 shape = CircleShape,
@@ -63,7 +63,7 @@ private fun StopButton(
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(28.dp),
             imageVector = CompoundIcons.StopSolid(),
             // Note: accessibility is managed in TextComposer.
             contentDescription = null,

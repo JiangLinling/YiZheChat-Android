@@ -16,6 +16,7 @@ import io.element.android.libraries.architecture.FeatureEntryPoint
 import io.element.android.libraries.architecture.NodeInputs
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
+import io.element.android.libraries.matrix.api.user.MatrixUser
 import kotlinx.parcelize.Parcelize
 
 interface PreferencesEntryPoint : FeatureEntryPoint {
@@ -27,10 +28,43 @@ interface PreferencesEntryPoint : FeatureEntryPoint {
         data object NotificationSettings : InitialTarget
 
         @Parcelize
+        data object ChatSecurity : InitialTarget
+
+        @Parcelize
         data object NotificationTroubleshoot : InitialTarget
 
         @Parcelize
         data object DeveloperSettings : InitialTarget
+
+        @Parcelize
+        data object AdvancedSettings : InitialTarget
+
+        @Parcelize
+        data object Labs : InitialTarget
+
+        @Parcelize
+        data object AnalyticsSettings : InitialTarget
+
+        @Parcelize
+        data object About : InitialTarget
+
+        @Parcelize
+        data object LockScreenSettings : InitialTarget
+
+        @Parcelize
+        data class UserProfile(val matrixUser: MatrixUser) : InitialTarget
+
+        @Parcelize
+        data object BlockedUsers : InitialTarget
+
+        @Parcelize
+        data object MessageFavourites : InitialTarget
+
+        @Parcelize
+        data object SignOut : InitialTarget
+
+        @Parcelize
+        data object AccountDeactivation : InitialTarget
     }
 
     data class Params(val initialElement: InitialTarget) : NodeInputs
@@ -43,10 +77,14 @@ interface PreferencesEntryPoint : FeatureEntryPoint {
     ): Node
 
     interface Callback : Plugin {
+        fun navigateToMyQrCode() {}
         fun navigateToAddAccount()
         fun navigateToLinkNewDevice()
         fun navigateToBugReport()
         fun navigateToSecureBackup()
+        fun navigateToSetUpRecoveryKey() = navigateToSecureBackup()
+        fun navigateToEnterRecoveryKey() = navigateToSecureBackup()
+        fun navigateToChangeRecoveryKey() = navigateToSecureBackup()
         fun navigateToRoomNotificationSettings(roomId: RoomId)
         fun navigateToEvent(roomId: RoomId, eventId: EventId)
     }

@@ -31,8 +31,22 @@ interface SeenInvitesStore {
      */
     suspend fun markAsUnSeen(roomId: RoomId)
 
-    /**
-     * Delete the store.
-     */
+    /** Notification metadata for this session only. */
+    fun notifications(): Flow<List<InviteNotification>>
+
+    /** Merge metadata observed from Matrix, without replacing confirmed outcomes with stale invites. */
+    suspend fun observeNotifications(notifications: List<InviteNotification>, completeSnapshot: Boolean = false)
+
+    /** Refresh encrypted history snapshots from currently visible Matrix profiles. */
+    suspend fun updateNotificationProfiles(profiles: Map<RoomId, Pair<String?, String?>>) = Unit
+
+    /** Only call after the existing Matrix/lifecycle action confirms the outcome. */
+    suspend fun recordOutcome(roomId: RoomId, outcome: InviteNotification.Outcome, seen: Boolean = true, expectedSequence: Long? = null)
+
+    suspend fun markNotificationSeen(roomId: RoomId)
+
+    /** Delete all session invitation metadata. */
+    /** Delete all session invitation metadata. */
+    /** Delete all session invitation metadata. */
     suspend fun clear()
 }

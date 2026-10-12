@@ -87,6 +87,7 @@ internal fun createRoomListRoomSummary(
     timestamp: String? = null,
     isTombstoned: Boolean = false,
     isSpace: Boolean = false,
+    latestEvent: LatestEvent = LatestEvent.Synced(""),
 ) = RoomListRoomSummary(
     id = A_ROOM_ID.value,
     roomId = A_ROOM_ID,
@@ -96,7 +97,7 @@ internal fun createRoomListRoomSummary(
     numberOfUnreadNotifications = numberOfUnreadNotifications,
     isMarkedUnread = isMarkedUnread,
     timestamp = timestamp,
-    latestEvent = LatestEvent.Synced(""),
+    latestEvent = latestEvent,
     avatarData = AvatarData(id = A_ROOM_ID.value, name = A_ROOM_NAME, size = AvatarSize.RoomListItem),
     displayType = displayType,
     userDefinedNotificationMode = userDefinedNotificationMode,

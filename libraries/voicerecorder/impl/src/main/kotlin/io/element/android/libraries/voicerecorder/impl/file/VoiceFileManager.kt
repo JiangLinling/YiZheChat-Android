@@ -11,7 +11,22 @@ package io.element.android.libraries.voicerecorder.impl.file
 import java.io.File
 
 interface VoiceFileManager {
+    /** Removes scratch files left by a reclaimed process before a new capture can start. */
+    fun recoverAbandonedFiles()
+
     fun createFile(): File
+
+    fun createFile(operationId: String): File = createFile()
+
+    fun discardPreparedCapture(operationId: String) = Unit
+
+    fun pendingCaptureCleanups(): Set<String> = emptySet()
+
+    fun captureCleanupResult(operationId: String): String = "VOICE_CAPTURE_CANCELLED_AND_CLEANED"
+
+    fun markCaptureCleanup(file: File, resultCode: String) = Unit
+
+    fun acknowledgeCaptureCleanup(operationId: String) = Unit
 
     fun deleteFile(file: File)
 }

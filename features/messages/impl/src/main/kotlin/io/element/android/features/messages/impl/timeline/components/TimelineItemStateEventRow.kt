@@ -83,11 +83,15 @@ fun TimelineItemStateEventRow(
         TimelineItemReadReceiptView(
             state = ReadReceiptViewState(
                 sendState = event.localSendState,
+                isMine = event.isMine,
                 isLastOutgoingMessage = isLastOutgoingMessage,
                 receipts = event.readReceiptState.receipts,
             ),
             renderReadReceipts = renderReadReceipts,
             onReadReceiptsClick = { onReadReceiptsClick(event) },
+            modifier = Modifier
+                .align(Alignment.End)
+                .padding(end = 16.dp),
         )
     }
 }

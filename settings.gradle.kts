@@ -12,13 +12,16 @@ pluginManagement {
         gradlePluginPortal()
         google()
         mavenCentral()
+        maven {
+            url = java.net.URI("https://developer.huawei.com/repo/")
+        }
     }
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         maven {
-            url = uri("https://www.jitpack.io")
+            url = java.net.URI("https://www.jitpack.io")
             content {
                 includeModule("com.github.matrix-org", "matrix-analytics-events")
                 // Required transitively by androidx.media3:media3-exoplayer-midi for MIDI playback.
@@ -28,10 +31,13 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven {
-            url = uri("https://repo1.maven.org/maven2/")
+            url = java.net.URI("https://repo1.maven.org/maven2/")
         }
         flatDir {
             dirs("libraries/matrix/libs")
+        }
+        maven {
+            url = java.net.URI("https://developer.huawei.com/repo/")
         }
     }
 }
@@ -68,6 +74,7 @@ fun includeProjects(directory: File, path: String, maxDepth: Int = 1) {
 }
 
 includeProjects(File(rootDir, "enterprise"), ":enterprise", maxDepth = 2)
+includeProjects(File(rootDir, "security"), ":security", maxDepth = 2)
 includeProjects(File(rootDir, "features"), ":features")
 includeProjects(File(rootDir, "libraries"), ":libraries")
 includeProjects(File(rootDir, "services"), ":services")

@@ -10,6 +10,7 @@
 
 package io.element.android.features.location.impl.show
 
+import io.element.android.features.location.api.live.PausedLiveLocationShare
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalInspectionMode
@@ -34,6 +35,18 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ShowLocationViewTest {
+    @Test
+    fun `paused share without a last point still offers safe Stop`() = runAndroidComposeUiTest {
+        val events = EventsRecorder<ShowLocationEvent>()
+        setShowLocationView(aShowLocationState(
+            isLive = true, locationShares = emptyList(),
+            pausedLiveLocationShare = PausedLiveLocationShare.RECOVERABLE,
+            eventSink = events,
+        ))
+        clickOn(CommonStrings.action_stop)
+        events.assertSingle(ShowLocationEvent.StopLocationSharing)
+    }
+
     @Test
     fun `test back action`() = runAndroidComposeUiTest {
         val eventsRecorder = EventsRecorder<ShowLocationEvent>(expectEvents = false)

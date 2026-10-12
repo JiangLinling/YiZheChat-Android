@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_share_location_resume_live_location">Resume live location</string>
+    <string name="screen_share_location_selected_current">Current location</string>
+    <string name="screen_share_location_selected_pin">Selected location</string>
+    <string name="screen_share_location_drag_hint">Drag the map to choose a location, then tap Send</string>
+    <string name="location_current_point">Selected location</string>
+    <string name="location_send_failed">Location was not sent. Tap Send to retry.</string>
+    <string name="location_more">More</string>
+    <string name="location_share_live">Share live location</string>
+    <string name="location_resume_live">Resume live location</string>
+    <string name="location_send_point_title">Send location</string>
+    <string name="location_recenter">My location</string>
+    <string name="location_search_places">Search places</string>
+    <string name="location_no_places">No places found. Try another search or move the map.</string>
+    <string name="location_query_failed">Map search failed (%1$d). Please retry.</string>
+    <string name="location_amap_consent_title">Use AMap</string>
+    <string name="location_amap_consent_body">AMap provides the map and place search. The selected coordinates, search terms, device and network information may be sent to AMap (Beijing AutoNavi Tuqiang Technology Co., Ltd.). Live location starts only when you choose to share it. Privacy policy: https://lbs.amap.com/pages/privacy/</string>
+    <string name="location_amap_privacy_policy">AMap privacy policy</string>
+    <string name="screen_share_location_tab_location">Location</string>
+    <string name="screen_share_location_tab_live">Live location</string>
+    <string name="screen_share_location_live_mode_hint">Conversation members can see your live location while sharing. Tap Send to choose the sharing duration.</string>
+</resources>

@@ -13,12 +13,12 @@ package io.element.android.features.home.impl.roomlist
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.AndroidComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runAndroidComposeUiTest
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.element.android.features.home.impl.R
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.ui.strings.CommonStrings
-import io.element.android.tests.testutils.EnsureCalledOnceWithParam
 import io.element.android.tests.testutils.EnsureNeverCalledWithParam
 import io.element.android.tests.testutils.EventsRecorder
 import io.element.android.tests.testutils.clickOn
@@ -63,56 +63,44 @@ class RoomListContextMenuTest {
     }
 
     @Test
-    fun `clicking on Leave room generates expected Events`() = runAndroidComposeUiTest {
-        val eventsRecorder = EventsRecorder<RoomListEvent>()
+    fun `leave room is hidden from the compact room list menu`() = runAndroidComposeUiTest {
+        val eventsRecorder = EventsRecorder<RoomListEvent>(expectEvents = false)
         val contextMenu = aContextMenuShown(isDm = false)
         setRoomListContextMenu(
             contextMenu = contextMenu,
             eventSink = eventsRecorder,
         )
-        clickOn(CommonStrings.action_leave_room)
-        eventsRecorder.assertList(
-            listOf(
-                RoomListEvent.HideContextMenu,
-                RoomListEvent.LeaveRoom(contextMenu.roomId, needsConfirmation = true),
-            )
-        )
+        onNodeWithText(activity!!.getString(R.string.screen_roomlist_leave_group)).assertDoesNotExist()
     }
 
     @Test
-    fun `clicking on Report room invokes the expected callback and generates expected Event`() = runAndroidComposeUiTest {
-        val eventsRecorder = EventsRecorder<RoomListEvent>()
+    fun `report room is hidden from the compact room list menu`() = runAndroidComposeUiTest {
+        val eventsRecorder = EventsRecorder<RoomListEvent>(expectEvents = false)
         val contextMenu = aContextMenuShown()
-        val callback = EnsureCalledOnceWithParam(contextMenu.roomId, Unit)
         setRoomListContextMenu(
             contextMenu = contextMenu,
             canReportRoom = true,
             eventSink = eventsRecorder,
             onRoomSettingsClick = EnsureNeverCalledWithParam(),
-            onReportRoomClick = callback,
+            onReportRoomClick = EnsureNeverCalledWithParam(),
         )
-        clickOn(CommonStrings.action_report_room)
-        eventsRecorder.assertSingle(RoomListEvent.HideContextMenu)
-        callback.assertSuccess()
+        onNodeWithText(activity!!.getString(CommonStrings.action_report_room)).assertDoesNotExist()
     }
 
     @Test
-    fun `clicking on Settings invokes the expected callback and generates expected Event`() = runAndroidComposeUiTest {
-        val eventsRecorder = EventsRecorder<RoomListEvent>()
+    fun `settings are hidden from the compact room list menu`() = runAndroidComposeUiTest {
+        val eventsRecorder = EventsRecorder<RoomListEvent>(expectEvents = false)
         val contextMenu = aContextMenuShown()
-        val callback = EnsureCalledOnceWithParam(contextMenu.roomId, Unit)
         setRoomListContextMenu(
             contextMenu = contextMenu,
             eventSink = eventsRecorder,
-            onRoomSettingsClick = callback,
+            onRoomSettingsClick = EnsureNeverCalledWithParam(),
         )
-        clickOn(CommonStrings.common_settings)
-        eventsRecorder.assertSingle(RoomListEvent.HideContextMenu)
-        callback.assertSuccess()
+        onNodeWithText(activity!!.getString(CommonStrings.common_settings)).assertDoesNotExist()
     }
 
     @Test
-    fun `clicking on Favourites generates expected Event`() = runAndroidComposeUiTest {
+    fun `clicking on Pin generates expected Event`() = runAndroidComposeUiTest {
         val eventsRecorder = EventsRecorder<RoomListEvent>()
         val contextMenu = aContextMenuShown(isDm = false, isFavorite = false)
         val callback = EnsureNeverCalledWithParam<RoomId>()
@@ -121,12 +109,24 @@ class RoomListContextMenuTest {
             eventSink = eventsRecorder,
             onRoomSettingsClick = callback,
         )
-        clickOn(CommonStrings.common_favourite)
+        clickOn(R.string.screen_roomlist_pin)
         eventsRecorder.assertList(
             listOf(
                 RoomListEvent.SetRoomIsFavorite(contextMenu.roomId, true),
             )
         )
+    }
+
+    @Test
+    fun `clicking on Mute generates expected Event`() = runAndroidComposeUiTest {
+        val eventsRecorder = EventsRecorder<RoomListEvent>()
+        val contextMenu = aContextMenuShown(isMuted = false)
+        setRoomListContextMenu(
+            contextMenu = contextMenu,
+            eventSink = eventsRecorder,
+        )
+        clickOn(R.string.screen_roomlist_mute)
+        eventsRecorder.assertSingle(RoomListEvent.SetRoomMuted(contextMenu.roomId, true))
     }
 
     private fun AndroidComposeUiTest<ComponentActivity>.setRoomListContextMenu(

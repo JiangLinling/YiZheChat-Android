@@ -29,6 +29,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterNotNull
@@ -36,9 +38,12 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import org.maplibre.compose.location.DesiredAccuracy
 import org.maplibre.compose.location.PermissionException
+import org.maplibre.spatialk.units.Bearing
+import org.maplibre.spatialk.units.extensions.inDegrees
 import org.maplibre.spatialk.units.extensions.inMeters
 import org.maplibre.spatialk.units.extensions.meters
 import timber.log.Timber
@@ -56,6 +61,7 @@ class LiveLocationSharingService : Service() {
     @AppCoroutineScope
     @Inject lateinit var appCoroutineScope: CoroutineScope
     private lateinit var coroutineScope: CoroutineScope
+    private var runtimeLease: LiveLocationSharingCoordinator.RuntimeLease? = null
 
     override fun onBind(p0: Intent?): IBinder? = null
 
@@ -66,6 +72,7 @@ class LiveLocationSharingService : Service() {
         Timber.d("LiveLocationSharingService onCreate")
         bindings<LocationBindings>().inject(this)
         runCatchingExceptions {
+            runtimeLease = coordinator.serviceCreated()
             appForegroundStateService.updateIsSharingLiveLocation(true)
             coroutineScope = appCoroutineScope.childScope(Dispatchers.Default, "LiveLocationSharingService")
             val notificationId = NotificationIdProvider.getForegroundServiceNotificationId(ForegroundServiceType.LIVE_LOCATION)
@@ -98,12 +105,14 @@ class LiveLocationSharingService : Service() {
                         context = applicationContext,
                         updateInterval = UPDATE_INTERVAL_IN_SECOND.seconds,
                         minDistance = minDistanceMeters.meters,
-                        desiredAccuracy = DesiredAccuracy.Balanced,
-                        coroutineScope = coroutineScope
-                    ).location
+                        desiredAccuracy = DesiredAccuracy.Highest,
+                        coroutineScope = coroutineScope,
+                        onCollectionStarted = { checkNotNull(runtimeLease).collectionStarted() },
+                        onCollectionReleased = { clean -> checkNotNull(runtimeLease).collectionFinished(clean) },
+                    ).locationUpdates
                 } catch (exception: PermissionException) {
                     Timber.e(exception, "Failed to create PlatformLocationProvider")
-                    coordinator.dispatchUnrecoverableError()
+                    appCoroutineScope.launch { coordinator.dispatchUnrecoverableError() }
                     emptyFlow()
                 }
             }
@@ -113,6 +122,7 @@ class LiveLocationSharingService : Service() {
                     lat = location.position.value.latitude,
                     lon = location.position.value.longitude,
                     accuracy = location.position.accuracy?.inMeters?.toFloat(),
+                    heading = location.course?.value?.minus(Bearing.North)?.inDegrees?.toFloat(),
                 )
             }
             .onEach(coordinator::dispatch)
@@ -121,15 +131,24 @@ class LiveLocationSharingService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Timber.d("LiveLocationSharingService onStartCommand startId=$startId")
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
         Timber.d("LiveLocationSharingService onDestroy")
-        if (::coroutineScope.isInitialized) {
-            coroutineScope.cancel()
-        }
+        val original = runtimeLease
+        val job = if (::coroutineScope.isInitialized) coroutineScope.coroutineContext[Job] else null
+        job?.cancel()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         appForegroundStateService.updateIsSharingLiveLocation(false)
         super.onDestroy()
+        appCoroutineScope.launch { withContext(NonCancellable) {
+            job?.join() // Includes callbackFlow listener removal and handler-thread exit.
+            if (original != null) {
+                val failure = runCatching { original.verifyReleased() }.exceptionOrNull()
+                coordinator.serviceReleased(original, failure)
+            }
+            runtimeLease = null
+        } }
     }
 }

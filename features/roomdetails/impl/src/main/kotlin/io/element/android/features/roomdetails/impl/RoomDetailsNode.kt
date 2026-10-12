@@ -9,6 +9,8 @@
 package io.element.android.features.roomdetails.impl
 
 import android.content.Context
+import androidx.compose.runtime.setValue
+import io.element.android.security.dataprotection.api.perform
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -44,6 +46,9 @@ class RoomDetailsNode(
     @Assisted plugins: List<Plugin>,
     presenterFactory: RoomDetailsPresenter.Factory,
     private val room: BaseRoom,
+    private val matrixClient: io.element.android.libraries.matrix.api.MatrixClient,
+    private val managementControlService: io.element.android.security.dataprotection.api.ManagementControlService,
+    private val operationalCoordinator: io.element.android.security.dataprotection.api.AppOperationalStateCoordinator,
     private val analyticsService: AnalyticsService,
     private val leaveRoomRenderer: LeaveRoomRenderer,
 ) : Node(buildContext, plugins = plugins), RoomDetailsNavigator {
@@ -56,6 +61,7 @@ class RoomDetailsNode(
         fun navigateToAvatarPreview(name: String, url: String)
         fun navigateToPollHistory()
         fun navigateToMediaGallery()
+        fun navigateToFindChatContent()
         fun navigateToAdminSettings()
         fun navigateToPinnedMessagesList()
         fun navigateToKnockRequestsList()
@@ -77,19 +83,13 @@ class RoomDetailsNode(
         )
     }
 
-    private fun CoroutineScope.onShareRoom(context: Context) = launch {
-        room.getPermalink()
-            .onSuccess { permalink ->
-                context.startSharePlainTextIntent(
-                    activityResultLauncher = null,
-                    chooserTitle = context.getString(R.string.screen_room_details_share_room_title),
-                    text = permalink,
-                    noActivityFoundMessage = context.getString(AndroidUtilsR.string.error_no_compatible_app_found)
-                )
-            }
-            .onFailure {
-                Timber.e(it)
-            }
+    private fun shareCard(context: Context, link: String) {
+        val card = io.element.android.libraries.matrix.api.permalink.SharedIdentityCard(true, stateFlow.value.roomName, link)
+        context.startActivity(android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            setClassName(context.packageName, "io.element.android.x.MainActivity")
+            putExtra(android.content.Intent.EXTRA_TEXT, card.body())
+        })
     }
 
     private val stateFlow = launchMolecule { presenter.present() }
@@ -102,9 +102,39 @@ class RoomDetailsNode(
     override fun View(modifier: Modifier) {
         val context = LocalContext.current
         val state by stateFlow.collectAsState()
+        var qrCapability by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<io.element.android.security.dataprotection.api.GroupShareCapability?>(null) }
+        var sharing by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
         fun onShareRoom() {
-            lifecycleScope.onShareRoom(context)
+            if (sharing) return
+            android.app.AlertDialog.Builder(context).setTitle(context.getString(R.string.screen_group_share_title))
+                .setItems(arrayOf(context.getString(R.string.screen_group_share_card),
+                    context.getString(R.string.screen_group_share_link), context.getString(R.string.screen_group_share_qr))) { _, choice ->
+                    sharing = true
+                    lifecycleScope.launch {
+                        try {
+                            val capability = operationalCoordinator.perform(
+                                io.element.android.security.dataprotection.api.lifecycleOperationRequest(
+                                    lifecycleId = io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_04,
+                                    trigger = "share_intent",
+                                    accountIdHash = io.element.android.security.securestorage.api.accountIdHash(matrixClient.sessionId.value),
+                                    matrixDeviceIdHash = io.element.android.security.securestorage.api.accountIdHash(matrixClient.deviceId.value),
+                                    roomIdHash = io.element.android.security.securestorage.api.accountIdHash(state.roomId.value),
+                                )) { managementControlService.issueGroupShare(matrixClient.sessionId.value, state.roomId.value) }
+                            when (choice) {
+                                0 -> shareCard(context, capability.link())
+                                1 -> context.startSharePlainTextIntent(null, context.getString(R.string.screen_group_share_link), capability.link(),
+                                    noActivityFoundMessage = context.getString(AndroidUtilsR.string.error_no_compatible_app_found))
+                                else -> qrCapability = capability
+                            }
+                        } catch (failure: kotlin.coroutines.cancellation.CancellationException) { throw failure
+                        } catch (_: io.element.android.security.dataprotection.api.GroupSharePermissionException) {
+                            android.widget.Toast.makeText(context, R.string.screen_group_share_permission_required, android.widget.Toast.LENGTH_LONG).show()
+                        } catch (_: Exception) {
+                            android.widget.Toast.makeText(context, R.string.screen_group_share_error, android.widget.Toast.LENGTH_LONG).show()
+                        } finally { sharing = false }
+                    }
+                }.setNegativeButton(context.getString(io.element.android.libraries.ui.strings.CommonStrings.action_cancel), null).show()
         }
 
         fun onActionClick(action: RoomDetailsAction) {
@@ -118,6 +148,12 @@ class RoomDetailsNode(
             }
         }
 
+        qrCapability?.let { capability ->
+            GroupShareQrDialog(capability, state.roomName, onDismiss = { qrCapability = null }, onSendCard = {
+                qrCapability = null
+                shareCard(context, capability.link())
+            })
+        }
         RoomDetailsView(
             state = state,
             modifier = modifier,
@@ -130,6 +166,7 @@ class RoomDetailsNode(
             openAvatarPreview = callback::navigateToAvatarPreview,
             openPollHistory = callback::navigateToPollHistory,
             openMediaGallery = callback::navigateToMediaGallery,
+            onFindChatContentClick = callback::navigateToFindChatContent,
             openAdminSettings = callback::navigateToAdminSettings,
             onJoinCallClick = callback::navigateToRoomCall,
             onPinnedMessagesClick = callback::navigateToPinnedMessagesList,

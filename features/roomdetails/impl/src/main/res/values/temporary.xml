@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_room_details_add_members">Add members</string>
+    <string name="screen_room_details_starred_conversation">Starred conversation</string>
+    <string name="screen_room_details_star_conversation">Star conversation</string>
+    <string name="screen_room_details_leave_conversation">Leave conversation</string>
+    <string name="screen_room_details_leave_group">Leave group</string>
+    <string name="screen_room_details_message_notifications">Message notifications</string>
+    <string name="screen_room_details_friend_profile">Contact profile</string>
+    <string name="screen_room_details_find_chat">Search chat history</string>
+    <string name="screen_room_details_search_hint">Search messages or sender</string>
+    <string name="screen_room_details_search_empty">No matching chat history</string>
+    <string name="screen_room_details_search_load_older">Load older messages</string>
+    <string name="screen_room_details_search_clear">Clear search</string>
+    <string name="screen_room_details_chat_settings">Chat settings</string>
+    <string name="screen_room_details_view_profile">View personal profile</string>
+    <string name="screen_room_details_chat_media">Photos, videos and files</string>
+    <string name="screen_room_details_chat_pinned_messages">Pinned messages</string>
+    <string name="screen_room_details_do_not_disturb">Do not disturb</string>
+    <string name="screen_room_details_pin_chat">Pin chat</string>
+    <string name="screen_room_details_chat_security">Chat security</string>
+    <string name="screen_room_details_chat_encrypted_description">End-to-end encryption is enabled for this chat. You can view and verify the other person’s identity in their profile.</string>
+    <string name="screen_room_details_chat_unencrypted_description">End-to-end encryption is not enabled for this chat.</string>
+    <string name="screen_room_details_group_settings">Group settings</string>
+    <string name="screen_room_details_group_info">Group information</string>
+    <string name="screen_room_details_group_management">Group management</string>
+    <string name="screen_room_details_share_group">Share group</string>
+    <string name="screen_room_details_manage_member">Manage group member</string>
+    <string name="screen_room_details_group_members">Group members</string>
+    <string name="screen_group_share_title">Share group</string>
+    <string name="screen_group_share_card">Send group card</string>
+    <string name="screen_group_share_link">Share link</string>
+    <string name="screen_group_share_qr">Group QR code (7 days)</string>
+    <string name="screen_group_share_valid_until">Valid for 7 days, until %1$s</string>
+    <string name="screen_group_share_error">Unable to share. Check your connection and invitation permission.</string>
+    <string name="screen_group_share_permission_required">You need permission to invite members. Ask a group administrator to share an invitation.</string>
+    <string name="screen_group_share_save">Save QR code</string>
+    <string name="screen_group_share_saved">QR code saved</string>
+    <string name="screen_group_share_save_error">Could not save QR code</string>
+</resources>

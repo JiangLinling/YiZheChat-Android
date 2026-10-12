@@ -24,7 +24,7 @@ internal class RustDynamicRoomList(
     override val loadingState: MutableStateFlow<RoomList.LoadingState>,
     private val processor: RoomSummaryListProcessor,
     override val pageSize: Int,
-    private val dynamicController: () -> RoomListDynamicEntriesController?,
+    private val controllerOwner: RoomListControllerOwner,
     private val addPagesCount: Int = DEFAULT_ADD_PAGES_COUNT
 ) : DynamicRoomList {
     private val mutex = Mutex()
@@ -35,7 +35,7 @@ internal class RustDynamicRoomList(
 
     override suspend fun updateFilter(filter: RoomListFilter) {
         mutex.withLock {
-            dynamicController()?.let { controller ->
+            controllerOwner.withController { controller ->
                 // Reset pagination when filter changes
                 controller.resetToOnePage()
                 val rustFilter = RoomListFilterMapper.toRustFilter(filter)
@@ -48,13 +48,13 @@ internal class RustDynamicRoomList(
 
     override suspend fun loadMore() {
         mutex.withLock {
-            dynamicController()?.addPages(addPagesCount)
+            controllerOwner.withController { it.addPages(addPagesCount) }
         }
     }
 
     override suspend fun reset() {
         mutex.withLock {
-            dynamicController()?.resetToOnePage()
+            controllerOwner.withController { it.resetToOnePage() }
         }
     }
 

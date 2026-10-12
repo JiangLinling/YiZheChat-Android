@@ -11,11 +11,15 @@ package io.element.android.libraries.mediaviewer.impl.local.image
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import coil3.request.ImageRequest
+import coil3.size.Precision
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.designsystem.utils.CommonDrawables
@@ -40,12 +44,30 @@ fun MediaImageView(
             contentDescription = null,
         )
     } else {
+        val context = LocalContext.current
         val zoomableImageState = rememberZoomableImageState(localMediaViewState.zoomableState)
         localMediaViewState.isReady = zoomableImageState.isImageDisplayed
+        val boundedModel = remember(
+            localMedia?.uri,
+            localMedia?.imageDecodeWidth,
+            localMedia?.imageDecodeHeight,
+        ) {
+            localMedia?.let { media ->
+                ImageRequest.Builder(context)
+                    .data(media.uri)
+                    .apply {
+                        val width = media.imageDecodeWidth
+                        val height = media.imageDecodeHeight
+                        if (width != null && height != null) size(width, height)
+                    }
+                    .precision(Precision.INEXACT)
+                    .build()
+            }
+        }
         ZoomableAsyncImage(
             modifier = modifier,
             state = zoomableImageState,
-            model = localMedia?.uri,
+            model = boundedModel,
             contentDescription = stringResource(id = CommonStrings.common_image),
             contentScale = ContentScale.Fit,
             onClick = { onClick() }

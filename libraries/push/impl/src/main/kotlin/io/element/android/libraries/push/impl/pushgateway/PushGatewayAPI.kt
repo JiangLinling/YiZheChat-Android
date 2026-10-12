@@ -9,6 +9,7 @@ package io.element.android.libraries.push.impl.pushgateway
 
 import retrofit2.http.Body
 import retrofit2.http.POST
+import retrofit2.http.Url
 
 interface PushGatewayAPI {
     /**
@@ -16,6 +17,9 @@ interface PushGatewayAPI {
      *
      * Ref: https://matrix.org/docs/spec/push_gateway/r0.1.1#post-matrix-push-v1-notify
      */
-    @POST(PushGatewayConfig.URI_PUSH_GATEWAY_PREFIX_PATH + "notify")
-    suspend fun notify(@Body body: PushGatewayNotifyBody): PushGatewayNotifyResponse
+    @POST
+    suspend fun notify(
+        @Url url: String,
+        @Body body: PushGatewayNotifyBody,
+    ): PushGatewayNotifyResponse
 }

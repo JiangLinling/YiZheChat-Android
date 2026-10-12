@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 Element Creations Ltd.
- * Copyright 2022-2025 New Vector Ltd.
+ * Copyright 2022-2026 New Vector Ltd.
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial.
  * Please see LICENSE files in the repository root for full details.
@@ -9,11 +9,13 @@
 package io.element.android.features.rageshake.impl.bugreport
 
 import android.content.res.Configuration
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -21,6 +23,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -35,10 +39,12 @@ import coil3.compose.AsyncImage
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import io.element.android.compound.theme.ElementTheme
+import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.rageshake.impl.R
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.designsystem.components.async.AsyncActionView
 import io.element.android.libraries.designsystem.components.form.textFieldState
+import io.element.android.libraries.designsystem.components.list.ListItemContent
 import io.element.android.libraries.designsystem.components.preferences.PreferenceDivider
 import io.element.android.libraries.designsystem.components.preferences.PreferencePage
 import io.element.android.libraries.designsystem.components.preferences.PreferenceRow
@@ -46,16 +52,23 @@ import io.element.android.libraries.designsystem.components.preferences.Preferen
 import io.element.android.libraries.designsystem.modifiers.onTabOrEnterKeyFocusNext
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.theme.components.Button
+import io.element.android.libraries.designsystem.theme.components.CircularProgressIndicator
+import io.element.android.libraries.designsystem.theme.components.Icon
+import io.element.android.libraries.designsystem.theme.components.IconButton
+import io.element.android.libraries.designsystem.theme.components.IconSource
 import io.element.android.libraries.designsystem.theme.components.ListItem
+import io.element.android.libraries.designsystem.theme.components.OutlinedButton
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.designsystem.theme.components.TextField
 import io.element.android.libraries.designsystem.theme.components.TextFieldValidity
 import io.element.android.libraries.ui.strings.CommonStrings
+import java.util.Locale
 
 @Composable
 fun BugReportView(
     state: BugReportState,
     onViewLogs: () -> Unit,
+    onAddAttachments: () -> Unit,
     onSuccess: () -> Unit,
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -65,14 +78,20 @@ fun BugReportView(
     Box(modifier = modifier) {
         PreferencePage(
             title = stringResource(id = CommonStrings.common_report_a_problem),
-            onBackClick = onBackClick
+            onBackClick = onBackClick,
         ) {
             val keyboardController = LocalSoftwareKeyboardController.current
             val isFormEnabled = state.sending !is AsyncAction.Loading
-            var descriptionFieldState by textFieldState(
-                stateValue = state.formState.description
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+            var descriptionFieldState by textFieldState(stateValue = state.formState.description)
+
+            PreferenceRow {
+                Text(
+                    text = stringResource(R.string.screen_bug_report_intro),
+                    style = ElementTheme.typography.fontBodyMdRegular,
+                    color = ElementTheme.colors.textSecondary,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+                )
+            }
             PreferenceRow {
                 TextField(
                     value = descriptionFieldState,
@@ -81,7 +100,6 @@ fun BugReportView(
                         .onTabOrEnterKeyFocusNext(LocalFocusManager.current),
                     enabled = isFormEnabled,
                     placeholder = stringResource(id = R.string.screen_bug_report_editor_placeholder),
-                    supportingText = stringResource(id = R.string.screen_bug_report_editor_description),
                     onValueChange = {
                         descriptionFieldState = it
                         eventSink(BugReportEvents.SetDescription(it))
@@ -91,123 +109,108 @@ fun BugReportView(
                         keyboardType = KeyboardType.Text,
                         imeAction = ImeAction.Next,
                     ),
-                    keyboardActions = KeyboardActions(onNext = {
-                        keyboardController?.hide()
-                    }),
-                    minLines = 3,
+                    keyboardActions = KeyboardActions(onNext = { keyboardController?.hide() }),
+                    minLines = 4,
                     validity = if (state.isDescriptionInError) TextFieldValidity.Invalid else TextFieldValidity.None,
                 )
             }
-            Spacer(modifier = Modifier.height(16.dp))
-            PreferenceDivider()
-            ListItem(
-                headlineContent = {
-                    Text(stringResource(id = R.string.screen_bug_report_view_logs))
-                },
-                enabled = isFormEnabled,
-                onClick = onViewLogs,
-            )
-            PreferenceDivider()
-            PreferenceSwitch(
-                isChecked = state.formState.sendLogs,
-                onCheckedChange = { eventSink(BugReportEvents.SetSendLog(it)) },
-                enabled = isFormEnabled,
-                title = stringResource(id = R.string.screen_bug_report_include_logs),
-                subtitle = stringResource(id = R.string.screen_bug_report_logs_description),
-            )
-            PreferenceSwitch(
-                isChecked = state.formState.canContact,
-                onCheckedChange = { eventSink(BugReportEvents.SetCanContact(it)) },
-                enabled = isFormEnabled,
-                title = stringResource(id = R.string.screen_bug_report_contact_me_title),
-                subtitle = stringResource(id = R.string.screen_bug_report_contact_me),
-            )
+
+            SectionTitle(stringResource(R.string.screen_bug_report_attachments_title))
+            PreferenceRow {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        text = stringResource(R.string.screen_bug_report_add_media),
+                        onClick = onAddAttachments,
+                        enabled = state.canAddAttachments,
+                        leadingIcon = IconSource.Vector(CompoundIcons.Attachment()),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = stringResource(
+                            R.string.screen_bug_report_attachments_hint,
+                            state.attachments.size,
+                            MAX_BUG_REPORT_MEDIA_COUNT,
+                        ),
+                        style = ElementTheme.typography.fontBodySmRegular,
+                        color = ElementTheme.colors.textSecondary,
+                    )
+                    if (state.attachmentNotice == BugReportAttachmentNotice.SelectionTrimmed) {
+                        Text(
+                            text = stringResource(R.string.screen_bug_report_attachment_selection_trimmed),
+                            style = ElementTheme.typography.fontBodySmRegular,
+                            color = ElementTheme.colors.textCriticalPrimary,
+                        )
+                    }
+                }
+            }
+            state.attachments.forEach { attachment ->
+                AttachmentRow(
+                    attachment = attachment,
+                    enabled = isFormEnabled && attachment.status !is BugReportAttachmentStatus.Compressing,
+                    onRemove = { eventSink(BugReportEvents.RemoveAttachment(attachment.id)) },
+                )
+            }
+
             if (state.screenshotUri != null) {
                 PreferenceSwitch(
                     isChecked = state.formState.sendScreenshot,
                     onCheckedChange = { eventSink(BugReportEvents.SetSendScreenshot(it)) },
                     enabled = isFormEnabled,
-                    title = stringResource(id = R.string.screen_bug_report_include_screenshot)
+                    title = stringResource(R.string.screen_bug_report_current_screenshot),
                 )
                 if (state.formState.sendScreenshot) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        val context = LocalContext.current
-                        val model = ImageRequest.Builder(context)
-                            .data(state.screenshotUri)
-                            // Since `screenshotUri` always has the same value, we need to disable memory cache to
-                            // ensure the image is reloaded when the URI content changes
-                            .memoryCachePolicy(CachePolicy.DISABLED)
-                            .build()
-                        AsyncImage(
-                            modifier = Modifier.fillMaxWidth(fraction = 0.5f),
-                            model = model,
-                            contentDescription = null,
-                        )
-                    }
+                    ScreenshotPreview(state.screenshotUri)
                 }
             }
+
+            SectionTitle(stringResource(R.string.screen_bug_report_include_title))
+            PreferenceSwitch(
+                isChecked = state.formState.sendLogs,
+                onCheckedChange = { eventSink(BugReportEvents.SetSendLog(it)) },
+                enabled = isFormEnabled,
+                title = stringResource(R.string.screen_bug_report_include_logs),
+            )
             PreferenceSwitch(
                 isChecked = state.formState.sendPushRules,
                 onCheckedChange = { eventSink(BugReportEvents.SetSendPushRules(it)) },
                 enabled = isFormEnabled,
                 title = stringResource(R.string.screen_bug_report_send_notification_settings_title),
-                subtitle = stringResource(R.string.screen_bug_report_send_notification_settings_description),
+            )
+            PreferenceSwitch(
+                isChecked = state.formState.canContact,
+                onCheckedChange = { eventSink(BugReportEvents.SetCanContact(it)) },
+                enabled = isFormEnabled,
+                title = stringResource(R.string.screen_bug_report_contact_me_title),
+            )
+            PreferenceDivider()
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.screen_bug_report_view_logs)) },
+                leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ListBulleted())),
+                enabled = isFormEnabled,
+                onClick = onViewLogs,
             )
             PreferenceRow {
-                var ghIssueNumberState by textFieldState(
-                    stateValue = state.formState.ghIssueNumber?.toString() ?: ""
-                )
-                TextField(
-                    value = ghIssueNumberState,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .onTabOrEnterKeyFocusNext(LocalFocusManager.current),
-                    enabled = isFormEnabled,
-                    label = stringResource(id = R.string.screen_bug_report_github_issue_label),
-                    placeholder = "1234",
-                    supportingText = stringResource(id = R.string.screen_bug_report_github_issue_description),
-                    leadingIcon = {
-                        Text(
-                            text = "#",
-                            style = ElementTheme.typography.fontBodyLgMedium,
-                            color = ElementTheme.colors.textSecondary,
-                        )
-                    },
-                    onValueChange = {
-                        if (it.isEmpty()) {
-                            ghIssueNumberState = ""
-                            eventSink(BugReportEvents.SetGhIssueNumber(null))
-                        } else {
-                            val number = it.toIntOrNull()?.takeIf { ghInt -> ghInt in 1..99_999 }
-                            number?.let { ghIssueNumber ->
-                                ghIssueNumberState = ghIssueNumber.toString()
-                                eventSink(BugReportEvents.SetGhIssueNumber(ghIssueNumber))
-                            }
-                        }
-                    },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = ImeAction.Next,
-                    ),
-                    keyboardActions = KeyboardActions(onNext = {
-                        keyboardController?.hide()
-                    }),
-                    singleLine = true,
+                Text(
+                    text = stringResource(R.string.screen_bug_report_privacy_notice),
+                    style = ElementTheme.typography.fontBodySmRegular,
+                    color = ElementTheme.colors.textSecondary,
+                    modifier = Modifier.padding(top = 8.dp),
                 )
             }
-            // Submit
             PreferenceRow {
                 Button(
                     text = stringResource(id = CommonStrings.action_send),
-                    onClick = { eventSink(BugReportEvents.SendBugReport) },
+                    onClick = {
+                        // The text field keeps an IME-friendly local value. Reconcile it synchronously before
+                        // submission so process/navigation restoration cannot send a stale presenter value.
+                        eventSink(BugReportEvents.SetDescription(descriptionFieldState))
+                        eventSink(BugReportEvents.SendBugReport)
+                    },
                     enabled = state.submitEnabled,
                     showProgress = state.sending.isLoading(),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 24.dp, bottom = 16.dp)
+                        .padding(top = 16.dp, bottom = 24.dp),
                 )
             }
         }
@@ -221,7 +224,7 @@ fun BugReportView(
             },
             errorMessage = { error ->
                 when (error) {
-                    BugReportFormError.DescriptionTooShort -> stringResource(id = R.string.screen_bug_report_error_description_too_short)
+                    BugReportFormError.DescriptionTooShort -> stringResource(R.string.screen_bug_report_error_description_too_short)
                     else -> error.message ?: error.toString()
                 }
             },
@@ -230,24 +233,121 @@ fun BugReportView(
     }
 }
 
+@Composable
+private fun SectionTitle(title: String) {
+    PreferenceRow {
+        Text(
+            text = title,
+            style = ElementTheme.typography.fontBodyMdMedium,
+            color = ElementTheme.colors.textPrimary,
+            modifier = Modifier.padding(top = 20.dp, bottom = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun AttachmentRow(
+    attachment: BugReportAttachmentState,
+    enabled: Boolean,
+    onRemove: () -> Unit,
+) {
+    ListItem(
+        enabled = enabled,
+        leadingContent = ListItemContent.Custom {
+            if (attachment.kind == BugReportAttachmentKind.Image && attachment.previewUri != null) {
+                AsyncImage(
+                    model = attachment.previewUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(8.dp)),
+                )
+            } else {
+                Icon(
+                    imageVector = if (attachment.kind == BugReportAttachmentKind.Video) CompoundIcons.VideoCall() else CompoundIcons.Image(),
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp),
+                )
+            }
+        },
+        headlineContent = { Text(attachment.displayName) },
+        supportingContent = {
+            Text(
+                text = attachment.statusLabel(),
+                color = if (attachment.status is BugReportAttachmentStatus.Failed) {
+                    ElementTheme.colors.textCriticalPrimary
+                } else {
+                    ElementTheme.colors.textSecondary
+                },
+            )
+        },
+        trailingContent = ListItemContent.Custom {
+            when (attachment.status) {
+                BugReportAttachmentStatus.Compressing -> CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(24.dp),
+                )
+                else -> IconButton(onClick = onRemove, enabled = enabled) {
+                    Icon(
+                        imageVector = CompoundIcons.Delete(),
+                        contentDescription = stringResource(R.string.screen_bug_report_remove_attachment),
+                    )
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun BugReportAttachmentState.statusLabel(): String = when (val currentStatus = status) {
+    BugReportAttachmentStatus.Compressing -> stringResource(R.string.screen_bug_report_attachment_compressing)
+    BugReportAttachmentStatus.Ready -> sizeBytes?.let(::formatFileSize).orEmpty()
+    is BugReportAttachmentStatus.Failed -> when (currentStatus.reason) {
+        BugReportAttachmentError.UnsupportedFormat -> stringResource(R.string.screen_bug_report_attachment_unsupported)
+        BugReportAttachmentError.CompressionFailed -> stringResource(R.string.screen_bug_report_attachment_compression_failed)
+        BugReportAttachmentError.ItemTooLarge -> stringResource(R.string.screen_bug_report_attachment_too_large)
+        BugReportAttachmentError.TotalTooLarge -> stringResource(R.string.screen_bug_report_attachments_total_too_large)
+    }
+}
+
+@Composable
+private fun ScreenshotPreview(uri: String) {
+    PreferenceRow {
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            val context = LocalContext.current
+            val model = ImageRequest.Builder(context)
+                .data(uri)
+                .memoryCachePolicy(CachePolicy.DISABLED)
+                .build()
+            AsyncImage(
+                modifier = Modifier
+                    .fillMaxWidth(0.55f)
+                    .clip(RoundedCornerShape(12.dp)),
+                model = model,
+                contentDescription = null,
+            )
+        }
+    }
+}
+
+private fun formatFileSize(bytes: Long): String {
+    val megabytes = bytes / (1024f * 1024f)
+    return if (megabytes >= 1f) {
+        String.format(Locale.getDefault(), "%.1f MB", megabytes)
+    } else {
+        String.format(Locale.getDefault(), "%.0f KB", bytes / 1024f)
+    }
+}
+
 @Preview(heightDp = 1000)
 @Composable
 internal fun BugReportViewDayPreview(@PreviewParameter(BugReportStateProvider::class) state: BugReportState) = ElementPreview {
-    BugReportView(
-        state = state,
-        onSuccess = {},
-        onBackClick = {},
-        onViewLogs = {},
-    )
+    BugReportView(state, {}, {}, {}, {})
 }
 
 @Preview(heightDp = 1000, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun BugReportViewNightPreview(@PreviewParameter(BugReportStateProvider::class) state: BugReportState) = ElementPreview {
-    BugReportView(
-        state = state,
-        onSuccess = {},
-        onBackClick = {},
-        onViewLogs = {},
-    )
+    BugReportView(state, {}, {}, {}, {})
 }

@@ -10,10 +10,15 @@
 
     <!-- To be able to install APK from the application -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Android 14+ callback used to record the real LC-09 capture attempt. -->
+    <uses-permission android:name="android.permission.DETECT_SCREEN_CAPTURE" />
+
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:name=".ElementXApplication"
         android:allowBackup="false"
+        android:allowAudioPlaybackCapture="false"
         android:appCategory="social"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
@@ -28,6 +33,66 @@
         android:theme="@style/Theme.ElementX"
         tools:targetApi="33">
 
+        <receiver
+            android:name=".security.ManagementSyncReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="io.element.android.yizhe.MANAGEMENT_SYNC" />
+            </intent-filter>
+        </receiver>
+
+        <meta-data
+            android:name="io.element.android.yizhe.control.BASE_URL"
+            android:value="${yizheControlBaseUrl}" />
+        <meta-data
+            android:name="io.element.android.yizhe.control.SIGNING_KEY_DER_B64"
+            android:value="${yizheControlSigningKeyDerB64}" />
+        <meta-data
+            android:name="io.element.android.yizhe.control.SIGNING_KEY_ID"
+            android:value="${yizheControlSigningKeyId}" />
+        <meta-data
+            android:name="io.element.android.yizhe.control.CERTIFICATE_PIN"
+            android:value="${yizheControlCertificatePin}" />
+        <meta-data
+            android:name="io.yizhechat.kms.BASE_URL"
+            android:value="${yizheKmsBaseUrl}" />
+        <meta-data
+            android:name="io.yizhechat.kms.SIGNING_PUBLIC_KEY_DER_B64"
+            android:value="${yizheKmsSigningKeyDerB64}" />
+        <meta-data
+            android:name="io.yizhechat.kms.CERTIFICATE_PINS_SHA256"
+            android:value="${yizheKmsCertificatePins}" />
+        <meta-data
+            android:name="io.yizhechat.kms.MAXIMUM_OFFLINE_LEASE_MILLIS"
+            android:value="${yizheKmsMaximumOfflineLeaseMillis}" />
+        <meta-data
+            android:name="io.yizhechat.kms.MAXIMUM_OFFLINE_LICENSE_USES"
+            android:value="${yizheKmsMaximumOfflineLicenseUses}" />
+        <meta-data
+            android:name="io.yizhechat.kms.CLOCK_ROLLBACK_TOLERANCE_MILLIS"
+            android:value="${yizheKmsClockRollbackToleranceMillis}" />
+        <meta-data
+            android:name="io.element.android.yizhe.officepreview.BASE_URL"
+            android:value="${yizheOfficePreviewBaseUrl}" />
+        <meta-data
+            android:name="io.element.android.yizhe.officepreview.CERTIFICATE_PIN"
+            android:value="${yizheOfficePreviewCertificatePin}" />
+        <!-- Next-only deployment identity consumed by the update, Matrix, and RTC owners. -->
+        <meta-data
+            android:name="io.element.android.yizhe.update.CHANNEL"
+            android:value="${yizheUpdateChannel}" />
+        <meta-data
+            android:name="io.element.android.yizhe.update.CDN_BASE_URL"
+            android:value="${yizheNextUpdateCdnBaseUrl}" />
+        <meta-data
+            android:name="io.element.android.yizhe.update.FALLBACK_BASE_URL"
+            android:value="${yizheNextUpdateFallbackBaseUrl}" />
+        <meta-data
+            android:name="io.element.android.yizhe.next.MATRIX_HOMESERVER_URL"
+            android:value="${yizheNextMatrixHomeserverUrl}" />
+        <meta-data
+            android:name="io.element.android.yizhe.next.RTC_BASE_URL"
+            android:value="${yizheNextRtcBaseUrl}" />
         <meta-data
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
@@ -55,7 +120,31 @@
         the application from a mobile.element.io link.
         -->
         <activity
+            android:name=".FloatingNotificationChatActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:taskAffinity="${applicationId}.floating"
+            android:theme="@style/Theme.ElementX.FloatingSplash"
+            android:windowSoftInputMode="adjustNothing" />
+
+        <activity
+            android:name=".NotificationChatActivity"
+            android:allowEmbedded="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:documentLaunchMode="intoExisting"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:resizeableActivity="true"
+            android:taskAffinity="${applicationId}.notification"
+            android:theme="@style/Theme.ElementX.Splash"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".MainActivity"
+            android:resizeableActivity="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:exported="true"
             android:launchMode="singleTask"
@@ -157,6 +246,13 @@
 
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.OPENABLE" />
+            </intent-filter>
+        <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="yizhe" android:host="friend" android:path="/v1" />
+                <data android:scheme="yizhe" android:host="group" android:path="/v1" />
             </intent-filter>
         </activity>
 

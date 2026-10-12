@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import dev.zacsweers.metro.Inject
+import io.element.android.appconfig.NextDeploymentConfig
 import io.element.android.features.preferences.impl.developer.tracing.toLogLevel
 import io.element.android.features.preferences.impl.developer.tracing.toLogLevelItem
 import io.element.android.features.preferences.impl.model.EnabledFeature
@@ -84,6 +85,9 @@ class AppDeveloperSettingsPresenter(
                 )
                 is AppDeveloperSettingsEvent.SetCustomElementCallBaseUrl -> coroutineScope.launch {
                     val urlToSave = event.baseUrl.takeIf { !it.isNullOrEmpty() }
+                    check(!NextDeploymentConfig.isNextDeployment || urlToSave == null || urlToSave == NextDeploymentConfig.rtcBaseUrl) {
+                        "Next refuses a custom Element Call URL outside its dedicated RTC endpoint."
+                    }
                     appPreferencesStore.setCustomElementCallBaseUrl(urlToSave)
                 }
                 is AppDeveloperSettingsEvent.SetTracingLogLevel -> coroutineScope.launch {
@@ -147,6 +151,9 @@ class AppDeveloperSettingsPresenter(
 }
 
 private fun customElementCallUrlValidator(url: String?): Boolean {
+    if (NextDeploymentConfig.isNextDeployment) {
+        return url.isNullOrEmpty() || url == NextDeploymentConfig.rtcBaseUrl
+    }
     return runCatchingExceptions {
         if (url.isNullOrEmpty()) return@runCatchingExceptions
         val parsedUrl = URL(url)

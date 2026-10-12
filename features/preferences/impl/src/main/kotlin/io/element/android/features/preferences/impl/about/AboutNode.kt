@@ -9,9 +9,19 @@
 package io.element.android.features.preferences.impl.about
 
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.LocalActivity
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.content.FileProvider
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.bumble.appyx.core.modality.BuildContext
 import com.bumble.appyx.core.node.Node
 import com.bumble.appyx.core.plugin.Plugin
@@ -22,6 +32,7 @@ import io.element.android.compound.theme.ElementTheme
 import io.element.android.libraries.androidutils.browser.openUrlInChromeCustomTab
 import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.di.SessionScope
+import io.element.android.security.dataprotection.api.PreparedAppUpdate
 
 @ContributesNode(SessionScope::class)
 @AssistedInject
@@ -44,11 +55,40 @@ class AboutNode(
         activity.openUrlInChromeCustomTab(null, darkTheme, elementLegal.url)
     }
 
+    private fun installUpdate(activity: Activity, prepared: PreparedAppUpdate): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !activity.packageManager.canRequestPackageInstalls()) {
+            activity.startActivity(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}"))
+            )
+            return false
+        }
+        val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", prepared.apkFile)
+        activity.startActivity(
+            Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                data = uri
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+                putExtra(Intent.EXTRA_RETURN_RESULT, false)
+            }
+        )
+        return true
+    }
+
     @Composable
     override fun View(modifier: Modifier) {
         val activity = requireNotNull(LocalActivity.current)
         val isDark = ElementTheme.isLightTheme.not()
         val state = presenter.present()
+        val preparedUpdate = state.preparedUpdate.dataOrNull()
+        var installRequested by rememberSaveable { mutableStateOf(false) }
+        LifecycleResumeEffect(preparedUpdate?.apkFile?.absolutePath, installRequested) {
+            // Returning from the Android "install unknown apps" permission screen must
+            // retry only after the user explicitly requested installation.
+            if (installRequested && preparedUpdate != null && installUpdate(activity, preparedUpdate)) {
+                installRequested = false
+            }
+            onPauseOrDispose { }
+        }
         AboutView(
             state = state,
             onBackClick = ::navigateUp,
@@ -56,6 +96,7 @@ class AboutNode(
                 onElementLegalClick(activity, isDark, elementLegal)
             },
             onOpenSourceLicensesClick = callback::navigateToOssLicenses,
+            onInstallUpdate = { installRequested = true },
             modifier = modifier
         )
     }

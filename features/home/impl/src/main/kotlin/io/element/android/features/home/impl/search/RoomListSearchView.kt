@@ -13,9 +13,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -36,6 +41,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import io.element.android.compound.tokens.generated.CompoundIcons
+import io.element.android.compound.theme.ElementTheme
+import io.element.android.features.home.impl.R
 import io.element.android.features.home.impl.components.RoomSummaryRow
 import io.element.android.features.home.impl.contentType
 import io.element.android.features.home.impl.model.RoomListRoomSummary
@@ -48,8 +55,11 @@ import io.element.android.libraries.designsystem.theme.components.Icon
 import io.element.android.libraries.designsystem.theme.components.IconButton
 import io.element.android.libraries.designsystem.theme.components.Scaffold
 import io.element.android.libraries.designsystem.theme.components.TopAppBar
+import io.element.android.libraries.designsystem.theme.components.Text
+import io.element.android.features.userprofile.api.FriendPrivateProfile
 import io.element.android.libraries.designsystem.utils.OnVisibleRangeChangeEffect
 import io.element.android.libraries.matrix.api.core.RoomId
+import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.ui.strings.CommonStrings
 
 @Composable
@@ -58,6 +68,7 @@ internal fun RoomListSearchView(
     hideInvitesAvatars: Boolean,
     eventSink: (RoomListEvent) -> Unit,
     onRoomClick: (RoomId) -> Unit,
+    onFriendClick: (UserId) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BackHandler(enabled = state.isSearchActive) {
@@ -74,6 +85,7 @@ internal fun RoomListSearchView(
                 state = state,
                 hideInvitesAvatars = hideInvitesAvatars,
                 onRoomClick = onRoomClick,
+                onFriendClick = onFriendClick,
                 eventSink = eventSink,
             )
         }
@@ -87,6 +99,7 @@ private fun RoomListSearchContent(
     hideInvitesAvatars: Boolean,
     eventSink: (RoomListEvent) -> Unit,
     onRoomClick: (RoomId) -> Unit,
+    onFriendClick: (UserId) -> Unit,
 ) {
     val borderColor = MaterialTheme.colorScheme.tertiary
     val strokeWidth = 1.dp
@@ -117,6 +130,7 @@ private fun RoomListSearchContent(
                             .fillMaxWidth()
                             .focusRequester(focusRequester),
                         state = state.query,
+                        placeholder = { Text(stringResource(R.string.screen_roomlist_search_hint)) },
                         lineLimits = TextFieldLineLimits.SingleLine,
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = Color.Transparent,
@@ -164,6 +178,9 @@ private fun RoomListSearchContent(
                 state = lazyListState,
                 modifier = Modifier.weight(1f),
             ) {
+                if (state.results.isNotEmpty()) {
+                    item { SearchSectionHeader(stringResource(R.string.screen_roomlist_search_chats)) }
+                }
                 items(
                     items = state.results,
                     contentType = { room -> room.contentType() },
@@ -177,7 +194,48 @@ private fun RoomListSearchContent(
                         eventSink = eventSink,
                     )
                 }
+                if (state.contactResults.isNotEmpty()) {
+                    item { SearchSectionHeader(stringResource(R.string.screen_roomlist_search_contacts)) }
+                    items(
+                        items = state.contactResults,
+                        key = { it.userId.value },
+                    ) { profile ->
+                        FriendSearchResultRow(profile = profile, onClick = { onFriendClick(profile.userId) })
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun SearchSectionHeader(title: String) {
+    Text(
+        text = title,
+        style = ElementTheme.typography.fontBodySmMedium,
+        color = ElementTheme.colors.textSecondary,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+    )
+}
+
+@Composable
+private fun FriendSearchResultRow(profile: FriendPrivateProfile, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+    ) {
+        Icon(
+            imageVector = CompoundIcons.User(),
+            contentDescription = null,
+            tint = ElementTheme.colors.iconSecondary,
+            modifier = Modifier.size(24.dp),
+        )
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = profile.displayName(null), style = ElementTheme.typography.fontBodyLgMedium)
+            Text(text = profile.userId.value, style = ElementTheme.typography.fontBodyMdRegular, color = ElementTheme.colors.textSecondary)
         }
     }
 }
@@ -189,6 +247,7 @@ internal fun RoomListSearchContentPreview(@PreviewParameter(RoomListSearchStateP
         state = state,
         hideInvitesAvatars = false,
         onRoomClick = {},
+        onFriendClick = {},
         eventSink = {},
     )
 }

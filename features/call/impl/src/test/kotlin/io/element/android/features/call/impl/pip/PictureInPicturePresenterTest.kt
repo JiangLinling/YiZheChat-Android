@@ -63,7 +63,7 @@ class PictureInPicturePresenterTest {
     }
 
     @Test
-    fun `with webPipApi, when entering pip is supported, but web deny it, the call is finished`() = runTest {
+    fun `web PiP denial preserves Next call and retains legacy exit behavior`() = runTest {
         val handUpResult = lambdaRecorder<Unit> { }
         val presenter = createPictureInPicturePresenter(
             supportPip = true,
@@ -76,7 +76,11 @@ class PictureInPicturePresenterTest {
             val initialState = awaitItem()
             initialState.eventSink(PictureInPictureEvent.SetPipController(FakePipController(canEnterPipResult = { false })))
             initialState.eventSink(PictureInPictureEvent.EnterPictureInPicture)
-            handUpResult.assertions().isCalledOnce()
+            if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment) {
+                handUpResult.assertions().isNeverCalled()
+            } else {
+                handUpResult.assertions().isCalledOnce()
+            }
         }
     }
 

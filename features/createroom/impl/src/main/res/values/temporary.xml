@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_create_room_message_retention_title">Message retention</string>
+    <string name="screen_create_room_message_retention_standard_title">Standard secure chat</string>
+    <string name="screen_create_room_message_retention_standard_description">Messages are retained for the organization’s standard period (currently 30 days).</string>
+    <string name="screen_create_room_message_retention_confidential_title">Confidential chat</string>
+    <string name="screen_create_room_message_retention_confidential_description">Messages are retained for the shorter confidential period (currently 7 days). New-device recovery requires additional approval.</string>
+    <string name="screen_create_room_start_group">Start group chat</string>
+    <string name="screen_create_room_confirm_group">Confirm group</string>
+    <string name="screen_create_room_next_count">Next (%1$d)</string>
+    <string name="screen_create_room_search_contacts">Search contacts</string>
+    <string name="screen_create_room_contacts_title">Contacts</string>
+    <string name="screen_create_room_contacts_loading">Loading contacts…</string>
+    <string name="screen_create_room_selected_members">Selected %1$d: %2$s</string>
+    <string name="screen_create_room_contacts_empty">Add friends in Contacts before starting a group.</string>
+    <string name="screen_create_room_contacts_no_match">No matching contacts</string>
+    <string name="screen_create_room_group_details">Group details</string>
+    <string name="screen_create_room_group_name">Group name</string>
+    <string name="screen_create_room_group_members">Group members</string>
+    <string name="screen_create_room_members_count">You and %1$d members in total</string>
+    <string name="screen_create_room_group_settings">Group settings</string>
+    <string name="screen_create_room_join_method">Joining method</string>
+    <string name="screen_create_room_invitation_only">Invitation only</string>
+    <string name="screen_create_room_public_join">Anyone can join</string>
+    <string name="screen_create_room_confidential_policy_note">The organization’s confidential retention period applies. New-device recovery requires additional approval.</string>
+    <string name="screen_create_room_standard_policy_note">The organization’s standard retention period applies.</string>
+    <string name="screen_create_room_more_details">More group details</string>
+    <string name="screen_create_room_optional">Optional</string>
+    <string name="screen_create_room_group_avatar">Group photo</string>
+    <string name="screen_create_room_group_service_unavailable">The secure group creation service is not ready yet. Please try again later.</string>
+</resources>

@@ -15,10 +15,14 @@ import androidx.compose.ui.test.AndroidComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.v2.runAndroidComposeUiTest
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.common.truth.Truth.assertThat
+import io.element.android.features.logout.api.LogoutEntryPoint
 import io.element.android.libraries.architecture.AsyncAction
+import io.element.android.libraries.matrix.api.encryption.RecoveryState
 import io.element.android.libraries.testtags.TestTags
 import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.tests.testutils.EnsureNeverCalled
+import io.element.android.tests.testutils.EnsureNeverCalledWithParam
 import io.element.android.tests.testutils.EventsRecorder
 import io.element.android.tests.testutils.clickOn
 import io.element.android.tests.testutils.ensureCalledOnce
@@ -95,30 +99,64 @@ class LogoutViewTest {
     }
 
     @Test
-    fun `last session setting button invoke onChangeRecoveryKeyClicked`() = runAndroidComposeUiTest {
+    fun `recovery setup is offered even when another device is available`() = runAndroidComposeUiTest {
         val eventsRecorder = EventsRecorder<LogoutEvents>(expectEvents = false)
-        ensureCalledOnce { callback ->
-            setLogoutView(
-                aLogoutState(
-                    isLastDevice = true,
-                    eventSink = eventsRecorder
-                ),
-                onChangeRecoveryKeyClick = callback,
-            )
-            clickOn(CommonStrings.common_settings)
-        }
+        var destination: LogoutEntryPoint.RecoveryDestination? = null
+        setLogoutView(
+            aLogoutState(
+                isLastDevice = false,
+                recoveryState = RecoveryState.DISABLED,
+                eventSink = eventsRecorder,
+            ),
+            onRecoveryActionClick = { destination = it },
+        )
+
+        clickOn(R.string.screen_signout_prepare_recovery_key_action)
+
+        assertThat(destination).isEqualTo(LogoutEntryPoint.RecoveryDestination.SET_UP)
+    }
+
+    @Test
+    fun `enabled recovery offers explicit key replacement without logging out`() = runAndroidComposeUiTest {
+        val eventsRecorder = EventsRecorder<LogoutEvents>(expectEvents = false)
+        var destination: LogoutEntryPoint.RecoveryDestination? = null
+        setLogoutView(
+            aLogoutState(eventSink = eventsRecorder),
+            onRecoveryActionClick = { destination = it },
+        )
+
+        clickOn(R.string.screen_signout_change_recovery_key_action)
+
+        assertThat(destination).isEqualTo(LogoutEntryPoint.RecoveryDestination.CHANGE)
+    }
+
+    @Test
+    fun `incomplete recovery opens key confirmation without logging out`() = runAndroidComposeUiTest {
+        val eventsRecorder = EventsRecorder<LogoutEvents>(expectEvents = false)
+        var destination: LogoutEntryPoint.RecoveryDestination? = null
+        setLogoutView(
+            aLogoutState(
+                recoveryState = RecoveryState.INCOMPLETE,
+                eventSink = eventsRecorder,
+            ),
+            onRecoveryActionClick = { destination = it },
+        )
+
+        clickOn(R.string.screen_signout_confirm_recovery_key_action)
+
+        assertThat(destination).isEqualTo(LogoutEntryPoint.RecoveryDestination.CONFIRM)
     }
 }
 
 private fun AndroidComposeUiTest<ComponentActivity>.setLogoutView(
     state: LogoutState,
-    onChangeRecoveryKeyClick: () -> Unit = EnsureNeverCalled(),
+    onRecoveryActionClick: (LogoutEntryPoint.RecoveryDestination) -> Unit = EnsureNeverCalledWithParam(),
     onBackClick: () -> Unit = EnsureNeverCalled(),
 ) {
     setContent {
         LogoutView(
             state = state,
-            onChangeRecoveryKeyClick = onChangeRecoveryKeyClick,
+            onRecoveryActionClick = onRecoveryActionClick,
             onBackClick = onBackClick,
         )
     }

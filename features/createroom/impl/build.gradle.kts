@@ -43,6 +43,8 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(projects.libraries.featureflag.api)
     implementation(projects.features.invitepeople.api)
+    implementation(projects.security.contentProtection.api)
+    implementation(projects.security.dataProtection.api)
     api(projects.features.createroom.api)
 
     testCommonDependencies(libs, true)
@@ -52,5 +54,7 @@ dependencies {
     testImplementation(projects.libraries.mediaupload.test)
     testImplementation(projects.libraries.permissions.test)
     testImplementation(projects.features.startchat.test)
+    testImplementation(projects.security.contentProtection.test)
+    testImplementation(projects.security.dataProtection.test)
     testImplementation(projects.libraries.featureflag.test)
 }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -30,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -44,6 +46,7 @@ import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
+import io.element.android.features.messages.impl.timeline.LocalTimelineIsTalkbackActive
 import io.element.android.features.messages.impl.timeline.aTimelineItemEvent
 import io.element.android.features.messages.impl.timeline.components.ATimelineItemEventRow
 import io.element.android.features.messages.impl.timeline.components.layout.ContentAvoidingLayout
@@ -59,12 +62,12 @@ import io.element.android.libraries.designsystem.modifiers.onKeyboardContextMenu
 import io.element.android.libraries.designsystem.modifiers.roundedBackground
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
+import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.matrix.ui.media.MAX_THUMBNAIL_HEIGHT
 import io.element.android.libraries.matrix.ui.media.MAX_THUMBNAIL_WIDTH
 import io.element.android.libraries.matrix.ui.media.MediaRequestData
 import io.element.android.libraries.textcomposer.ElementRichTextEditorStyle
 import io.element.android.libraries.ui.strings.CommonStrings
-import io.element.android.libraries.ui.utils.a11y.isTalkbackActive
 import io.element.android.wysiwyg.compose.EditorStyledText
 import io.element.android.wysiwyg.link.Link
 
@@ -79,11 +82,14 @@ fun TimelineItemVideoView(
     onLinkLongClick: (Link) -> Unit,
     onContentLayoutChange: (ContentAvoidingLayoutData) -> Unit,
     modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
+    useFitBackdrop: Boolean = true,
+    portraitFrame: Boolean = true,
 ) {
-    val isTalkbackActive = isTalkbackActive()
+    val isTalkbackActive = LocalTimelineIsTalkbackActive.current
     val a11yLabel = stringResource(CommonStrings.common_video)
     val description = content.caption?.let { "$a11yLabel: $it" } ?: a11yLabel
-    Column(modifier = modifier) {
+    Column(modifier = modifier.then(if (portraitFrame) Modifier.widthIn(max = MEDIA_PORTRAIT_WIDTH_DP.dp) else Modifier)) {
         val containerModifier = if (content.showCaption) {
             Modifier
                 .padding(top = 6.dp)
@@ -93,7 +99,7 @@ fun TimelineItemVideoView(
         }
         TimelineItemAspectRatioBox(
             modifier = containerModifier.blurHashBackground(content.blurHash, alpha = 0.9f),
-            aspectRatio = coerceRatioWhenHidingContent(content.aspectRatio, hideMediaContent),
+            aspectRatio = if (portraitFrame) MEDIA_PORTRAIT_ASPECT_RATIO else coerceRatioWhenHidingContent(content.aspectRatio, hideMediaContent),
             contentAlignment = Alignment.Center,
         ) {
             ProtectedView(
@@ -101,74 +107,122 @@ fun TimelineItemVideoView(
                 onShowClick = onShowContentClick,
             ) {
                 var isLoaded by remember { mutableStateOf(false) }
-                AsyncImage(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(if (isLoaded) Modifier.background(Color.White) else Modifier)
-                        .then(
-                            if (!isTalkbackActive && onContentClick != null) {
-                                Modifier
-                                    .combinedClickable(
-                                        onClick = onContentClick,
-                                        onLongClick = onLongClick,
-                                    )
-                                    .onKeyboardContextMenuAction(onLongClick)
-                            } else {
-                                Modifier
-                            }
-                        ),
-                    model = MediaRequestData(
-                        source = content.thumbnailSource,
-                        kind = MediaRequestData.Kind.Thumbnail(
-                            width = content.thumbnailWidth?.toLong() ?: MAX_THUMBNAIL_WIDTH,
-                            height = content.thumbnailHeight?.toLong() ?: MAX_THUMBNAIL_HEIGHT,
-                        )
-                    ),
-                    contentScale = ContentScale.Crop,
-                    alignment = Alignment.Center,
-                    contentDescription = description,
-                    onState = { isLoaded = it is AsyncImagePainter.State.Success },
+                val model = content.localPreviewUri ?: MediaRequestData(
+                    source = content.thumbnailSource,
+                    kind = MediaRequestData.Kind.Thumbnail(
+                        width = content.thumbnailWidth?.toLong() ?: MAX_THUMBNAIL_WIDTH,
+                        height = content.thumbnailHeight?.toLong() ?: MAX_THUMBNAIL_HEIGHT,
+                    )
                 )
-
                 Box(
-                    modifier = Modifier.roundedBackground(),
+                    modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Image(
-                        imageVector = CompoundIcons.PlaySolid(),
-                        contentDescription = stringResource(id = CommonStrings.a11y_play),
-                        colorFilter = ColorFilter.tint(Color.White),
-                        modifier = Modifier.semantics { hideFromAccessibility() }
+                    if (useFitBackdrop) {
+                        AsyncImage(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .blur(14.dp),
+                            model = model,
+                            contentScale = ContentScale.Crop,
+                            alignment = Alignment.Center,
+                            contentDescription = null,
+                            alpha = 0.72f,
+                        )
+                    }
+                    AsyncImage(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(if (isLoaded && !useFitBackdrop) Modifier.background(Color.White) else Modifier)
+                            .then(
+                                if (!isTalkbackActive && onContentClick != null) {
+                                    Modifier
+                                        .combinedClickable(
+                                            onClick = onContentClick,
+                                            onLongClick = onLongClick,
+                                        )
+                                        .onKeyboardContextMenuAction(onLongClick)
+                                } else {
+                                    Modifier
+                                }
+                            ),
+                        model = model,
+                        contentScale = contentScale,
+                        alignment = Alignment.Center,
+                        contentDescription = description,
+                        onState = { isLoaded = it is AsyncImagePainter.State.Success },
                     )
+
+                    val progress = content.localMediaProgress
+                    if (progress != null) {
+                        MediaSendProgressOverlay(progress = progress)
+                    } else {
+                        Box(
+                            modifier = Modifier.roundedBackground(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Image(
+                                imageVector = CompoundIcons.PlaySolid(),
+                                contentDescription = stringResource(id = CommonStrings.a11y_play),
+                                colorFilter = ColorFilter.tint(Color.White),
+                                modifier = Modifier.semantics { hideFromAccessibility() }
+                            )
+                        }
+                    }
+                    if (content.duration.inWholeSeconds > 0) {
+                        Text(
+                            text = content.duration.formatVoiceTimestamp(),
+                            style = ElementTheme.typography.fontBodyXsRegular,
+                            color = Color.White,
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(8.dp)
+                                .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
                 }
             }
         }
 
-        if (content.showCaption) {
-            Spacer(modifier = Modifier.height(8.dp))
-            val caption = if (LocalInspectionMode.current) {
-                SpannedString(content.caption)
-            } else {
-                content.formattedCaption ?: SpannedString(content.caption)
-            }
-            CompositionLocalProvider(
-                LocalContentColor provides ElementTheme.colors.textPrimary,
-                LocalTextStyle provides ElementTheme.typography.fontBodyLgRegular,
-            ) {
-                val aspectRatio = content.aspectRatio ?: DEFAULT_ASPECT_RATIO
-                EditorStyledText(
-                    modifier = Modifier
-                        .padding(horizontal = 4.dp) // This is (12.dp - 8.dp) contentPadding from CommonLayout
-                        .widthIn(min = MIN_HEIGHT_IN_DP.dp * aspectRatio, max = MAX_HEIGHT_IN_DP.dp * aspectRatio),
-                    text = caption,
-                    onLinkClickedListener = onLinkClick,
-                    onLinkLongClickedListener = onLinkLongClick,
-                    style = ElementRichTextEditorStyle.textStyle(),
-                    releaseOnDetach = false,
-                    onTextLayout = ContentAvoidingLayout.measureLegacyLastTextLine(onContentLayoutChange = onContentLayoutChange),
-                )
-            }
-        }
+        TimelineItemVideoCaptionView(
+            content = content,
+            onLinkClick = onLinkClick,
+            onLinkLongClick = onLinkLongClick,
+            onContentLayoutChange = onContentLayoutChange,
+        )
+    }
+}
+
+@Composable
+internal fun TimelineItemVideoCaptionView(
+    content: TimelineItemVideoContent,
+    onLinkClick: (Link) -> Unit,
+    onLinkLongClick: (Link) -> Unit,
+    onContentLayoutChange: (ContentAvoidingLayoutData) -> Unit,
+) {
+    if (!content.showCaption) return
+    Spacer(modifier = Modifier.height(8.dp))
+    val caption = if (LocalInspectionMode.current) {
+        SpannedString(content.caption)
+    } else {
+        content.formattedCaption ?: SpannedString(content.caption)
+    }
+    CompositionLocalProvider(
+        LocalContentColor provides ElementTheme.colors.textPrimary,
+        LocalTextStyle provides ElementTheme.typography.fontBodyLgRegular,
+    ) {
+        EditorStyledText(
+            modifier = Modifier
+                .padding(horizontal = 4.dp)
+                .widthIn(min = 75.dp, max = MEDIA_PORTRAIT_WIDTH_DP.dp),
+            text = caption,
+            onLinkClickedListener = onLinkClick,
+            onLinkLongClickedListener = onLinkLongClick,
+            style = ElementRichTextEditorStyle.textStyle(),
+            releaseOnDetach = false,
+            onTextLayout = ContentAvoidingLayout.measureLegacyLastTextLine(onContentLayoutChange = onContentLayoutChange),
+        )
     }
 }
 

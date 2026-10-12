@@ -20,9 +20,11 @@ sealed interface VoiceMessageComposerEvent {
         val playerEvent: VoiceMessagePlayerEvent,
     ) : VoiceMessageComposerEvent
     data object SendVoiceMessage : VoiceMessageComposerEvent
+    data object SendBurnAfterReadVoiceMessage : VoiceMessageComposerEvent
     data object DeleteVoiceMessage : VoiceMessageComposerEvent
     data object AcceptPermissionRationale : VoiceMessageComposerEvent
     data object DismissPermissionsRationale : VoiceMessageComposerEvent
     data class LifecycleEvent(val event: Lifecycle.Event) : VoiceMessageComposerEvent
     data object DismissSendFailureDialog : VoiceMessageComposerEvent
+    data object DismissRecordingPermissionLostDialog : VoiceMessageComposerEvent
 }

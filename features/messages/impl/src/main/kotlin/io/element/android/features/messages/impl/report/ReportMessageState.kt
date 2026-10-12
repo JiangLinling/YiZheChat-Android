@@ -13,6 +13,7 @@ import io.element.android.libraries.architecture.AsyncAction
 data class ReportMessageState(
     val reason: String,
     val blockUser: Boolean,
+    val reportSubmitted: Boolean,
     val result: AsyncAction<Unit>,
     val eventSink: (ReportMessageEvent) -> Unit
 )

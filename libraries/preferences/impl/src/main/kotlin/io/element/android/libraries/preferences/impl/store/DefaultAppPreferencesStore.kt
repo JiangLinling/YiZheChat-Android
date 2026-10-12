@@ -42,6 +42,7 @@ private val messageSoundDisplayNameKey = stringPreferencesKey("notificationMessa
 private val callRingtoneUriKey = stringPreferencesKey("notificationCallRingtoneUri")
 private val callRingtoneChannelVersionKey = intPreferencesKey("notificationCallRingtoneChannelVersion")
 private val callRingtoneDisplayNameKey = stringPreferencesKey("notificationCallRingtoneDisplayName")
+private const val CALL_RINGTONE_SYSTEM_DEFAULT = "call_system_default"
 
 @ContributesBinding(AppScope::class)
 class DefaultAppPreferencesStore(
@@ -99,7 +100,7 @@ class DefaultAppPreferencesStore(
 
     override fun getLiveLocationMinimumDistanceInMetersUpdateFlow(): Flow<Int> {
         return store.data.map { prefs ->
-            prefs[liveLocationMinimumDistanceUpdateKey] ?: 10
+            prefs[liveLocationMinimumDistanceUpdateKey] ?: 1
         }
     }
 
@@ -198,13 +199,19 @@ class DefaultAppPreferencesStore(
     }
 
     override fun getCallRingtoneFlow(): Flow<NotificationSound> {
-        return store.data.map { prefs -> NotificationSound.fromStored(prefs[callRingtoneUriKey]) }
+        return store.data.map { prefs -> callRingtoneFromStored(prefs[callRingtoneUriKey]) }
     }
 
     override suspend fun setCallRingtoneAndIncrementVersion(sound: NotificationSound, title: String?): Int {
         var newVersion = 0
         store.edit { prefs ->
-            val stored = sound.toStored()
+            // A missing value means the bundled YiZhe ringtone. Persist SystemDefault explicitly
+            // so users can still opt back into the Android ringtone after this default migration.
+            val stored = if (sound == NotificationSound.SystemDefault) {
+                CALL_RINGTONE_SYSTEM_DEFAULT
+            } else {
+                sound.toStored()
+            }
             if (stored != null) {
                 prefs[callRingtoneUriKey] = stored
             } else {
@@ -231,7 +238,7 @@ class DefaultAppPreferencesStore(
             messageSound = NotificationSound.fromStored(prefs[messageSoundUriKey]),
             messageSoundVersion = prefs[messageSoundChannelVersionKey] ?: 0,
             messageSoundDisplayName = prefs[messageSoundDisplayNameKey],
-            callRingtone = NotificationSound.fromStored(prefs[callRingtoneUriKey]),
+            callRingtone = callRingtoneFromStored(prefs[callRingtoneUriKey]),
             callRingtoneVersion = prefs[callRingtoneChannelVersionKey] ?: 0,
             callRingtoneDisplayName = prefs[callRingtoneDisplayNameKey],
         )
@@ -241,6 +248,13 @@ class DefaultAppPreferencesStore(
         store.edit { it.clear() }
     }
 }
+
+private fun callRingtoneFromStored(value: String?): NotificationSound =
+    when (value) {
+        null -> NotificationSound.ElementDefault
+        CALL_RINGTONE_SYSTEM_DEFAULT -> NotificationSound.SystemDefault
+        else -> NotificationSound.fromStored(value)
+    }
 
 private fun BuildMeta.defaultLogLevel(): LogLevel {
     return when (buildType) {

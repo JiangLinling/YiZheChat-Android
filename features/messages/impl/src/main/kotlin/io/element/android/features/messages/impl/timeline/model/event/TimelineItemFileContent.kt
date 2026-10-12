@@ -22,6 +22,7 @@ data class TimelineItemFileContent(
     override val formattedFileSize: String,
     override val fileExtension: String,
     override val mimeType: String,
+    override val isBurnAfterRead: Boolean = false,
 ) : TimelineItemEventContentWithAttachment {
     override val type: String = "TimelineItemFileContent"
 

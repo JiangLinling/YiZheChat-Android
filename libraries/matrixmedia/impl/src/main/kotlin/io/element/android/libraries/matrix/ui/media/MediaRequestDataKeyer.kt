@@ -25,5 +25,6 @@ internal class MediaRequestDataKeyer : Keyer<MediaRequestData> {
 }
 
 private fun MediaRequestData.toKey(): String? {
+    if (!cacheable) return null
     return source?.let { "${it.safeUrl}_$kind" }
 }

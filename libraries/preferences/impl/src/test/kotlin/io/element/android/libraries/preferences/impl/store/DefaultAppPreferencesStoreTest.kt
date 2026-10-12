@@ -10,6 +10,7 @@ package io.element.android.libraries.preferences.impl.store
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.core.meta.BuildMeta
 import io.element.android.libraries.core.meta.BuildType
+import io.element.android.libraries.preferences.api.store.NotificationSound
 import io.element.android.libraries.preferences.test.FakePreferenceDataStoreFactory
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -34,13 +35,13 @@ class DefaultAppPreferencesStoreTest {
     )
 
     @Test
-    fun `live location minimum distance defaults to 10`() = runTest {
+    fun `live location minimum distance defaults to 1`() = runTest {
         val store = DefaultAppPreferencesStore(
             buildMeta = buildMeta,
             preferenceDataStoreFactory = FakePreferenceDataStoreFactory(),
         )
 
-        assertThat(store.getLiveLocationMinimumDistanceInMetersUpdateFlow().first()).isEqualTo(10)
+        assertThat(store.getLiveLocationMinimumDistanceInMetersUpdateFlow().first()).isEqualTo(1)
     }
 
     @Test
@@ -53,5 +54,29 @@ class DefaultAppPreferencesStoreTest {
         store.setLiveLocationMinimumDistanceInMetersUpdate(25)
 
         assertThat(store.getLiveLocationMinimumDistanceInMetersUpdateFlow().first()).isEqualTo(25)
+    }
+
+    @Test
+    fun `call ringtone defaults to the bundled app tone`() = runTest {
+        val store = DefaultAppPreferencesStore(
+            buildMeta = buildMeta,
+            preferenceDataStoreFactory = FakePreferenceDataStoreFactory(),
+        )
+
+        assertThat(store.getCallRingtoneFlow().first()).isEqualTo(NotificationSound.ElementDefault)
+        assertThat(store.getNotificationSoundChannelConfig().callRingtone).isEqualTo(NotificationSound.ElementDefault)
+    }
+
+    @Test
+    fun `call ringtone can be changed back to the Android system default`() = runTest {
+        val store = DefaultAppPreferencesStore(
+            buildMeta = buildMeta,
+            preferenceDataStoreFactory = FakePreferenceDataStoreFactory(),
+        )
+
+        store.setCallRingtoneAndIncrementVersion(NotificationSound.SystemDefault, title = null)
+
+        assertThat(store.getCallRingtoneFlow().first()).isEqualTo(NotificationSound.SystemDefault)
+        assertThat(store.getNotificationSoundChannelConfig().callRingtone).isEqualTo(NotificationSound.SystemDefault)
     }
 }

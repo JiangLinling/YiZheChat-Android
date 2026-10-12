@@ -92,7 +92,11 @@ class RoomCallStatePresenterTest {
     fun `present - initial state - when is DM room`() = runTest {
         val room = FakeJoinedRoom(
             baseRoom = FakeBaseRoom(
-                initialRoomInfo = aRoomInfo(isDm = true),
+                initialRoomInfo = aRoomInfo(
+                    isDm = true,
+                    invitedMembersCount = 0,
+                    joinedMembersCount = 2,
+                ),
                 roomPermissions = roomPermissions(true),
             )
         )
@@ -104,6 +108,31 @@ class RoomCallStatePresenterTest {
                 RoomCallState.StandBy(
                     canStartCall = true,
                     isDM = true
+                )
+            )
+        }
+    }
+
+    @Test
+    fun `present - pending DM cannot start a call`() = runTest {
+        val room = FakeJoinedRoom(
+            baseRoom = FakeBaseRoom(
+                initialRoomInfo = aRoomInfo(
+                    isDm = true,
+                    activeMembersCount = 2,
+                    invitedMembersCount = 1,
+                    joinedMembersCount = 1,
+                ),
+                roomPermissions = roomPermissions(true),
+            )
+        )
+        val presenter = createRoomCallStatePresenter(joinedRoom = room)
+        presenter.test {
+            skipItems(1)
+            assertThat(awaitItem()).isEqualTo(
+                RoomCallState.StandBy(
+                    canStartCall = false,
+                    isDM = true,
                 )
             )
         }

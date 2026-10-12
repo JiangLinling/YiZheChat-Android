@@ -34,8 +34,12 @@ class ResetIdentityPasswordPresenterTest {
     @Test
     fun `present - Reset event succeeds`() = runTest {
         val resetLambda = lambdaRecorder<String, Result<Unit>> { _ -> Result.success(Unit) }
+        val onResetSucceeded = lambdaRecorder<Unit> { }
         val resetHandle = FakeIdentityPasswordResetHandle(resetPasswordLambda = resetLambda)
-        val presenter = createPresenter(identityResetHandle = resetHandle)
+        val presenter = createPresenter(
+            identityResetHandle = resetHandle,
+            onResetSucceeded = onResetSucceeded,
+        )
         moleculeFlow(RecompositionMode.Immediate) {
             presenter.present()
         }.test {
@@ -43,14 +47,19 @@ class ResetIdentityPasswordPresenterTest {
             initialState.eventSink(ResetIdentityPasswordEvent.Reset("password"))
             assertThat(awaitItem().resetAction.isLoading()).isTrue()
             assertThat(awaitItem().resetAction.isSuccess()).isTrue()
+            onResetSucceeded.assertions().isCalledOnce()
         }
     }
 
     @Test
     fun `present - Reset event can fail gracefully`() = runTest {
         val resetLambda = lambdaRecorder<String, Result<Unit>> { _ -> Result.failure(IllegalStateException("Failed")) }
+        val onResetSucceeded = lambdaRecorder<Unit> { }
         val resetHandle = FakeIdentityPasswordResetHandle(resetPasswordLambda = resetLambda)
-        val presenter = createPresenter(identityResetHandle = resetHandle)
+        val presenter = createPresenter(
+            identityResetHandle = resetHandle,
+            onResetSucceeded = onResetSucceeded,
+        )
         moleculeFlow(RecompositionMode.Immediate) {
             presenter.present()
         }.test {
@@ -58,6 +67,7 @@ class ResetIdentityPasswordPresenterTest {
             initialState.eventSink(ResetIdentityPasswordEvent.Reset("password"))
             assertThat(awaitItem().resetAction.isLoading()).isTrue()
             assertThat(awaitItem().resetAction.isFailure()).isTrue()
+            onResetSucceeded.assertions().isNeverCalled()
         }
     }
 
@@ -81,8 +91,12 @@ class ResetIdentityPasswordPresenterTest {
 
     private fun TestScope.createPresenter(
         identityResetHandle: FakeIdentityPasswordResetHandle = FakeIdentityPasswordResetHandle(),
+        completeReset: suspend (suspend () -> Result<Unit>) -> Result<Unit> = { reset -> reset() },
+        onResetSucceeded: () -> Unit = {},
     ) = ResetIdentityPasswordPresenter(
         identityPasswordResetHandle = identityResetHandle,
         dispatchers = testCoroutineDispatchers(),
+        completeReset = completeReset,
+        onResetSucceeded = onResetSucceeded,
     )
 }

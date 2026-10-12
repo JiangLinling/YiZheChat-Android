@@ -8,6 +8,7 @@
 
 package io.element.android.features.messages.impl
 
+import io.element.android.features.location.api.live.PausedLiveLocationShare
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import io.element.android.features.messages.api.timeline.voicemessages.composer.VoiceMessageComposerState
 import io.element.android.features.messages.api.timeline.voicemessages.composer.aVoiceMessageComposerState
@@ -45,6 +46,7 @@ import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.designsystem.components.avatar.AvatarData
 import io.element.android.libraries.designsystem.components.avatar.AvatarSize
 import io.element.android.libraries.designsystem.preview.ROOM_NAME
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.ThreadId
 import io.element.android.libraries.matrix.api.encryption.identity.IdentityState
@@ -129,6 +131,9 @@ fun aMessagesState(
         hasUnreadThreads = false,
     ),
     isCurrentlySharingLiveLocationInRoom: Boolean = false,
+    pausedLiveLocationShare: PausedLiveLocationShare? = null,
+    favouriteSnackbarMessage: SnackbarMessage? = null,
+    showHistoryRecoveryBanner: Boolean = false,
     eventSink: (MessagesEvent) -> Unit = {},
 ) = MessagesState(
     roomId = RoomId("!id:domain"),
@@ -147,6 +152,7 @@ fun aMessagesState(
     customReactionState = customReactionState,
     reactionSummaryState = reactionSummaryState,
     snackbarMessage = null,
+    favouriteSnackbarMessage = favouriteSnackbarMessage,
     inviteProgress = AsyncData.Uninitialized,
     showReinvitePrompt = showReinvitePrompt,
     enableTextFormatting = true,
@@ -158,7 +164,9 @@ fun aMessagesState(
     topBarSharedHistoryIcon = topBarSharedHistoryIcon,
     successorRoom = successorRoom,
     threads = threads,
-    showLiveLocationShareBanner = isCurrentlySharingLiveLocationInRoom,
+    showLiveLocationShareBanner = isCurrentlySharingLiveLocationInRoom || pausedLiveLocationShare != null,
+    pausedLiveLocationShare = pausedLiveLocationShare,
+    showHistoryRecoveryBanner = showHistoryRecoveryBanner,
     eventSink = eventSink,
 )
 

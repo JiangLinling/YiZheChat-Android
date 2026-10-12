@@ -33,9 +33,13 @@ dependencies {
     implementation(projects.libraries.matrix.api)
     implementation(projects.libraries.roomselect.api)
     implementation(projects.libraries.uiStrings)
+    implementation(projects.security.dataProtection.api)
+    implementation(projects.security.secureStorage.api)
 
     testCommonDependencies(libs, true)
     testImplementation(projects.libraries.matrix.test)
     testImplementation(projects.libraries.roomselect.test)
     testImplementation(projects.libraries.testtags)
+    testImplementation(projects.security.dataProtection.test)
+    testImplementation(projects.security.secureStorage.test)
 }

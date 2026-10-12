@@ -17,6 +17,7 @@ import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedInject
 import io.element.android.annotations.ContributesNode
 import io.element.android.libraries.architecture.NodeInputs
+import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.architecture.inputs
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.matrix.api.core.EventId
@@ -34,7 +35,13 @@ class ReportMessageNode(
         val senderId: UserId,
     ) : NodeInputs
 
+    interface Callback : Plugin {
+        fun onBack()
+        fun onReportSuccess()
+    }
+
     private val inputs = inputs<Inputs>()
+    private val callback: Callback = callback()
 
     private val presenter = presenterFactory.create(
         ReportMessagePresenter.Inputs(inputs.eventId, inputs.senderId)
@@ -45,7 +52,8 @@ class ReportMessageNode(
         val state = presenter.present()
         ReportMessageView(
             state = state,
-            onBackClick = ::navigateUp,
+            onBackClick = callback::onBack,
+            onReportSuccess = callback::onReportSuccess,
             modifier = modifier
         )
     }

@@ -21,10 +21,19 @@ import io.element.android.libraries.matrix.ui.components.MatrixUserProvider
 fun UserPreferences(
     matrixUser: MatrixUser,
     modifier: Modifier = Modifier,
+    onMyQrCodeClick: () -> Unit = {},
 ) {
     MatrixUserHeader(
         modifier = modifier,
         matrixUser = matrixUser,
+        trailingContent = {
+            io.element.android.libraries.designsystem.theme.components.IconButton(onClick = onMyQrCodeClick) {
+                io.element.android.libraries.designsystem.theme.components.Icon(
+                    imageVector = io.element.android.compound.tokens.generated.CompoundIcons.QrCode(),
+                    contentDescription = androidx.compose.ui.res.stringResource(io.element.android.features.preferences.impl.R.string.screen_settings_friend_qr),
+                )
+            }
+        },
     )
 }
 

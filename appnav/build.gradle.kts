@@ -43,8 +43,13 @@ dependencies {
     implementation(projects.libraries.sessionStorage.api)
     implementation(projects.libraries.uiCommon)
     implementation(projects.libraries.uiStrings)
+    implementation(projects.appicon.yizhe)
     implementation(projects.features.login.api)
+    implementation(projects.security.contentProtection.api)
+    implementation(projects.security.dataProtection.api)
+    implementation(projects.security.secureStorage.api)
 
+    implementation(libs.androidx.lifecycle.process)
     implementation(libs.coil)
 
     implementation(projects.features.announcement.api)
@@ -68,6 +73,7 @@ dependencies {
     testImplementation(projects.features.messages.test)
     testImplementation(projects.features.networkmonitor.test)
     testImplementation(projects.features.rageshake.test)
+    testImplementation(projects.security.secureStorage.test)
     testImplementation(projects.services.apperror.test)
     testImplementation(projects.services.appnavstate.test)
     testImplementation(projects.services.analytics.test)

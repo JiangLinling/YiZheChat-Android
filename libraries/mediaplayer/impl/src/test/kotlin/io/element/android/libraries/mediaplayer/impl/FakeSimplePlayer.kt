@@ -9,6 +9,7 @@
 package io.element.android.libraries.mediaplayer.impl
 
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import io.element.android.tests.testutils.lambda.lambdaError
 
 class FakeSimplePlayer(
@@ -59,5 +60,12 @@ class FakeSimplePlayer(
 
     fun simulatePlaybackStateChanged(playbackState: Int) {
         listeners.forEach { it.onPlaybackStateChanged(playbackState) }
+    }
+
+    fun simulatePositionDiscontinuity(
+        positionMs: Long = currentPosition,
+        reason: Int = Player.DISCONTINUITY_REASON_SEEK,
+    ) {
+        listeners.forEach { it.onPositionDiscontinuity(positionMs, reason) }
     }
 }

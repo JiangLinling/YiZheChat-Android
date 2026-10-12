@@ -18,6 +18,7 @@ import com.bumble.appyx.core.navigation.model.permanent.PermanentNavModel
 import com.bumble.appyx.core.node.Node
 import com.bumble.appyx.core.node.ParentNode
 import com.bumble.appyx.core.plugin.Plugin
+import com.bumble.appyx.core.state.MutableSavedStateMap
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedInject
 import io.element.android.annotations.ContributesNode
@@ -32,6 +33,7 @@ import io.element.android.libraries.matrix.api.timeline.TimelineProvider
 import io.element.android.libraries.roomselect.api.RoomSelectEntryPoint
 import io.element.android.libraries.roomselect.api.RoomSelectMode
 import kotlinx.parcelize.Parcelize
+import java.util.UUID
 
 @ContributesNode(SessionScope::class)
 @AssistedInject
@@ -52,13 +54,19 @@ class ForwardMessagesNode(
     object NavTarget : Parcelable
 
     data class Inputs(
-        val eventId: EventId,
+        val eventIds: List<EventId>,
         val timelineProvider: TimelineProvider,
     ) : NodeInputs
 
     private val inputs = inputs<Inputs>()
     private val callback: ForwardEntryPoint.Callback = callback()
-    private val presenter = presenterFactory.create(inputs.eventId.value, inputs.timelineProvider)
+    private val actionIntentId = buildContext.savedStateMap?.get(ACTION_INTENT_ID_KEY) as? String ?: UUID.randomUUID().toString()
+    private val presenter = presenterFactory.create(inputs.eventIds.map(EventId::value), actionIntentId, inputs.timelineProvider)
+
+    override fun onSaveInstanceState(state: MutableSavedStateMap) {
+        super.onSaveInstanceState(state)
+        state[ACTION_INTENT_ID_KEY] = actionIntentId
+    }
 
     override fun resolve(navTarget: NavTarget, buildContext: BuildContext): Node {
         val callback = object : RoomSelectEntryPoint.Callback {
@@ -93,5 +101,9 @@ class ForwardMessagesNode(
                 onForwardSuccess = callback::onDone,
             )
         }
+    }
+
+    private companion object {
+        const val ACTION_INTENT_ID_KEY = "ForwardActionIntentId"
     }
 }

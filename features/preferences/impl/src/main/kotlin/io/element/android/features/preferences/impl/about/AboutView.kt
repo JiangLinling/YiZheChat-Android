@@ -12,6 +12,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewParameter
+import io.element.android.features.preferences.impl.R
+import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.designsystem.components.preferences.PreferencePage
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
@@ -24,6 +26,7 @@ fun AboutView(
     state: AboutState,
     onElementLegalClick: (ElementLegal) -> Unit,
     onOpenSourceLicensesClick: () -> Unit,
+    onInstallUpdate: () -> Unit,
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -32,6 +35,60 @@ fun AboutView(
         onBackClick = onBackClick,
         title = stringResource(id = CommonStrings.common_about)
     ) {
+        ListItem(
+            headlineContent = { Text(stringResource(R.string.screen_about_current_version, state.currentVersion)) },
+        )
+        when (val update = state.updateCheck) {
+            AsyncData.Uninitialized -> ListItem(
+                headlineContent = { Text(stringResource(R.string.screen_about_check_update)) },
+                onClick = { state.eventSink(AboutEvent.CheckForUpdate) },
+            )
+            is AsyncData.Loading -> ListItem(
+                headlineContent = { Text(stringResource(R.string.screen_about_checking_update)) },
+            )
+            is AsyncData.Success -> {
+                val release = update.data
+                if (release == null) {
+                    ListItem(headlineContent = { Text(stringResource(R.string.screen_about_latest_version)) })
+                } else {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.screen_about_update_available, release.versionName)) },
+                        supportingContent = { Text(release.releaseNotes) },
+                        onClick = { state.eventSink(AboutEvent.DownloadUpdate(release)) },
+                    )
+                }
+            }
+            is AsyncData.Failure -> ListItem(
+                headlineContent = { Text(stringResource(R.string.screen_about_update_error)) },
+                onClick = { state.eventSink(AboutEvent.CheckForUpdate) },
+            )
+        }
+        when (state.preparedUpdate) {
+            is AsyncData.Loading -> {
+                val progress = state.downloadProgress?.fraction
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            if (progress == null) {
+                                stringResource(R.string.screen_about_verifying_update)
+                            } else {
+                                stringResource(R.string.screen_about_download_progress, (progress * 100).toInt())
+                            }
+                        )
+                    },
+                )
+            }
+            is AsyncData.Success -> ListItem(
+                headlineContent = { Text(stringResource(R.string.screen_about_install_update)) },
+                supportingContent = { Text(stringResource(R.string.screen_about_update_verified)) },
+                onClick = onInstallUpdate,
+            )
+            is AsyncData.Failure -> ListItem(
+                headlineContent = { Text(stringResource(R.string.screen_about_update_error)) },
+                onClick = { state.eventSink(AboutEvent.ClearUpdateError) },
+            )
+            else -> Unit
+        }
         state.elementLegals.forEach { elementLegal ->
             ListItem(
                 headlineContent = {
@@ -56,6 +113,7 @@ internal fun AboutViewPreview(@PreviewParameter(AboutStateProvider::class) state
         state = state,
         onElementLegalClick = {},
         onOpenSourceLicensesClick = {},
+        onInstallUpdate = {},
         onBackClick = {},
     )
 }

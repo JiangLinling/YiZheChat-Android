@@ -27,6 +27,7 @@ import io.element.android.features.location.impl.common.LocationConstraintsCheck
 import io.element.android.features.location.impl.common.MapDefaults
 import io.element.android.features.location.impl.common.SendLiveLocationPermissions
 import io.element.android.features.location.impl.common.actions.LocationActions
+import io.element.android.features.location.impl.common.checkLiveLocationResumeConstraints
 import io.element.android.features.location.impl.common.checkLocationConstraints
 import io.element.android.features.location.impl.common.permissions.PermissionsEvents
 import io.element.android.features.location.impl.common.permissions.PermissionsPresenter
@@ -40,6 +41,7 @@ import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.architecture.runUpdatingState
 import io.element.android.libraries.core.extensions.flatMap
+import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.core.meta.BuildMeta
 import io.element.android.libraries.dateformatter.api.DurationFormatter
 import io.element.android.libraries.matrix.api.MatrixClient
@@ -49,9 +51,14 @@ import io.element.android.libraries.matrix.api.room.location.AssetType
 import io.element.android.libraries.matrix.api.room.powerlevels.permissionsAsState
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.textcomposer.model.MessageComposerMode
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
 import io.element.android.services.analytics.api.AnalyticsService
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.launch
+import java.security.MessageDigest
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 
@@ -62,6 +69,7 @@ class ShareLocationPresenter(
     permissionsPresenterFactory: PermissionsPresenter.Factory,
     private val room: JoinedRoom,
     @Assisted private val timelineMode: Timeline.Mode,
+    @Assisted private val burnAfterRead: Boolean,
     private val analyticsService: AnalyticsService,
     private val messageComposerContext: MessageComposerContext,
     private val locationActions: LocationActions,
@@ -70,10 +78,12 @@ class ShareLocationPresenter(
     private val durationFormatter: DurationFormatter,
     private val liveLocationShareManager: ActiveLiveLocationShareManager,
     private val liveLocationStore: LiveLocationStore,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
+    private val mapProviderConfigurationService: io.element.android.security.dataprotection.api.MapProviderConfigurationService,
 ) : Presenter<ShareLocationState> {
     @AssistedFactory
     fun interface Factory {
-        fun create(timelineMode: Timeline.Mode): ShareLocationPresenter
+        fun create(timelineMode: Timeline.Mode, burnAfterRead: Boolean): ShareLocationPresenter
     }
 
     private val permissionsPresenter = permissionsPresenterFactory.create(MapDefaults.permissions)
@@ -87,7 +97,13 @@ class ShareLocationPresenter(
             mutableStateOf(ShareLocationState.Dialog.None)
         }
         val startLiveLocationAction = remember { mutableStateOf<AsyncAction<Unit>>(AsyncAction.Uninitialized) }
+        val shareStaticLocationAction = remember { mutableStateOf<AsyncAction<Unit>>(AsyncAction.Uninitialized) }
         val currentUser by client.userProfile.collectAsState()
+        var mapProviderLoading by remember { mutableStateOf(true) }
+        val mapProvider by produceState(io.element.android.security.dataprotection.api.MapProviderConfiguration()) {
+            value = mapProviderConfigurationService.fetch().getOrDefault(io.element.android.security.dataprotection.api.MapProviderConfiguration())
+            mapProviderLoading = false
+        }
         val customMapStyleUrl by produceState(AsyncData.Loading()) {
             // Ignore errors
             value = AsyncData.Success(client.getMapStyleUrl().getOrNull())
@@ -96,6 +112,8 @@ class ShareLocationPresenter(
             perms.sendLiveLocationPermissions()
         }
         val scope = rememberCoroutineScope()
+        val pausedShares by liveLocationShareManager.pausedShares.collectAsState()
+        val pausedShare = pausedShares[room.roomId]
 
         fun checkLocationConstraints() {
             // No need to check SendLiveLocationPermissions here
@@ -128,13 +146,21 @@ class ShareLocationPresenter(
         fun handleEvent(event: ShareLocationEvent) {
             when (event) {
                 is ShareLocationEvent.ShareStaticLocation -> scope.launch {
-                    shareStaticLocation(event)
+                    if (shareStaticLocationAction.value !is AsyncAction.Loading) {
+                        shareStaticLocationAction.runUpdatingState {
+                            runCatchingExceptions {
+                                appOperationalStateCoordinator.perform(locationOperationRequest("location_share")) {
+                                    shareStaticLocation(event).getOrThrow()
+                                }
+                            }
+                        }
+                    }
                 }
                 ShareLocationEvent.StartTrackingUserLocation -> checkLocationConstraints()
                 ShareLocationEvent.StopTrackingUserLocation -> trackUserPosition = false
                 ShareLocationEvent.DismissDialog -> dialogState = ShareLocationState.Dialog.None
                 ShareLocationEvent.OpenAppSettings -> {
-                    locationActions.openAppSettings()
+                    permissionsState.eventSink(PermissionsEvents.OpenAppSettings)
                     dialogState = ShareLocationState.Dialog.None
                 }
                 ShareLocationEvent.OpenLocationSettings -> {
@@ -153,10 +179,29 @@ class ShareLocationPresenter(
                 is ShareLocationEvent.StartLiveLocationShare -> scope.launch {
                     dialogState = ShareLocationState.Dialog.None
                     startLiveLocationAction.runUpdatingState {
-                        liveLocationShareManager.startShare(
-                            roomId = room.roomId,
-                            duration = event.duration,
-                        )
+                        runCatchingExceptions {
+                            appOperationalStateCoordinator.perform(locationOperationRequest("live_location_start")) {
+                                liveLocationShareManager.startShare(
+                                    roomId = room.roomId,
+                                    duration = event.duration,
+                                ).getOrThrow()
+                            }
+                        }
+                    }
+                }
+                ShareLocationEvent.ResumeLiveLocationShare -> scope.launch {
+                    val constraints = checkLiveLocationResumeConstraints(permissionsState, locationActions, sendLiveLocationPermissions)
+                    if (constraints is LocationConstraintsCheck.Success) {
+                        dialogState = ShareLocationState.Dialog.None
+                        startLiveLocationAction.runUpdatingState {
+                            runCatchingExceptions {
+                                appOperationalStateCoordinator.perform(locationOperationRequest("live_location_resume")) {
+                                    liveLocationShareManager.resumeShare(room.roomId).getOrThrow()
+                                }
+                            }
+                        }
+                    } else {
+                        dialogState = ShareLocationState.Dialog.Constraints(constraints.toDialogState())
                     }
                 }
                 ShareLocationEvent.RequestPermissions -> {
@@ -167,40 +212,46 @@ class ShareLocationPresenter(
         }
 
         return ShareLocationState(
+            mapProvider = mapProvider,
+            mapProviderLoading = mapProviderLoading,
             customMapStyleUrl = customMapStyleUrl,
             currentUser = currentUser,
             dialogState = dialogState,
             trackUserLocation = trackUserPosition,
             hasLocationPermission = permissionsState.isAnyGranted,
-            canShareLiveLocation = timelineMode.canShareLiveLocation(),
+            canShareLiveLocation = timelineMode.canShareLiveLocation() && !burnAfterRead,
+            pausedLiveLocationShare = pausedShare,
             appName = appName,
+            shareStaticLocationAction = shareStaticLocationAction.value,
             startLiveLocationAction = startLiveLocationAction.value,
             eventSink = ::handleEvent,
         )
     }
 
-    private suspend fun shareStaticLocation(event: ShareLocationEvent.ShareStaticLocation) {
+    private suspend fun shareStaticLocation(event: ShareLocationEvent.ShareStaticLocation): Result<Unit> {
         val replyMode = messageComposerContext.composerMode as? MessageComposerMode.Reply
         val inReplyToEventId = replyMode?.eventId
         val geoUri = event.location.toGeoUri()
-        getTimeline().flatMap {
+        return getTimeline().flatMap {
             it.sendLocation(
                 body = generateBody(geoUri),
                 geoUri = geoUri,
-                description = null,
+                description = event.name?.let { name -> listOf(name, event.address.orEmpty()).filter(String::isNotBlank).distinct().joinToString("\n") },
                 zoomLevel = MapDefaults.DEFAULT_ZOOM.toInt(),
                 assetType = if (event.isPinned) AssetType.PIN else AssetType.SENDER,
-                inReplyToEventId = inReplyToEventId,
+                inReplyToEventId = inReplyToEventId.takeUnless { burnAfterRead },
+                burnAfterRead = burnAfterRead,
+            )
+        }.onSuccess {
+            analyticsService.capture(
+                Composer(
+                    inThread = messageComposerContext.composerMode.inThread,
+                    isEditing = messageComposerContext.composerMode.isEditing,
+                    isReply = messageComposerContext.composerMode.isReply,
+                    messageType = if (event.isPinned) Composer.MessageType.LocationPin else Composer.MessageType.LocationUser
+                )
             )
         }
-        analyticsService.capture(
-            Composer(
-                inThread = messageComposerContext.composerMode.inThread,
-                isEditing = messageComposerContext.composerMode.isEditing,
-                isReply = messageComposerContext.composerMode.isReply,
-                messageType = if (event.isPinned) Composer.MessageType.LocationPin else Composer.MessageType.LocationUser
-            )
-        )
     }
 
     private suspend fun getTimeline(): Result<Timeline> {
@@ -209,6 +260,14 @@ class ShareLocationPresenter(
             else -> Result.success(room.liveTimeline)
         }
     }
+
+    private fun locationOperationRequest(trigger: String) = lifecycleOperationRequest(
+        lifecycleId = FullAppLifecycleId.LC_17,
+        trigger = trigger,
+        roomIdHash = MessageDigest.getInstance("SHA-256")
+            .digest(room.roomId.value.encodeToByteArray())
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) },
+    )
 }
 
 private fun Timeline.Mode.canShareLiveLocation() = when (this) {

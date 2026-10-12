@@ -9,16 +9,25 @@
 package io.element.android.libraries.matrix.impl.notification
 
 import com.google.common.truth.Truth.assertThat
+import io.element.android.libraries.matrix.api.core.DeviceId
+import io.element.android.libraries.matrix.api.core.RoomId
+import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.exception.NotificationResolverException
 import io.element.android.libraries.matrix.api.notification.NotificationContent
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
 import io.element.android.libraries.matrix.api.timeline.item.event.TextMessageType
 import io.element.android.libraries.matrix.impl.fixtures.factories.aRustBatchNotificationResultOk
 import io.element.android.libraries.matrix.impl.fixtures.factories.aRustNotificationEventTimeline
 import io.element.android.libraries.matrix.impl.fixtures.factories.aRustNotificationItem
 import io.element.android.libraries.matrix.impl.fixtures.fakes.FakeFfiNotificationClient
 import io.element.android.libraries.matrix.impl.fixtures.fakes.FakeFfiTimelineEvent
+import io.element.android.libraries.matrix.impl.timeline.DisabledMatrixProtectedContentAdapter
+import io.element.android.libraries.matrix.impl.timeline.MatrixProtectedContentAdapter
+import io.element.android.libraries.matrix.impl.timeline.MatrixProtectedContentAdapterFactory
+import io.element.android.libraries.matrix.impl.timeline.ProtectedReadDiagnosticOrigin
 import io.element.android.libraries.matrix.test.AN_EVENT_ID
 import io.element.android.libraries.matrix.test.AN_EVENT_ID_2
+import io.element.android.libraries.matrix.test.A_DEVICE_ID
 import io.element.android.libraries.matrix.test.A_MESSAGE
 import io.element.android.libraries.matrix.test.A_ROOM_ID
 import io.element.android.libraries.matrix.test.A_SESSION_ID
@@ -84,6 +93,39 @@ class RustNotificationServiceTest {
     }
 
     @Test
+    fun `authenticated burn after read lifecycle is preserved in notification projection`() = runTest {
+        val notificationClient = FakeFfiNotificationClient(
+            notificationItemResult = mapOf(AN_EVENT_ID.value to aRustBatchNotificationResultOk()),
+        )
+        val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
+            override suspend fun decryptMessageContent(eventIdentity: String, message: MessageContent): MessageContent =
+                message.copy(
+                    body = "one time secret",
+                    type = TextMessageType("one time secret", formatted = null),
+                    isContentProtectionAuthorized = true,
+                    isBurnAfterRead = true,
+                )
+
+            override suspend fun decryptMessageContent(
+                eventIdentity: String,
+                message: MessageContent,
+                diagnosticOrigin: ProtectedReadDiagnosticOrigin,
+            ): MessageContent = decryptMessageContent(eventIdentity, message)
+        }
+        val sut = createRustNotificationService(
+            notificationClient = notificationClient,
+            protectedContentAdapterFactory = FixedProtectedContentAdapterFactory(adapter),
+        )
+
+        val result = sut.getNotifications(mapOf(A_ROOM_ID to listOf(AN_EVENT_ID))).getOrThrow()[AN_EVENT_ID]!!.getOrThrow()
+
+        val content = result.content as NotificationContent.MessageLike.RoomMessage
+        assertThat(content.isContentProtectionAuthorized).isTrue()
+        assertThat(content.isBurnAfterRead).isTrue()
+        assertThat((content.messageType as TextMessageType).body).isEqualTo("one time secret")
+    }
+
+    @Test
     fun `test unable to resolve event`() = runTest {
         val notificationClient = FakeFfiNotificationClient(
             notificationItemResult = emptyMap(),
@@ -108,14 +150,76 @@ class RustNotificationServiceTest {
         closeResult.assertions().isCalledOnce()
     }
 
+    @Test
+    fun notificationDiagnosticOriginPreservesUnapprovedContentAndEventIdentity() = runTest {
+        val origins = mutableListOf<ProtectedReadDiagnosticOrigin>()
+        val eventIds = mutableListOf<String>()
+        val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
+            override suspend fun decryptMessageContent(
+                eventIdentity: String,
+                message: MessageContent,
+                diagnosticOrigin: ProtectedReadDiagnosticOrigin,
+            ): MessageContent {
+                origins += diagnosticOrigin
+                eventIds += eventIdentity
+                return message.copy(isContentProtectionAuthorized = false, isBurnAfterRead = false)
+            }
+        }
+        val sut = createRustNotificationService(
+            notificationClient = FakeFfiNotificationClient(
+                notificationItemResult = mapOf(AN_EVENT_ID.value to aRustBatchNotificationResultOk()),
+            ),
+            protectedContentAdapterFactory = FixedProtectedContentAdapterFactory(adapter),
+        )
+        val result = sut.getNotifications(mapOf(A_ROOM_ID to listOf(AN_EVENT_ID)))
+            .getOrThrow()[AN_EVENT_ID]!!.getOrThrow()
+        val content = result.content as NotificationContent.MessageLike.RoomMessage
+        assertThat(origins).containsExactly(ProtectedReadDiagnosticOrigin.NOTIFICATION_PREVIEW)
+        assertThat(eventIds).containsExactly(AN_EVENT_ID.value)
+        assertThat(content.isContentProtectionAuthorized).isFalse()
+        assertThat(content.isBurnAfterRead).isFalse()
+        assertThat((content.messageType as TextMessageType).body).isEqualTo(A_MESSAGE)
+    }
+
+    @Test
+    fun defaultDiagnosticOverloadPreservesLegacyDisabledProjection() = runTest {
+        val message = io.element.android.libraries.matrix.test.timeline.aMessageContent(A_MESSAGE)
+            .copy(isContentProtectionAuthorized = false, isBurnAfterRead = true)
+        val adapter: MatrixProtectedContentAdapter = DisabledMatrixProtectedContentAdapter
+        val legacy = adapter.decryptMessageContent(AN_EVENT_ID.value, message)
+        for (origin in ProtectedReadDiagnosticOrigin.values()) {
+            val observed = adapter.decryptMessageContent(AN_EVENT_ID.value, message, origin)
+            assertThat(observed).isSameInstanceAs(message)
+            assertThat(observed).isEqualTo(legacy)
+            assertThat(observed.isContentProtectionAuthorized).isFalse()
+            assertThat(observed.isBurnAfterRead).isTrue()
+        }
+    }
+
     private fun TestScope.createRustNotificationService(
         notificationClient: NotificationClient = FakeFfiNotificationClient(),
         clock: SystemClock = FakeSystemClock(),
+        protectedContentAdapterFactory: MatrixProtectedContentAdapterFactory =
+            io.element.android.libraries.matrix.impl.timeline.DisabledMatrixProtectedContentAdapterFactory,
     ) =
         RustNotificationService(
             sessionId = A_SESSION_ID,
+            deviceId = A_DEVICE_ID,
             notificationClient = notificationClient,
             dispatchers = testCoroutineDispatchers(),
             clock = clock,
+            protectedContentAdapterFactory = protectedContentAdapterFactory,
         )
+}
+
+private class FixedProtectedContentAdapterFactory(
+    private val adapter: MatrixProtectedContentAdapter,
+) : MatrixProtectedContentAdapterFactory {
+    override fun create(
+        sessionId: SessionId,
+        deviceId: DeviceId,
+        roomId: RoomId,
+        activeMemberAccountIdHashes: suspend () -> Set<String>,
+        isRoomEncrypted: suspend () -> Boolean,
+    ): MatrixProtectedContentAdapter = adapter
 }

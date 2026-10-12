@@ -9,6 +9,7 @@
 package io.element.android.features.invite.impl
 
 import dev.zacsweers.metro.ContributesBinding
+import io.element.android.features.invite.api.InviteNotification
 import io.element.android.features.invite.api.SeenInvitesStore
 import io.element.android.libraries.di.SessionScope
 import io.element.android.libraries.matrix.api.MatrixClient
@@ -52,7 +53,7 @@ class DefaultDeclineInvite(
                         sessionId = client.sessionId,
                         roomId = roomId
                     )
-                    seenInvitesStore.markAsUnSeen(roomId)
+                    seenInvitesStore.recordOutcome(roomId, InviteNotification.Outcome.DECLINED)
                 }
 
             if (blockUser) {

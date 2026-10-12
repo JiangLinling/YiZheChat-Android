@@ -8,15 +8,20 @@
 
 package io.element.android.features.rageshake.impl.bugreport
 
+import io.element.android.libraries.mediapickers.api.PickedMedia
+
 sealed interface BugReportEvents {
     data object SendBugReport : BugReportEvents
     data object ResetAll : BugReportEvents
+    data object DiscardAttachments : BugReportEvents
     data object ClearError : BugReportEvents
+    data object ClearAttachmentNotice : BugReportEvents
 
     data class SetDescription(val description: String) : BugReportEvents
     data class SetSendLog(val sendLog: Boolean) : BugReportEvents
     data class SetCanContact(val canContact: Boolean) : BugReportEvents
     data class SetSendScreenshot(val sendScreenshot: Boolean) : BugReportEvents
     data class SetSendPushRules(val sendPushRules: Boolean) : BugReportEvents
-    data class SetGhIssueNumber(val ghIssueNumber: Int?) : BugReportEvents
+    data class AddAttachments(val media: List<PickedMedia>) : BugReportEvents
+    data class RemoveAttachment(val id: String) : BugReportEvents
 }

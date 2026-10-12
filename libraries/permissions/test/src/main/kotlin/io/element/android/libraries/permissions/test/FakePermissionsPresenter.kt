@@ -22,7 +22,9 @@ class FakePermissionsPresenter(
         when (event) {
             PermissionsEvent.RequestPermissions -> state.value = state.value.copy(showDialog = true, permissionAlreadyAsked = true)
             PermissionsEvent.CloseDialog -> state.value = state.value.copy(showDialog = false)
-            PermissionsEvent.OpenSystemSettingAndCloseDialog -> state.value = state.value.copy(showDialog = false)
+            PermissionsEvent.OpenSystemSettingAndCloseDialog, is PermissionsEvent.OpenSystemSettingsUsingActivity -> {
+                state.value = state.value.copy(showDialog = false)
+            }
         }
     }
 

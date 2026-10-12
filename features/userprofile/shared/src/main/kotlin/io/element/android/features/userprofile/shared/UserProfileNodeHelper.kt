@@ -32,15 +32,29 @@ class UserProfileNodeHelper(
     fun onShareUser(
         context: Context,
         permalinkBuilder: PermalinkBuilder,
+        displayName: String? = null,
     ) {
         val permalinkResult = permalinkBuilder.permalinkForUser(userId)
         permalinkResult.onSuccess { permalink ->
-            context.startSharePlainTextIntent(
-                activityResultLauncher = null,
-                chooserTitle = context.getString(CommonStrings.action_share),
-                text = permalink,
-                noActivityFoundMessage = context.getString(R.string.error_no_compatible_app_found)
-            )
+            val link = io.element.android.libraries.matrix.api.permalink.SharedIdentityCard.userLink(userId.value)
+            android.app.AlertDialog.Builder(context)
+                .setTitle(context.getString(io.element.android.features.userprofile.shared.R.string.screen_identity_share_title))
+                .setItems(arrayOf(
+                    context.getString(io.element.android.features.userprofile.shared.R.string.screen_identity_share_card),
+                    context.getString(io.element.android.features.userprofile.shared.R.string.screen_identity_share_link),
+                )) { _, choice ->
+                    if (choice == 0) {
+                        val card = io.element.android.libraries.matrix.api.permalink.SharedIdentityCard(false, displayName ?: userId.value, link)
+                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            setClassName(context.packageName, "io.element.android.x.MainActivity")
+                            putExtra(android.content.Intent.EXTRA_TEXT, card.body())
+                        })
+                    } else {
+                        context.startSharePlainTextIntent(null, context.getString(CommonStrings.action_share), link,
+                            noActivityFoundMessage = context.getString(R.string.error_no_compatible_app_found))
+                    }
+                }.setNegativeButton(context.getString(CommonStrings.action_cancel), null).show()
         }.onFailure {
             Timber.e(it)
         }

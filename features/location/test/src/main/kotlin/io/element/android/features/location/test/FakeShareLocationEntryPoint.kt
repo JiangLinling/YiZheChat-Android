@@ -19,5 +19,6 @@ class FakeShareLocationEntryPoint : ShareLocationEntryPoint {
         parentNode: Node,
         buildContext: BuildContext,
         timelineMode: Timeline.Mode,
+        burnAfterRead: Boolean,
     ): Node = lambdaError()
 }

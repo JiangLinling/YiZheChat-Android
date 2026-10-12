@@ -15,6 +15,14 @@ import org.junit.Test
 
 class RoomDetailsStateTest {
     @Test
+    fun `encrypted direct room should have encrypted badge`() {
+        val sut = aDmRoomDetailsState(isEncrypted = true)
+
+        assertThat(sut.roomBadges).contains(RoomBadge.ENCRYPTED)
+        assertThat(sut.roomBadges).doesNotContain(RoomBadge.NOT_ENCRYPTED)
+    }
+
+    @Test
     fun `room not public not encrypted should have not encrypted badge`() {
         val sut = aRoomDetailsState(
             isPublic = false,

@@ -33,11 +33,15 @@ class DefaultForwardEntryPointTest {
     @Test
     fun `test node builder`() = runTest {
         val entryPoint = DefaultForwardEntryPoint()
+        val actionIntentIds = mutableListOf<String>()
         val parentNode = TestParentNode.create { buildContext, plugins ->
             ForwardMessagesNode(
                 buildContext = buildContext,
                 plugins = plugins,
-                presenterFactory = { _, _ -> createForwardMessagesPresenter() },
+                presenterFactory = { _, actionIntentId, _ ->
+                    actionIntentIds += actionIntentId
+                    createForwardMessagesPresenter(actionIntentId = actionIntentId)
+                },
                 roomSelectEntryPoint = FakeRoomSelectEntryPoint(),
             )
         }
@@ -57,10 +61,20 @@ class DefaultForwardEntryPointTest {
         assertThat(result).isInstanceOf(ForwardMessagesNode::class.java)
         assertThat(result.plugins).contains(
             ForwardMessagesNode.Inputs(
-                eventId = params.eventId,
+                eventIds = params.eventIds,
                 timelineProvider = params.timelineProvider,
             )
         )
         assertThat(result.plugins).contains(callback)
+
+        val savedState = result.saveInstanceState { true }
+        entryPoint.createNode(
+            parentNode = parentNode,
+            buildContext = BuildContext.root(savedState),
+            params = params,
+            callback = callback,
+        )
+        assertThat(actionIntentIds).hasSize(2)
+        assertThat(actionIntentIds[1]).isEqualTo(actionIntentIds[0])
     }
 }

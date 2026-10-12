@@ -64,6 +64,7 @@ import io.element.android.tests.testutils.lambda.value
 import io.element.android.tests.testutils.test
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -99,6 +100,7 @@ class MessageComposerPresenterSlashCommandTest {
 
     @Test
     fun `present - slash command error sets failure`() = runTest {
+        val unknownCommand = "/unknown-command"
         val presenter = createPresenter(
             slashCommandService = FakeSlashCommandService(
                 parseResult = { _, _, _ -> SlashCommand.ErrorUnknownSlashCommand(A_FAILURE_REASON) }
@@ -106,13 +108,13 @@ class MessageComposerPresenterSlashCommandTest {
         )
         presenter.test {
             val initialState = awaitFirstItem()
-            initialState.textEditorState.setHtml(A_MESSAGE)
+            initialState.textEditorState.setHtml(unknownCommand)
             initialState.eventSink(MessageComposerEvent.SendMessage)
             val errorState = awaitItem()
             assertThat(errorState.slashCommandAction.isFailure()).isTrue()
             assertThat(errorState.slashCommandAction.errorOrNull()?.message).isEqualTo(A_FAILURE_REASON)
             // Composer should not be reset when command is an error
-            assertThat(errorState.textEditorState.messageHtml()).isEqualTo(A_MESSAGE)
+            assertThat(errorState.textEditorState.messageHtml()).isEqualTo(unknownCommand)
             // Close the error
             errorState.eventSink(MessageComposerEvent.ClearSlashError)
             val finalState = awaitItem()
@@ -278,6 +280,7 @@ class MessageComposerPresenterSlashCommandTest {
         sessionCoroutineScope = this,
         isInThread = isInThread,
         room = room,
+        matrixClient = io.element.android.libraries.matrix.test.FakeMatrixClient(sessionId = room.sessionId),
         mediaPickerProvider = pickerProvider,
         sessionPreferencesStore = sessionPreferencesStore,
         localMediaFactory = localMediaFactory,
@@ -311,6 +314,9 @@ class MessageComposerPresenterSlashCommandTest {
         mediaOptimizationConfigProvider = mediaOptimizationConfigProvider,
         notificationConversationService = notificationConversationService,
         slashCommandService = slashCommandService,
+        appOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
+        localAttachmentPreviewLeaseService = io.mockk.mockk(relaxed = true),
+        commonInfoRepository = io.mockk.mockk(relaxed = true),
     ).apply {
         isTesting = true
         showTextFormatting = isRichTextEditorEnabled

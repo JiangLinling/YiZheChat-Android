@@ -17,9 +17,11 @@ import io.element.android.libraries.core.data.tryOrNull
 import io.element.android.libraries.core.extensions.mapFailure
 import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.featureflag.api.FeatureFlagService
+import io.element.android.libraries.featureflag.api.FeatureFlags
 import io.element.android.libraries.matrix.api.HomeserverCapabilitiesProvider
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.analytics.SdkStoreSizes
+import io.element.android.libraries.matrix.api.auth.OpenIdToken
 import io.element.android.libraries.matrix.api.core.DeviceId
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomAlias
@@ -28,6 +30,7 @@ import io.element.android.libraries.matrix.api.core.RoomIdOrAlias
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.createroom.CreateRoomParameters
 import io.element.android.libraries.matrix.api.createroom.RoomPreset
+import io.element.android.libraries.matrix.api.exception.AccountDeactivationException
 import io.element.android.libraries.matrix.api.linknewdevice.LinkDesktopHandler
 import io.element.android.libraries.matrix.api.linknewdevice.LinkMobileHandler
 import io.element.android.libraries.matrix.api.media.MatrixMediaLoader
@@ -55,8 +58,11 @@ import io.element.android.libraries.matrix.impl.linknewdevice.RustLinkDesktopHan
 import io.element.android.libraries.matrix.impl.linknewdevice.RustLinkMobileHandler
 import io.element.android.libraries.matrix.impl.linknewdevice.RustQrCodeDataParser
 import io.element.android.libraries.matrix.impl.mapper.map
+import io.element.android.libraries.matrix.impl.media.DisabledMatrixProtectedMediaService
+import io.element.android.libraries.matrix.impl.media.MatrixProtectedMediaService
 import io.element.android.libraries.matrix.impl.media.RustMediaLoader
 import io.element.android.libraries.matrix.impl.media.RustMediaPreviewService
+import io.element.android.libraries.matrix.impl.media.SecureMatrixMediaLoader
 import io.element.android.libraries.matrix.impl.notification.RustNotificationService
 import io.element.android.libraries.matrix.impl.notificationsettings.RustNotificationSettingsService
 import io.element.android.libraries.matrix.impl.oauth.toRustAction
@@ -80,6 +86,9 @@ import io.element.android.libraries.matrix.impl.roomlist.roomOrNull
 import io.element.android.libraries.matrix.impl.spaces.RustSpaceService
 import io.element.android.libraries.matrix.impl.sync.RustSyncService
 import io.element.android.libraries.matrix.impl.sync.map
+import io.element.android.libraries.matrix.impl.timeline.DisabledMatrixContentProtectionRuntime
+import io.element.android.libraries.matrix.impl.timeline.DisabledMatrixProtectedContentAdapterFactory
+import io.element.android.libraries.matrix.impl.timeline.MatrixProtectedContentAdapterFactory
 import io.element.android.libraries.matrix.impl.usersearch.UserSearchResultMapper
 import io.element.android.libraries.matrix.impl.util.SessionPathsProvider
 import io.element.android.libraries.matrix.impl.util.cancelAndDestroy
@@ -89,6 +98,27 @@ import io.element.android.libraries.matrix.impl.workmanager.PerformDatabaseVacuu
 import io.element.android.libraries.sessionstorage.api.SessionStore
 import io.element.android.libraries.workmanager.api.WorkManagerRequestType
 import io.element.android.libraries.workmanager.api.WorkManagerScheduler
+import io.element.android.security.contentprotection.api.MatrixContentProtectionRuntime
+import io.element.android.security.dataprotection.api.DataDeletionCoordinator
+import io.element.android.security.dataprotection.api.DataProtectionPolicyProvider
+import io.element.android.security.dataprotection.api.AccountReactivationScopeStore
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.DeletionOperationId
+import io.element.android.security.dataprotection.api.DeletionReason
+import io.element.android.security.dataprotection.api.DeletionRequest
+import io.element.android.security.dataprotection.api.DeletionScope
+import io.element.android.security.dataprotection.api.DeletionStep
+import io.element.android.security.dataprotection.api.PermanentAccountDeletionAwaitingMatrixException
+import io.element.android.security.dataprotection.api.PermanentAccountDeletionAwaitingGlobalDestroyException
+import io.element.android.security.dataprotection.api.PermanentAccountDeletionCoordinator
+import io.element.android.security.dataprotection.api.PermanentAccountDeletionHandle
+import io.element.android.security.dataprotection.api.PermanentAccountDeletionPreparationExpiredException
+import io.element.android.security.securestorage.api.SecureMediaLeaseManager
+import io.element.android.security.securestorage.api.SensitiveFileStore
+import io.element.android.security.securestorage.api.DeviceRootKeyService
+import io.element.android.security.securestorage.api.deriveAccountVaultId
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.toolbox.api.systemclock.SystemClock
 import kotlinx.collections.immutable.ImmutableList
@@ -108,10 +138,17 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.delay
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import org.matrix.rustcomponents.sdk.AuthData
 import org.matrix.rustcomponents.sdk.AuthDataPasswordDetails
 import org.matrix.rustcomponents.sdk.BeaconInfoListener
@@ -129,13 +166,26 @@ import org.matrix.rustcomponents.sdk.use
 import timber.log.Timber
 import java.io.File
 import java.util.Optional
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.jvm.optionals.getOrNull
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import io.element.android.security.securestorage.api.accountIdHash as hashAccountId
 import org.matrix.rustcomponents.sdk.CreateRoomParameters as RustCreateRoomParameters
 import org.matrix.rustcomponents.sdk.RoomPreset as RustRoomPreset
 import org.matrix.rustcomponents.sdk.SyncService as ClientSyncService
 
+private const val PERMANENT_DELETION_COMMIT_ATTEMPTS = 60
+private const val PERMANENT_DELETION_PROPAGATION_RETRY_MILLIS = 1_000L
+private val joinedRoomsResponseJson = Json { ignoreUnknownKeys = true }
+
+@Serializable
+private data class JoinedRoomsResponse(
+    @SerialName("joined_rooms") val joinedRooms: List<String>,
+)
+
+@Suppress("LargeClass")
 class RustMatrixClient(
     private val innerClient: Client,
     private val sessionStore: SessionStore,
@@ -149,11 +199,29 @@ class RustMatrixClient(
     private val featureFlagService: FeatureFlagService,
     private val analyticsService: AnalyticsService,
     private val workManagerScheduler: WorkManagerScheduler,
+    sensitiveFileStore: SensitiveFileStore,
+    secureMediaLeaseManager: SecureMediaLeaseManager,
+    secureFileStoreEnabled: Boolean,
+    private val dataDeletionCoordinator: DataDeletionCoordinator,
+    private val permanentAccountDeletionCoordinator: PermanentAccountDeletionCoordinator,
+    private val accountReactivationScopeStore: AccountReactivationScopeStore,
+    private val dataProtectionPolicyProvider: DataProtectionPolicyProvider,
+    private val deviceRootKeyService: DeviceRootKeyService,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
+    private val matrixContentProtectionRuntime: MatrixContentProtectionRuntime = DisabledMatrixContentProtectionRuntime,
+    private val matrixProtectedContentAdapterFactory: MatrixProtectedContentAdapterFactory = DisabledMatrixProtectedContentAdapterFactory,
+    private val matrixProtectedMediaService: MatrixProtectedMediaService = DisabledMatrixProtectedMediaService,
+    private val managementControlService: io.element.android.security.dataprotection.api.ManagementControlService? = null,
 ) : MatrixClient {
     override val sessionId: UserId = UserId(innerClient.userId())
     override val deviceId: DeviceId = DeviceId(innerClient.deviceId())
-    override val sessionCoroutineScope = appCoroutineScope.childScope(dispatchers.main, "Session-$sessionId")
+    private val accountVaultId = deriveAccountVaultId(sessionId.value, deviceId.value)
+    override val sessionCoroutineScope = appCoroutineScope.childScope(dispatchers.main, "Matrix session")
     private val sessionDispatcher = dispatchers.io.limitedParallelism(64)
+    private val authenticatedApiHttpClient = OkHttpClient()
+    private val ephemeralMediaHttpClient = authenticatedApiHttpClient.newBuilder()
+        .cache(null).followRedirects(false).followSslRedirects(false).build()
+    private val matrixProtectionAttached = AtomicBoolean(true)
 
     private val innerRoomListService = innerSyncService.roomListService()
 
@@ -173,7 +241,14 @@ class RustMatrixClient(
     )
     private val notificationProcessSetup = NotificationProcessSetup.SingleProcess(innerSyncService)
     private val innerNotificationClient = runBlocking { innerClient.notificationClient(notificationProcessSetup) }
-    override val notificationService = RustNotificationService(sessionId, innerNotificationClient, dispatchers, clock)
+    override val notificationService = RustNotificationService(
+        sessionId = sessionId,
+        deviceId = deviceId,
+        notificationClient = innerNotificationClient,
+        dispatchers = dispatchers,
+        clock = clock,
+        protectedContentAdapterFactory = matrixProtectedContentAdapterFactory,
+    )
     override val notificationSettingsService = RustNotificationSettingsService(innerClient, sessionCoroutineScope, dispatchers)
     override val encryptionService = RustEncryptionService(
         client = innerClient,
@@ -198,6 +273,9 @@ class RustMatrixClient(
         roomListFactory = RoomListFactory(
             innerRoomListService = innerRoomListService,
             analyticsService = analyticsService,
+            sessionId = sessionId,
+            deviceId = deviceId,
+            protectedContentAdapterFactory = matrixProtectedContentAdapterFactory,
         ),
         roomSyncSubscriber = roomSyncSubscriber,
     )
@@ -227,29 +305,103 @@ class RustMatrixClient(
 
     private val roomInfoMapper = RoomInfoMapper()
 
+    private val membershipLifecycle = managementControlService?.let {
+        io.element.android.libraries.matrix.impl.room.RoomMembershipLifecycle(
+            sessionId.value, deviceId.value, it, appOperationalStateCoordinator,
+            isProjected = { roomId, target, action ->
+                innerClient.getRoom(roomId)?.use { room ->
+                    if (target == sessionId.value) {
+                        room.membership() == if (action == "join") Membership.JOINED else Membership.LEFT
+                    } else {
+                        val expected = if (action == "ban") org.matrix.rustcomponents.sdk.MembershipState.Ban
+                            else org.matrix.rustcomponents.sdk.MembershipState.Leave
+                        room.member(target).membership == expected
+                    }
+                } == true
+            },
+        ).also { lifecycle -> lifecycle.startRecovery(sessionCoroutineScope) }
+    }
+
     private val roomFactory = RustRoomFactory(
         roomListService = roomListService,
-        innerRoomListService = innerRoomListService,
+        innerClient = innerClient,
         sessionId = sessionId,
         deviceId = deviceId,
         notificationSettingsService = notificationSettingsService,
         sessionCoroutineScope = sessionCoroutineScope,
         dispatchers = dispatchers,
         systemClock = clock,
-        roomContentForwarder = RoomContentForwarder(innerRoomListService),
+        roomContentForwarder = RoomContentForwarder(
+            roomListService = innerRoomListService,
+            sessionId = sessionId,
+            deviceId = deviceId,
+            protectedContentAdapterFactory = matrixProtectedContentAdapterFactory,
+            matrixMediaLoader = { matrixMediaLoader },
+            cacheDirectory = baseCacheDirectory,
+        ),
         roomSyncSubscriber = roomSyncSubscriber,
         timelineEventFilterFactory = timelineEventFilterFactory,
+        membershipLifecycle = membershipLifecycle,
         roomMembershipObserver = roomMembershipObserver,
         roomInfoMapper = roomInfoMapper,
         featureFlagService = featureFlagService,
         analyticsService = analyticsService,
+        matrixProtectedContentAdapterFactory = matrixProtectedContentAdapterFactory,
     )
 
-    override val matrixMediaLoader: MatrixMediaLoader = RustMediaLoader(
+    private val rustMediaLoader = RustMediaLoader(
         baseCacheDirectory = baseCacheDirectory,
         dispatchers = dispatchers,
         innerClient = innerClient,
+        ephemeralMediaContent = { source ->
+            val storedSession = sessionStore.getSession(sessionId.value)
+                ?: throw SecurityException("Matrix session is unavailable.")
+            check(storedSession.isTokenValid) { "Matrix session token is unavailable." }
+            // SessionStore holds Vault envelopes. Only the current SDK session has runtime credentials.
+            val session = innerClient.session()
+            check(session.userId == sessionId.value && session.deviceId == deviceId.value &&
+                session.homeserverUrl.trimEnd('/') == storedSession.homeserverUrl.trimEnd('/') &&
+                session.accessToken.isNotBlank()) { "Matrix runtime session does not match the active account." }
+            io.element.android.libraries.matrix.impl.media.loadUncachedEncryptedMatrixContent(
+                source, session.homeserverUrl, session.accessToken, ephemeralMediaHttpClient,
+            )
+        },
     )
+    override val matrixMediaLoader: MatrixMediaLoader = if (secureFileStoreEnabled) {
+        SecureMatrixMediaLoader(
+            delegate = rustMediaLoader,
+            vaultId = accountVaultId,
+            sensitiveFileStore = sensitiveFileStore,
+            secureMediaLeaseManager = secureMediaLeaseManager,
+            sessionCoroutineScope = sessionCoroutineScope,
+            clock = clock,
+            appOperationalStateCoordinator = appOperationalStateCoordinator,
+            protectedMediaService = matrixProtectedMediaService,
+            accountIdHash = hashAccountId(sessionId.value),
+            matrixDeviceIdHash = hashAccountId(deviceId.value),
+            requireInnerProtection = { dataProtectionPolicyProvider.current().policy.requireContentEnvelope },
+            downloadDispatcher = sessionDispatcher,
+            cleanupRetryScope = sessionCoroutineScope,
+            progressiveVideoEnabled = { featureFlagService.isFeatureEnabled(FeatureFlags.ProgressiveProtectedVideoPlayback) },
+            progressiveVideoAcquirer = { source, wireLength ->
+                val stored = sessionStore.getSession(sessionId.value)
+                    ?: throw SecurityException("Matrix session is unavailable.")
+                check(stored.isTokenValid)
+                val session = innerClient.session()
+                check(session.userId == sessionId.value && session.deviceId == deviceId.value &&
+                    session.homeserverUrl.trimEnd('/') == stored.homeserverUrl.trimEnd('/') && session.accessToken.isNotBlank())
+                io.element.android.libraries.matrix.impl.media.openProgressiveProtectedVideo(
+                    source, wireLength, session.homeserverUrl, session.accessToken, ephemeralMediaHttpClient,
+                    matrixProtectedMediaService, accountVaultId, hashAccountId(sessionId.value),
+                    fullDownload = {
+                        matrixMediaLoader.downloadMediaFile(source, "video/mp4", filename = null, useCache = false).getOrThrow()
+                    },
+                )
+            },
+        )
+    } else {
+        rustMediaLoader
+    }
 
     override val mediaPreviewService = RustMediaPreviewService(
         sessionCoroutineScope = sessionCoroutineScope,
@@ -283,6 +435,7 @@ class RustMatrixClient(
         .stateIn(sessionCoroutineScope, started = SharingStarted.Eagerly, initialValue = persistentListOf())
 
     init {
+        matrixContentProtectionRuntime.attach()
         // Make sure the session delegate has a reference to the client to be able to logout on auth error
         sessionDelegate.bindClient(this)
 
@@ -325,6 +478,45 @@ class RustMatrixClient(
         }.mapFailure { it.mapClientException() }
     }
 
+    override suspend fun recoverySessionAccessToken(): Result<String> = withContext(sessionDispatcher) {
+        runCatchingExceptions {
+            val stored = sessionStore.getSession(sessionId.value)
+                ?: throw SecurityException("RECOVERY_MATRIX_SESSION_UNAVAILABLE")
+            val runtime = innerClient.session()
+            check(stored.isTokenValid && stored.userId == sessionId.value && stored.deviceId == deviceId.value &&
+                runtime.userId == stored.userId && runtime.deviceId == stored.deviceId &&
+                runtime.homeserverUrl.trimEnd('/') == stored.homeserverUrl.trimEnd('/')) {
+                "RECOVERY_MATRIX_SESSION_UNAVAILABLE"
+            }
+            runtime.accessToken.also {
+                check(it.length in 16..8192 && '\r' !in it && '\n' !in it && !it.startsWith("yzvault1:")) {
+                    "RECOVERY_MATRIX_SESSION_UNAVAILABLE"
+                }
+            }
+        }
+    }
+
+    override suspend fun requestOpenIdToken(): Result<OpenIdToken> = withContext(sessionDispatcher) {
+        runCatchingExceptions {
+            innerClient.requestOpenidToken().let {
+                OpenIdToken(
+                    accessToken = it.accessToken,
+                    tokenType = it.tokenType,
+                    matrixServerName = it.matrixServerName,
+                    expiresInSeconds = it.expiresInSeconds.toLong(),
+                )
+            }
+        }.mapFailure { it.mapClientException() }
+    }
+
+    override suspend fun getCurrentRoomInfo(roomId: RoomId) = withContext(sessionDispatcher) {
+        runCatchingExceptions {
+            checkNotNull(innerClient.getRoom(roomId.value)) { "Local SDK room is unavailable" }.use { room ->
+                roomInfoMapper.map(room.roomInfo()).also { check(it.id == roomId) }
+            }
+        }
+    }
+
     override suspend fun getRoom(roomId: RoomId): BaseRoom? = withContext(sessionDispatcher) {
         roomFactory.getBaseRoom(roomId)
     }
@@ -356,7 +548,9 @@ class RustMatrixClient(
 
     override suspend fun findDM(userId: UserId): Result<RoomId?> = withContext(sessionDispatcher) {
         runCatchingExceptions {
-            innerClient.getDmRoom(userId.value)?.use { RoomId(it.id()) }
+            if (managementControlService?.supportsManagedRoomCreation == true) {
+                managedDirectRooms().execute(userId.value, false)?.let(::RoomId)
+            } else innerClient.getDmRoom(userId.value)?.use { RoomId(it.id()) }
         }
     }
 
@@ -367,6 +561,23 @@ class RustMatrixClient(
                 .map { RoomId(it.id()) }
                 .toSet()
         }
+    }
+
+    override suspend fun getRemoteJoinedRoomIds(): Result<Set<RoomId>> = withContext(sessionDispatcher) {
+        runCatchingExceptions {
+            val session = innerClient.session()
+            val request = Request.Builder()
+                .url("${session.homeserverUrl.trimEnd('/')}/_matrix/client/v3/joined_rooms")
+                .header("Authorization", "Bearer ${session.accessToken}")
+                .get()
+                .build()
+            authenticatedApiHttpClient.newCall(request).execute().use { response ->
+                check(response.isSuccessful) { "joined_rooms request failed with HTTP ${response.code}" }
+                joinedRoomsResponseJson.decodeFromString<JoinedRoomsResponse>(response.body.bytes().decodeToString())
+                    .joinedRooms
+                    .mapTo(linkedSetOf(), ::RoomId)
+            }
+        }.mapFailure { it.mapClientException() }
     }
 
     override suspend fun ignoreUser(userId: UserId): Result<Unit> = withContext(sessionDispatcher) {
@@ -383,6 +594,9 @@ class RustMatrixClient(
 
     override suspend fun createRoom(createRoomParams: CreateRoomParameters): Result<RoomId> = withContext(sessionDispatcher) {
         runCatchingExceptions {
+            check(!(managementControlService?.supportsManagedRoomCreation == true && createRoomParams.isDirect)) {
+                "Managed direct rooms require the original LC11 invitation operation"
+            }
             val hasPublicAccess = createRoomParams.preset == RoomPreset.PUBLIC_CHAT || createRoomParams.joinRuleOverride == JoinRule.Public
             val powerLevels = defaultRoomCreationPowerLevels(isSpace = createRoomParams.isSpace, isPublic = hasPublicAccess)
 
@@ -424,6 +638,11 @@ class RustMatrixClient(
     }
 
     override suspend fun createDM(userId: UserId): Result<RoomId> {
+        if (managementControlService?.supportsManagedRoomCreation == true) return withContext(sessionDispatcher) {
+            runCatchingExceptions {
+                RoomId(checkNotNull(managedDirectRooms().execute(userId.value, true)))
+            }
+        }
         val createRoomParams = CreateRoomParameters(
             name = null,
             isEncrypted = true,
@@ -434,6 +653,13 @@ class RustMatrixClient(
             invite = listOf(userId),
         )
         return createRoom(createRoomParams)
+    }
+
+    private fun managedDirectRooms() = ManagedDirectRoomLifecycle(checkNotNull(managementControlService),
+        appOperationalStateCoordinator, hashAccountId(sessionId.value), hashAccountId(deviceId.value)) { roomId ->
+        withTimeout(30.seconds) {
+            while (innerClient.getRoom(roomId)?.use { true } != true) delay(100)
+        }
     }
 
     override suspend fun getProfile(userId: UserId): Result<MatrixUser> = withContext(sessionDispatcher) {
@@ -477,7 +703,8 @@ class RustMatrixClient(
 
     override suspend fun joinRoom(roomId: RoomId): Result<RoomInfo?> = withContext(sessionDispatcher) {
         runCatchingExceptions {
-            innerClient.joinRoomById(roomId.value).destroy()
+            val join: suspend () -> Unit = { innerClient.joinRoomById(roomId.value).destroy() }
+            membershipLifecycle?.perform(roomId.value, sessionId.value, "join", join) ?: join()
             try {
                 awaitRoom(roomId, 10.seconds, CurrentUserMembership.JOINED)
             } catch (e: Exception) {
@@ -488,6 +715,15 @@ class RustMatrixClient(
     }.mapFailure { it.mapClientException() }
 
     override suspend fun joinRoomByIdOrAlias(roomIdOrAlias: RoomIdOrAlias, serverNames: List<String>): Result<RoomInfo?> = withContext(sessionDispatcher) {
+        if (membershipLifecycle != null && io.element.android.appconfig.NextDeploymentConfig.isNextDeployment) {
+            return@withContext runCatchingExceptions {
+                val resolved = when (roomIdOrAlias) {
+                    is RoomIdOrAlias.Id -> roomIdOrAlias.roomId
+                    is RoomIdOrAlias.Alias -> RoomId(checkNotNull(innerClient.resolveRoomAlias(roomIdOrAlias.roomAlias.value)).roomId)
+                }
+                joinRoom(resolved).getOrThrow()
+            }
+        }
         runCatchingExceptions {
             val roomId = innerClient.joinRoomByIdOrAlias(
                 roomIdOrAlias = roomIdOrAlias.identifier,
@@ -571,6 +807,10 @@ class RustMatrixClient(
     }
 
     internal suspend fun destroy() {
+        matrixContentProtectionRuntime.clearSensitiveCaches()
+        if (matrixProtectionAttached.compareAndSet(true, false)) {
+            matrixContentProtectionRuntime.detach()
+        }
         innerNotificationClient.close()
 
         roomFactory.destroy()
@@ -611,11 +851,24 @@ class RustMatrixClient(
     }
 
     override suspend fun logout(userInitiated: Boolean, ignoreSdkError: Boolean) {
-        sessionCoroutineScope.cancel()
         // Remove current delegate so we don't receive an auth error
-        clientDelegateTaskHandle?.cancelAndDestroy()
-        clientDelegateTaskHandle = null
+        detachSessionDelegate()
         withContext(sessionDispatcher) {
+            val removalScope = if (userInitiated) {
+                val installationId = deviceRootKeyService.ensureReady().installationId
+                val accountHash = hashAccountId(sessionId.value)
+                val matrixDeviceIdHash = sha256Hex(deviceId.value)
+                check(
+                    accountReactivationScopeStore.markAccountRemoved(
+                        accountIdHash = accountHash,
+                        installationId = installationId,
+                        matrixDeviceIdHash = matrixDeviceIdHash,
+                    )
+                ) { "Unable to persist the account reactivation boundary." }
+                Triple(accountHash, installationId, matrixDeviceIdHash)
+            } else {
+                null
+            }
             if (userInitiated) {
                 try {
                     innerClient.logout()
@@ -623,18 +876,27 @@ class RustMatrixClient(
                     if (ignoreSdkError) {
                         Timber.e(failure, "Fail to call logout on HS. Still delete local files.")
                     } else {
-                        // If the logout failed we need to restore the delegate
-                        clientDelegateTaskHandle = innerClient.setDelegate(sessionDelegate)
+                        requireNotNull(removalScope).let { (accountHash, installationId, matrixDeviceIdHash) ->
+                            check(
+                                accountReactivationScopeStore.restoreAccountActive(
+                                    accountIdHash = accountHash,
+                                    installationId = installationId,
+                                    matrixDeviceIdHash = matrixDeviceIdHash,
+                                )
+                            ) { "Unable to roll back the account reactivation boundary." }
+                        }
+                        // If the logout failed we need to restore the delegate without hiding the logout error.
+                        restoreSessionDelegate(failure)
                         Timber.e(failure, "Fail to call logout on HS.")
                         throw failure
                     }
                 }
             }
+            val deletionRequest = if (userInitiated) prepareProtectedAccountDeletion(DeletionReason.ACCOUNT_LOGOUT) else null
             destroy()
 
-            deleteSessionDirectory()
             if (userInitiated) {
-                sessionStore.removeSession(sessionId.value)
+                completeProtectedAccountDeletion(requireNotNull(deletionRequest))
             }
         }
     }
@@ -649,44 +911,198 @@ class RustMatrixClient(
 
     override suspend fun deactivateAccount(password: String, eraseData: Boolean): Result<Unit> = withContext(sessionDispatcher) {
         Timber.w("Deactivating account")
-        // Remove current delegate so we don't receive an auth error
-        clientDelegateTaskHandle?.cancelAndDestroy()
-        clientDelegateTaskHandle = null
         runCatchingExceptions {
-            // First call without AuthData, should fail
-            val firstAttempt = runCatchingExceptions {
-                innerClient.deactivateAccount(
-                    authData = null,
-                    eraseData = eraseData,
-                )
-            }
-            if (firstAttempt.isFailure) {
-                Timber.w(firstAttempt.exceptionOrNull(), "Expected failure, try again")
-                // This is expected, try again with the password
-                runCatchingExceptions {
-                    innerClient.deactivateAccount(
-                        authData = AuthData.Password(
-                            passwordDetails = AuthDataPasswordDetails(
-                                identifier = sessionId.value,
-                                password = password,
-                            ),
-                        ),
-                        eraseData = eraseData,
-                    )
-                }.onFailure {
-                    Timber.e(it, "Failed to deactivate account")
-                    // If the deactivation failed we need to restore the delegate
-                    clientDelegateTaskHandle = innerClient.setDelegate(sessionDelegate)
-                    throw it
+            // Remove current delegate so we don't receive an auth error.
+            detachSessionDelegate()
+            val accountHash = hashAccountId(sessionId.value)
+            var deletionHandle = permanentAccountDeletionCoordinator.pending(accountHash)
+            if (deletionHandle != null) {
+                val resumed = permanentAccountDeletionCoordinator.commitRemote(deletionHandle)
+                if (resumed.isSuccess) {
+                    finishPermanentlyDeletedAccount(deletionHandle)
+                    return@runCatchingExceptions
+                }
+                when (val failure = resumed.exceptionOrNull()) {
+                    is PermanentAccountDeletionAwaitingMatrixException,
+                    is PermanentAccountDeletionAwaitingGlobalDestroyException -> Unit
+                    // PREPARED already means FROZEN. Keep the durable operation fail-closed even if
+                    // an older server reports expiry; it must be recovered under the same identity.
+                    is PermanentAccountDeletionPreparationExpiredException -> throw failure
+                    else -> throw requireNotNull(failure)
                 }
             }
-            destroy()
-            deleteSessionDirectory()
-            sessionStore.removeSession(sessionId.value)
+            if (deletionHandle == null) {
+                deletionHandle = permanentAccountDeletionCoordinator.prepare(
+                    localDeletionRequest = buildProtectedAccountDeletionRequest(DeletionReason.USER_REQUEST),
+                    eraseData = eraseData,
+                ).getOrThrow()
+            }
+            var matrixDeactivated = false
+            // First call without AuthData, should fail
+            try {
+                val firstAttempt = runCatchingExceptions {
+                    innerClient.deactivateAccount(
+                        authData = null,
+                        eraseData = eraseData,
+                    )
+                }
+                if (firstAttempt.isFailure) {
+                    Timber.w(firstAttempt.exceptionOrNull(), "Expected failure, try again")
+                    // This is expected, try again with the password
+                    runCatchingExceptions {
+                        innerClient.deactivateAccount(
+                            authData = AuthData.Password(
+                                passwordDetails = AuthDataPasswordDetails(
+                                    identifier = sessionId.value,
+                                    password = password,
+                                ),
+                            ),
+                            eraseData = eraseData,
+                        )
+                    }.getOrThrow()
+                }
+                matrixDeactivated = true
+            } catch (failure: Throwable) {
+                if (!matrixDeactivated) {
+                    // prepare() has already frozen the account. Preserve its confirmation secret and
+                    // operation identity so a corrected password resumes the exact same deletion.
+                    val reportedFailure = failure.toAccountDeactivationFailure()
+                    restoreSessionDelegate(reportedFailure)
+                    throw reportedFailure
+                }
+                throw failure
+            }
+
+            commitPermanentDeletionWithPropagationRetry(deletionHandle)
+            finishPermanentlyDeletedAccount(deletionHandle)
         }.onFailure {
             Timber.e(it, "Failed to deactivate account")
         }
     }
+
+    private fun detachSessionDelegate() {
+        // The delegate registration is owned by its TaskHandle. Calling setDelegate(null) while
+        // that registration is active is rejected by the Rust SDK as "Delegate already initialized".
+        val previousHandle = clientDelegateTaskHandle
+        clientDelegateTaskHandle = null
+        previousHandle?.cancelAndDestroy()
+    }
+
+    private fun restoreSessionDelegate(primaryFailure: Throwable) {
+        runCatchingExceptions { innerClient.setDelegate(sessionDelegate) }
+            .onSuccess { clientDelegateTaskHandle = it }
+            .onFailure { restorationFailure ->
+                primaryFailure.addSuppressed(restorationFailure)
+                Timber.e(restorationFailure, "Failed to restore Matrix session delegate after account action failure.")
+            }
+    }
+
+    private fun Throwable.toAccountDeactivationFailure(): Throwable {
+        return if (
+            this is ClientException.Generic &&
+            listOfNotNull(msg, details, message, cause?.message).any { errorText ->
+                errorText.contains("Invalid username or password", ignoreCase = true) ||
+                    errorText.contains("Invalid password", ignoreCase = true)
+            }
+        ) {
+            AccountDeactivationException.InvalidCredentials(this)
+        } else {
+            this
+        }
+    }
+
+    internal suspend fun deleteProtectedAccountData(reason: DeletionReason) {
+        val request = prepareProtectedAccountDeletion(reason)
+        completeProtectedAccountDeletion(request)
+    }
+
+    private suspend fun prepareProtectedAccountDeletion(reason: DeletionReason): DeletionRequest {
+        val request = buildProtectedAccountDeletionRequest(reason)
+        val report = dataDeletionCoordinator.prepare(request)
+        check(DeletionStep.REQUESTED in report.completedSteps && report.errorCode == null) {
+            "Unable to durably prepare protected account cleanup."
+        }
+        return request
+    }
+
+    private suspend fun buildProtectedAccountDeletionRequest(reason: DeletionReason): DeletionRequest {
+        val policy = dataProtectionPolicyProvider.current().policy
+        val lifecycleContext = currentLifecycleOperationContext()
+        val deletionOperationId = lifecycleContext
+            ?.takeIf { it.lifecycleId == FullAppLifecycleId.LC_22 }
+            ?.operationId
+            ?: UUID.randomUUID().toString()
+        val sessionPaths = requireNotNull(sessionPathsProvider.provides(sessionId)) {
+            "Unable to locate protected account session paths."
+        }
+        val request = DeletionRequest(
+            operationId = DeletionOperationId(deletionOperationId),
+            scope = DeletionScope.Account(
+                accountIdHash = hashAccountId(sessionId.value),
+                vaultId = accountVaultId.value,
+                localSessionId = sessionId.value,
+                sessionFilePath = sessionPaths.fileDirectory.path,
+                sessionCachePath = sessionPaths.cacheDirectory.path,
+            ),
+            reason = reason,
+            policyVersion = policy.version,
+            requestedAtEpochMillis = System.currentTimeMillis(),
+        )
+        return request
+    }
+
+    private suspend fun commitPermanentDeletionWithPropagationRetry(handle: PermanentAccountDeletionHandle) {
+        var lastFailure: Throwable? = null
+        repeat(PERMANENT_DELETION_COMMIT_ATTEMPTS) { attempt ->
+            val result = permanentAccountDeletionCoordinator.commitRemote(handle)
+            if (result.isSuccess) return
+            val failure = requireNotNull(result.exceptionOrNull())
+            lastFailure = failure
+            if (
+                failure !is PermanentAccountDeletionAwaitingMatrixException &&
+                failure !is PermanentAccountDeletionAwaitingGlobalDestroyException ||
+                attempt == PERMANENT_DELETION_COMMIT_ATTEMPTS - 1
+            ) {
+                throw failure
+            }
+            delay(PERMANENT_DELETION_PROPAGATION_RETRY_MILLIS)
+        }
+        throw requireNotNull(lastFailure)
+    }
+
+    private suspend fun finishPermanentlyDeletedAccount(handle: PermanentAccountDeletionHandle) {
+        destroy()
+        val report = permanentAccountDeletionCoordinator.completeLocal(
+            handle = handle,
+            confirmedPreconditions = setOf(
+                DeletionStep.STOPPED_SYNC_AND_UI,
+                DeletionStep.PURGED_MEMORY,
+                DeletionStep.CLOSED_DATABASES,
+            ),
+        )
+        if (!report.isComplete) {
+            Timber.w("Permanent local account cleanup requires retry: ${report.errorCode ?: "UNKNOWN"}")
+        }
+    }
+
+    private suspend fun completeProtectedAccountDeletion(request: DeletionRequest) {
+        val report = dataDeletionCoordinator.delete(
+            request.copy(
+                confirmedPreconditions = setOf(
+                    DeletionStep.STOPPED_SYNC_AND_UI,
+                    DeletionStep.PURGED_MEMORY,
+                    DeletionStep.CLOSED_DATABASES,
+                )
+            )
+        )
+        if (!report.isComplete) {
+            Timber.w("Protected account cleanup requires retry: ${report.errorCode ?: "UNKNOWN"}")
+        }
+    }
+
+    private fun sha256Hex(value: String): String = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(value.encodeToByteArray())
+        .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
     override suspend fun getAccountManagementUrl(action: AccountManagementAction?): Result<String?> = withContext(sessionDispatcher) {
         val rustAction = action?.toRustAction()
@@ -743,6 +1159,23 @@ class RustMatrixClient(
         runCatchingExceptions {
             innerClient.isReportRoomApiSupported()
         }.getOrDefault(false)
+    }
+
+    override suspend fun ensureServerVersionsReady(): Result<Unit> = withContext(sessionDispatcher) {
+        runCatchingExceptions {
+            // MatrixRTC delayed membership reads the SDK's in-memory server versions and unstable
+            // features. A restored client can have enough room state to render the call while that
+            // cache is stale or empty. availableSlidingSyncVersions() is allowed to reuse the
+            // persisted cache, so reset it first to force an authenticated /versions request.
+            innerClient.resetSupportedVersions()
+            val availableSyncVersions = innerClient.availableSlidingSyncVersions()
+            check(availableSyncVersions.isNotEmpty()) {
+                "Homeserver version discovery returned no supported sync transport."
+            }
+            innerClient.isReportRoomApiSupported()
+            Timber.d("Homeserver version cache refreshed before MatrixRTC initialization.")
+            Unit
+        }.mapFailure { it.mapClientException() }
     }
 
     override suspend fun isLivekitRtcSupported(): Boolean = withContext(sessionDispatcher) {
@@ -839,11 +1272,6 @@ class RustMatrixClient(
                 file.length()
             }
         }
-    }
-
-    private suspend fun deleteSessionDirectory() = withContext(sessionDispatcher) {
-        // Delete all the files for this session
-        sessionPathsProvider.provides(sessionId)?.deleteRecursively()
     }
 
     private fun scheduleDatabaseVacuum() {

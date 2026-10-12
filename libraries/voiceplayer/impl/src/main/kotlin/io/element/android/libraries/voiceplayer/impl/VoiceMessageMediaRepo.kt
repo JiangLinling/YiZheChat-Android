@@ -12,13 +12,13 @@ import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
 import dev.zacsweers.metro.ContributesBinding
-import io.element.android.libraries.core.extensions.mapCatchingExceptions
-import io.element.android.libraries.di.CacheDirectory
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.matrix.api.media.MatrixMediaLoader
+import io.element.android.libraries.matrix.api.media.MediaFile
 import io.element.android.libraries.matrix.api.media.MediaSource
-import io.element.android.libraries.matrix.api.mxc.MxcTools
-import java.io.File
+import io.element.android.security.contentprotection.api.KmsTransportPriority
+import io.element.android.security.contentprotection.api.KmsTransportSchedulingContext
+import kotlinx.coroutines.withContext
 
 /**
  * Fetches the media file for a voice message.
@@ -52,15 +52,13 @@ interface VoiceMessageMediaRepo {
      * In case of a cache hit the file is returned immediately.
      * In case of a cache miss the file is downloaded and then returned.
      *
-     * @return A [Result] holding either the media [File] from the cache directory or an [Exception].
+     * @return A [Result] holding a revocable media handle or an [Exception].
      */
-    suspend fun getMediaFile(): Result<File>
+    suspend fun getMediaFile(): Result<MediaFile>
 }
 
 @AssistedInject
 class DefaultVoiceMessageMediaRepo(
-    @CacheDirectory private val cacheDir: File,
-    mxcTools: MxcTools,
     private val matrixMediaLoader: MatrixMediaLoader,
     @Assisted private val mediaSource: MediaSource,
     @Assisted private val mimeType: String?,
@@ -76,31 +74,12 @@ class DefaultVoiceMessageMediaRepo(
         ): DefaultVoiceMessageMediaRepo
     }
 
-    override suspend fun getMediaFile(): Result<File> = when {
-        cachedFile == null -> Result.failure(IllegalStateException("Invalid mxcUri."))
-        cachedFile.exists() -> Result.success(cachedFile)
-        else -> matrixMediaLoader.downloadMediaFile(
+    override suspend fun getMediaFile(): Result<MediaFile> = withContext(KmsTransportSchedulingContext(KmsTransportPriority.USER_MEDIA)) {
+        matrixMediaLoader.downloadMediaFile(
             source = mediaSource,
             mimeType = mimeType,
             filename = filename,
-        ).mapCatchingExceptions {
-            it.use { mediaFile ->
-                val dest = cachedFile.apply { parentFile?.mkdirs() }
-                if (mediaFile.persist(dest.path)) {
-                    dest
-                } else {
-                    error("Failed to move file to cache.")
-                }
-            }
-        }
-    }
-
-    private val cachedFile: File? = mxcTools.mxcUri2FilePath(mediaSource.safeUrl)?.let {
-        File("${cacheDir.path}/$CACHE_VOICE_SUBDIR/$it")
+            useCache = false,
+        )
     }
 }
-
-/**
- * Subdirectory of the application's cache directory where voice messages are stored.
- */
-private const val CACHE_VOICE_SUBDIR = "temp/voice"

@@ -8,6 +8,8 @@
 
 package io.element.android.libraries.push.impl.notifications.channels
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationChannelCompat
@@ -30,6 +32,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -37,14 +40,89 @@ class NotificationChannelsTest {
     @Test
     @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
     fun `init - creates notification channels and migrates old ones`() {
+        val createdCompatChannels = mutableListOf<NotificationChannelCompat>()
         val notificationManager = mockk<NotificationManagerCompat>(relaxed = true) {
             every { notificationChannels } returns emptyList()
+            every { createNotificationChannel(capture(createdCompatChannels)) } returns Unit
         }
 
         createNotificationChannels(notificationManager = notificationManager)
 
         verify { notificationManager.createNotificationChannel(any<NotificationChannelCompat>()) }
         verify { notificationManager.deleteNotificationChannel(any<String>()) }
+        assertThat(createdCompatChannels.first { it.id == NOISY_NOTIFICATION_CHANNEL_ID_BASE }.importance)
+            .isEqualTo(NotificationManagerCompat.IMPORTANCE_HIGH)
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
+    fun `init - removes all legacy V2 noisy channels`() {
+        val legacyChannel = mockk<NotificationChannel>(relaxed = true) {
+            every { id } returns "DEFAULT_NOISY_NOTIFICATION_CHANNEL_ID_V2_v7"
+        }
+        val notificationManager = mockk<NotificationManagerCompat>(relaxed = true) {
+            every { notificationChannels } returns listOf(legacyChannel)
+        }
+
+        createNotificationChannels(notificationManager = notificationManager)
+
+        verify { notificationManager.deleteNotificationChannel("DEFAULT_NOISY_NOTIFICATION_CHANNEL_ID_V2_v7") }
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
+    fun `init - repairs legacy V3 built-in sound and removes old channel`() = runTest {
+        val legacyChannel = mockk<NotificationChannel>(relaxed = true) {
+            every { id } returns "DEFAULT_NOISY_NOTIFICATION_CHANNEL_ID_V3_v1"
+        }
+        val createdChannels = mutableListOf<NotificationChannelCompat>()
+        val notificationManager = mockk<NotificationManagerCompat>(relaxed = true) {
+            every { notificationChannels } returns listOf(legacyChannel)
+            every { createNotificationChannel(capture(createdChannels)) } returns Unit
+        }
+        val appPreferencesStore = InMemoryAppPreferencesStore(
+            messageSound = NotificationSound.ElementFade,
+            messageSoundChannelVersion = 1,
+        )
+
+        createNotificationChannels(
+            notificationManager = notificationManager,
+            appPreferencesStore = appPreferencesStore,
+        )
+
+        val config = appPreferencesStore.getNotificationSoundChannelConfig()
+        val context = RuntimeEnvironment.getApplication()
+        val expectedSound = "android.resource://${context.packageName}/${io.element.android.libraries.push.impl.R.raw.yizhe_message_alert}".toUri()
+        assertThat(config.messageSound).isEqualTo(NotificationSound.ElementDefault)
+        assertThat(config.messageSoundVersion).isEqualTo(2)
+        assertThat(createdChannels.first { it.id == "${NOISY_NOTIFICATION_CHANNEL_ID_BASE}_v2" }.sound)
+            .isEqualTo(expectedSound)
+        verify { notificationManager.deleteNotificationChannel("DEFAULT_NOISY_NOTIFICATION_CHANNEL_ID_V3_v1") }
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
+    fun `init - preserves a deliberate silent choice while removing legacy V3 channel`() = runTest {
+        val legacyChannel = mockk<NotificationChannel>(relaxed = true) {
+            every { id } returns "DEFAULT_NOISY_NOTIFICATION_CHANNEL_ID_V3_v4"
+        }
+        val notificationManager = mockk<NotificationManagerCompat>(relaxed = true) {
+            every { notificationChannels } returns listOf(legacyChannel)
+        }
+        val appPreferencesStore = InMemoryAppPreferencesStore(
+            messageSound = NotificationSound.Silent,
+            messageSoundChannelVersion = 4,
+        )
+
+        createNotificationChannels(
+            notificationManager = notificationManager,
+            appPreferencesStore = appPreferencesStore,
+        )
+
+        val config = appPreferencesStore.getNotificationSoundChannelConfig()
+        assertThat(config.messageSound).isEqualTo(NotificationSound.Silent)
+        assertThat(config.messageSoundVersion).isEqualTo(4)
+        verify { notificationManager.deleteNotificationChannel("DEFAULT_NOISY_NOTIFICATION_CHANNEL_ID_V3_v4") }
     }
 
     @Test
@@ -56,6 +134,30 @@ class NotificationChannelsTest {
 
         val normalChannel = notificationChannels.getChannelForIncomingCall(ring = false)
         assertThat(normalChannel).isEqualTo(CALL_NOTIFICATION_CHANNEL_ID)
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
+    fun `refreshRingingCallChannel - switches to priority channel when Do Not Disturb access is granted`() {
+        val context = RuntimeEnvironment.getApplication()
+        val systemNotificationManager = context.getSystemService(NotificationManager::class.java)
+        val shadowNotificationManager = shadowOf(systemNotificationManager)
+        shadowNotificationManager.setNotificationPolicyAccessGranted(false)
+        val notificationManager = mockk<NotificationManagerCompat>(relaxed = true) {
+            every { notificationChannels } returns emptyList()
+        }
+        val channels = createNotificationChannels(notificationManager = notificationManager)
+        assertThat(channels.getChannelForIncomingCall(ring = true)).isEqualTo(RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE)
+
+        shadowNotificationManager.setNotificationPolicyAccessGranted(true)
+        channels.refreshRingingCallChannel()
+
+        val expectedId = "${RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE}_priority"
+        assertThat(channels.getChannelForIncomingCall(ring = true)).isEqualTo(expectedId)
+        verify {
+            notificationManager.createNotificationChannel(match<NotificationChannel> { it.id == expectedId && it.canBypassDnd() })
+        }
+        shadowNotificationManager.setNotificationPolicyAccessGranted(false)
     }
 
     @Test
@@ -220,13 +322,13 @@ class NotificationChannelsTest {
 
         val expectedId = "${RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE}_v5"
         assertThat(channels.getChannelForIncomingCall(ring = true)).isEqualTo(expectedId)
-        verify { notificationManager.createNotificationChannel(match<NotificationChannelCompat> { it.id == expectedId }) }
+        verify { notificationManager.createNotificationChannel(match<NotificationChannel> { it.id == expectedId }) }
     }
 
     @Test
     @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
     fun `recreateRingingCallChannel - Silent produces channel with no sound`() {
-        val captured = slot<NotificationChannelCompat>()
+        val captured = slot<NotificationChannel>()
         val notificationManager = mockk<NotificationManagerCompat>(relaxed = true) {
             every { notificationChannels } returns emptyList()
             every { createNotificationChannel(capture(captured)) } returns Unit
@@ -237,6 +339,23 @@ class NotificationChannelsTest {
 
         assertThat(captured.captured.id).isEqualTo("${RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE}_v1")
         assertThat(captured.captured.sound).isNull()
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
+    fun `recreateRingingCallChannel - ElementDefault uses bundled YiZhe ringtone`() {
+        val captured = slot<NotificationChannel>()
+        val notificationManager = mockk<NotificationManagerCompat>(relaxed = true) {
+            every { notificationChannels } returns emptyList()
+            every { createNotificationChannel(capture(captured)) } returns Unit
+        }
+        val channels = createNotificationChannels(notificationManager = notificationManager)
+
+        channels.recreateRingingCallChannel(sound = NotificationSound.ElementDefault, version = 1)
+
+        val context = RuntimeEnvironment.getApplication()
+        val expected = "android.resource://${context.packageName}/${io.element.android.libraries.push.impl.R.raw.yizhe_call_ringtone}".toUri()
+        assertThat(captured.captured.sound).isEqualTo(expected)
     }
 
     @Test
@@ -257,8 +376,8 @@ class NotificationChannelsTest {
         verify { notificationManager.createNotificationChannel(match<NotificationChannelCompat> { it.id == "${NOISY_NOTIFICATION_CHANNEL_ID_BASE}_v5" }) }
         verify {
             notificationManager.createNotificationChannel(
-            match<NotificationChannelCompat> { it.id == "${RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE}_v7" }
-        )
+                match<NotificationChannel> { it.id == "${RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE}_v7" }
+            )
         }
     }
 
@@ -284,7 +403,7 @@ class NotificationChannelsTest {
     @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
     fun `readNoisyChannelSound - classifies the bundled message URI as ElementDefault`() = runTest {
         val context = RuntimeEnvironment.getApplication()
-        val ourBundled = "android.resource://${context.packageName}/${io.element.android.libraries.push.impl.R.raw.message}".toUri()
+        val ourBundled = "android.resource://${context.packageName}/${io.element.android.libraries.push.impl.R.raw.yizhe_message_alert}".toUri()
         val channel = mockk<android.app.NotificationChannel>(relaxed = true) {
             every { sound } returns ourBundled
         }
@@ -337,7 +456,7 @@ class NotificationChannelsTest {
 
     @Test
     @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
-    fun `init - migrates legacy SystemDefault message sound to ElementDefault when version is 0`() = runTest {
+    fun `init - preserves SystemDefault for a fresh install`() = runTest {
         val notificationManager = mockk<NotificationManagerCompat>(relaxed = true) {
             every { notificationChannels } returns emptyList()
         }
@@ -352,32 +471,38 @@ class NotificationChannelsTest {
         )
 
         val config = appPreferencesStore.getNotificationSoundChannelConfig()
-        assertThat(config.messageSound).isEqualTo(NotificationSound.ElementDefault)
-        assertThat(config.messageSoundVersion).isEqualTo(1)
+        assertThat(config.messageSound).isEqualTo(NotificationSound.SystemDefault)
+        assertThat(config.messageSoundVersion).isEqualTo(0)
     }
 
     @Test
     @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
-    fun `init - migration is idempotent across multiple instantiations`() = runTest {
-        val notificationManager = mockk<NotificationManagerCompat>(relaxed = true) {
-            every { notificationChannels } returns emptyList()
+    fun `init - V3 repair is idempotent after the legacy channel is gone`() = runTest {
+        val legacyChannel = mockk<NotificationChannel>(relaxed = true) {
+            every { id } returns "DEFAULT_NOISY_NOTIFICATION_CHANNEL_ID_V3_v1"
+        }
+        val legacyNotificationManager = mockk<NotificationManagerCompat>(relaxed = true) {
+            every { notificationChannels } returns listOf(legacyChannel)
         }
         val appPreferencesStore = InMemoryAppPreferencesStore(
-            messageSound = NotificationSound.SystemDefault,
-            messageSoundChannelVersion = 0,
+            messageSound = NotificationSound.ElementDefault,
+            messageSoundChannelVersion = 1,
         )
 
         // First boot: migrate.
-        createNotificationChannels(notificationManager = notificationManager, appPreferencesStore = appPreferencesStore)
+        createNotificationChannels(notificationManager = legacyNotificationManager, appPreferencesStore = appPreferencesStore)
         val afterFirst = appPreferencesStore.getNotificationSoundChannelConfig()
         assertThat(afterFirst.messageSound).isEqualTo(NotificationSound.ElementDefault)
-        assertThat(afterFirst.messageSoundVersion).isEqualTo(1)
+        assertThat(afterFirst.messageSoundVersion).isEqualTo(2)
 
-        // Second boot: gate (version == 0) no longer matches, so the version must not bump again.
-        createNotificationChannels(notificationManager = notificationManager, appPreferencesStore = appPreferencesStore)
+        // Second boot: the V3 channel has been removed, so the version must not bump again.
+        val repairedNotificationManager = mockk<NotificationManagerCompat>(relaxed = true) {
+            every { notificationChannels } returns emptyList()
+        }
+        createNotificationChannels(notificationManager = repairedNotificationManager, appPreferencesStore = appPreferencesStore)
         val afterSecond = appPreferencesStore.getNotificationSoundChannelConfig()
         assertThat(afterSecond.messageSound).isEqualTo(NotificationSound.ElementDefault)
-        assertThat(afterSecond.messageSoundVersion).isEqualTo(1)
+        assertThat(afterSecond.messageSoundVersion).isEqualTo(2)
     }
 
     @Test
@@ -468,6 +593,25 @@ class NotificationChannelsTest {
         val result = channels.readRingingCallChannelSound()
 
         assertThat(result).isEqualTo(NotificationSound.SystemDefault)
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
+    fun `readRingingCallChannelSound - returns ElementDefault for bundled YiZhe ringtone`() = runTest {
+        val context = RuntimeEnvironment.getApplication()
+        val bundledUri = "android.resource://${context.packageName}/${io.element.android.libraries.push.impl.R.raw.yizhe_call_ringtone}".toUri()
+        val channel = mockk<android.app.NotificationChannel>(relaxed = true) {
+            every { sound } returns bundledUri
+        }
+        val notificationManager = mockk<NotificationManagerCompat>(relaxed = true) {
+            every { notificationChannels } returns emptyList()
+            every { getNotificationChannel(RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE) } returns channel
+        }
+        val channels = createNotificationChannels(notificationManager = notificationManager)
+
+        val result = channels.readRingingCallChannelSound()
+
+        assertThat(result).isEqualTo(NotificationSound.ElementDefault)
     }
 
     @Test

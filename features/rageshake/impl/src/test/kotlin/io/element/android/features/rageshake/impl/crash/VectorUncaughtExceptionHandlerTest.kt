@@ -10,7 +10,6 @@ package io.element.android.features.rageshake.impl.crash
 
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.matrix.test.AN_EXCEPTION
-import io.element.android.libraries.preferences.test.FakePreferenceDataStoreFactory
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -21,14 +20,14 @@ import org.robolectric.RobolectricTestRunner
 class VectorUncaughtExceptionHandlerTest {
     @Test
     fun `activate should change the default handler`() {
-        val sut = VectorUncaughtExceptionHandler(PreferencesCrashDataStore(FakePreferenceDataStoreFactory()))
+        val sut = VectorUncaughtExceptionHandler(FakeCrashDataStore())
         sut.activate()
         assertThat(Thread.getDefaultUncaughtExceptionHandler()).isInstanceOf(VectorUncaughtExceptionHandler::class.java)
     }
 
     @Test
     fun `uncaught exception`() = runTest {
-        val crashDataStore = PreferencesCrashDataStore(FakePreferenceDataStoreFactory())
+        val crashDataStore = FakeCrashDataStore()
         assertThat(crashDataStore.appHasCrashed().first()).isFalse()
         assertThat(crashDataStore.crashInfo().first()).isEmpty()
         val sut = VectorUncaughtExceptionHandler(crashDataStore)
@@ -39,5 +38,19 @@ class VectorUncaughtExceptionHandlerTest {
         assertThat(crashInfo).contains("Memory statuses")
         crashDataStore.resetAppHasCrashed()
         assertThat(crashDataStore.appHasCrashed().first()).isFalse()
+    }
+
+    @Test
+    fun `production policy records crash occurrence without diagnostic details`() = runTest {
+        val crashDataStore = FakeCrashDataStore()
+        val sut = VectorUncaughtExceptionHandler(
+            crashDataStore = crashDataStore,
+            persistCrashDetails = false,
+        )
+
+        sut.uncaughtException(Thread("sensitive-thread-name"), AN_EXCEPTION)
+
+        assertThat(crashDataStore.appHasCrashed().first()).isTrue()
+        assertThat(crashDataStore.crashInfo().first()).isEmpty()
     }
 }

@@ -10,6 +10,7 @@ package io.element.android.features.messages.impl.timeline.components.event
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,17 +21,25 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.location.api.StaticMapView
+import io.element.android.features.location.api.messageResource
+import io.element.android.features.messages.impl.R
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemLocationContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemLocationContentProvider
+import io.element.android.features.messages.impl.timeline.model.event.aLiveLocationMode
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.designsystem.theme.components.CircularProgressIndicator
@@ -42,6 +51,7 @@ import io.element.android.libraries.ui.strings.CommonStrings
 @Composable
 fun TimelineItemLocationView(
     content: TimelineItemLocationContent,
+    onContentClick: (() -> Unit)?,
     onStopLiveLocationClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -56,10 +66,30 @@ fun TimelineItemLocationView(
             contentDescription = content.description
         )
 
+        if (onContentClick != null) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clickable(
+                        role = Role.Button,
+                        onClick = onContentClick,
+                    )
+            )
+        }
+
         if (content.mode is TimelineItemLocationContent.Mode.Live) {
+            var stopRequested by remember(content.mode.protectedAggregateId, content.mode.isActive) {
+                mutableStateOf(false)
+            }
             LiveLocationOverlay(
                 mode = content.mode,
-                onStopClick = onStopLiveLocationClick,
+                stopRequested = stopRequested,
+                onStopClick = {
+                    if (!stopRequested) {
+                        stopRequested = true
+                        onStopLiveLocationClick()
+                    }
+                },
                 modifier = Modifier.align(Alignment.BottomStart)
             )
         }
@@ -69,6 +99,7 @@ fun TimelineItemLocationView(
 @Composable
 private fun LiveLocationOverlay(
     mode: TimelineItemLocationContent.Mode.Live,
+    stopRequested: Boolean,
     onStopClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -98,7 +129,7 @@ private fun LiveLocationOverlay(
                     shape = iconShape
                 )
         ) {
-            if (mode.isLoading) {
+            if ((mode.isLoading && mode.pausedState == null) || stopRequested) {
                 CircularProgressIndicator(
                     strokeWidth = 2.dp,
                     color = ElementTheme.colors.iconSecondary,
@@ -121,15 +152,22 @@ private fun LiveLocationOverlay(
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = if (mode.isActive) {
-                    stringResource(CommonStrings.common_live_location)
-                } else {
-                    stringResource(CommonStrings.common_live_location_ended)
+                text = when {
+                    stopRequested -> stringResource(R.string.screen_room_live_location_ending)
+                    mode.pausedState != null && mode.isActive -> stringResource(mode.pausedState.messageResource())
+                    mode.isActive -> stringResource(CommonStrings.common_live_location)
+                    else -> stringResource(CommonStrings.common_live_location_ended)
                 },
                 style = ElementTheme.typography.fontBodySmMedium,
                 color = ElementTheme.colors.textPrimary,
             )
-            if (mode.isActive) {
+            if (stopRequested) {
+                Text(
+                    text = stringResource(R.string.screen_room_live_location_stopped_waiting_sync),
+                    style = ElementTheme.typography.fontBodySmRegular,
+                    color = ElementTheme.colors.textSecondary,
+                )
+            } else if (mode.isActive) {
                 Text(
                     text = mode.endsAt,
                     style = ElementTheme.typography.fontBodySmRegular,
@@ -138,7 +176,7 @@ private fun LiveLocationOverlay(
             }
         }
 
-        if (mode.canStopSharing) {
+        if (mode.canStopSharing && !stopRequested) {
             IconButton(
                 onClick = onStopClick,
                 colors = IconButtonDefaults.iconButtonColors(
@@ -151,7 +189,7 @@ private fun LiveLocationOverlay(
             ) {
                 Icon(
                     imageVector = CompoundIcons.Stop(),
-                    contentDescription = null,
+                    contentDescription = stringResource(CommonStrings.action_stop),
                 )
             }
         }
@@ -164,6 +202,17 @@ internal fun TimelineItemLocationViewPreview(@PreviewParameter(TimelineItemLocat
     ElementPreview {
         TimelineItemLocationView(
             content = content,
+            onContentClick = {},
             onStopLiveLocationClick = {},
         )
     }
+
+@PreviewsDayNight
+@Composable
+internal fun TimelineItemLocationStoppingPreview() = ElementPreview {
+    LiveLocationOverlay(
+        mode = aLiveLocationMode(isActive = true),
+        stopRequested = true,
+        onStopClick = {},
+    )
+}

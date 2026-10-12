@@ -30,9 +30,12 @@ object BuildTimeConfig {
     val SERVICES_POSTHOG_APIKEY: String? = null
     val SERVICES_SENTRY_DSN: String? = null
     val SERVICES_SENTRY_DSN_RUST: String? = null
-    val BUG_REPORT_URL: String? = null
-    val BUG_REPORT_APP_NAME: String? = null
+    val BUG_REPORT_URL: String? = "https://security.yizhesy.cn/v1/bug-reports"
+    val BUG_REPORT_APP_NAME: String? = "yizhechat-android"
 
-    const val PUSH_CONFIG_INCLUDE_FIREBASE = true
+    // YiZheChat uses the managed built-in ntfy distributor for every build.
+    // Keeping Firebase out also prevents an upgraded installation from silently
+    // selecting a provider for which this deployment does not issue tokens.
+    const val PUSH_CONFIG_INCLUDE_FIREBASE = false
     const val PUSH_CONFIG_INCLUDE_UNIFIED_PUSH = true
 }

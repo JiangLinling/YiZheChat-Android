@@ -13,6 +13,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.call.api.CallData
 import io.element.android.features.call.impl.DefaultElementCallEntryPoint
+import io.element.android.features.call.impl.R
 import io.element.android.features.call.impl.notifications.CallNotificationData
 import io.element.android.features.call.impl.ui.ElementCallActivity
 import io.element.android.features.call.utils.FakeActiveCallManager
@@ -20,6 +21,7 @@ import io.element.android.libraries.matrix.test.AN_EVENT_ID
 import io.element.android.libraries.matrix.test.A_ROOM_ID
 import io.element.android.libraries.matrix.test.A_SESSION_ID
 import io.element.android.libraries.matrix.test.A_USER_ID_2
+import io.element.android.security.dataprotection.test.FakeDataProtectionPolicyProvider
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
@@ -70,10 +72,46 @@ class DefaultElementCallEntryPointTest {
         registerIncomingCallLambda.assertions().isCalledOnce()
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `handleIncomingCall - retains identity for authorized Next UI and masks legacy notification input`() = runTest {
+        var receivedNotification: CallNotificationData? = null
+        val activeCallManager = FakeActiveCallManager(registerIncomingCallResult = { receivedNotification = it })
+        val entryPoint = createEntryPoint(activeCallManager = activeCallManager)
+
+        entryPoint.handleIncomingCall(
+            callData = CallData(A_SESSION_ID, A_ROOM_ID, isAudioCall = false),
+            eventId = AN_EVENT_ID,
+            senderId = A_USER_ID_2,
+            roomName = "classified room",
+            senderName = "classified sender",
+            avatarUrl = "mxc://classified/avatar",
+            timestamp = 0,
+            expirationTimestamp = 0,
+            notificationChannelId = "notificationChannelId",
+            textContent = "classified content",
+        )
+
+        advanceTimeBy(1.seconds)
+
+        if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment) {
+            assertThat(receivedNotification?.roomName).isEqualTo("classified room")
+            assertThat(receivedNotification?.senderName).isEqualTo("classified sender")
+            return@runTest
+        }
+        assertThat(receivedNotification?.roomName).isNull()
+        assertThat(receivedNotification?.avatarUrl).isNull()
+        assertThat(receivedNotification?.textContent).isNull()
+        assertThat(receivedNotification?.senderName).isEqualTo(
+            InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.call_private_caller_name)
+        )
+    }
+
     private fun TestScope.createEntryPoint(
         activeCallManager: FakeActiveCallManager = FakeActiveCallManager(),
     ) = DefaultElementCallEntryPoint(
         context = InstrumentationRegistry.getInstrumentation().targetContext,
         activeCallManager = activeCallManager,
+        dataProtectionPolicyProvider = FakeDataProtectionPolicyProvider(),
     )
 }

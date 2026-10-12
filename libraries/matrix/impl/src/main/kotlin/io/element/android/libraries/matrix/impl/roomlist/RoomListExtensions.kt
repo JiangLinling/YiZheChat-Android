@@ -58,6 +58,7 @@ internal fun RoomListInterface.entriesFlow(
     pageSize: Int,
     initialFilterKind: RoomListEntriesDynamicFilterKind,
     onControllerCreated: (RoomListDynamicEntriesController) -> Unit,
+    onControllerReleased: (RoomListDynamicEntriesController) -> Unit = { it.destroy() },
 ): Flow<List<RoomListEntriesUpdate>> =
     callbackFlow {
         val listener = object : RoomListEntriesListener {
@@ -70,12 +71,20 @@ internal fun RoomListInterface.entriesFlow(
             listener = listener,
         )
         val controller = result.controller()
-        controller.setFilter(initialFilterKind)
-        onControllerCreated(controller)
-        awaitClose {
-            result.entriesStream().cancelAndDestroy()
-            controller.destroy()
-            result.destroy()
+        try {
+            controller.setFilter(initialFilterKind)
+            onControllerCreated(controller)
+            awaitClose()
+        } finally {
+            try {
+                result.entriesStream().cancelAndDestroy()
+            } finally {
+                try {
+                    onControllerReleased(controller)
+                } finally {
+                    result.destroy()
+                }
+            }
         }
     }.catch {
         Timber.d(it, "entriesFlow() failed")

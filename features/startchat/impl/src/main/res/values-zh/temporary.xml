@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_add_friend_title">添加朋友</string>
+    <string name="screen_add_friend_scan">扫一扫</string>
+    <string name="screen_add_friend_my_qr_code">我的二维码</string>
+    <string name="screen_friend_scan_title">扫一扫添加朋友</string>
+    <string name="screen_friend_scan_description">扫描乙者好友二维码</string>
+    <string name="screen_friend_scan_active">正在扫描</string>
+    <string name="screen_friend_scan_waiting">相机不可用</string>
+    <string name="screen_friend_scan_camera_permission">允许使用相机后即可扫描乙者好友二维码</string>
+    <string name="screen_friend_scan_my_qr_description">让朋友扫一扫添加你</string>
+    <string name="screen_friend_scan_invalid">这不是有效的乙者好友二维码</string>
+    <string name="screen_friend_scan_again">重新扫描</string>
+    <string name="screen_friend_scan_from_image">从相册扫码</string>
+    <string name="screen_friend_my_qr_title">我的二维码</string>
+    <string name="screen_friend_my_qr_description">让朋友扫描此二维码即可找到并添加你。二维码不包含电话、备注等私密资料。</string>
+    <string name="screen_add_friend_search_hint">搜索昵称或账号</string>
+    <string name="screen_friend_copy_account">复制账号</string>
+    <string name="screen_friend_account_copied">账号已复制</string>
+    <string name="screen_friend_save_qr">保存二维码</string>
+    <string name="screen_friend_qr_saved">二维码已保存</string>
+    <string name="screen_friend_qr_save_failed">二维码保存失败</string>
+</resources>

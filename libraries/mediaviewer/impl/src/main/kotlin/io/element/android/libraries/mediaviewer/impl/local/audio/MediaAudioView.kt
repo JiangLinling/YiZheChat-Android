@@ -31,6 +31,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,6 +88,7 @@ fun MediaAudioView(
     audioFocus: AudioFocus?,
     modifier: Modifier = Modifier,
     isDisplayed: Boolean = true,
+    onPlaybackEnded: () -> Unit = {},
 ) {
     val exoPlayer = rememberExoPlayer(forAudioOnly = true)
     ExoPlayerMediaAudioView(
@@ -97,6 +99,7 @@ fun MediaAudioView(
         localMedia = localMedia,
         info = info,
         audioFocus = audioFocus,
+        onPlaybackEnded = onPlaybackEnded,
         modifier = modifier,
     )
 }
@@ -111,6 +114,7 @@ private fun ExoPlayerMediaAudioView(
     localMedia: LocalMedia?,
     info: MediaInfo?,
     audioFocus: AudioFocus?,
+    onPlaybackEnded: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var mediaPlayerControllerState: MediaPlayerControllerState by remember {
@@ -144,6 +148,7 @@ private fun ExoPlayerMediaAudioView(
 
     localMediaViewState.playableState = playableState
 
+    val currentOnPlaybackEnded by rememberUpdatedState(onPlaybackEnded)
     val playerListener = remember {
         object : Player.Listener {
             override fun onRenderedFirstFrame() {
@@ -169,6 +174,12 @@ private fun ExoPlayerMediaAudioView(
 
             override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
                 metadata = mediaMetadata
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    currentOnPlaybackEnded()
+                }
             }
         }
     }

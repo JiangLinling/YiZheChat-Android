@@ -1,3 +1,5 @@
+import extension.testCommonDependencies
+
 /*
  * Copyright (c) 2025 Element Creations Ltd.
  * Copyright 2023-2025 New Vector Ltd.
@@ -16,4 +18,8 @@ android {
 
 dependencies {
     implementation(projects.libraries.architecture)
+    implementation(projects.security.dataProtection.api)
+
+    testCommonDependencies(libs)
+    testImplementation(libs.coroutines.test)
 }

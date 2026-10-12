@@ -29,8 +29,10 @@ import io.element.android.features.preferences.impl.about.AboutNode
 import io.element.android.features.preferences.impl.advanced.AdvancedSettingsNode
 import io.element.android.features.preferences.impl.analytics.AnalyticsSettingsNode
 import io.element.android.features.preferences.impl.blockedusers.BlockedUsersNode
+import io.element.android.features.preferences.impl.chatsecurity.ChatSecurityNode
 import io.element.android.features.preferences.impl.developer.DeveloperSettingsNode
 import io.element.android.features.preferences.impl.labs.LabsNode
+import io.element.android.features.preferences.impl.messagefavourites.MessageFavouritesNode
 import io.element.android.features.preferences.impl.notifications.NotificationSettingsNode
 import io.element.android.features.preferences.impl.notifications.edit.EditDefaultNotificationSettingNode
 import io.element.android.features.preferences.impl.root.PreferencesRootNode
@@ -90,6 +92,9 @@ class PreferencesFlowNode(
         data object NotificationSettings : NavTarget
 
         @Parcelize
+        data object ChatSecurity : NavTarget
+
+        @Parcelize
         data object TroubleshootNotifications : NavTarget
 
         @Parcelize
@@ -106,6 +111,9 @@ class PreferencesFlowNode(
 
         @Parcelize
         data object BlockedUsers : NavTarget
+
+        @Parcelize
+        data object MessageFavourites : NavTarget
 
         @Parcelize
         data object SignOut : NavTarget
@@ -151,6 +159,10 @@ class PreferencesFlowNode(
                         backstack.push(NavTarget.NotificationSettings)
                     }
 
+                    override fun navigateToChatSecurity() {
+                        backstack.push(NavTarget.ChatSecurity)
+                    }
+
                     override fun navigateToLockScreenSettings() {
                         backstack.push(NavTarget.LockScreenSettings)
                     }
@@ -171,8 +183,16 @@ class PreferencesFlowNode(
                         backstack.push(NavTarget.UserProfile(matrixUser))
                     }
 
+                    override fun navigateToMyQrCode() {
+                        callback.navigateToMyQrCode()
+                    }
+
                     override fun navigateToBlockedUsers() {
                         backstack.push(NavTarget.BlockedUsers)
+                    }
+
+                    override fun navigateToMessageFavourites() {
+                        backstack.push(NavTarget.MessageFavourites)
                     }
 
                     override fun startSignOutFlow() {
@@ -232,6 +252,18 @@ class PreferencesFlowNode(
                 }
                 createNode<NotificationSettingsNode>(buildContext, listOf(notificationSettingsCallback))
             }
+            NavTarget.ChatSecurity -> {
+                val chatSecurityCallback = object : ChatSecurityNode.Callback {
+                    override fun navigateToEnterRecoveryKey() {
+                        callback.navigateToEnterRecoveryKey()
+                    }
+
+                    override fun navigateToSecureBackup() {
+                        callback.navigateToSecureBackup()
+                    }
+                }
+                createNode<ChatSecurityNode>(buildContext, listOf(chatSecurityCallback))
+            }
             NavTarget.TroubleshootNotifications -> {
                 notificationTroubleShootEntryPoint.createNode(
                     parentNode = this,
@@ -280,13 +312,26 @@ class PreferencesFlowNode(
                 createNode<EditDefaultNotificationSettingNode>(buildContext, plugins = listOf(input, callback))
             }
             NavTarget.AdvancedSettings -> {
-                createNode<AdvancedSettingsNode>(buildContext)
+                val advancedSettingsCallback = object : AdvancedSettingsNode.Callback {
+                    override fun navigateToAnalyticsSettings() {
+                        backstack.push(NavTarget.AnalyticsSettings)
+                    }
+
+                    override fun navigateToLockScreenSettings() {
+                        backstack.push(NavTarget.LockScreenSettings)
+                    }
+                }
+                createNode<AdvancedSettingsNode>(buildContext, listOf(advancedSettingsCallback))
             }
             is NavTarget.UserProfile -> {
                 val inputs = EditUserProfileNode.Inputs(navTarget.matrixUser)
                 val callback = object : EditUserProfileNode.Callback {
                     override fun onDone() {
-                        backstack.pop()
+                        if (backstack.canPop()) {
+                            backstack.pop()
+                        } else {
+                            navigateUp()
+                        }
                     }
                 }
                 createNode<EditUserProfileNode>(buildContext, listOf(inputs, callback))
@@ -306,10 +351,22 @@ class PreferencesFlowNode(
             NavTarget.BlockedUsers -> {
                 createNode<BlockedUsersNode>(buildContext)
             }
+            NavTarget.MessageFavourites -> {
+                val messageFavouritesCallback = object : MessageFavouritesNode.Callback {
+                    override fun navigateToEvent(roomId: RoomId, eventId: EventId) {
+                        callback.navigateToEvent(roomId, eventId)
+                    }
+                }
+                createNode<MessageFavouritesNode>(buildContext, plugins = listOf(messageFavouritesCallback))
+            }
             NavTarget.SignOut -> {
                 val callBack: LogoutEntryPoint.Callback = object : LogoutEntryPoint.Callback {
-                    override fun navigateToSecureBackup() {
-                        callback.navigateToSecureBackup()
+                    override fun navigateToRecovery(destination: LogoutEntryPoint.RecoveryDestination) {
+                        when (destination) {
+                            LogoutEntryPoint.RecoveryDestination.SET_UP -> callback.navigateToSetUpRecoveryKey()
+                            LogoutEntryPoint.RecoveryDestination.CONFIRM -> callback.navigateToEnterRecoveryKey()
+                            LogoutEntryPoint.RecoveryDestination.CHANGE -> callback.navigateToChangeRecoveryKey()
+                        }
                     }
                 }
                 logoutEntryPoint.createNode(

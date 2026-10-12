@@ -67,6 +67,8 @@ fun ElementThemeApp(
     val theme by remember(isBlackThemeAllowed) {
         appPreferencesStore.getThemeFlow().mapToTheme(allowBlackTheme = isBlackThemeAllowed)
     }.collectAsState(initial = Theme.System)
+    val yiZheLight = remember(compoundLight) { compoundLight.withYiZheLightColors() }
+    val yiZheDark = remember(compoundDark) { compoundDark.withYiZheDarkColors() }
     LaunchedEffect(theme) {
         AppCompatDelegate.setDefaultNightMode(
             when (theme) {
@@ -82,8 +84,8 @@ fun ElementThemeApp(
         ElementTheme(
             theme = theme,
             content = content,
-            compoundLight = compoundLight,
-            compoundDark = compoundDark,
+            compoundLight = yiZheLight,
+            compoundDark = yiZheDark,
         )
     }
 }

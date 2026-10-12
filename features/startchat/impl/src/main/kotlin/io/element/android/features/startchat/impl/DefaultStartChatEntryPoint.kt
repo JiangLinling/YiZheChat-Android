@@ -21,7 +21,8 @@ class DefaultStartChatEntryPoint : StartChatEntryPoint {
         parentNode: Node,
         buildContext: BuildContext,
         callback: StartChatEntryPoint.Callback,
+        params: StartChatEntryPoint.Params,
     ): Node {
-        return parentNode.createNode<StartChatFlowNode>(buildContext, listOf(callback))
+        return parentNode.createNode<StartChatFlowNode>(buildContext, listOf(callback, params))
     }
 }

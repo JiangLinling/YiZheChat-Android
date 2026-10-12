@@ -11,7 +11,9 @@ package io.element.android.libraries.matrix.impl.media
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.core.mimetype.MimeTypes
+import io.element.android.libraries.matrix.api.media.EphemeralMediaCacheUnavailableException
 import io.element.android.libraries.matrix.api.media.MatrixMediaLoader
+import io.element.android.libraries.matrix.api.media.MediaCachePolicy
 import io.element.android.libraries.matrix.api.media.MediaFile
 import io.element.android.libraries.matrix.api.media.MediaSource
 import kotlinx.coroutines.withContext
@@ -24,6 +26,7 @@ class RustMediaLoader(
     private val baseCacheDirectory: File,
     dispatchers: CoroutineDispatchers,
     private val innerClient: Client,
+    private val ephemeralMediaContent: (suspend (MediaSource) -> ByteArray)? = null,
 ) : MatrixMediaLoader {
     private val mediaDispatcher = dispatchers.io.limitedParallelism(32)
     private val cacheDirectory
@@ -31,8 +34,16 @@ class RustMediaLoader(
             if (!exists()) mkdirs() // Must always ensure that this directory exists because "Clear cache" does not restart an app's process.
         }
 
-    override suspend fun loadMediaContent(source: MediaSource): Result<ByteArray> =
-        withContext(mediaDispatcher) {
+    override suspend fun loadMediaContent(
+        source: MediaSource,
+        cachePolicy: MediaCachePolicy,
+    ): Result<ByteArray> =
+        if (cachePolicy == MediaCachePolicy.EPHEMERAL) {
+            runCatchingExceptions {
+                val load = ephemeralMediaContent ?: throw EphemeralMediaCacheUnavailableException()
+                load(source)
+            }
+        } else withContext(mediaDispatcher) {
             runCatchingExceptions {
                 source.toRustMediaSource().use { source ->
                     innerClient.getMediaContent(source)
@@ -43,8 +54,10 @@ class RustMediaLoader(
     override suspend fun loadMediaThumbnail(
         source: MediaSource,
         width: Long,
-        height: Long
+        height: Long,
+        cachePolicy: MediaCachePolicy,
     ): Result<ByteArray> =
+        rejectUnsupportedEphemeralPolicy(cachePolicy) ?:
         withContext(mediaDispatcher) {
             runCatchingExceptions {
                 source.toRustMediaSource().use { mediaSource ->
@@ -56,6 +69,17 @@ class RustMediaLoader(
                 }
             }
         }
+
+    private fun rejectUnsupportedEphemeralPolicy(cachePolicy: MediaCachePolicy): Result<ByteArray>? {
+        return if (cachePolicy == MediaCachePolicy.EPHEMERAL) {
+            // The current Matrix Rust FFI exposes cache control only for getMediaFile, whose contract materializes a
+            // plaintext temporary file. Until it exposes an uncached in-memory request, do not downgrade one-time
+            // content to the reusable media store.
+            Result.failure(EphemeralMediaCacheUnavailableException())
+        } else {
+            null
+        }
+    }
 
     override suspend fun downloadMediaFile(
         source: MediaSource,

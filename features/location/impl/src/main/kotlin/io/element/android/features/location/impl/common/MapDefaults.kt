@@ -35,8 +35,9 @@ object MapDefaults {
     )
 
     val defaultCameraPosition = CameraPosition(
-        target = Position(0.0, 0.0),
-        zoom = 0.0,
+        // Centre the empty state on China instead of the Gulf of Guinea (0, 0).
+        target = Position(longitude = 104.1954, latitude = 35.8617),
+        zoom = 3.4,
     )
     const val DEFAULT_ZOOM = 15.0
 

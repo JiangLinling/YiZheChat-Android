@@ -25,7 +25,12 @@ data class UserProfileState(
     val isCurrentUser: Boolean,
     val dmRoomId: RoomId?,
     val canCall: Boolean,
+    val privateProfile: FriendPrivateProfile,
+    val savePrivateProfileAction: AsyncAction<Unit>,
     val snackbarMessage: SnackbarMessage?,
+    val canRemoveFriend: Boolean = false,
+    val removeFriendAction: AsyncAction<Unit> = AsyncAction.Uninitialized,
+    val removeFriendDiagnostic: String? = null,
     val eventSink: (UserProfileEvents) -> Unit
 ) {
     enum class ConfirmationDialog {

@@ -8,15 +8,24 @@
 
 package io.element.android.features.messages.impl.timeline.model.event
 
+import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.notification.CallIntent
 import io.element.android.libraries.matrix.api.timeline.item.event.EventType
 
-// State of the call, for now only isDeclined but in the future could be missed, active.
+// Actor identities belong to the terminal action, not the original invitation sender.
 sealed interface RtcNotificationState {
-    /** Some users have declined, byMe indicates if the current user is one of them. */
-    data class Declined(val byMe: Boolean) : RtcNotificationState
+    /** Retain all legacy decline actors, or the protected lifecycle action actor. */
+    data class Declined(val byMe: Boolean, val actors: List<UserId> = emptyList()) : RtcNotificationState
 
-    object Started : RtcNotificationState
+    data class Cancelled(val byMe: Boolean, val actor: UserId? = null) : RtcNotificationState
+
+    data class Missed(val byMe: Boolean, val actor: UserId? = null) : RtcNotificationState
+
+    data class Ended(val durationMillis: Long?) : RtcNotificationState
+
+    data object Connected : RtcNotificationState
+
+    data object Started : RtcNotificationState
 }
 
 class TimelineItemRtcNotificationContent(

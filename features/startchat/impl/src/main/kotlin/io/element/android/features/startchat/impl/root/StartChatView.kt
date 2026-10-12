@@ -46,6 +46,7 @@ import io.element.android.libraries.designsystem.theme.components.Scaffold
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.designsystem.theme.components.TopAppBar
 import io.element.android.libraries.matrix.api.core.RoomId
+import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.ui.components.CreateDmConfirmationBottomSheet
 import io.element.android.libraries.matrix.ui.components.MatrixUserRow
 import io.element.android.libraries.ui.strings.CommonStrings
@@ -61,6 +62,9 @@ fun StartChatView(
     onInviteFriendsClick: () -> Unit,
     onJoinByAddressClick: () -> Unit,
     onRoomDirectorySearchClick: () -> Unit,
+    onScanClick: () -> Unit = {},
+    onMyQrCodeClick: () -> Unit = {},
+    onUserSelected: (MatrixUser) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -91,22 +95,28 @@ fun StartChatView(
                 onSelectUser = {
                     coroutineScope.launch {
                         view.hideKeyboardAndAwaitAnimation()
-                        state.eventSink(StartChatEvents.StartDM(it))
+                        onUserSelected(it)
                     }
                 },
                 onDeselectUser = { },
+                searchPlaceholder = stringResource(R.string.screen_add_friend_search_hint),
             )
 
             if (!state.userListState.isSearchActive) {
-                CreateRoomActionButtonsList(
-                    state = state,
-                    onNewRoomClick = onNewRoomClick,
-                    onInvitePeopleClick = onInviteFriendsClick,
-                    onJoinByAddressClick = onJoinByAddressClick,
-                    onRoomDirectorySearchClick = onRoomDirectorySearchClick,
-                    onDmClick = onOpenDM,
+                CreateRoomActionButton(
+                    iconRes = R.drawable.ic_yizhe_scan,
+                    text = stringResource(R.string.screen_add_friend_scan),
+                    onClick = onScanClick,
+                )
+                CreateRoomActionButton(
+                    iconRes = CompoundDrawables.ic_compound_qr_code,
+                    text = stringResource(R.string.screen_add_friend_my_qr_code),
+                    onClick = onMyQrCodeClick,
                 )
             }
+
+            // This entry point is the YiZheChat "Add friend" search. Do not mix
+            // room creation or recent-chat suggestions into the friend workflow.
         }
     }
 
@@ -149,7 +159,7 @@ private fun CreateRoomRootViewTopBar(
     onCloseClick: () -> Unit,
 ) {
     TopAppBar(
-        titleStr = stringResource(id = CommonStrings.action_start_chat),
+        titleStr = stringResource(id = R.string.screen_add_friend_title),
         navigationIcon = {
             BackButton(
                 imageVector = CompoundIcons.Close(),
@@ -163,9 +173,6 @@ private fun CreateRoomRootViewTopBar(
 private fun CreateRoomActionButtonsList(
     state: StartChatState,
     onNewRoomClick: () -> Unit,
-    onInvitePeopleClick: () -> Unit,
-    onJoinByAddressClick: () -> Unit,
-    onRoomDirectorySearchClick: () -> Unit,
     onDmClick: (RoomId) -> Unit,
 ) {
     LazyColumn {
@@ -174,27 +181,6 @@ private fun CreateRoomActionButtonsList(
                 iconRes = CompoundDrawables.ic_compound_plus,
                 text = stringResource(id = R.string.screen_create_room_action_create_room),
                 onClick = onNewRoomClick,
-            )
-        }
-        item {
-            CreateRoomActionButton(
-                iconRes = CompoundDrawables.ic_compound_list_bulleted,
-                text = stringResource(id = R.string.screen_room_directory_search_title),
-                onClick = onRoomDirectorySearchClick,
-            )
-        }
-        item {
-            CreateRoomActionButton(
-                iconRes = CompoundDrawables.ic_compound_share_android,
-                text = stringResource(id = CommonStrings.action_invite_friends_to_app, state.applicationName),
-                onClick = onInvitePeopleClick,
-            )
-        }
-        item {
-            CreateRoomActionButton(
-                iconRes = CompoundDrawables.ic_compound_room,
-                text = stringResource(R.string.screen_start_chat_join_room_by_address_action),
-                onClick = onJoinByAddressClick,
             )
         }
         if (state.userListState.recentDirectRooms.isNotEmpty()) {
@@ -260,5 +246,8 @@ internal fun StartChatViewPreview(@PreviewParameter(StartChatStateProvider::clas
             onJoinByAddressClick = {},
             onInviteFriendsClick = {},
             onRoomDirectorySearchClick = {},
+            onScanClick = {},
+            onMyQrCodeClick = {},
+            onUserSelected = {},
         )
     }

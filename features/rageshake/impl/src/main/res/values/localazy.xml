@@ -19,4 +19,18 @@
   <string name="screen_bug_report_send_notification_settings_description">"If you are having issues with notifications, uploading the notification push rules can help us pinpoint the root cause. Note these rules can contain private information, such as your display name or keywords to be notified for."</string>
   <string name="screen_bug_report_send_notification_settings_title">"Send notification settings"</string>
   <string name="screen_bug_report_view_logs">"View logs"</string>
+  <string name="screen_bug_report_intro">"Tell us what happened. You can add images or a screen recording to make the problem easier to reproduce."</string>
+  <string name="screen_bug_report_attachments_title">"Images and screen recordings"</string>
+  <string name="screen_bug_report_add_media">"Add images or screen recording"</string>
+  <string name="screen_bug_report_attachments_hint">"%1$d of %2$d added · compressed before upload · up to 20 MB total"</string>
+  <string name="screen_bug_report_attachment_selection_trimmed">"Only the remaining available attachments were added."</string>
+  <string name="screen_bug_report_attachment_compressing">"Compressing…"</string>
+  <string name="screen_bug_report_attachment_unsupported">"This format is not supported. Remove it to continue."</string>
+  <string name="screen_bug_report_attachment_compression_failed">"Compression failed. The original file will not be uploaded."</string>
+  <string name="screen_bug_report_attachment_too_large">"Still over 15 MB after compression. Remove it to continue."</string>
+  <string name="screen_bug_report_attachments_total_too_large">"Attachments exceed 20 MB in total. Remove some to continue."</string>
+  <string name="screen_bug_report_remove_attachment">"Remove attachment"</string>
+  <string name="screen_bug_report_current_screenshot">"Current screenshot"</string>
+  <string name="screen_bug_report_include_title">"Include with report"</string>
+  <string name="screen_bug_report_privacy_notice">"Diagnostics may contain display names or message snippets. Turn off any item you do not want to send. Images and videos are compressed locally before upload."</string>
 </resources>

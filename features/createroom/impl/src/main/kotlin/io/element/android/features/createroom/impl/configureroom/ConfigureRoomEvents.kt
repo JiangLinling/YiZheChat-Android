@@ -9,13 +9,17 @@
 package io.element.android.features.createroom.impl.configureroom
 
 import io.element.android.libraries.matrix.api.spaces.SpaceRoom
+import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.ui.media.AvatarAction
+import io.element.android.security.contentprotection.api.RoomLifecycleProfileKind
 
 sealed interface ConfigureRoomEvents {
+    data class ToggleInvite(val user: MatrixUser) : ConfigureRoomEvents
     data class RoomNameChanged(val name: String) : ConfigureRoomEvents
     data class TopicChanged(val topic: String) : ConfigureRoomEvents
     data class JoinRuleChanged(val joinRuleItem: JoinRuleItem) : ConfigureRoomEvents
     data class RoomAddressChanged(val roomAddress: String) : ConfigureRoomEvents
+    data class LifecycleProfileChanged(val profileKind: RoomLifecycleProfileKind) : ConfigureRoomEvents
     data object CreateRoom : ConfigureRoomEvents
     data class HandleAvatarAction(val action: AvatarAction) : ConfigureRoomEvents
     data class SetParentSpace(val space: SpaceRoom?) : ConfigureRoomEvents

@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.libraries.designsystem.preview.ElementPreview
@@ -30,6 +31,7 @@ fun PlaybackSpeedButton(
     speed: Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    containerColor: Color = ElementTheme.colors.bgCanvasDefault,
 ) {
     val speedText = when (speed) {
         0.5f -> "0.5×"
@@ -42,7 +44,7 @@ fun PlaybackSpeedButton(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(
-                color = ElementTheme.colors.bgCanvasDefault,
+                color = containerColor,
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 4.dp),

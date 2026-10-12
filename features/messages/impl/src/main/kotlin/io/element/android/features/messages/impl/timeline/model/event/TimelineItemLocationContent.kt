@@ -8,6 +8,7 @@
 
 package io.element.android.features.messages.impl.timeline.model.event
 
+import io.element.android.features.location.api.live.PausedLiveLocationShare
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -29,6 +30,7 @@ data class TimelineItemLocationContent(
     val description: String? = null,
     val assetType: AssetType? = null,
     val mode: Mode,
+    override val isBurnAfterRead: Boolean = false,
 ) : TimelineItemEventContent {
     val location = when (mode) {
         is Mode.Live -> mode.lastKnownLocation
@@ -41,7 +43,7 @@ data class TimelineItemLocationContent(
      */
     val pinVariant: PinVariant = when (mode) {
         is Mode.Live -> {
-            if (mode.isActive) {
+            if (mode.isActive && mode.pausedState == null) {
                 PinVariant.UserLocation(avatarData = senderAvatar(), isLive = true)
             } else {
                 PinVariant.StaleLocation
@@ -75,6 +77,9 @@ data class TimelineItemLocationContent(
             val endsAt: String,
             val endTimestamp: Long,
             val isOwnUser: Boolean,
+            /** Opaque protected aggregate identifier; never contains coordinates or message text. */
+            val protectedAggregateId: String? = null,
+            val pausedState: PausedLiveLocationShare? = null,
         ) : Mode {
             val isLoading = lastKnownLocation == null && isActive
             val canStopSharing = isActive && isOwnUser

@@ -12,6 +12,8 @@ import androidx.compose.runtime.Immutable
 import io.element.android.features.messages.impl.timeline.components.MessageShieldData
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemEventContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemImageContent
+import io.element.android.features.messages.impl.timeline.model.event.TimelineItemLocationContent
+import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRelayContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemStickerContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemTextBasedContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemVideoContent
@@ -28,6 +30,7 @@ import io.element.android.libraries.matrix.api.timeline.item.ThreadSummary
 import io.element.android.libraries.matrix.api.timeline.item.TimelineItemDebugInfo
 import io.element.android.libraries.matrix.api.timeline.item.event.EventOrTransactionId
 import io.element.android.libraries.matrix.api.timeline.item.event.LocalEventSendState
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageClipboardSource
 import io.element.android.libraries.matrix.api.timeline.item.event.MessageShield
 import io.element.android.libraries.matrix.api.timeline.item.event.MessageShieldProvider
 import io.element.android.libraries.matrix.api.timeline.item.event.ProfileDetails
@@ -36,12 +39,13 @@ import io.element.android.libraries.matrix.api.timeline.item.event.TimelineItemD
 import io.element.android.libraries.matrix.api.timeline.item.event.TimelineItemEventOrigin
 import io.element.android.libraries.matrix.api.timeline.item.event.getDisambiguatedDisplayName
 import io.element.android.libraries.matrix.ui.messages.reply.InReplyToDetails
+import io.element.android.security.contentprotection.api.TrustedRedactionReason
 import kotlinx.collections.immutable.ImmutableList
 
 @Immutable
 sealed interface TimelineItem {
     fun identifier(): UniqueId = when (this) {
-        is Event -> id
+        is Event -> displayId
         is Virtual -> id
         is GroupedEvents -> id
     }
@@ -103,6 +107,12 @@ sealed interface TimelineItem {
         val forwarder: UserId?,
         /** If [forwarder] is set, the profile of the forwarding user, if it was cached at the time the `EventTimelineItem` was created. */
         val forwarderProfile: ProfileDetails?,
+        /** Stable UI identity used while an optimistic echo becomes its authenticated remote event. */
+        val displayId: UniqueId = id,
+        /** Present only after the control-plane redaction receipt has been verified. */
+        val trustedRedactionReason: TrustedRedactionReason? = null,
+        /** Exact local authority for copying this projection; null means fail closed. */
+        val clipboardSource: MessageClipboardSource? = null,
     ) : TimelineItem {
         val showSenderInformation = groupPosition.isNew() && !isMine
 
@@ -124,6 +134,8 @@ sealed interface TimelineItem {
             is TimelineItemStickerContent -> content.formattedCaption == null && content.caption == null
             is TimelineItemImageContent -> content.formattedCaption == null && content.caption == null
             is TimelineItemVideoContent -> content.formattedCaption == null && content.caption == null
+            is TimelineItemLocationContent -> false
+            is TimelineItemRelayContent -> false
             else -> true
         }
 
@@ -145,7 +157,13 @@ sealed interface TimelineItem {
         val id: UniqueId,
         val events: ImmutableList<Event>,
         val aggregatedReadReceipts: ImmutableList<ReadReceiptData>,
+        val kind: GroupedEventsKind = GroupedEventsKind.ROOM_CHANGES,
     ) : TimelineItem
+}
+
+enum class GroupedEventsKind {
+    ROOM_CHANGES,
+    MEDIA_ALBUM,
 }
 
 sealed interface TimelineItemThreadInfo {

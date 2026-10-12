@@ -15,10 +15,14 @@ import app.cash.turbine.ReceiveTurbine
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.matrix.api.core.EventId
+import io.element.android.libraries.matrix.api.core.UniqueId
+import io.element.android.libraries.matrix.api.media.MatrixMediaLoader
+import io.element.android.libraries.matrix.api.media.MediaFile
 import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.api.timeline.item.event.EventOrTransactionId
+import io.element.android.libraries.matrix.api.timeline.item.event.SegmentedVideoCandidate
 import io.element.android.libraries.matrix.api.timeline.item.event.toEventOrTransactionId
 import io.element.android.libraries.matrix.test.AN_EVENT_ID
 import io.element.android.libraries.matrix.test.AN_EVENT_ID_2
@@ -40,6 +44,7 @@ import io.element.android.libraries.mediaviewer.impl.details.MediaBottomSheetSta
 import io.element.android.libraries.mediaviewer.impl.model.GroupedMediaItems
 import io.element.android.libraries.mediaviewer.impl.model.aMediaItemImage
 import io.element.android.libraries.mediaviewer.impl.model.aMediaItemLoadingIndicator
+import io.element.android.libraries.mediaviewer.impl.segmented.product.SegmentedVideoPlaybackOwnerFactory
 import io.element.android.libraries.mediaviewer.test.FakeLocalMediaActions
 import io.element.android.libraries.mediaviewer.test.FakeLocalMediaFactory
 import io.element.android.services.toolbox.test.systemclock.FakeSystemClock
@@ -48,15 +53,19 @@ import io.element.android.tests.testutils.lambda.lambdaRecorder
 import io.element.android.tests.testutils.lambda.value
 import io.element.android.tests.testutils.test
 import io.element.android.tests.testutils.testCoroutineDispatchers
+import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
 
 private val TESTED_MEDIA_INFO = anApkMediaInfo(
     senderId = A_USER_ID,
@@ -243,6 +252,77 @@ class MediaViewerPresenterTest {
                     )
                 )
             )
+        }
+    }
+
+    @Test
+    fun `present - cancel loading media cancels the actual loader job`() = runTest {
+        val mediaLoader = CancellationAwareMediaLoader()
+        val presenter = createMediaViewerPresenter(
+            localMediaFactory = localMediaFactory,
+            matrixMediaLoader = mediaLoader,
+        )
+        val data = aMediaViewerPageData(mediaSource = MediaSource(aUrl))
+
+        presenter.test {
+            val state = awaitFirstItem()
+            state.eventSink(MediaViewerEvent.LoadMedia(data))
+            mediaLoader.started.await()
+
+            state.eventSink(MediaViewerEvent.CancelLoadingMedia(data))
+
+            mediaLoader.cancelled.await()
+        }
+    }
+
+    @Test
+    fun `present - segmented loads sharing init source keep independent jobs and cancellation`() = runTest {
+        val playbackOwnerFactory = mockk<SegmentedVideoPlaybackOwnerFactory>()
+        val callIndex = AtomicInteger(0)
+        val started = List(2) { CompletableDeferred<Unit>() }
+        val cancelled = List(2) { CompletableDeferred<Unit>() }
+        coEvery { playbackOwnerFactory.create(any(), any()) } coAnswers {
+            val index = callIndex.getAndIncrement()
+            started[index].complete(Unit)
+            try {
+                awaitCancellation()
+            } finally {
+                cancelled[index].complete(Unit)
+            }
+        }
+        val presenter = createMediaViewerPresenter(
+            localMediaFactory = localMediaFactory,
+            segmentedVideoPlaybackOwnerFactory = playbackOwnerFactory,
+        )
+        val sharedSource = MediaSource("mxc://matrix.example/shared-init")
+        val first = MediaViewerPageData.MediaViewerData(
+            eventId = AN_EVENT_ID,
+            mediaInfo = TESTED_MEDIA_INFO,
+            mediaSource = sharedSource,
+            thumbnailSource = null,
+            downloadedMedia = androidx.compose.runtime.mutableStateOf(AsyncData.Uninitialized),
+            pagerKey = 0L,
+            segmentedVideo = mockk<SegmentedVideoCandidate>("firstCandidate"),
+            mediaItemId = UniqueId("first-item"),
+        )
+        val second = first.copy(
+            eventId = AN_EVENT_ID_2,
+            pagerKey = 1L,
+            segmentedVideo = mockk<SegmentedVideoCandidate>("secondCandidate"),
+            mediaItemId = UniqueId("second-item"),
+        )
+
+        presenter.test {
+            val state = awaitFirstItem()
+            state.eventSink(MediaViewerEvent.LoadMedia(first))
+            started[0].await()
+            state.eventSink(MediaViewerEvent.LoadMedia(second))
+            started[1].await()
+
+            state.eventSink(MediaViewerEvent.CancelLoadingMedia(second))
+
+            cancelled[1].await()
+            assertThat(cancelled[0].isCompleted).isFalse()
         }
     }
 
@@ -934,13 +1014,14 @@ internal fun TestScope.createMediaViewerPresenter(
     localMediaFactory: LocalMediaFactory,
     eventId: EventId? = null,
     mode: MediaViewerEntryPoint.MediaViewerMode = MediaViewerEntryPoint.MediaViewerMode.SingleMedia,
-    matrixMediaLoader: FakeMatrixMediaLoader = FakeMatrixMediaLoader(),
+    matrixMediaLoader: MatrixMediaLoader = FakeMatrixMediaLoader(),
     localMediaActions: FakeLocalMediaActions = FakeLocalMediaActions(),
     mediaGalleryDataSource: MediaGalleryDataSource = FakeMediaGalleryDataSource(
         startLambda = { },
     ),
     canShowInfo: Boolean = true,
     mediaViewerNavigator: MediaViewerNavigator = FakeMediaViewerNavigator(),
+    segmentedVideoPlaybackOwnerFactory: SegmentedVideoPlaybackOwnerFactory? = null,
     room: JoinedRoom = FakeJoinedRoom(
         liveTimeline = FakeTimeline(),
     ),
@@ -961,6 +1042,10 @@ internal fun TestScope.createMediaViewerPresenter(
             localMediaFactory = localMediaFactory,
             systemClock = FakeSystemClock(),
             pagerKeysHandler = PagerKeysHandler(),
+            appOperationalStateCoordinator = io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator(),
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64),
+            segmentedVideoPlaybackOwnerFactory = segmentedVideoPlaybackOwnerFactory,
         ),
         room = room,
         localMediaActions = localMediaActions,
@@ -979,3 +1064,20 @@ internal fun createMediaViewerEntryPointParams(
     thumbnailSource = null,
     canShowInfo = canShowInfo,
 )
+
+private class CancellationAwareMediaLoader : MatrixMediaLoader by FakeMatrixMediaLoader() {
+    val started = CompletableDeferred<Unit>()
+    val cancelled = CompletableDeferred<Unit>()
+
+    override suspend fun downloadMediaFile(
+        source: MediaSource,
+        mimeType: String?,
+        filename: String?,
+        useCache: Boolean,
+    ): Result<MediaFile> = try {
+        started.complete(Unit)
+        awaitCancellation()
+    } finally {
+        cancelled.complete(Unit)
+    }
+}

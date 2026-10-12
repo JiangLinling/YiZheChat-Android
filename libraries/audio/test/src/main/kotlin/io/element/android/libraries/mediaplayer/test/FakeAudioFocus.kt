@@ -10,12 +10,36 @@ package io.element.android.libraries.mediaplayer.test
 
 import io.element.android.libraries.audio.api.AudioFocus
 import io.element.android.libraries.audio.api.AudioFocusRequester
+import io.element.android.libraries.audio.api.AudioSessionOwner
+import io.element.android.libraries.audio.api.AudioSessionRequest
+import io.element.android.libraries.audio.api.AudioSessionRole
 import io.element.android.tests.testutils.lambda.lambdaError
 
 class FakeAudioFocus(
     private val requestAudioFocusResult: (AudioFocusRequester, () -> Unit) -> Unit = { _, _ -> lambdaError() },
     private val releaseAudioFocusResult: () -> Unit = { lambdaError() },
 ) : AudioFocus {
+    private var owner: AudioSessionRequest? = null
+
+    override fun acquire(request: AudioSessionRequest): Boolean {
+        owner = request
+        requestAudioFocusResult(request.role.toLegacyRequester()) {
+            request.onOwnershipLost(io.element.android.libraries.audio.api.AudioSessionLossReason.SYSTEM_FOCUS_LOST)
+        }
+        return true
+    }
+
+    override fun release(ownerId: String) {
+        if (owner?.ownerId == ownerId) {
+            owner = null
+            releaseAudioFocusResult()
+        }
+    }
+
+    override fun currentOwner(): AudioSessionOwner? = owner?.let {
+        AudioSessionOwner(it.ownerId, it.role, it.operationId)
+    }
+
     override fun requestAudioFocus(
         requester: AudioFocusRequester,
         onFocusLost: () -> Unit,
@@ -24,6 +48,14 @@ class FakeAudioFocus(
     }
 
     override fun releaseAudioFocus() {
+        owner = null
         releaseAudioFocusResult()
     }
+}
+
+private fun AudioSessionRole.toLegacyRequester(): AudioFocusRequester = when (this) {
+    AudioSessionRole.MediaPlayback -> AudioFocusRequester.MediaViewer
+    AudioSessionRole.VoiceMessagePlayback -> AudioFocusRequester.VoiceMessage
+    AudioSessionRole.VoiceMessageCapture -> AudioFocusRequester.RecordVoiceMessage
+    AudioSessionRole.RtcCall -> AudioFocusRequester.ElementCall
 }

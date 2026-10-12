@@ -13,6 +13,7 @@ import io.element.android.features.roommembermoderation.api.RoomMemberModeration
 import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.core.bool.orFalse
 import io.element.android.libraries.matrix.api.encryption.identity.IdentityState
+import io.element.android.libraries.matrix.api.room.RoomMembershipState
 import io.element.android.libraries.matrix.api.room.RoomMember
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
@@ -26,7 +27,18 @@ data class RoomMemberListState(
     val selectedSection: SelectedSection,
     val moderationState: RoomMemberModerationState,
     val eventSink: (RoomMemberListEvent) -> Unit,
+    val ownPowerLevel: Long? = null,
 ) {
+    fun canManage(member: RoomMember): Boolean {
+        if (ownPowerLevel == null || ownPowerLevel <= member.powerLevel) return false
+        val permissions = moderationState.permissions
+        return when (member.membership) {
+            RoomMembershipState.BAN -> permissions.canUnban
+            RoomMembershipState.LEAVE -> permissions.canBan
+            RoomMembershipState.JOIN, RoomMembershipState.INVITE, RoomMembershipState.KNOCK -> permissions.canKick || permissions.canBan
+        }
+    }
+
     val showBannedSection: Boolean = moderationState.permissions.canBan && roomMembers.dataOrNull()?.banned?.isNotEmpty() == true
 }
 

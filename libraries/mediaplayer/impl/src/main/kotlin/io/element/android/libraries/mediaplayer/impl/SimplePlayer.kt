@@ -40,6 +40,7 @@ interface SimplePlayer {
         fun onIsPlayingChanged(isPlaying: Boolean)
         fun onMediaItemTransition(mediaItem: MediaItem?)
         fun onPlaybackStateChanged(playbackState: Int)
+        fun onPositionDiscontinuity(positionMs: Long, reason: Int)
     }
 }
 
@@ -63,6 +64,11 @@ class DefaultSimplePlayer(
             override fun onIsPlayingChanged(isPlaying: Boolean) = listener.onIsPlayingChanged(isPlaying)
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = listener.onMediaItemTransition(mediaItem)
             override fun onPlaybackStateChanged(playbackState: Int) = listener.onPlaybackStateChanged(playbackState)
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int,
+            ) = listener.onPositionDiscontinuity(newPosition.positionMs, reason)
         })
     }
 

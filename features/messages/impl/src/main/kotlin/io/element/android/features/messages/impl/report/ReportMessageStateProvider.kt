@@ -19,6 +19,12 @@ open class ReportMessageStateProvider : PreviewParameterProvider<ReportMessageSt
             aReportMessageState(reason = "This user is making the chat very toxic.", blockUser = true),
             aReportMessageState(reason = "This user is making the chat very toxic.", blockUser = true, result = AsyncAction.Loading),
             aReportMessageState(reason = "This user is making the chat very toxic.", blockUser = true, result = AsyncAction.Failure(RuntimeException("error"))),
+            aReportMessageState(
+                reason = "This user is making the chat very toxic.",
+                blockUser = true,
+                reportSubmitted = true,
+                result = AsyncAction.Failure(RuntimeException("block error")),
+            ),
             aReportMessageState(reason = "This user is making the chat very toxic.", blockUser = true, result = AsyncAction.Success(Unit)),
             // Add other states here
         )
@@ -27,10 +33,12 @@ open class ReportMessageStateProvider : PreviewParameterProvider<ReportMessageSt
 fun aReportMessageState(
     reason: String = "",
     blockUser: Boolean = false,
+    reportSubmitted: Boolean = false,
     result: AsyncAction<Unit> = AsyncAction.Uninitialized,
 ) = ReportMessageState(
     reason = reason,
     blockUser = blockUser,
+    reportSubmitted = reportSubmitted,
     result = result,
     eventSink = {}
 )

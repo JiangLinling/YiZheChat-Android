@@ -46,6 +46,7 @@ import io.element.android.libraries.featureflag.api.FeatureFlags
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.api.room.powerlevels.permissionsAsState
 import io.element.android.libraries.matrix.api.room.roomMembers
+import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
 import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.analyticsproviders.api.trackers.captureInteraction
@@ -183,12 +184,17 @@ class PinnedMessagesListPresenter(
                 kind = PinUnpinAction.Kind.Unpin,
             )
         )
-        timelineProvider.invokeOnTimeline {
+        val result = timelineProvider.invokeOnTimeline {
             unpinEvent(targetEvent.eventId)
-                .onFailure {
-                    Timber.e(it, "Failed to unpin event ${targetEvent.eventId}")
-                    snackbarDispatcher.post(SnackbarMessage(CommonStrings.common_error))
-                }
+        }
+        if (result == null) {
+            Timber.w("Pinned timeline unavailable while unpinning ${targetEvent.eventId}")
+            snackbarDispatcher.post(SnackbarMessage(CommonStrings.common_error))
+        } else {
+            result.onFailure {
+                Timber.e(it, "Failed to unpin event ${targetEvent.eventId}")
+                snackbarDispatcher.post(SnackbarMessage(CommonStrings.common_error))
+            }
         }
     }
 
@@ -205,9 +211,13 @@ class PinnedMessagesListPresenter(
                 is AsyncData.Loading -> flowOf(AsyncData.Loading())
                 is AsyncData.Success -> {
                     val timelineItemsFlow = asyncTimeline.data.timelineItems
-                    combine(timelineItemsFlow, room.membersStateFlow) { items, membersState ->
+                    combine(timelineItemsFlow, room.membersStateFlow, room.roomInfoFlow) { items, membersState, roomInfo ->
+                        val pinnedEventIds = roomInfo.pinnedEventIds.toSet()
+                        val activePinnedItems = items
+                            .filterIsInstance<MatrixTimelineItem.Event>()
+                            .filter { it.eventId in pinnedEventIds }
                         timelineItemsFactory.replaceWith(
-                            timelineItems = items,
+                            timelineItems = activePinnedItems,
                             roomMembers = membersState.roomMembers().orEmpty()
                         )
                     }.launchIn(this)

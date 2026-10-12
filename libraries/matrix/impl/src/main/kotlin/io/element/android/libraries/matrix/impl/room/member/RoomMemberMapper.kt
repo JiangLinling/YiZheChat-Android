@@ -56,6 +56,7 @@ object RoomMemberMapper {
             RustMembershipState.Join -> RoomMembershipState.JOIN
             RustMembershipState.Knock -> RoomMembershipState.KNOCK
             RustMembershipState.Leave -> RoomMembershipState.LEAVE
-            is RustMembershipState.Custom -> TODO()
+            // Unknown future/extension membership values must not grant room membership.
+            is RustMembershipState.Custom -> RoomMembershipState.LEAVE
         }
 }

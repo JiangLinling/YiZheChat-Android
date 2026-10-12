@@ -26,22 +26,33 @@ import io.element.android.features.messages.api.MessageComposerContext
 import io.element.android.features.poll.api.create.CreatePollMode
 import io.element.android.features.poll.impl.PollConstants.MAX_SELECTIONS
 import io.element.android.features.poll.impl.data.PollRepository
+import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.architecture.Presenter
+import io.element.android.libraries.core.extensions.runCatchingExceptions
+import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.poll.PollAnswer
 import io.element.android.libraries.matrix.api.poll.PollKind
 import io.element.android.libraries.matrix.api.poll.isDisclosed
+import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.api.timeline.Timeline
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
 import io.element.android.services.analytics.api.AnalyticsService
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import java.security.MessageDigest
 
 @AssistedInject
 class CreatePollPresenter(
     repositoryFactory: PollRepository.Factory,
     private val analyticsService: AnalyticsService,
     private val messageComposerContext: MessageComposerContext,
+    private val room: JoinedRoom,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
     @Assisted private val navigateUp: () -> Unit,
     @Assisted private val mode: CreatePollMode,
     @Assisted private val timelineMode: Timeline.Mode,
@@ -73,6 +84,7 @@ class CreatePollPresenter(
 
         var showBackConfirmation: Boolean by rememberSaveable { mutableStateOf(false) }
         var showDeleteConfirmation: Boolean by rememberSaveable { mutableStateOf(false) }
+        var saveAction by remember { mutableStateOf<AsyncAction<Unit>>(AsyncAction.Uninitialized) }
 
         LaunchedEffect(Unit) {
             if (mode is CreatePollMode.EditPoll) {
@@ -81,6 +93,7 @@ class CreatePollPresenter(
                         question = it.question,
                         answers = it.answers.map(PollAnswer::text).toImmutableList(),
                         isDisclosed = it.kind.isDisclosed,
+                        answerIds = it.answers.map(PollAnswer::id).toImmutableList(),
                     )
                     initialPoll = loadedPoll
                     poll = loadedPoll
@@ -100,25 +113,40 @@ class CreatePollPresenter(
         fun handleEvent(event: CreatePollEvent) {
             when (event) {
                 is CreatePollEvent.Save -> scope.launch {
-                    if (canSave) {
-                        repository.savePoll(
-                            existingPollId = when (mode) {
-                                is CreatePollMode.EditPoll -> mode.eventId
-                                is CreatePollMode.NewPoll -> null
-                            },
-                            question = poll.question,
-                            answers = poll.answers,
-                            pollKind = poll.pollKind,
-                            maxSelections = MAX_SELECTIONS,
-                        ).onSuccess {
+                    if (canSave && saveAction !is AsyncAction.Loading) {
+                        saveAction = AsyncAction.Loading
+                        val existingPollId = when (mode) {
+                            is CreatePollMode.EditPoll -> mode.eventId
+                            is CreatePollMode.NewPoll -> null
+                        }
+                        var navigatedAfterQueueAcceptance = false
+                        var saveFailure: Throwable? = null
+                        runCatchingExceptions {
+                            appOperationalStateCoordinator.perform(pollOperationRequest(existingPollId)) {
+                                val saveResult = repository.savePoll(
+                                    existingPollId = existingPollId,
+                                    question = poll.question,
+                                    answers = poll.answers,
+                                    pollKind = poll.pollKind,
+                                    maxSelections = MAX_SELECTIONS,
+                                    answerIds = poll.answerIds,
+                                )
+                                saveFailure = saveResult.exceptionOrNull()
+                                saveResult.getOrThrow()
+                                // The poll is already accepted by the Matrix send queue here. Do not
+                                // keep the editor on screen while LC-15 audit receipts are submitted.
+                                navigatedAfterQueueAcceptance = true
+                                navigateUp()
+                            }
+                        }.onSuccess {
                             analyticsService.capturePollSaved(
                                 isUndisclosed = poll.pollKind == PollKind.Undisclosed,
                                 numberOfAnswers = poll.answers.size,
                             )
                         }.onFailure {
-                            analyticsService.trackSavePollFailed(it, mode)
+                            analyticsService.trackSavePollFailed(saveFailure ?: it, mode)
+                            if (!navigatedAfterQueueAcceptance) saveAction = AsyncAction.Failure(saveFailure ?: it)
                         }
-                        navigateUp()
                     } else {
                         Timber.d("Cannot create poll")
                     }
@@ -135,7 +163,11 @@ class CreatePollPresenter(
 
                     scope.launch {
                         showDeleteConfirmation = false
-                        repository.deletePoll(mode.eventId)
+                        runCatchingExceptions {
+                            appOperationalStateCoordinator.perform(pollOperationRequest(mode.eventId)) {
+                                repository.deletePoll(mode.eventId).getOrThrow()
+                            }
+                        }.onFailure { Timber.e(it, "Failed to delete poll") }
                         navigateUp()
                     }
                 }
@@ -185,8 +217,20 @@ class CreatePollPresenter(
             showBackConfirmation = showBackConfirmation,
             showDeleteConfirmation = showDeleteConfirmation,
             eventSink = ::handleEvent,
+            saveAction = saveAction,
         )
     }
+
+    private fun pollOperationRequest(eventId: EventId?) = lifecycleOperationRequest(
+        lifecycleId = FullAppLifecycleId.LC_15,
+        trigger = "poll",
+        roomIdHash = room.roomId.value.sha256Hex(),
+        eventIdHash = eventId?.value?.sha256Hex(),
+    )
+
+    private fun String.sha256Hex(): String = MessageDigest.getInstance("SHA-256")
+        .digest(encodeToByteArray())
+        .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
     private fun AnalyticsService.capturePollSaved(
         isUndisclosed: Boolean,

@@ -18,6 +18,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -105,6 +106,118 @@ class TimelineItemsSubscriberTest {
     }
 
     @Test
+    fun `isolated Clear waits for its structural replacement instead of publishing an empty timeline`() = runTest {
+        val timelineItems: MutableSharedFlow<List<MatrixTimelineItem>> =
+            MutableSharedFlow(replay = 1, extraBufferCapacity = Int.MAX_VALUE)
+        val timeline = FakeFfiTimeline()
+        val diffProcessor = createMatrixTimelineDiffProcessor(timelineItems = timelineItems)
+        val timelineItemsSubscriber = createTimelineItemsSubscriber(
+            timeline = timeline,
+            timelineDiffProcessor = diffProcessor,
+        )
+        timelineItems.test {
+            timelineItemsSubscriber.subscribeIfNeeded()
+            runCurrent()
+            timeline.emitDiff(listOf(TimelineDiff.Reset(listOf(FakeFfiTimelineItem(), FakeFfiTimelineItem()))))
+            assertThat(awaitItem()).hasSize(2)
+
+            timeline.emitDiff(listOf(TimelineDiff.Clear))
+            advanceTimeBy(100L)
+            runCurrent()
+
+            expectNoEvents()
+            assertThat(timelineItems.replayCache.single()).isNotEmpty()
+
+            timeline.emitDiff(listOf(TimelineDiff.Reset(listOf(FakeFfiTimelineItem()))))
+            assertThat(awaitItem()).isNotEmpty()
+            timelineItemsSubscriber.unsubscribeIfNeeded()
+        }
+    }
+
+    @Test
+    fun `a newer Clear supersedes an uncommitted replacement without publishing an empty timeline`() = runTest {
+        val timelineItems: MutableSharedFlow<List<MatrixTimelineItem>> =
+            MutableSharedFlow(replay = 1, extraBufferCapacity = Int.MAX_VALUE)
+        val timeline = FakeFfiTimeline()
+        val diffProcessor = createMatrixTimelineDiffProcessor(timelineItems = timelineItems)
+        val timelineItemsSubscriber = createTimelineItemsSubscriber(
+            timeline = timeline,
+            timelineDiffProcessor = diffProcessor,
+        )
+        val initial = FakeFfiTimelineItem(asEventResult = aRustEventTimelineItem(), uniqueId = "initial")
+        val superseded = FakeFfiTimelineItem(asEventResult = aRustEventTimelineItem(), uniqueId = "superseded")
+        val replacement = FakeFfiTimelineItem(asEventResult = aRustEventTimelineItem(), uniqueId = "replacement")
+
+        timelineItems.test {
+            timelineItemsSubscriber.subscribeIfNeeded()
+            runCurrent()
+            timeline.emitDiff(listOf(TimelineDiff.Reset(listOf(initial))))
+            advanceTimeBy(20L)
+            runCurrent()
+            assertThat(awaitItem().single().uniqueIdValue()).isEqualTo("initial")
+
+            timeline.emitDiff(listOf(TimelineDiff.Clear))
+            advanceTimeBy(20L)
+            runCurrent()
+            timeline.emitDiff(listOf(TimelineDiff.Reset(listOf(superseded)), TimelineDiff.Clear))
+            advanceTimeBy(20L)
+            runCurrent()
+
+            expectNoEvents()
+            assertThat(timelineItems.replayCache.single().single().uniqueIdValue()).isEqualTo("initial")
+
+            timeline.emitDiff(listOf(TimelineDiff.Reset(listOf(replacement))))
+            advanceTimeBy(20L)
+            runCurrent()
+            assertThat(awaitItem().single().uniqueIdValue()).isEqualTo("replacement")
+            timelineItemsSubscriber.unsubscribeIfNeeded()
+        }
+    }
+
+    @Test
+    fun `only the replacement after the last Clear in one emission is committed`() = runTest {
+        val timelineItems: MutableSharedFlow<List<MatrixTimelineItem>> =
+            MutableSharedFlow(replay = 1, extraBufferCapacity = Int.MAX_VALUE)
+        val timeline = FakeFfiTimeline()
+        val diffProcessor = createMatrixTimelineDiffProcessor(timelineItems = timelineItems)
+        val timelineItemsSubscriber = createTimelineItemsSubscriber(
+            timeline = timeline,
+            timelineDiffProcessor = diffProcessor,
+        )
+        val initial = FakeFfiTimelineItem(asEventResult = aRustEventTimelineItem(), uniqueId = "initial")
+        val superseded = FakeFfiTimelineItem(asEventResult = aRustEventTimelineItem(), uniqueId = "superseded")
+        val replacement = FakeFfiTimelineItem(asEventResult = aRustEventTimelineItem(), uniqueId = "replacement")
+
+        timelineItems.test {
+            timelineItemsSubscriber.subscribeIfNeeded()
+            runCurrent()
+            timeline.emitDiff(listOf(TimelineDiff.Reset(listOf(initial))))
+            advanceTimeBy(20L)
+            runCurrent()
+            assertThat(awaitItem().single().uniqueIdValue()).isEqualTo("initial")
+
+            timeline.emitDiff(
+                listOf(
+                    TimelineDiff.Clear,
+                    TimelineDiff.Reset(listOf(superseded)),
+                    TimelineDiff.Clear,
+                )
+            )
+            advanceTimeBy(20L)
+            runCurrent()
+
+            expectNoEvents()
+            assertThat(timelineItems.replayCache.single().single().uniqueIdValue()).isEqualTo("initial")
+
+            timeline.emitDiff(listOf(TimelineDiff.Reset(listOf(replacement))))
+            advanceTimeBy(20L)
+            runCurrent()
+            assertThat(awaitItem().single().uniqueIdValue()).isEqualTo("replacement")
+            timelineItemsSubscriber.unsubscribeIfNeeded()
+        }
+    }
+
+    @Test
     fun `multiple subscriptions does not have side effect`() = runTest {
         val timelineItemsSubscriber = createTimelineItemsSubscriber()
         timelineItemsSubscriber.subscribeIfNeeded()
@@ -112,6 +225,12 @@ class TimelineItemsSubscriberTest {
         timelineItemsSubscriber.unsubscribeIfNeeded()
         timelineItemsSubscriber.unsubscribeIfNeeded()
     }
+}
+
+private fun MatrixTimelineItem.uniqueIdValue(): String = when (this) {
+    is MatrixTimelineItem.Event -> uniqueId.value
+    is MatrixTimelineItem.Virtual -> uniqueId.value
+    MatrixTimelineItem.Other -> "other"
 }
 
 private fun TestScope.createTimelineItemsSubscriber(

@@ -12,6 +12,7 @@ import io.element.android.features.logout.api.direct.DirectLogoutState
 import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.matrix.api.core.DeviceId
 import io.element.android.libraries.matrix.api.user.MatrixUser
+import io.element.android.security.dataprotection.api.ManagedAppRelease
 import kotlinx.collections.immutable.ImmutableList
 
 data class PreferencesRootState(
@@ -32,6 +33,7 @@ data class PreferencesRootState(
     val showLabsItem: Boolean,
     val directLogoutState: DirectLogoutState,
     val snackbarMessage: SnackbarMessage?,
+    val availableUpdate: ManagedAppRelease?,
     val eventSink: (PreferencesRootEvent) -> Unit,
 ) {
     val showBlockedUsersItem = nbOfBlockedUsers > 0

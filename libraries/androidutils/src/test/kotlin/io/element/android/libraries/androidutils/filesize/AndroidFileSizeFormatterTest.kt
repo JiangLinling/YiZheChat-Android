@@ -19,6 +19,16 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 class AndroidFileSizeFormatterTest {
+    @Config(sdk = [Build.VERSION_CODES.N, Build.VERSION_CODES.O, Build.VERSION_CODES.P, 35])
+    @Test
+    fun `small files retain their exact byte count`() {
+        val sut = createAndroidFileSizeFormatter(sdkLevel = Build.VERSION.SDK_INT)
+        listOf(0L, 1L, 2L, 68L, 899L, 900L).forEach { bytes ->
+            assertThat(sut.format(bytes, useShortFormat = true)).isEqualTo("$bytes B")
+            assertThat(sut.format(bytes, useShortFormat = false)).isEqualTo("$bytes B")
+        }
+    }
+
     @Config(sdk = [Build.VERSION_CODES.N])
     @Test
     fun `test api 24 long format`() {

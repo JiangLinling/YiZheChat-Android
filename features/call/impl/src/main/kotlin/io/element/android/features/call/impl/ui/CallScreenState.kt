@@ -16,4 +16,16 @@ data class CallScreenState(
     val userAgent: String,
     val isCallActive: Boolean,
     val eventSink: (CallScreenEvent) -> Unit,
+    val peerName: String? = null,
+    val peerAvatarUrl: String? = null,
+    val isAudioCall: Boolean = true,
+    val isIncoming: Boolean = false,
+    val isGroupCall: Boolean = false,
+    val isNetworkDisconnected: Boolean = false,
+    val isTerminating: Boolean = false,
+    val isMediaConnected: Boolean = false,
+    val connectedSeconds: Long = 0,
+    // Protected local HTML and passive protocol negotiation may overlap native admission.
+    // Identity, room writes, keys and media permissions still wait for Success.
+    val preparationUrl: String? = null,
 )

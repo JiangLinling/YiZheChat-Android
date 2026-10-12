@@ -8,16 +8,16 @@
 
 package io.element.android.libraries.push.impl.notifications.fake
 
+import io.element.android.libraries.matrix.api.media.MediaFile
 import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.push.impl.notifications.NotificationMediaRepo
-import java.io.File
 
 class FakeNotificationMediaRepo : NotificationMediaRepo {
     override suspend fun getMediaFile(
         mediaSource: MediaSource,
         mimeType: String?,
         filename: String?,
-    ): Result<File> {
+    ): Result<MediaFile> {
         return Result.failure(IllegalStateException("Fake class"))
     }
 }

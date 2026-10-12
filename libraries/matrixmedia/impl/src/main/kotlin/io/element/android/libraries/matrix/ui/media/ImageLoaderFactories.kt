@@ -47,6 +47,8 @@ class DefaultImageLoaderFactory(
 
     override fun newImageLoader(matrixMediaLoader: MatrixMediaLoader): ImageLoader {
         return ImageLoader.Builder(context)
+            // Matrix media is either held in memory or backed by SensitiveFileStore. Never duplicate decrypted pixels in Coil's disk cache.
+            .diskCache(null)
             .components {
                 add(okHttpNetworkFetcherFactory)
                 // Add gif support

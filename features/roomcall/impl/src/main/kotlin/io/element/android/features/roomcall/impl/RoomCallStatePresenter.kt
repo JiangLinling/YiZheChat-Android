@@ -23,6 +23,7 @@ import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.matrix.api.notification.CallIntent
 import io.element.android.libraries.matrix.api.room.CallIntentConsensus
 import io.element.android.libraries.matrix.api.room.JoinedRoom
+import io.element.android.libraries.matrix.api.room.directRoomRelationState
 import io.element.android.libraries.matrix.api.room.powerlevels.canCall
 import io.element.android.libraries.matrix.api.room.powerlevels.permissionsAsState
 
@@ -39,6 +40,7 @@ class RoomCallStatePresenter(
         }
         val roomInfo by room.roomInfoFlow.collectAsState()
         val canJoinCall by room.permissionsAsState(false) { perms -> perms.canCall() }
+        val canInteract = roomInfo.directRoomRelationState().canInteract
         val isUserInTheCall by remember {
             derivedStateOf {
                 room.sessionId in roomInfo.activeRoomCallParticipants
@@ -55,13 +57,13 @@ class RoomCallStatePresenter(
                 when {
                     isAvailable.not() -> RoomCallState.Unavailable
                     roomInfo.hasRoomCall -> RoomCallState.OnGoing(
-                        canJoinCall = canJoinCall,
+                        canJoinCall = canJoinCall && canInteract,
                         isUserInTheCall = isUserInTheCall,
                         isUserLocallyInTheCall = isUserLocallyInTheCall,
                         isAudioCall = roomInfo.activeCallIntentConsensus.isAudio(),
                     )
                     else -> RoomCallState.StandBy(
-                        canStartCall = canJoinCall,
+                        canStartCall = canJoinCall && canInteract,
                         isDM = roomInfo.isDm
                     )
                 }

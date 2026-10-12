@@ -9,6 +9,7 @@
 package io.element.android.features.share.impl
 
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
+import io.element.android.features.share.api.ShareResult
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.matrix.api.core.RoomId
 
@@ -21,7 +22,7 @@ open class ShareStateProvider : PreviewParameterProvider<ShareState> {
             ),
             aShareState(
                 shareAction = AsyncAction.Success(
-                    listOf(RoomId("!room2:domain")),
+                    ShareResult(listOf(RoomId("!room2:domain"))),
                 )
             ),
             aShareState(
@@ -31,7 +32,7 @@ open class ShareStateProvider : PreviewParameterProvider<ShareState> {
 }
 
 fun aShareState(
-    shareAction: AsyncAction<List<RoomId>> = AsyncAction.Uninitialized,
+    shareAction: AsyncAction<ShareResult> = AsyncAction.Uninitialized,
     eventSink: (ShareEvents) -> Unit = {}
 ) = ShareState(
     shareAction = shareAction,

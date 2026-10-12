@@ -13,7 +13,10 @@ import androidx.compose.ui.res.stringResource
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.designsystem.components.ProgressDialog
 import io.element.android.libraries.designsystem.components.dialogs.RetryDialog
+import io.element.android.libraries.matrix.api.exception.AccountDeactivationException
 import io.element.android.libraries.ui.strings.CommonStrings
+import io.element.android.features.deactivation.impl.R
+import io.element.android.security.dataprotection.api.PermanentAccountDeletionSubmissionBlockedException
 
 @Composable
 fun AccountDeactivationActionDialog(
@@ -35,7 +38,13 @@ fun AccountDeactivationActionDialog(
         is AsyncAction.Failure ->
             RetryDialog(
                 title = stringResource(id = CommonStrings.dialog_title_error),
-                content = stringResource(id = CommonStrings.error_unknown),
+                content = stringResource(
+                    id = when (state.error) {
+                        is PermanentAccountDeletionSubmissionBlockedException -> R.string.screen_deactivate_account_service_upgrading
+                        is AccountDeactivationException.InvalidCredentials -> R.string.screen_deactivate_account_invalid_password
+                        else -> CommonStrings.error_unknown
+                    }
+                ),
                 onRetry = onRetryClick,
                 onDismiss = onDismissDialog,
             )

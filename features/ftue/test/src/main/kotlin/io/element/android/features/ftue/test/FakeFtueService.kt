@@ -18,4 +18,8 @@ class FakeFtueService : FtueService {
     suspend fun emitState(newState: FtueState) {
         state.emit(newState)
     }
+
+    override fun refresh() = Unit
+
+    override fun onUserCompletedSessionVerification() = Unit
 }

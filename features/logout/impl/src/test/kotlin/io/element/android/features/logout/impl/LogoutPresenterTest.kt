@@ -15,6 +15,8 @@ import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.matrix.api.MatrixClient
+import io.element.android.libraries.push.api.PushService
+import io.element.android.libraries.push.test.FakePushService
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.encryption.BackupState
 import io.element.android.libraries.matrix.api.encryption.BackupUploadState
@@ -25,6 +27,8 @@ import io.element.android.libraries.matrix.test.FakeMatrixClient
 import io.element.android.libraries.matrix.test.encryption.FakeEncryptionService
 import io.element.android.libraries.workmanager.api.WorkManagerRequestType
 import io.element.android.libraries.workmanager.test.FakeWorkManagerScheduler
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import kotlinx.coroutines.delay
@@ -50,6 +54,7 @@ class LogoutPresenterTest {
             assertThat(initialState.recoveryState).isEqualTo(RecoveryState.UNKNOWN)
             assertThat(initialState.backupUploadState).isEqualTo(BackupUploadState.Unknown)
             assertThat(initialState.waitingForALongTime).isFalse()
+            assertThat(initialState.showUnbackedKeysWarning).isFalse()
             assertThat(initialState.logoutAction).isEqualTo(AsyncAction.Uninitialized)
         }
     }
@@ -133,7 +138,7 @@ class LogoutPresenterTest {
     }
 
     @Test
-    fun `present - logout then cancel`() = runTest {
+    fun `present - logout with unknown backup first warns then cancel`() = runTest {
         val presenter = createLogoutPresenter()
         moleculeFlow(RecompositionMode.Immediate) {
             presenter.present()
@@ -141,9 +146,11 @@ class LogoutPresenterTest {
             val initialState = awaitFirstItem()
             initialState.eventSink.invoke(LogoutEvents.Logout(ignoreSdkError = false))
             val confirmationState = awaitItem()
-            assertThat(confirmationState.logoutAction).isEqualTo(AsyncAction.ConfirmingNoParams)
+            assertThat(confirmationState.showUnbackedKeysWarning).isTrue()
+            assertThat(confirmationState.logoutAction).isEqualTo(AsyncAction.Uninitialized)
             initialState.eventSink.invoke(LogoutEvents.CloseDialogs)
             val finalState = awaitItem()
+            assertThat(finalState.showUnbackedKeysWarning).isFalse()
             assertThat(finalState.logoutAction).isEqualTo(AsyncAction.Uninitialized)
         }
     }
@@ -152,21 +159,28 @@ class LogoutPresenterTest {
     fun `present - logout then confirm`() = runTest {
         val cancelWorkManagerJobsLambda = lambdaRecorder<SessionId, WorkManagerRequestType?, Unit> { _, _ -> }
         val workManagerScheduler = FakeWorkManagerScheduler(cancelLambda = cancelWorkManagerJobsLambda)
-        val presenter = createLogoutPresenter(workManagerScheduler = workManagerScheduler)
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val presenter = createLogoutPresenter(
+            workManagerScheduler = workManagerScheduler,
+            appOperationalStateCoordinator = coordinator,
+        )
         moleculeFlow(RecompositionMode.Immediate) {
             presenter.present()
         }.test {
             val initialState = awaitFirstItem()
             initialState.eventSink.invoke(LogoutEvents.Logout(ignoreSdkError = false))
             val confirmationState = awaitItem()
-            assertThat(confirmationState.logoutAction).isEqualTo(AsyncAction.ConfirmingNoParams)
-            confirmationState.eventSink.invoke(LogoutEvents.Logout(ignoreSdkError = false))
-            val loadingState = awaitItem()
+            assertThat(confirmationState.showUnbackedKeysWarning).isTrue()
+            confirmationState.eventSink.invoke(LogoutEvents.ConfirmLogoutWithoutBackup)
+            val loadingState = awaitAction { it is AsyncAction.Loading }
             assertThat(loadingState.logoutAction).isInstanceOf(AsyncAction.Loading::class.java)
-            val successState = awaitItem()
+            val successState = awaitAction { it is AsyncAction.Success }
             assertThat(successState.logoutAction).isInstanceOf(AsyncAction.Success::class.java)
 
             cancelWorkManagerJobsLambda.assertions().isCalledOnce()
+            assertThat(coordinator.startedRequests).hasSize(1)
+            assertThat(coordinator.startedRequests.single().lifecycleId).isEqualTo(FullAppLifecycleId.LC_22)
+            assertThat(coordinator.startedRequests.single().trigger).isEqualTo("remove_local_account")
         }
     }
 
@@ -186,12 +200,14 @@ class LogoutPresenterTest {
             val initialState = awaitFirstItem()
             initialState.eventSink.invoke(LogoutEvents.Logout(ignoreSdkError = false))
             val confirmationState = awaitItem()
-            assertThat(confirmationState.logoutAction).isEqualTo(AsyncAction.ConfirmingNoParams)
-            confirmationState.eventSink.invoke(LogoutEvents.Logout(ignoreSdkError = false))
-            val loadingState = awaitItem()
+            assertThat(confirmationState.showUnbackedKeysWarning).isTrue()
+            confirmationState.eventSink.invoke(LogoutEvents.ConfirmLogoutWithoutBackup)
+            val loadingState = awaitAction { it is AsyncAction.Loading }
             assertThat(loadingState.logoutAction).isInstanceOf(AsyncAction.Loading::class.java)
-            val errorState = awaitItem()
-            assertThat(errorState.logoutAction).isEqualTo(AsyncAction.Failure(AN_EXCEPTION))
+            val errorState = awaitAction { it is AsyncAction.Failure }
+            val logoutFailure = errorState.logoutAction as AsyncAction.Failure
+            assertThat(logoutFailure.error).isInstanceOf(AN_EXCEPTION::class.java)
+            assertThat(logoutFailure.error).hasMessageThat().isEqualTo(AN_EXCEPTION.message)
             errorState.eventSink.invoke(LogoutEvents.CloseDialogs)
             val finalState = awaitItem()
             assertThat(finalState.logoutAction).isEqualTo(AsyncAction.Uninitialized)
@@ -216,16 +232,18 @@ class LogoutPresenterTest {
             val initialState = awaitFirstItem()
             initialState.eventSink.invoke(LogoutEvents.Logout(ignoreSdkError = false))
             val confirmationState = awaitItem()
-            assertThat(confirmationState.logoutAction).isEqualTo(AsyncAction.ConfirmingNoParams)
-            confirmationState.eventSink.invoke(LogoutEvents.Logout(ignoreSdkError = false))
-            val loadingState = awaitItem()
+            assertThat(confirmationState.showUnbackedKeysWarning).isTrue()
+            confirmationState.eventSink.invoke(LogoutEvents.ConfirmLogoutWithoutBackup)
+            val loadingState = awaitAction { it is AsyncAction.Loading }
             assertThat(loadingState.logoutAction).isInstanceOf(AsyncAction.Loading::class.java)
-            val errorState = awaitItem()
-            assertThat(errorState.logoutAction).isEqualTo(AsyncAction.Failure(AN_EXCEPTION))
+            val errorState = awaitAction { it is AsyncAction.Failure }
+            val logoutFailure = errorState.logoutAction as AsyncAction.Failure
+            assertThat(logoutFailure.error).isInstanceOf(AN_EXCEPTION::class.java)
+            assertThat(logoutFailure.error).hasMessageThat().isEqualTo(AN_EXCEPTION.message)
             errorState.eventSink.invoke(LogoutEvents.Logout(ignoreSdkError = true))
-            val loadingState2 = awaitItem()
+            val loadingState2 = awaitAction { it is AsyncAction.Loading }
             assertThat(loadingState2.logoutAction).isInstanceOf(AsyncAction.Loading::class.java)
-            val successState = awaitItem()
+            val successState = awaitAction { it is AsyncAction.Success }
             assertThat(successState.logoutAction).isInstanceOf(AsyncAction.Success::class.java)
         }
     }
@@ -234,14 +252,27 @@ class LogoutPresenterTest {
         skipItems(2)
         return awaitItem()
     }
+
+    private suspend fun ReceiveTurbine<LogoutState>.awaitAction(
+        predicate: (AsyncAction<Unit>) -> Boolean,
+    ): LogoutState {
+        while (true) {
+            val state = awaitItem()
+            if (predicate(state.logoutAction)) return state
+        }
+    }
 }
 
 internal fun createLogoutPresenter(
     matrixClient: MatrixClient = FakeMatrixClient(),
     encryptionService: EncryptionService = FakeEncryptionService(),
+    pushService: PushService = FakePushService(),
     workManagerScheduler: FakeWorkManagerScheduler = FakeWorkManagerScheduler(cancelLambda = { _, _ -> }),
+    appOperationalStateCoordinator: FakeAppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
 ): LogoutPresenter = LogoutPresenter(
     matrixClient = matrixClient,
     encryptionService = encryptionService,
+    pushService = pushService,
     workManagerScheduler = workManagerScheduler,
+    appOperationalStateCoordinator = appOperationalStateCoordinator,
 )

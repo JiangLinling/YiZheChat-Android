@@ -13,6 +13,7 @@ import io.element.android.libraries.di.SessionScope
 import io.element.android.libraries.pushproviders.unifiedpush.R
 import io.element.android.libraries.pushproviders.unifiedpush.UnifiedPushConfig
 import io.element.android.libraries.pushproviders.unifiedpush.UnifiedPushDistributorProvider
+import io.element.android.libraries.pushproviders.unifiedpush.embedded.EmbeddedNtfyManager
 import io.element.android.libraries.troubleshoot.api.test.NotificationTroubleshootNavigator
 import io.element.android.libraries.troubleshoot.api.test.NotificationTroubleshootTest
 import io.element.android.libraries.troubleshoot.api.test.NotificationTroubleshootTestDelegate
@@ -43,7 +44,10 @@ class UnifiedPushTest(
 
     override suspend fun run(coroutineScope: CoroutineScope) {
         delegate.start()
-        val distributors = unifiedPushDistributorProvider.getDistributors()
+        // The embedded ntfy distributor is part of this application, not an external package, so
+        // UnifiedPushDistributorProvider cannot discover it. Include it explicitly to avoid a false
+        // "No distributor found" failure while the built-in ntfy connection is healthy.
+        val distributors = listOf(EmbeddedNtfyManager.DISTRIBUTOR) + unifiedPushDistributorProvider.getDistributors()
         if (distributors.isNotEmpty()) {
             delegate.updateState(
                 description = stringProvider.getQuantityString(

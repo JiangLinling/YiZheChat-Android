@@ -16,5 +16,6 @@ interface SeenInvitesStoreFactory {
     fun getOrCreate(
         sessionId: SessionId,
         sessionCoroutineScope: CoroutineScope,
+        deviceId: String,
     ): SeenInvitesStore
 }

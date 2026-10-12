@@ -2,7 +2,7 @@
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
   <string name="notification_channel_call">"通话"</string>
   <string name="notification_channel_listening_for_events">"正在监听事件"</string>
-  <string name="notification_channel_noisy">"嘈杂通知"</string>
+  <string name="notification_channel_noisy">"消息通知"</string>
   <string name="notification_channel_ringing_calls">"响铃通话"</string>
   <string name="notification_channel_silent">"静默通知"</string>
   <plurals name="notification_compat_summary_line_for_room">
@@ -13,6 +13,8 @@
   </plurals>
   <string name="notification_error_unified_push_unregistered_android">"UnifiedPush 分发器注册失败，你将无法再接收通知。请检查 app 的通知设置及推送分发器的状态。"</string>
   <string name="notification_fallback_content">"你有新消息。"</string>
+  <string name="notification_confidential_content">"收到一条安全消息。"</string>
+  <string name="notification_burn_after_read_content">"收到一条阅后即焚消息。"</string>
   <plurals name="notification_fallback_n_content">
     <item quantity="other">"你有 %d 个新消息。"</item>
   </plurals>

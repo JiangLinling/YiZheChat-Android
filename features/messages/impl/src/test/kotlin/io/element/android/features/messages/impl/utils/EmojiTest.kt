@@ -35,4 +35,12 @@ class EmojiTest {
         Assert.assertFalse("Hello".containsOnlyEmojisInternal())
         Assert.assertFalse("Hello 👋".containsOnlyEmojisInternal())
     }
+
+    @Test
+    fun countsEmojiGraphemes() {
+        Assert.assertEquals(1, "👍".emojiGraphemeCountInternal())
+        Assert.assertEquals(2, "🙂🙁".emojiGraphemeCountInternal())
+        Assert.assertEquals(5, "👨‍👩‍👦1️⃣🚀👳🏾‍♂️🪩".emojiGraphemeCountInternal())
+        Assert.assertEquals(0, "plain text".emojiGraphemeCountInternal())
+    }
 }

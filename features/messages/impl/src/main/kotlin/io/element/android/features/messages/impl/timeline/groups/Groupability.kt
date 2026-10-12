@@ -35,6 +35,7 @@ import io.element.android.libraries.matrix.api.timeline.item.event.LiveLocationC
 import io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
 import io.element.android.libraries.matrix.api.timeline.item.event.PollContent
 import io.element.android.libraries.matrix.api.timeline.item.event.ProfileChangeContent
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedOperationContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RedactedContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RoomMembershipContent
 import io.element.android.libraries.matrix.api.timeline.item.event.StateContent
@@ -89,8 +90,9 @@ internal fun MatrixTimelineItem.Event.canBeDisplayedInBubbleBlock(): Boolean {
         is ProfileChangeContent,
         is RoomMembershipContent,
         UnknownContent,
-        is LegacyCallInviteContent,
-        is CallNotifyContent,
-        is StateContent -> false
+            is LegacyCallInviteContent,
+            is CallNotifyContent,
+            is ProtectedOperationContent,
+            is StateContent -> false
     }
 }

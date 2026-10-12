@@ -14,9 +14,11 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.TopAppBarDefaults
@@ -41,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import io.element.android.appconfig.RoomListConfig
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
+import io.element.android.features.home.impl.ContactsPage
 import io.element.android.features.home.impl.HomeNavigationBarItem
 import io.element.android.features.home.impl.R
 import io.element.android.features.home.impl.filters.RoomListFiltersState
@@ -55,6 +58,7 @@ import io.element.android.libraries.designsystem.components.TopAppBarScrollBehav
 import io.element.android.libraries.designsystem.components.avatar.Avatar
 import io.element.android.libraries.designsystem.components.avatar.AvatarSize
 import io.element.android.libraries.designsystem.components.avatar.AvatarType
+import io.element.android.libraries.designsystem.components.button.BackButton
 import io.element.android.libraries.designsystem.modifiers.backgroundVerticalGradient
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
@@ -65,7 +69,6 @@ import io.element.android.libraries.designsystem.theme.components.DropdownMenuIt
 import io.element.android.libraries.designsystem.theme.components.Icon
 import io.element.android.libraries.designsystem.theme.components.IconButton
 import io.element.android.libraries.designsystem.theme.components.Text
-import io.element.android.libraries.designsystem.theme.components.TopAppBar
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.ui.components.aMatrixUser
@@ -94,28 +97,53 @@ fun HomeTopBar(
     displayFilters: Boolean,
     filtersState: RoomListFiltersState,
     spaceFiltersState: SpaceFiltersState,
+    unreadCount: Long = 0,
+    notificationUnreadCount: Int = 0,
+    onOpenNotifications: () -> Unit = {},
+    isSystemMessagesPage: Boolean = false,
+    onSystemMessagesBack: () -> Unit = {},
+    contactsPage: ContactsPage = ContactsPage.Directory,
+    onContactsBack: () -> Unit = {},
+    onAddFriendClick: () -> Unit = {},
+    onScanFriendClick: () -> Unit = {},
+    onMyQrCodeClick: () -> Unit = {},
+    onInviteNewUserClick: () -> Unit = {},
+    onCreateRoomClick: () -> Unit = {},
+    onCreateSpaceClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val topBarColors = TopAppBarDefaults.topAppBarColors(
+        containerColor = Color.Transparent,
+        scrolledContainerColor = Color.Transparent,
+    )
     Column(modifier) {
-        TopAppBar(
+        CenterAlignedTopAppBar(
             modifier = Modifier
                 .backgroundVerticalGradient(
                     isVisible = !areSearchResultsDisplayed,
                 )
                 .statusBarsPadding(),
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = Color.Transparent,
-                scrolledContainerColor = Color.Transparent,
-            ),
+            colors = topBarColors,
             title = {
                 val displayTitle = when (selectedNavigationItem) {
-                    HomeNavigationBarItem.Chats -> {
-                        when (spaceFiltersState) {
+                    HomeNavigationBarItem.Chats -> when {
+                        isSystemMessagesPage -> stringResource(R.string.screen_roomlist_system_messages)
+                        else -> when (spaceFiltersState) {
                             is SpaceFiltersState.Selected -> spaceFiltersState.selectedFilter.spaceRoom.displayName
-                            else -> stringResource(selectedNavigationItem.labelRes)
+                            else -> if (unreadCount > 0) {
+                                stringResource(R.string.screen_home_title_with_unread, unreadCount)
+                            } else {
+                                stringResource(R.string.screen_home_title)
+                            }
                         }
                     }
-                    HomeNavigationBarItem.Spaces -> stringResource(selectedNavigationItem.labelRes)
+                    HomeNavigationBarItem.Contacts -> when (contactsPage) {
+                        ContactsPage.Directory -> stringResource(selectedNavigationItem.labelRes)
+                        ContactsPage.FriendRequests -> stringResource(R.string.screen_home_new_friends)
+                        ContactsPage.Groups -> stringResource(R.string.screen_home_groups)
+                        ContactsPage.Spaces -> stringResource(R.string.screen_home_spaces)
+                    }
+                    HomeNavigationBarItem.Me -> stringResource(selectedNavigationItem.labelRes)
                 }
                 Text(
                     modifier = Modifier.semantics {
@@ -126,21 +154,79 @@ fun HomeTopBar(
                 )
             },
             navigationIcon = {
-                NavigationIcon(
-                    currentUserAndNeighbors = currentUserAndNeighbors,
-                    showAvatarIndicator = showAvatarIndicator,
-                    onAccountSwitch = onAccountSwitch,
-                    onClick = onOpenSettings,
-                )
+                if (selectedNavigationItem == HomeNavigationBarItem.Chats && !isSystemMessagesPage) {
+                    IconButton(onClick = onOpenNotifications) {
+                        Box {
+                            Icon(
+                                imageVector = CompoundIcons.Notifications(),
+                                contentDescription = stringResource(R.string.screen_notifications_title),
+                                modifier = Modifier.size(20.dp),
+                                tint = topBarColors.actionIconContentColor,
+                            )
+                            if (notificationUnreadCount > 0) {
+                                io.element.android.libraries.designsystem.atomic.atoms.UnreadIndicatorAtom(
+                                    count = notificationUnreadCount.toLong(),
+                                    color = ElementTheme.colors.bgCriticalPrimary,
+                                    modifier = Modifier.align(Alignment.TopEnd),
+                                )
+                            }
+                        }
+                    }
+                } else if (isSystemMessagesPage) {
+                    BackButton(onClick = onSystemMessagesBack)
+                } else if (selectedNavigationItem == HomeNavigationBarItem.Contacts && contactsPage != ContactsPage.Directory) {
+                    BackButton(onClick = onContactsBack)
+                }
             },
             actions = {
-                if (selectedNavigationItem == HomeNavigationBarItem.Chats) {
+                if (selectedNavigationItem == HomeNavigationBarItem.Chats && !isSystemMessagesPage) {
                     RoomListMenuItems(
                         onToggleSearch = onToggleSearch,
                         onMenuActionClick = onMenuActionClick,
                         canReportBug = canReportBug,
                         spaceFiltersState = spaceFiltersState,
+                        onAddFriendClick = onAddFriendClick,
+                        onScanFriendClick = onScanFriendClick,
+                        onMyQrCodeClick = onMyQrCodeClick,
+                        onInviteNewUserClick = onInviteNewUserClick,
+                        onCreateRoomClick = onCreateRoomClick,
+                        onCreateSpaceClick = onCreateSpaceClick,
                     )
+                } else if (selectedNavigationItem == HomeNavigationBarItem.Contacts) {
+                    when (contactsPage) {
+                        ContactsPage.Directory -> {
+                            IconButton(onClick = onAddFriendClick) {
+                                Icon(
+                                    imageVector = CompoundIcons.Search(),
+                                    contentDescription = stringResource(R.string.screen_home_friend_search),
+                                )
+                            }
+                            IconButton(onClick = onAddFriendClick) {
+                                Icon(
+                                    imageVector = CompoundIcons.Plus(),
+                                    contentDescription = stringResource(R.string.screen_home_new_friends),
+                                )
+                            }
+                        }
+                        ContactsPage.FriendRequests -> IconButton(onClick = onAddFriendClick) {
+                            Icon(
+                                imageVector = CompoundIcons.Plus(),
+                                contentDescription = stringResource(R.string.screen_home_add_friend),
+                            )
+                        }
+                        ContactsPage.Groups -> IconButton(onClick = onCreateRoomClick) {
+                            Icon(
+                                imageVector = CompoundIcons.Plus(),
+                                contentDescription = stringResource(R.string.screen_home_new_chat),
+                            )
+                        }
+                        ContactsPage.Spaces -> IconButton(onClick = onCreateSpaceClick) {
+                            Icon(
+                                imageVector = CompoundIcons.Plus(),
+                                contentDescription = stringResource(R.string.screen_home_spaces),
+                            )
+                        }
+                    }
                 }
             },
             // We want a 16dp left padding for the navigationIcon :
@@ -149,7 +235,7 @@ fun HomeTopBar(
             // 4dp extra padding using left insets
             windowInsets = WindowInsets(left = 4.dp),
         )
-        if (displayFilters) {
+        if (displayFilters && !isSystemMessagesPage) {
             TopAppBarScrollBehaviorLayout(scrollBehavior = scrollBehavior) {
                 RoomListFiltersView(
                     state = filtersState,
@@ -166,6 +252,12 @@ private fun RowScope.RoomListMenuItems(
     onMenuActionClick: (RoomListMenuAction) -> Unit,
     canReportBug: Boolean,
     spaceFiltersState: SpaceFiltersState,
+    onAddFriendClick: () -> Unit,
+    onScanFriendClick: () -> Unit,
+    onMyQrCodeClick: () -> Unit,
+    onInviteNewUserClick: () -> Unit,
+    onCreateRoomClick: () -> Unit,
+    onCreateSpaceClick: () -> Unit,
 ) {
     IconButton(
         onClick = onToggleSearch,
@@ -175,7 +267,62 @@ private fun RowScope.RoomListMenuItems(
             contentDescription = stringResource(CommonStrings.action_search),
         )
     }
-    SpaceFilterButton(spaceFiltersState = spaceFiltersState)
+    var showCreateMenu by remember { mutableStateOf(false) }
+    IconButton(onClick = { showCreateMenu = true }) {
+        Icon(
+            imageVector = CompoundIcons.Plus(),
+            contentDescription = stringResource(R.string.screen_home_add_menu),
+        )
+    }
+    DropdownMenu(
+        expanded = showCreateMenu,
+        onDismissRequest = { showCreateMenu = false },
+    ) {
+        DropdownMenuItem(
+            onClick = {
+                showCreateMenu = false
+                onCreateRoomClick()
+            },
+            text = { Text(stringResource(R.string.screen_home_new_chat)) },
+            leadingIcon = {
+                Icon(imageVector = CompoundIcons.ChatNew(), contentDescription = null)
+            },
+        )
+        DropdownMenuItem(
+            onClick = {
+                showCreateMenu = false
+                onAddFriendClick()
+            },
+            text = { Text(stringResource(R.string.screen_home_add_friend)) },
+            leadingIcon = {
+                Icon(imageVector = CompoundIcons.UserAdd(), contentDescription = null)
+            },
+        )
+        DropdownMenuItem(
+            onClick = {
+                showCreateMenu = false
+                onScanFriendClick()
+            },
+            text = { Text(stringResource(R.string.screen_home_scan)) },
+            leadingIcon = { Icon(painter = androidx.compose.ui.res.painterResource(R.drawable.ic_yizhe_scan), contentDescription = null) },
+        )
+        DropdownMenuItem(
+            onClick = {
+                showCreateMenu = false
+                onInviteNewUserClick()
+            },
+            text = { Text(stringResource(R.string.screen_home_invite_new_user)) },
+            leadingIcon = { Icon(imageVector = CompoundIcons.UserAdd(), contentDescription = null) },
+        )
+        DropdownMenuItem(
+            onClick = {
+                showCreateMenu = false
+                onMyQrCodeClick()
+            },
+            text = { Text(stringResource(R.string.screen_home_my_qr_code)) },
+            leadingIcon = { Icon(imageVector = CompoundIcons.QrCode(), contentDescription = null) },
+        )
+    }
     if (RoomListConfig.HAS_DROP_DOWN_MENU) {
         var showMenu by remember { mutableStateOf(false) }
         IconButton(
@@ -389,7 +536,7 @@ internal fun HomeTopBarSpaceFiltersSelectedPreview() = ElementPreview {
 @Composable
 internal fun HomeTopBarSpacesPreview() = ElementPreview {
     HomeTopBar(
-        selectedNavigationItem = HomeNavigationBarItem.Spaces,
+        selectedNavigationItem = HomeNavigationBarItem.Contacts,
         currentUserAndNeighbors = persistentListOf(aMatrixUser(id = "@id:domain", displayName = USER_NAME_ALICE)),
         showAvatarIndicator = false,
         areSearchResultsDisplayed = false,

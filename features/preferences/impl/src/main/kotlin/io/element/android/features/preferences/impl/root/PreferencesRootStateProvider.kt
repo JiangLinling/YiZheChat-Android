@@ -17,6 +17,7 @@ import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.ui.components.aMatrixUser
 import io.element.android.libraries.matrix.ui.components.aMatrixUserList
 import io.element.android.libraries.ui.strings.CommonStrings
+import io.element.android.security.dataprotection.api.ManagedAppRelease
 import kotlinx.collections.immutable.toImmutableList
 
 open class PreferencesRootStateProvider : PreviewParameterProvider<PreferencesRootState> {
@@ -87,6 +88,7 @@ fun aPreferencesRootState(
     showLabsItem: Boolean = false,
     directLogoutState: DirectLogoutState = aDirectLogoutState(),
     snackbarMessage: SnackbarMessage? = null,
+    availableUpdate: ManagedAppRelease? = null,
     eventSink: (PreferencesRootEvent) -> Unit = {},
 ) = PreferencesRootState(
     myUser = myUser,
@@ -106,5 +108,6 @@ fun aPreferencesRootState(
     showLabsItem = showLabsItem,
     directLogoutState = directLogoutState,
     snackbarMessage = snackbarMessage,
+    availableUpdate = availableUpdate,
     eventSink = eventSink,
 )

@@ -13,6 +13,7 @@ import io.element.android.libraries.core.extensions.mapCatchingExceptions
 import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.matrix.api.core.EventId
+import io.element.android.libraries.matrix.api.media.MediaFile
 import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.mediaplayer.api.MediaPlayer
 import kotlinx.coroutines.flow.Flow
@@ -20,7 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
-import java.io.File
+import java.util.UUID
 
 /**
  * A media player specialized in playing a single voice message.
@@ -86,6 +87,9 @@ interface VoiceMessagePlayer {
      */
     fun setPlaybackSpeed(speed: Float)
 
+    /** Pause and revoke the process-bound media handle owned by this player. */
+    fun close()
+
     data class State(
         /**
          * Whether the player is ready to play.
@@ -148,6 +152,11 @@ class DefaultVoiceMessagePlayer(
         mimeType = mimeType,
         filename = filename,
     )
+    private val sourceOwnerPrefix = UUID.randomUUID().toString()
+    private var currentSourceOwnerId: String? = null
+    private var activeMediaFile: MediaFile? = null
+    private var loadGeneration: Long = 0L
+    private var closed: Boolean = false
 
     private var internalState = MutableStateFlow(
         VoiceMessagePlayer.State(
@@ -160,10 +169,13 @@ class DefaultVoiceMessagePlayer(
     )
 
     override val state: Flow<VoiceMessagePlayer.State> = combine(mediaPlayer.state, internalState) { mediaPlayerState, internalState ->
-        if (mediaPlayerState.isMyTrack) {
+        if (!closed && mediaPlayerState.isMyTrack) {
+            if (mediaPlayerState.isEnded) {
+                releaseActiveMediaFile()
+            }
             this.internalState.update {
                 it.copy(
-                    isReady = mediaPlayerState.isReady,
+                    isReady = mediaPlayerState.isReady && activeMediaFile != null,
                     isPlaying = mediaPlayerState.isPlaying,
                     isEnded = mediaPlayerState.isEnded,
                     currentPosition = mediaPlayerState.currentPosition,
@@ -188,15 +200,44 @@ class DefaultVoiceMessagePlayer(
     }.distinctUntilChanged()
 
     override suspend fun prepare(): Result<Unit> = if (eventId != null) {
-        repo.getMediaFile().mapCatchingExceptions<Unit, File> { mediaFile ->
-            val state = internalState.value
-            mediaPlayer.setMedia(
-                uri = mediaFile.path,
-                mediaId = eventId.value,
-                // Files in the voice cache have no extension so we need to set the mime type manually.
-                mimeType = MimeTypes.Ogg,
-                startPositionMs = if (state.isEnded) 0L else state.currentPosition,
-            )
+        val generation = synchronized(this) {
+            if (closed) return Result.failure(IllegalStateException("Voice message player is closed"))
+            (++loadGeneration).also { currentSourceOwnerId = "$sourceOwnerPrefix:$it" }
+        }
+        val sourceOwnerId = "$sourceOwnerPrefix:$generation"
+        repo.getMediaFile().mapCatchingExceptions<Unit, MediaFile> { mediaFile ->
+            var ownershipTransferred = false
+            try {
+                check(acceptsLoad(generation)) { "Voice media load completed after player close or replacement" }
+                val state = internalState.value
+                releaseActiveMediaFile()
+                mediaPlayer.setMedia(
+                    uri = mediaFile.uriString(),
+                    mediaId = eventId.value,
+                    mimeType = MimeTypes.Ogg,
+                    startPositionMs = if (state.isEnded) 0L else state.currentPosition,
+                    sourceOwnerId = sourceOwnerId,
+                )
+                val accepted = synchronized(this) {
+                    if (closed || generation != loadGeneration || !mediaPlayer.state.value.isMyTrack) {
+                        false
+                    } else {
+                        activeMediaFile = mediaFile
+                        true
+                    }
+                }
+                check(accepted) { "Voice media load completed after player close or replacement" }
+                ownershipTransferred = true
+                internalState.update { it.copy(isReady = true) }
+            } finally {
+                if (!ownershipTransferred) {
+                    if (mediaPlayer.state.value.sourceOwnerId == sourceOwnerId) mediaPlayer.clear()
+                    synchronized(this) {
+                        if (activeMediaFile === mediaFile) activeMediaFile = null
+                    }
+                    mediaFile.close()
+                }
+            }
         }
     } else {
         Result.failure(IllegalStateException("Cannot acquireControl on a voice message with no eventId"))
@@ -228,10 +269,37 @@ class DefaultVoiceMessagePlayer(
         mediaPlayer.setPlaybackSpeed(speed)
     }
 
+    override fun close() {
+        val mediaFile = synchronized(this) {
+            closed = true
+            loadGeneration++
+            activeMediaFile.also { activeMediaFile = null }
+        }
+        if (mediaPlayer.state.value.sourceOwnerId?.startsWith("$sourceOwnerPrefix:") == true) mediaPlayer.clear()
+        mediaFile?.close()
+        internalState.update {
+            it.copy(isReady = false, isPlaying = false)
+        }
+    }
+
+    /**
+     * Pausing or losing audio focus keeps the bounded lease so playback can resume without another
+     * download. End-of-playback and page disposal release it; the lease TTL remains the hard limit.
+     */
+    private fun releaseActiveMediaFile() {
+        val mediaFile = synchronized(this) {
+            activeMediaFile.also { activeMediaFile = null }
+        }
+        mediaFile?.close()
+    }
+
+    @Synchronized
+    private fun acceptsLoad(generation: Long): Boolean = !closed && generation == loadGeneration
+
     private val MediaPlayer.State.isMyTrack: Boolean
-        get() = if (eventId == null) false else this.mediaId == eventId.value
+        get() = eventId != null && currentSourceOwnerId != null && this.mediaId == eventId.value && this.sourceOwnerId == currentSourceOwnerId
 
     private fun inControl(): Boolean = mediaPlayer.state.value.let {
-        it.isMyTrack && (it.isReady || it.isEnded)
+        !closed && activeMediaFile != null && it.isMyTrack && (it.isReady || it.isEnded)
     }
 }

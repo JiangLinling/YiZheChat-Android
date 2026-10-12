@@ -8,6 +8,7 @@
 
 package io.element.android.features.poll.impl.create
 
+import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.matrix.api.poll.PollKind
 import kotlinx.collections.immutable.ImmutableList
 
@@ -21,6 +22,7 @@ data class CreatePollState(
     val showBackConfirmation: Boolean,
     val showDeleteConfirmation: Boolean,
     val eventSink: (CreatePollEvent) -> Unit,
+    val saveAction: AsyncAction<Unit> = AsyncAction.Uninitialized,
 ) {
     enum class Mode {
         New,

@@ -25,6 +25,7 @@ data class PollFormState(
     val question: String,
     val answers: ImmutableList<String>,
     val isDisclosed: Boolean,
+    val answerIds: ImmutableList<String>? = null,
 ) {
     companion object {
         val Empty = PollFormState(
@@ -50,7 +51,10 @@ data class PollFormState(
             return this
         }
 
-        return copy(answers = (answers + "").toImmutableList())
+        return copy(
+            answers = (answers + "").toImmutableList(),
+            answerIds = answerIds?.let { (it + java.util.UUID.randomUUID().toString()).toImmutableList() },
+        )
     }
 
     /**
@@ -67,7 +71,10 @@ data class PollFormState(
             return this
         }
 
-        return copy(answers = answers.filterIndexed { i, _ -> i != index }.toImmutableList())
+        return copy(
+            answers = answers.filterIndexed { i, _ -> i != index }.toImmutableList(),
+            answerIds = answerIds?.filterIndexed { i, _ -> i != index }?.toImmutableList(),
+        )
     }
 
     /**
@@ -98,7 +105,8 @@ data class PollFormState(
     /**
      * Whether the form is currently valid.
      */
-    val isValid get() = question.isNotBlank() && answers.size >= MIN_ANSWERS && answers.all { it.isNotBlank() }
+    val isValid get() = question.isNotBlank() && answers.size >= MIN_ANSWERS && answers.all { it.isNotBlank() } &&
+        (answerIds == null || (answerIds.size == answers.size && answerIds.all { it.isNotBlank() } && answerIds.distinct().size == answerIds.size))
 }
 
 /**
@@ -110,13 +118,14 @@ internal val pollFormStateSaver = mapSaver(
             "question" to it.question,
             "answers" to it.answers.toTypedArray(),
             "isDisclosed" to it.isDisclosed,
-        )
+        ).apply { it.answerIds?.let { ids -> put("answerIds", ids.toTypedArray()) } }
     },
     restore = { saved ->
         PollFormState(
             question = saved["question"] as String,
             answers = (saved["answers"] as Array<*>).map { it as String }.toImmutableList(),
             isDisclosed = saved["isDisclosed"] as Boolean,
+            answerIds = (saved["answerIds"] as? Array<*>)?.map { it as String }?.toImmutableList(),
         )
     }
 )

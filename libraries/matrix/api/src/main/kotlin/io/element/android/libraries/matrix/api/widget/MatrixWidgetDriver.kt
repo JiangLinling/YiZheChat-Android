@@ -13,7 +13,12 @@ import kotlinx.coroutines.flow.Flow
 interface MatrixWidgetDriver : AutoCloseable {
     val id: String
     val incomingMessages: Flow<String>
+    /** Exact Matrix event ID acknowledged for this widget's outgoing ringing invitation. */
+    val outgoingCallInvitation: kotlinx.coroutines.flow.StateFlow<String?>
 
     suspend fun run()
     suspend fun send(message: String)
+
+    /** Best-effort departure of this widget's own RTC membership after local media has stopped. */
+    suspend fun stopCallMembership()
 }

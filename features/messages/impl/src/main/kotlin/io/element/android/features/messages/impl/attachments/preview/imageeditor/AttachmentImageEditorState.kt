@@ -28,6 +28,7 @@ data class AttachmentImageEdits(
     val rotationQuarterTurns: Int = 0,
     val isFlippedHorizontally: Boolean = false,
     val isFlippedVertically: Boolean = false,
+    val annotations: List<ImageAnnotation> = emptyList(),
 ) {
     val normalizedRotationQuarterTurns: Int
         get() = rotationQuarterTurns % 4
@@ -39,13 +40,14 @@ data class AttachmentImageEdits(
         get() = cropRect != NormalizedCropRect.default() ||
             normalizedRotationQuarterTurns != 0 ||
             isFlippedHorizontally ||
-            isFlippedVertically
+            isFlippedVertically || annotations.isNotEmpty()
 
     fun rotateAntiClockwise(): AttachmentImageEdits {
         return copy(
             rotationQuarterTurns = (normalizedRotationQuarterTurns + 3) % 4,
             // Also update the crop rect to keep the same selected area
-            cropRect = cropRect.rotateAntiClockwise()
+            cropRect = cropRect.rotateAntiClockwise(),
+            annotations = annotations.map { it.mapPoints { p -> ImagePoint(p.y, 1f - p.x) } },
         )
     }
 
@@ -54,6 +56,7 @@ data class AttachmentImageEdits(
             isFlippedHorizontally = !isFlippedHorizontally,
             // Also update the crop rect to keep the same selected area
             cropRect = cropRect.flipHorizontally(),
+            annotations = annotations.map { it.mapPoints { p -> ImagePoint(1f - p.x, p.y) } },
         )
     }
 
@@ -62,6 +65,7 @@ data class AttachmentImageEdits(
             isFlippedVertically = !isFlippedVertically,
             // Also update the crop rect to keep the same selected area
             cropRect = cropRect.flipVertically(),
+            annotations = annotations.map { it.mapPoints { p -> ImagePoint(p.x, 1f - p.y) } },
         )
     }
 }

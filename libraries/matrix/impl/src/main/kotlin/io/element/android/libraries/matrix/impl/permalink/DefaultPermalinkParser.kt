@@ -41,6 +41,20 @@ class DefaultPermalinkParser(
      */
     override fun parse(uriString: String): PermalinkData {
         val uri = uriString.toUri()
+        if (uri.scheme == "yizhe" && uri.path == "/v1") {
+            if (uri.host == "friend") {
+                val user = uri.getQueryParameter("user_id").orEmpty()
+                if (io.element.android.libraries.matrix.api.core.MatrixPatterns.isUserId(user)) return PermalinkData.UserLink(UserId(user))
+            }
+            if (uri.host == "group") {
+                val room = uri.getQueryParameter("room_id").orEmpty()
+                val token = uri.getQueryParameter("token").orEmpty()
+                if (io.element.android.libraries.matrix.api.core.MatrixPatterns.isRoomId(room) && token.length in 32..4096) {
+                    return PermalinkData.RoomLink(RoomId(room).toRoomIdOrAlias(), invitationToken = token)
+                }
+            }
+            return PermalinkData.FallbackLink(uri)
+        }
         val matrixToUri = if (uri.scheme == "matrix") {
             // take matrix: URI as is to [parseMatrixEntityFrom]
             uri

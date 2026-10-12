@@ -40,6 +40,8 @@ dependencies {
     implementation(projects.libraries.uiStrings)
     implementation(projects.libraries.testtags)
     implementation(projects.services.appnavstate.api)
+    implementation(projects.security.dataProtection.api)
+    implementation(projects.security.contentProtection.api)
     api(libs.statemachine)
     api(projects.features.share.api)
 
@@ -50,4 +52,5 @@ dependencies {
     testImplementation(projects.libraries.preferences.test)
     testImplementation(projects.libraries.roomselect.test)
     testImplementation(projects.services.appnavstate.impl)
+    testImplementation(projects.security.dataProtection.test)
 }

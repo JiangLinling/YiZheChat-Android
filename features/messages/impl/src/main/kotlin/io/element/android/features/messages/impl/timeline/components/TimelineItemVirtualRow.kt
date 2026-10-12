@@ -17,7 +17,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import io.element.android.features.messages.impl.timeline.TimelineEvent
 import io.element.android.features.messages.impl.timeline.TimelineRoomInfo
-import io.element.android.features.messages.impl.timeline.components.virtual.TimelineItemDaySeparatorView
 import io.element.android.features.messages.impl.timeline.components.virtual.TimelineItemReadMarkerView
 import io.element.android.features.messages.impl.timeline.components.virtual.TimelineItemRoomBeginningView
 import io.element.android.features.messages.impl.timeline.components.virtual.TimelineLoadingMoreIndicator
@@ -40,7 +39,9 @@ fun TimelineItemVirtualRow(
 ) {
     Box(modifier = modifier) {
         when (virtual.model) {
-            is TimelineItemDaySeparatorModel -> TimelineItemDaySeparatorView(virtual.model)
+            // YiZheChat renders WeChat-style date/time markers immediately above the first event in
+            // each time segment. Keep the virtual item for indexing and the floating date badge only.
+            is TimelineItemDaySeparatorModel -> Spacer(modifier = Modifier)
             TimelineItemReadMarkerModel -> TimelineItemReadMarkerView()
             TimelineItemRoomBeginningModel -> {
                 TimelineItemRoomBeginningView(

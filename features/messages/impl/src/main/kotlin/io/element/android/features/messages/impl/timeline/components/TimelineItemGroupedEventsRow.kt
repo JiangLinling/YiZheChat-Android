@@ -16,6 +16,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import io.element.android.features.messages.impl.R
+import io.element.android.features.messages.impl.timeline.LocalTimelineIsTalkbackActive
 import io.element.android.features.messages.impl.timeline.TimelineEvent
 import io.element.android.features.messages.impl.timeline.TimelineRoomInfo
 import io.element.android.features.messages.impl.timeline.aGroupedEvents
@@ -23,9 +24,8 @@ import io.element.android.features.messages.impl.timeline.aTimelineRoomInfo
 import io.element.android.features.messages.impl.timeline.components.event.TimelineItemEventContentView
 import io.element.android.features.messages.impl.timeline.components.group.GroupHeaderView
 import io.element.android.features.messages.impl.timeline.components.layout.ContentAvoidingLayoutData
-import io.element.android.features.messages.impl.timeline.components.receipt.ReadReceiptViewState
-import io.element.android.features.messages.impl.timeline.components.receipt.TimelineItemReadReceiptView
 import io.element.android.features.messages.impl.timeline.model.TimelineItem
+import io.element.android.features.messages.impl.timeline.model.GroupedEventsKind
 import io.element.android.features.messages.impl.timeline.protection.TimelineProtectionEvent
 import io.element.android.features.messages.impl.timeline.protection.TimelineProtectionState
 import io.element.android.features.messages.impl.timeline.protection.aTimelineProtectionState
@@ -34,7 +34,6 @@ import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.api.user.MatrixUser
-import io.element.android.libraries.ui.utils.a11y.isTalkbackActive
 import io.element.android.wysiwyg.link.Link
 
 @Composable
@@ -71,10 +70,36 @@ fun TimelineItemGroupedEventsRow(
                 modifier = contentModifier,
                 onContentClick = null,
                 onLongClick = null,
-                onContentLayoutChange = onContentLayoutChange
+                onContentLayoutChange = onContentLayoutChange,
+                isMine = event.isMine,
+                localSendState = event.localSendState,
             )
         },
 ) {
+    if (timelineItem.kind == GroupedEventsKind.MEDIA_ALBUM) {
+        TimelineItemMediaAlbumRow(
+            timelineItem = timelineItem,
+            timelineMode = timelineMode,
+            timelineRoomInfo = timelineRoomInfo,
+            timelineProtectionState = timelineProtectionState,
+            renderReadReceipts = renderReadReceipts,
+            isLastOutgoingMessage = isLastOutgoingMessage,
+            displayThreadSummaries = displayThreadSummaries,
+            onClick = onClick,
+            onLongClick = onLongClick,
+            inReplyToClick = inReplyToClick,
+            onUserDataClick = onUserDataClick,
+            onLinkClick = onLinkClick,
+            onLinkLongClick = onLinkLongClick,
+            onReactionClick = onReactionClick,
+            onReactionLongClick = onReactionLongClick,
+            onMoreReactionsClick = onMoreReactionsClick,
+            onReadReceiptClick = onReadReceiptClick,
+            eventSink = eventSink,
+            modifier = modifier,
+        )
+        return
+    }
     val isExpanded = rememberSaveable { mutableStateOf(false) }
 
     fun onExpandGroupClick() {
@@ -144,14 +169,16 @@ private fun TimelineItemGroupedEventsRowContent(
                 modifier = contentModifier,
                 onContentClick = null,
                 onLongClick = null,
-                onContentLayoutChange = onContentLayoutChange
+                onContentLayoutChange = onContentLayoutChange,
+                isMine = event.isMine,
+                localSendState = event.localSendState,
             )
         },
 ) {
     Column(modifier = modifier.animateContentSize()) {
         GroupHeaderView(
             text = pluralStringResource(
-                id = R.plurals.screen_room_timeline_state_changes,
+                id = R.plurals.screen_room_timeline_chat_updates,
                 count = timelineItem.events.size,
                 timelineItem.events.size
             ),
@@ -162,7 +189,7 @@ private fun TimelineItemGroupedEventsRowContent(
         if (isExpanded) {
             Column {
                 timelineItem.events.let {
-                    if (isTalkbackActive()) {
+                    if (LocalTimelineIsTalkbackActive.current) {
                         it.reversed()
                     } else {
                         it
@@ -193,16 +220,6 @@ private fun TimelineItemGroupedEventsRowContent(
                     )
                 }
             }
-        } else if (renderReadReceipts) {
-            TimelineItemReadReceiptView(
-                state = ReadReceiptViewState(
-                    sendState = null,
-                    isLastOutgoingMessage = false,
-                    receipts = timelineItem.aggregatedReadReceipts,
-                ),
-                renderReadReceipts = true,
-                onReadReceiptsClick = onExpandGroupClick
-            )
         }
     }
 }

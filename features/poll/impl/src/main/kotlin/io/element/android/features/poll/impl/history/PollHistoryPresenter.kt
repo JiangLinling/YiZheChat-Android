@@ -73,10 +73,10 @@ class PollHistoryPresenter(
                         timeline = timeline,
                         pollStartId = event.pollStartId,
                         answerId = event.answerId
-                    )
+                    ).also(event.onComplete)
                 }
                 is PollHistoryEvents.EndPoll -> sessionCoroutineScope.launch {
-                    endPollAction.execute(timeline = timeline, pollStartId = event.pollStartId)
+                    endPollAction.execute(timeline = timeline, pollStartId = event.pollStartId).also(event.onComplete)
                 }
                 is PollHistoryEvents.SelectFilter -> {
                     activeFilter = event.filter

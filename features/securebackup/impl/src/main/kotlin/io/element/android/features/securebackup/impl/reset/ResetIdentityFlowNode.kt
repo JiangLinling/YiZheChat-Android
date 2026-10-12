@@ -77,14 +77,7 @@ class ResetIdentityFlowNode(
     private lateinit var activity: Activity
     private var darkTheme: Boolean = false
     private var resetJob: Job? = null
-
-    override fun onBuilt() {
-        super.onBuilt()
-
-        resetIdentityFlowManager.whenResetIsDone {
-            callback.onDone()
-        }
-    }
+    private var resetFlowFinished = false
 
     override fun resolve(navTarget: NavTarget, buildContext: BuildContext): Node {
         return when (navTarget) {
@@ -98,9 +91,14 @@ class ResetIdentityFlowNode(
             }
             is NavTarget.ResetPassword -> {
                 val handle = resetIdentityFlowManager.currentHandleFlow.value.dataOrNull() as? IdentityPasswordResetHandle ?: error("No password handle found")
+                val passwordCallback = object : ResetIdentityPasswordNode.Callback {
+                    override fun onResetSucceeded() {
+                        finishResetFlow()
+                    }
+                }
                 createNode<ResetIdentityPasswordNode>(
                     buildContext,
-                    listOf(ResetIdentityPasswordNode.Inputs(handle))
+                    listOf(ResetIdentityPasswordNode.Inputs(handle), passwordCallback)
                 )
             }
         }
@@ -124,13 +122,18 @@ class ResetIdentityFlowNode(
                 when (val handle = handleResult.data) {
                     null -> {
                         Timber.d("No reset handle return, the reset is done.")
+                        finishResetFlow()
                     }
                     is IdentityOAuthResetHandle -> {
                         Timber.d("Launching reset confirmation in MAS")
                         val url = sessionEnterpriseService.tweakMasUrl(handle.url)
                         activity.openUrlInChromeCustomTab(null, darkTheme, url)
                         Timber.d("Starting resetOAuth")
-                        resetJob = launch { handle.resetOAuth() }
+                        resetJob = launch {
+                            resetIdentityFlowManager.completeReset(handle::resetOAuth)
+                                .onSuccess { finishResetFlow() }
+                                .onFailure { Timber.e(it, "resetOAuth failed") }
+                        }
                         resetJob?.invokeOnCompletion { Timber.d("resetOAuth ended") }
                     }
                     is IdentityPasswordResetHandle -> backstack.push(NavTarget.ResetPassword)
@@ -155,6 +158,12 @@ class ResetIdentityFlowNode(
     private fun cancelResetJob() {
         resetJob?.cancel()
         resetJob = null
+    }
+
+    private fun finishResetFlow() {
+        if (resetFlowFinished) return
+        resetFlowFinished = true
+        callback.onDone()
     }
 
     @Composable

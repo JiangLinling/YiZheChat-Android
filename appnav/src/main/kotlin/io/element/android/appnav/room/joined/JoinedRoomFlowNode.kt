@@ -61,7 +61,7 @@ class JoinedRoomFlowNode(
 ) :
     BaseFlowNode<JoinedRoomFlowNode.NavTarget>(
         backstack = BackStack(
-            initialElement = NavTarget.Loading,
+            initialElement = if (plugins.filterIsInstance<Inputs>().first().joinedRoom != null) NavTarget.Loaded else NavTarget.Loading,
             savedStateMap = buildContext.savedStateMap,
         ),
         buildContext = buildContext,
@@ -71,6 +71,7 @@ class JoinedRoomFlowNode(
         val roomId: RoomId,
         val joinedRoom: JoinedRoom?,
         val initialElement: RoomNavigationTarget,
+        val roomName: String? = null,
     ) : NodeInputs
 
     private val inputs: Inputs = inputs()
@@ -132,7 +133,8 @@ class JoinedRoomFlowNode(
         LoadingRoomNodeView(
             state = loadingRoomState,
             onBackClick = onBackClick,
-            modifier = modifier
+            modifier = modifier,
+            roomName = inputs.roomName,
         )
     }
 

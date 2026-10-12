@@ -13,10 +13,13 @@ import dev.zacsweers.metro.Inject
 import io.element.android.libraries.androidutils.file.safeDelete
 import io.element.android.libraries.matrix.api.room.alias.RoomAliasHelper
 import io.element.android.libraries.matrix.api.spaces.SpaceRoom
+import io.element.android.libraries.matrix.api.user.MatrixUser
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import java.io.File
+import io.element.android.security.contentprotection.api.RoomLifecycleProfileKind
 
 @Inject
 class CreateRoomConfigStore(
@@ -37,7 +40,9 @@ class CreateRoomConfigStore(
             val roomAccessWithNewAddress = if (config.visibilityState is RoomVisibilityState.Public) {
                 val roomAddress = config.visibilityState.roomAddress
                 if (roomAddress is RoomAddress.AutoFilled || roomName.isEmpty()) {
-                    val roomAliasName = roomAliasHelper.roomAliasNameFromRoomDisplayName(roomName)
+                    val roomAliasName = roomAliasHelper.roomAliasNameFromRoomDisplayName(
+                        config.copy(roomName = roomName.takeIf { it.isNotBlank() }).effectiveRoomName.orEmpty()
+                    )
                     config.visibilityState.copy(roomAddress = RoomAddress.AutoFilled(roomAliasName))
                 } else {
                     config.visibilityState
@@ -52,10 +57,26 @@ class CreateRoomConfigStore(
         }
     }
 
+    fun setInvites(users: List<MatrixUser>) {
+        createRoomConfigFlow.getAndUpdate { config ->
+            val updated = config.copy(invites = users.distinctBy { it.userId }.toImmutableList())
+            val visibility = updated.visibilityState
+            if (visibility is RoomVisibilityState.Public && visibility.roomAddress is RoomAddress.AutoFilled) {
+                updated.copy(visibilityState = visibility.copy(
+                    roomAddress = RoomAddress.AutoFilled(roomAliasHelper.roomAliasNameFromRoomDisplayName(updated.effectiveRoomName.orEmpty()))
+                ))
+            } else updated
+        }
+    }
+
     fun setTopic(topic: String) {
         createRoomConfigFlow.getAndUpdate { config ->
             config.copy(topic = topic.takeIf { it.isNotEmpty() })
         }
+    }
+
+    fun setLifecycleProfileKind(profileKind: RoomLifecycleProfileKind) {
+        createRoomConfigFlow.getAndUpdate { config -> config.copy(lifecycleProfileKind = profileKind) }
     }
 
     fun setAvatarUri(uri: Uri?, cached: Boolean = false) {
@@ -76,7 +97,7 @@ class CreateRoomConfigStore(
                         joinRuleItem = joinRule
                     )
                     is JoinRuleItem.PublicVisibility -> {
-                        val roomAliasName = roomAliasHelper.roomAliasNameFromRoomDisplayName(config.roomName.orEmpty())
+                        val roomAliasName = roomAliasHelper.roomAliasNameFromRoomDisplayName(config.effectiveRoomName.orEmpty())
                         RoomVisibilityState.Public(
                             roomAddress = RoomAddress.AutoFilled(roomAliasName),
                             joinRuleItem = joinRule,

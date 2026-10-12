@@ -13,6 +13,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import io.element.android.libraries.androidutils.file.safeDelete
@@ -21,6 +22,7 @@ import io.element.android.libraries.core.data.tryOrNull
 import io.element.android.libraries.di.annotations.SessionCoroutineScope
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.preferences.api.store.SessionPreferencesStore
+import io.element.android.libraries.preferences.api.store.RecentImageAcknowledgements
 import io.element.android.libraries.preferences.api.store.VideoCompressionPreset
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -47,6 +49,9 @@ class DefaultSessionPreferencesStore(
     private val skipSessionVerification = booleanPreferencesKey("skipSessionVerification")
     private val compressImages = booleanPreferencesKey("compressMedia")
     private val compressMediaPreset = stringPreferencesKey("compressMediaPreset")
+    private val acknowledgedHistoryRecoveryBanners = stringSetPreferencesKey("acknowledgedHistoryRecoveryBannersV1")
+    private val playedVoiceMessages = stringSetPreferencesKey("playedVoiceMessagesV1")
+    private val recentImageAcknowledgements = stringSetPreferencesKey("recentImageAcknowledgementsV1")
 
     private val dataStoreFile = storeFile(context, sessionId)
     private val store = PreferenceDataStoreFactory.create(
@@ -94,6 +99,51 @@ class DefaultSessionPreferencesStore(
     override fun getVideoCompressionPreset(): Flow<VideoCompressionPreset> = get(compressMediaPreset) { VideoCompressionPreset.STANDARD.name }
         .map { tryOrNull { VideoCompressionPreset.valueOf(it) } ?: VideoCompressionPreset.STANDARD }
 
+    override suspend fun acknowledgeHistoryRecoveryBanner(roomId: String, status: String) {
+        val token = historyRecoveryBannerToken(roomId, status)
+        store.edit { preferences ->
+            preferences[acknowledgedHistoryRecoveryBanners] =
+                preferences[acknowledgedHistoryRecoveryBanners].orEmpty() + token
+        }
+    }
+
+    override suspend fun claimRecentImageSuggestions(newestFirstIds: List<String>, nowEpochMillis: Long): Set<String> {
+        var claimed = emptySet<String>()
+        store.edit { prefs ->
+            val records = RecentImageAcknowledgements.retain(prefs[recentImageAcknowledgements].orEmpty(), nowEpochMillis)
+            claimed = RecentImageAcknowledgements.claimable(newestFirstIds, records)
+            prefs[recentImageAcknowledgements] = RecentImageAcknowledgements.acknowledge(records, claimed, nowEpochMillis)
+        }
+        return claimed
+    }
+
+    override suspend fun acknowledgeSelectedImages(ids: List<String>, nowEpochMillis: Long) {
+        store.edit { prefs ->
+            prefs[recentImageAcknowledgements] = RecentImageAcknowledgements.acknowledge(
+                prefs[recentImageAcknowledgements].orEmpty(), ids, nowEpochMillis,
+            )
+        }
+    }
+
+    override suspend fun clearHistoryRecoveryBannerAcknowledgements(roomId: String) {
+        val prefix = historyRecoveryRoomPrefix(roomId)
+        store.edit { preferences ->
+            val retained = preferences[acknowledgedHistoryRecoveryBanners]
+                .orEmpty()
+                .filterNotTo(mutableSetOf()) { it.startsWith(prefix) }
+            if (retained.isEmpty()) {
+                preferences.remove(acknowledgedHistoryRecoveryBanners)
+            } else {
+                preferences[acknowledgedHistoryRecoveryBanners] = retained
+            }
+        }
+    }
+
+    override fun isHistoryRecoveryBannerAcknowledged(roomId: String, status: String): Flow<Boolean> {
+        val token = historyRecoveryBannerToken(roomId, status)
+        return store.data.map { preferences -> token in preferences[acknowledgedHistoryRecoveryBanners].orEmpty() }
+    }
+
     override suspend fun clear() {
         dataStoreFile.safeDelete()
     }
@@ -105,4 +155,20 @@ class DefaultSessionPreferencesStore(
     private fun <T> get(key: Preferences.Key<T>, default: () -> T): Flow<T> {
         return store.data.map { prefs -> prefs[key] ?: default() }
     }
+
+    override suspend fun markVoiceMessagePlayed(eventId: String) {
+        require(eventId.isNotBlank())
+        val token = eventId.hash()
+        store.edit { preferences -> preferences[playedVoiceMessages] = preferences[playedVoiceMessages].orEmpty() + token }
+    }
+
+    override fun hasVoiceMessagePlayed(eventId: String): Flow<Boolean> {
+        val token = eventId.hash()
+        return store.data.map { token in it[playedVoiceMessages].orEmpty() }
+    }
+
+    private fun historyRecoveryRoomPrefix(roomId: String): String = "${roomId.hash().take(24)}:"
+
+    private fun historyRecoveryBannerToken(roomId: String, status: String): String =
+        historyRecoveryRoomPrefix(roomId) + status
 }

@@ -18,12 +18,22 @@ import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.architecture.runCatchingUpdatingState
 import io.element.android.libraries.matrix.api.MatrixClient
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.LifecycleOperationContext
+import io.element.android.security.dataprotection.api.PermanentAccountDeletionCoordinator
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.security.MessageDigest
 
 @Inject
 class AccountDeactivationPresenter(
     private val matrixClient: MatrixClient,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
+    private val permanentAccountDeletionCoordinator: PermanentAccountDeletionCoordinator,
 ) : Presenter<AccountDeactivationState> {
     @Composable
     override fun present(): AccountDeactivationState {
@@ -38,7 +48,9 @@ class AccountDeactivationPresenter(
             when (event) {
                 is AccountDeactivationEvents.SetEraseData -> {
                     updateFormState(formState) {
-                        copy(eraseData = event.eraseData)
+                        // Permanent deletion is always a complete data erasure. Keep the event for
+                        // binary/source compatibility with callers, but never allow it to weaken LC-22.
+                        copy(eraseData = true)
                     }
                 }
                 is AccountDeactivationEvents.SetPassword -> {
@@ -77,10 +89,45 @@ class AccountDeactivationPresenter(
         action: MutableState<AsyncAction<Unit>>,
     ) = launch {
         suspend {
-            matrixClient.deactivateAccount(
-                password = formState.password,
-                eraseData = formState.eraseData,
-            ).getOrThrow()
+            val accountIdHash = matrixClient.sessionId.value.sha256Hex()
+            val pendingDeletion = permanentAccountDeletionCoordinator.pendingRecovery(accountIdHash)
+            if (pendingDeletion != null) {
+                // A successful prepare has already frozen the account. Seed the generic lifecycle
+                // coordinator from the exact durable LC-22 identity so it uses /resume; attempting
+                // to create a replacement operation is correctly rejected by the frozen boundary.
+                appOperationalStateCoordinator.operation(pendingDeletion.value)
+            }
+            val request = lifecycleOperationRequest(
+                lifecycleId = FullAppLifecycleId.LC_22,
+                trigger = "permanent_delete",
+                accountIdHash = accountIdHash,
+                matrixDeviceIdHash = matrixClient.deviceId.value.sha256Hex(),
+                operationId = pendingDeletion?.value ?: java.util.UUID.randomUUID().toString(),
+            )
+            val delete: suspend () -> Unit = {
+                // The permanent-deletion coordinator first freezes the LC-22 resource manifest.
+                // Push revocation is then performed by the server-owned PUSH_ACCOUNT task so its
+                // account-terminal authority receipt can be validated against that frozen scope.
+                matrixClient.deactivateAccount(
+                    password = formState.password,
+                    eraseData = true,
+                ).getOrThrow()
+            }
+            if (pendingDeletion == null) {
+                // A new permanent deletion must never resume an unrelated LC-22 logout or local
+                // account-removal operation that happens to be non-terminal.
+                appOperationalStateCoordinator.perform(request) { delete() }
+            } else {
+                // Resume the exact durable deletion identity. The lifecycle context prevents the
+                // generic coordinator from selecting another LC-22 operation on this installation.
+                withContext(LifecycleOperationContext(pendingDeletion.value, FullAppLifecycleId.LC_22)) {
+                    appOperationalStateCoordinator.perform(request) { delete() }
+                }
+            }
         }.runCatchingUpdatingState(action)
     }
+
+    private fun String.sha256Hex(): String = MessageDigest.getInstance("SHA-256")
+        .digest(encodeToByteArray())
+        .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 }

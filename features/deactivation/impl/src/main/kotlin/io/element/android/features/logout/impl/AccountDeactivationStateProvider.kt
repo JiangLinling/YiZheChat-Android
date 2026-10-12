@@ -35,7 +35,7 @@ open class AccountDeactivationStateProvider : PreviewParameterProvider<AccountDe
 }
 
 internal fun aDeactivateFormState(
-    eraseData: Boolean = false,
+    eraseData: Boolean = true,
     password: String = "",
 ) = DeactivateFormState(
     eraseData = eraseData,

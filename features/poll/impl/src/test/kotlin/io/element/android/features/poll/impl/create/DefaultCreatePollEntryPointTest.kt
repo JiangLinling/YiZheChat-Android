@@ -18,6 +18,7 @@ import io.element.android.features.poll.impl.data.PollRepository
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.test.room.FakeJoinedRoom
 import io.element.android.libraries.matrix.test.timeline.LiveTimelineProvider
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.services.analytics.test.FakeAnalyticsService
 import io.element.android.tests.testutils.node.TestParentNode
 import org.junit.Rule
@@ -30,6 +31,7 @@ class DefaultCreatePollEntryPointTest {
     @Test
     fun `test node builder`() {
         val entryPoint = DefaultCreatePollEntryPoint()
+        val room = FakeJoinedRoom()
         val parentNode = TestParentNode.create { buildContext, plugins ->
             CreatePollNode(
                 buildContext = buildContext,
@@ -37,9 +39,10 @@ class DefaultCreatePollEntryPointTest {
                 presenterFactory = { timelineMode: Timeline.Mode, backNavigator: () -> Unit, mode: CreatePollMode ->
                     CreatePollPresenter(
                         repositoryFactory = {
-                            val room = FakeJoinedRoom()
                             PollRepository(room, LiveTimelineProvider(room), timelineMode)
                         },
+                        room = room,
+                        appOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
                         analyticsService = FakeAnalyticsService(),
                         messageComposerContext = FakeMessageComposerContext(),
                         navigateUp = backNavigator,

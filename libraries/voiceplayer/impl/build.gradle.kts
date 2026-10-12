@@ -26,6 +26,7 @@ dependencies {
     implementation(projects.libraries.core)
     implementation(projects.libraries.di)
     implementation(projects.libraries.matrix.api)
+    implementation(projects.security.contentProtection.api)
     implementation(projects.libraries.mediaplayer.api)
     implementation(projects.libraries.preferences.api)
     implementation(projects.libraries.uiUtils)

@@ -452,11 +452,13 @@ class AndroidMediaPreProcessorTest {
         videoCompressor = VideoCompressor(context),
         coroutineDispatchers = testCoroutineDispatchers(),
         temporaryUriDeleter = temporaryUriDeleter,
+        featureFlagService = io.element.android.libraries.featureflag.test.FakeFeatureFlagService(),
     )
 
     @Throws(IOException::class)
-    private fun getFileFromAssets(context: Context, fileName: String): File = File(context.cacheDir, fileName)
+    private fun getFileFromAssets(context: Context, fileName: String): File = File(File(context.filesDir, "source-fixtures"), fileName)
         .also {
+            requireNotNull(it.parentFile).mkdirs()
             if (!it.exists()) {
                 it.outputStream().use { cache ->
                     context.assets.open(fileName).use { inputStream ->

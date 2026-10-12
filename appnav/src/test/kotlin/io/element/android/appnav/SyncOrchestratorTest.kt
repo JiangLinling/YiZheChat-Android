@@ -19,6 +19,7 @@ import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import io.element.android.tests.testutils.testCoroutineDispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
@@ -54,10 +55,12 @@ class SyncOrchestratorTest {
 
     @Test
     fun `when the sync wasn't running before, an initial sync will take place`() = runTest {
-        val startSyncRecorder = lambdaRecorder<Result<Unit>> { Result.success(Unit) }
-        val syncService = FakeSyncService(initialSyncState = SyncState.Idle).apply {
-            startSyncLambda = startSyncRecorder
+        val syncService = FakeSyncService(initialSyncState = SyncState.Idle)
+        val startSyncRecorder = lambdaRecorder<Result<Unit>> {
+            backgroundScope.launch { syncService.emitSyncState(SyncState.Running) }
+            Result.success(Unit)
         }
+        syncService.startSyncLambda = startSyncRecorder
         val networkMonitor = FakeNetworkMonitor(initialStatus = NetworkStatus.Connected)
         val syncOrchestrator = createSyncOrchestrator(
             syncService = syncService,

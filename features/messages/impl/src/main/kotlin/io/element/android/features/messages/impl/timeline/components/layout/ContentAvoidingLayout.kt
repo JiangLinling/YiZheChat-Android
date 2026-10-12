@@ -9,6 +9,7 @@
 package io.element.android.features.messages.impl.timeline.components.layout
 
 import android.text.Layout
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
@@ -55,8 +56,11 @@ fun ContentAvoidingLayout(
     Layout(
         modifier = modifier,
         content = {
-            scope.content()
-            overlay()
+            // Keep the two layout slots structurally distinct even when either caller emits no
+            // child. Without these containers, `first()` and `last()` can refer to the same
+            // measurable and Compose will crash when that one placeable is placed twice.
+            Box { scope.content() }
+            Box { overlay() }
         }
     ) { measurables, constraints ->
 

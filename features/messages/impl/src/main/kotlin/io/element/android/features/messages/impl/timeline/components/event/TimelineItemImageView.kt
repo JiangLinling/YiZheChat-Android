@@ -11,8 +11,10 @@ package io.element.android.features.messages.impl.timeline.components.event
 import android.text.SpannedString
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -28,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -38,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import io.element.android.compound.theme.ElementTheme
+import io.element.android.features.messages.impl.timeline.LocalTimelineIsTalkbackActive
 import io.element.android.features.messages.impl.timeline.aTimelineItemEvent
 import io.element.android.features.messages.impl.timeline.components.ATimelineItemEventRow
 import io.element.android.features.messages.impl.timeline.components.layout.ContentAvoidingLayout
@@ -54,11 +58,9 @@ import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.textcomposer.ElementRichTextEditorStyle
 import io.element.android.libraries.ui.strings.CommonStrings
-import io.element.android.libraries.ui.utils.a11y.isTalkbackActive
 import io.element.android.wysiwyg.compose.EditorStyledText
 import io.element.android.wysiwyg.link.Link
 
-private const val TALL_IMAGE_RATIO_DIVISOR = 3
 @Composable
 fun TimelineItemImageView(
     content: TimelineItemImageContent,
@@ -70,10 +72,13 @@ fun TimelineItemImageView(
     onShowContentClick: () -> Unit,
     onContentLayoutChange: (ContentAvoidingLayoutData) -> Unit,
     modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
+    useFitBackdrop: Boolean = true,
+    portraitFrame: Boolean = true,
 ) {
     val a11yLabel = stringResource(CommonStrings.common_image)
     val description = content.caption?.let { "$a11yLabel: $it" } ?: a11yLabel
-    Column(modifier = modifier) {
+    Column(modifier = modifier.then(if (portraitFrame) Modifier.widthIn(max = MEDIA_PORTRAIT_WIDTH_DP.dp) else Modifier)) {
         val containerModifier = if (content.showCaption) {
             Modifier.clip(RoundedCornerShape(10.dp))
         } else {
@@ -81,70 +86,94 @@ fun TimelineItemImageView(
         }
         TimelineItemAspectRatioBox(
             modifier = containerModifier.blurHashBackground(content.blurhash, alpha = 0.9f).align(Alignment.CenterHorizontally),
-            aspectRatio = coerceRatioWhenHidingContent(content.aspectRatio, hideMediaContent),
+            aspectRatio = if (portraitFrame) MEDIA_PORTRAIT_ASPECT_RATIO else coerceRatioWhenHidingContent(content.aspectRatio, hideMediaContent),
         ) {
             ProtectedView(
                 hideContent = hideMediaContent,
                 onShowClick = onShowContentClick,
             ) {
                 var isLoaded by remember { mutableStateOf(false) }
-                AsyncImage(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(if (isLoaded) Modifier.background(Color.White) else Modifier)
-                        .then(
-                            if (!isTalkbackActive() && onContentClick != null) {
-                                Modifier
-                                    .combinedClickable(
-                                        onClick = onContentClick,
-                                        onLongClick = onLongClick,
-                                    )
-                                    .onKeyboardContextMenuAction(onLongClick)
-                            } else {
-                                Modifier
-                            }
-                        ),
-                    model = content.thumbnailMediaRequestData,
-                    contentScale = ContentScale.Crop,
-                    alignment = Alignment.Center,
-                    contentDescription = description,
-                    onState = { isLoaded = it is AsyncImagePainter.State.Success },
-                )
+                val model = content.localPreviewUri ?: content.thumbnailMediaRequestData
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    if (useFitBackdrop) {
+                        AsyncImage(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .blur(14.dp),
+                            model = model,
+                            contentScale = ContentScale.Crop,
+                            alignment = Alignment.Center,
+                            contentDescription = null,
+                            alpha = 0.72f,
+                        )
+                    }
+                    AsyncImage(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(if (isLoaded && !useFitBackdrop) Modifier.background(Color.White) else Modifier)
+                            .then(
+                                if (!LocalTimelineIsTalkbackActive.current && onContentClick != null) {
+                                    Modifier
+                                        .combinedClickable(
+                                            onClick = onContentClick,
+                                            onLongClick = onLongClick,
+                                        )
+                                        .onKeyboardContextMenuAction(onLongClick)
+                                } else {
+                                    Modifier
+                                }
+                            ),
+                        model = model,
+                        contentScale = contentScale,
+                        alignment = Alignment.Center,
+                        contentDescription = description,
+                        onState = { isLoaded = it is AsyncImagePainter.State.Success },
+                    )
+                    content.localMediaProgress?.let { progress ->
+                        MediaSendProgressOverlay(progress = progress)
+                    }
+                }
             }
         }
 
-        if (content.showCaption) {
-            Spacer(modifier = Modifier.height(8.dp))
-            val caption = if (LocalInspectionMode.current) {
-                SpannedString(content.caption)
-            } else {
-                content.formattedCaption ?: SpannedString(content.caption)
-            }
-            CompositionLocalProvider(
-                LocalContentColor provides ElementTheme.colors.textPrimary,
-                LocalTextStyle provides ElementTheme.typography.fontBodyLgRegular
-            ) {
-                val width = content.width ?: 0
-                val height = content.height ?: 0
-                // if image is narrow and tall use DEFAULT_ASPECT_RATIO
-                val aspectRatio = if (width < height / TALL_IMAGE_RATIO_DIVISOR) {
-                    DEFAULT_ASPECT_RATIO
-                } else {
-                    content.aspectRatio ?: DEFAULT_ASPECT_RATIO
-                }
-                EditorStyledText(
-                    modifier = Modifier
-                        .padding(horizontal = 4.dp) // This is (12.dp - 8.dp) contentPadding from CommonLayout
-                        .widthIn(min = MIN_HEIGHT_IN_DP.dp * aspectRatio, max = MAX_HEIGHT_IN_DP.dp * aspectRatio),
-                    text = caption,
-                    style = ElementRichTextEditorStyle.textStyle(),
-                    onLinkClickedListener = onLinkClick,
-                    onLinkLongClickedListener = onLinkLongClick,
-                    releaseOnDetach = false,
-                    onTextLayout = ContentAvoidingLayout.measureLegacyLastTextLine(onContentLayoutChange = onContentLayoutChange),
-                )
-            }
-        }
+        TimelineItemImageCaptionView(
+            content = content,
+            onLinkClick = onLinkClick,
+            onLinkLongClick = onLinkLongClick,
+            onContentLayoutChange = onContentLayoutChange,
+        )
+    }
+}
+
+@Composable
+internal fun TimelineItemImageCaptionView(
+    content: TimelineItemImageContent,
+    onLinkClick: (Link) -> Unit,
+    onLinkLongClick: (Link) -> Unit,
+    onContentLayoutChange: (ContentAvoidingLayoutData) -> Unit,
+) {
+    if (!content.showCaption) return
+    Spacer(modifier = Modifier.height(8.dp))
+    val caption = if (LocalInspectionMode.current) {
+        SpannedString(content.caption)
+    } else {
+        content.formattedCaption ?: SpannedString(content.caption)
+    }
+    CompositionLocalProvider(
+        LocalContentColor provides ElementTheme.colors.textPrimary,
+        LocalTextStyle provides ElementTheme.typography.fontBodyLgRegular
+    ) {
+        EditorStyledText(
+            modifier = Modifier
+                .padding(horizontal = 4.dp)
+                .widthIn(min = 75.dp, max = MEDIA_PORTRAIT_WIDTH_DP.dp),
+            text = caption,
+            style = ElementRichTextEditorStyle.textStyle(),
+            onLinkClickedListener = onLinkClick,
+            onLinkLongClickedListener = onLinkLongClick,
+            releaseOnDetach = false,
+            onTextLayout = ContentAvoidingLayout.measureLegacyLastTextLine(onContentLayoutChange = onContentLayoutChange),
+        )
     }
 }
 

@@ -17,6 +17,8 @@ class FakeVoiceFileManager(
     private val config: VoiceFileConfig,
     private val fileId: String,
 ) : VoiceFileManager {
+    override fun recoverAbandonedFiles() = Unit
+
     override fun createFile(): File {
         val file = File("${config.cacheSubdir}/$fileId.${config.fileExt}")
         fakeFileSystem.createFile(file)

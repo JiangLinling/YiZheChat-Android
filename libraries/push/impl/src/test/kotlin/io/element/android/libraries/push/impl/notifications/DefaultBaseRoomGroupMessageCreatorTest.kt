@@ -87,7 +87,7 @@ class DefaultBaseRoomGroupMessageCreatorTest {
             threadId = null,
         )
         @Suppress("DEPRECATION")
-        assertThat(result.priority).isEqualTo(NotificationCompat.PRIORITY_DEFAULT)
+        assertThat(result.priority).isEqualTo(NotificationCompat.PRIORITY_HIGH)
         assertThat(fakeImageLoader.getExecutedRequestsData()).isEmpty()
     }
 

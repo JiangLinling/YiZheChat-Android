@@ -88,8 +88,10 @@ class PictureInPicturePresenter(
                 pipView?.enterPipMode()
                     ?.also { Timber.tag(loggerTag.value).d("Switch to PiP mode result: $it") }
             } else {
-                Timber.tag(loggerTag.value).w("Cannot enter PiP mode, hangup the call")
-                pipView?.hangUp()
+                // Recents and transient window changes may deny PiP. They are
+                // not a request to end an active call.
+                Timber.tag(loggerTag.value).w("Cannot enter PiP mode")
+                if (!io.element.android.appconfig.NextDeploymentConfig.isNextDeployment) pipView?.hangUp()
             }
         }
     }

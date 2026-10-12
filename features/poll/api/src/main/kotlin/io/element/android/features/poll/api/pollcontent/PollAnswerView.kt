@@ -22,8 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
@@ -70,7 +70,7 @@ internal fun PollAnswerView(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clearAndSetSemantics {
+            .semantics {
                 contentDescription = a11yText
             },
     ) {
@@ -83,10 +83,10 @@ internal fun PollAnswerView(
             contentDescription = null,
             modifier = Modifier
                 .padding(0.5.dp)
-                .size(22.dp),
+                .size(20.dp),
             tint = if (answerItem.isEnabled) {
                 if (answerItem.isSelected) {
-                    ElementTheme.colors.iconPrimary
+                    ElementTheme.colors.textActionAccent
                 } else {
                     ElementTheme.colors.iconSecondary
                 }
@@ -94,13 +94,13 @@ internal fun PollAnswerView(
                 ElementTheme.colors.iconDisabled
             },
         )
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(10.dp))
         Column {
             Row {
                 Text(
                     modifier = Modifier.weight(1f),
                     text = answerItem.answer.text,
-                    style = if (answerItem.isWinner) ElementTheme.typography.fontBodyLgMedium else ElementTheme.typography.fontBodyLgRegular,
+                    style = if (answerItem.isWinner) ElementTheme.typography.fontBodyMdMedium else ElementTheme.typography.fontBodyMdRegular,
                 )
                 if (answerItem.showVotes) {
                     Row(
@@ -129,20 +129,16 @@ internal fun PollAnswerView(
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(10.dp))
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth(),
-                color = if (answerItem.isWinner) ElementTheme.colors.textSuccessPrimary else answerItem.isEnabled.toEnabledColor(),
-                progress = {
-                    when {
-                        answerItem.showVotes -> answerItem.percentage
-                        answerItem.isSelected -> 1f
-                        else -> 0f
-                    }
-                },
-                trackColor = ElementTheme.colors.progressIndicatorTrackColor,
-                strokeCap = StrokeCap.Round,
-            )
+            if (answerItem.showVotes) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = if (answerItem.isWinner) ElementTheme.colors.textSuccessPrimary else answerItem.isEnabled.toEnabledColor(),
+                    progress = { answerItem.percentage },
+                    trackColor = ElementTheme.colors.progressIndicatorTrackColor,
+                    strokeCap = StrokeCap.Round,
+                )
+            }
         }
     }
 }

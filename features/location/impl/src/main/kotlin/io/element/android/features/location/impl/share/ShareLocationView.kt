@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SheetValue
@@ -27,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,63 +56,57 @@ import io.element.android.libraries.designsystem.components.async.AsyncIndicator
 import io.element.android.libraries.designsystem.components.async.AsyncIndicatorHost
 import io.element.android.libraries.designsystem.components.async.rememberAsyncIndicatorState
 import io.element.android.libraries.designsystem.components.avatar.AvatarSize
-import io.element.android.libraries.designsystem.components.button.BackButton
 import io.element.android.libraries.designsystem.components.dialogs.ConfirmationDialog
 import io.element.android.libraries.designsystem.components.dialogs.ListDialog
 import io.element.android.libraries.designsystem.components.list.ListItemContent
 import io.element.android.libraries.designsystem.components.list.RadioButtonListItem
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
+import io.element.android.libraries.designsystem.theme.components.Button
+import io.element.android.libraries.designsystem.theme.components.ButtonSize
 import io.element.android.libraries.designsystem.theme.components.IconSource
 import io.element.android.libraries.designsystem.theme.components.ListItem
 import io.element.android.libraries.designsystem.theme.components.Text
-import io.element.android.libraries.designsystem.theme.components.TopAppBar
+import io.element.android.libraries.designsystem.theme.components.TextButton
 import io.element.android.libraries.matrix.ui.model.getAvatarData
 import io.element.android.libraries.ui.strings.CommonStrings
 import kotlinx.collections.immutable.ImmutableList
 import org.maplibre.compose.camera.CameraMoveReason
-import org.maplibre.compose.camera.CameraState
 import org.maplibre.compose.camera.rememberCameraState
 import kotlin.time.Duration
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ShareLocationView(
+fun LegacyShareLocationView(
     state: ShareLocationState,
     navigateUp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    when (val dialogState = state.dialogState) {
-        ShareLocationState.Dialog.None -> Unit
-        is ShareLocationState.Dialog.Constraints -> LocationConstraintsDialog(
-            state = dialogState.state,
-            appName = state.appName,
-            onRequestPermissions = { state.eventSink(ShareLocationEvent.RequestPermissions) },
-            onOpenAppSettings = { state.eventSink(ShareLocationEvent.OpenAppSettings) },
-            onOpenLocationSettings = { state.eventSink(ShareLocationEvent.OpenLocationSettings) },
-            onDismiss = { state.eventSink(ShareLocationEvent.DismissDialog) },
-        )
-        ShareLocationState.Dialog.LiveLocationDisclaimer -> ConfirmationDialog(
-            content = stringResource(R.string.screen_share_location_live_location_disclaimer_title),
-            submitText = stringResource(CommonStrings.action_accept),
-            cancelText = stringResource(CommonStrings.action_decline),
-            onSubmitClick = { state.eventSink(ShareLocationEvent.AcceptLiveLocationDisclaimer) },
-            onDismiss = { state.eventSink(ShareLocationEvent.DismissDialog) },
-        )
-        is ShareLocationState.Dialog.LiveLocationDurations -> LiveLocationDurationDialog(
-            durations = dialogState.durations,
-            onSelectDuration = { duration ->
-                state.eventSink(StartLiveLocationShare(duration))
-            },
-            onDismiss = { state.eventSink(ShareLocationEvent.DismissDialog) },
-        )
-    }
+    ShareLocationDialogs(state)
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    val canChooseLive = state.canShareLiveLocation && state.pausedLiveLocationShare == null
+    val isLiveMode = selectedTab == 1 && canChooseLive
 
     val scaffoldState = rememberBottomSheetScaffoldState(
         bottomSheetState = rememberStandardBottomSheetState(initialValue = SheetValue.Expanded)
     )
     val cameraState = rememberCameraState(firstPosition = MapDefaults.defaultCameraPosition)
     val userLocationState = rememberUserLocationState(state.hasLocationPermission)
+    val userLocation = userLocationState.location
+
+    fun shareSelectedLocation() {
+        val selectedLocation = if (state.trackUserLocation) {
+            userLocation?.position?.value?.let { Location(lat = it.latitude, lon = it.longitude) }
+        } else {
+            cameraState.position.target.let { Location(lat = it.latitude, lon = it.longitude) }
+        } ?: return
+        state.eventSink(
+            ShareLocationEvent.ShareStaticLocation(
+                location = selectedLocation,
+                isPinned = !state.trackUserLocation,
+            )
+        )
+    }
 
     LaunchedEffect(cameraState.isCameraMoving) {
         if (cameraState.moveReason == CameraMoveReason.GESTURE) {
@@ -125,19 +122,71 @@ fun ShareLocationView(
         sheetDragHandle = null,
         sheetSwipeEnabled = false,
         topBar = {
-            TopAppBar(
-                titleStr = stringResource(CommonStrings.screen_share_location_title),
+            androidx.compose.material3.CenterAlignedTopAppBar(
+                title = {
+                    androidx.compose.material3.TabRow(
+                        selectedTabIndex = if (isLiveMode) 1 else 0,
+                        modifier = Modifier.widthIn(max = 196.dp).fillMaxWidth(),
+                        containerColor = ElementTheme.colors.bgCanvasDefault,
+                        contentColor = ElementTheme.colors.textActionPrimary,
+                        divider = {},
+                    ) {
+                        listOf(R.string.screen_share_location_tab_location, R.string.screen_share_location_tab_live).forEachIndexed { index, label ->
+                            val selected = index == if (isLiveMode) 1 else 0
+                            androidx.compose.material3.Tab(
+                                selected = selected,
+                                enabled = index == 0 || canChooseLive,
+                                onClick = {
+                                    selectedTab = index
+                                    if (index == 1 && state.hasLocationPermission) {
+                                        state.eventSink(ShareLocationEvent.StartTrackingUserLocation)
+                                    }
+                                },
+                                text = {
+                                    Text(
+                                        text = stringResource(label),
+                                        style = ElementTheme.typography.fontBodyMdMedium,
+                                        color = if (selected) ElementTheme.colors.textActionPrimary else ElementTheme.colors.textSecondary,
+                                        maxLines = 1,
+                                    )
+                                },
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
-                    BackButton(onClick = navigateUp)
+                    TextButton(
+                        text = stringResource(CommonStrings.action_cancel),
+                        onClick = navigateUp,
+                    )
+                },
+                actions = {
+                    Button(
+                        text = stringResource(CommonStrings.action_send),
+                        size = ButtonSize.MediumLowPadding,
+                        enabled = if (isLiveMode) {
+                            state.startLiveLocationAction !is AsyncAction.Loading
+                        } else {
+                            state.shareStaticLocationAction !is AsyncAction.Loading && (!state.trackUserLocation || userLocation != null)
+                        },
+                        onClick = {
+                            if (isLiveMode) {
+                                state.eventSink(
+                                    ShareLocationEvent.InitiateLiveLocationShare
+                                )
+                            } else {
+                                shareSelectedLocation()
+                            }
+                        },
+                    )
                 },
             )
         },
         sheetContent = {
             BottomSheetContent(
-                cameraState = cameraState,
                 state = state,
                 userLocationState = userLocationState,
-                navigateUp = navigateUp
+                isLiveMode = isLiveMode,
             )
         },
         mapContent = {
@@ -158,17 +207,25 @@ fun ShareLocationView(
                 } else {
                     PinVariant.PinnedLocation
                 }
-                LocationPin(
-                    variant = variant,
-                    modifier = Modifier.centerBottomEdge(this),
-                )
+                if (!isLiveMode) {
+                    LocationPin(
+                        variant = variant,
+                        modifier = Modifier.centerBottomEdge(this),
+                    )
+                }
             }
             LocationFloatingActionButton(
                 isMapCenteredOnUser = state.trackUserLocation,
                 onClick = { state.eventSink(ShareLocationEvent.StartTrackingUserLocation) },
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(all = 16.dp),
+                    .align(Alignment.BottomEnd)
+                    .padding(sheetPadding)
+                    .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 56.dp),
+            )
+            LocationActionView(
+                action = state.shareStaticLocationAction,
+                loadingText = stringResource(CommonStrings.common_waiting),
+                onActionSuccess = navigateUp,
             )
             StartLiveLocationActionView(state.startLiveLocationAction, navigateUp)
         }
@@ -178,6 +235,19 @@ fun ShareLocationView(
 @Composable
 private fun StartLiveLocationActionView(
     action: AsyncAction<Unit>,
+    onActionSuccess: () -> Unit,
+    modifier: Modifier = Modifier,
+) = LocationActionView(
+    action = action,
+    loadingText = stringResource(CommonStrings.common_waiting_live_location),
+    onActionSuccess = onActionSuccess,
+    modifier = modifier,
+)
+
+@Composable
+private fun LocationActionView(
+    action: AsyncAction<Unit>,
+    loadingText: String,
     onActionSuccess: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -190,7 +260,7 @@ private fun StartLiveLocationActionView(
             is AsyncAction.Loading -> {
                 LaunchedEffect(action) {
                     asyncIndicatorState.enqueue {
-                        AsyncIndicator.Loading(text = stringResource(CommonStrings.common_waiting_live_location))
+                        AsyncIndicator.Loading(text = loadingText)
                     }
                 }
             }
@@ -213,89 +283,50 @@ private fun StartLiveLocationActionView(
 
 @Composable
 private fun BottomSheetContent(
-    cameraState: CameraState,
     state: ShareLocationState,
     userLocationState: UserLocationState,
-    navigateUp: () -> Unit,
+    isLiveMode: Boolean,
 ) {
     Spacer(Modifier.height(20.dp))
-    val userLocation = userLocationState.location
-    if (state.trackUserLocation && userLocation != null) {
-        ShareCurrentLocationItem {
-            state.eventSink(
-                ShareLocationEvent.ShareStaticLocation(
-                    location = Location(
-                        lat = userLocation.position.value.latitude,
-                        lon = userLocation.position.value.longitude
-                    ),
-                    isPinned = false
+    if (isLiveMode) {
+        ListItem(
+            headlineContent = { Text(stringResource(R.string.screen_share_location_tab_live)) },
+            supportingContent = { Text(stringResource(R.string.screen_share_location_live_mode_hint)) },
+            leadingContent = ListItemContent.Icon(
+                iconSource = IconSource.Vector(CompoundIcons.LocationPinSolid()),
+                tintColor = ElementTheme.colors.iconAccentPrimary,
+            ),
+        )
+    } else {
+        SelectedLocationItem(isCurrentLocation = state.trackUserLocation && userLocationState.location != null)
+    }
+}
+
+@Composable
+private fun SelectedLocationItem(isCurrentLocation: Boolean) {
+    ListItem(
+        headlineContent = {
+            Text(
+                stringResource(
+                    if (isCurrentLocation) {
+                        R.string.screen_share_location_selected_current
+                    } else {
+                        R.string.screen_share_location_selected_pin
+                    }
                 )
             )
-            navigateUp()
-        }
-    } else {
-        SharePinLocationItem(
-            onClick = {
-                val positionTarget = cameraState.position.target
-                state.eventSink(
-                    ShareLocationEvent.ShareStaticLocation(
-                        location = Location(lat = positionTarget.latitude, lon = positionTarget.longitude),
-                        isPinned = true
-                    )
-                )
-                navigateUp()
-            }
-        )
-    }
-    if (state.canShareLiveLocation) {
-        ShareLiveLocationItem {
-            state.eventSink(ShareLocationEvent.InitiateLiveLocationShare)
-        }
-    }
-}
-
-@Composable
-private fun ShareCurrentLocationItem(
-    onClick: () -> Unit,
-) {
-    ListItem(
-        headlineContent = {
-            Text(stringResource(CommonStrings.screen_share_my_location_action))
         },
-        onClick = onClick,
-        leadingContent = ListItemContent.Icon(
-            iconSource = IconSource.Vector(CompoundIcons.LocationNavigatorCentred())
-        )
-    )
-}
-
-@Composable
-private fun SharePinLocationItem(
-    onClick: () -> Unit,
-) {
-    ListItem(
-        headlineContent = {
-            Text(stringResource(CommonStrings.screen_share_this_location_action))
+        supportingContent = {
+            Text(stringResource(R.string.screen_share_location_drag_hint))
         },
-        onClick = onClick,
         leadingContent = ListItemContent.Icon(
-            iconSource = IconSource.Vector(CompoundIcons.LocationNavigator())
-        )
-    )
-}
-
-@Composable
-private fun ShareLiveLocationItem(
-    onClick: () -> Unit,
-) {
-    ListItem(
-        headlineContent = {
-            Text(stringResource(CommonStrings.action_share_live_location))
-        },
-        onClick = onClick,
-        leadingContent = ListItemContent.Icon(
-            iconSource = IconSource.Vector(CompoundIcons.LocationPinSolid()),
-            tintColor = ElementTheme.colors.iconAccentPrimary,
+            iconSource = IconSource.Vector(
+                if (isCurrentLocation) {
+                    CompoundIcons.LocationNavigatorCentred()
+                } else {
+                    CompoundIcons.LocationNavigator()
+                }
+            )
         )
     )
 }
@@ -336,4 +367,38 @@ internal fun ShareLocationViewPreview(
         state = state,
         navigateUp = {},
     )
+}
+
+@Composable
+fun ShareLocationView(state: ShareLocationState, navigateUp: () -> Unit, modifier: Modifier = Modifier) {
+    LegacyShareLocationView(state, navigateUp, modifier)
+}
+
+@Composable
+internal fun ShareLocationDialogs(state: ShareLocationState) {
+    when (val dialogState = state.dialogState) {
+        ShareLocationState.Dialog.None -> Unit
+        is ShareLocationState.Dialog.Constraints -> LocationConstraintsDialog(
+            state = dialogState.state,
+            appName = state.appName,
+            onRequestPermissions = { state.eventSink(ShareLocationEvent.RequestPermissions) },
+            onOpenAppSettings = { state.eventSink(ShareLocationEvent.OpenAppSettings) },
+            onOpenLocationSettings = { state.eventSink(ShareLocationEvent.OpenLocationSettings) },
+            onDismiss = { state.eventSink(ShareLocationEvent.DismissDialog) },
+        )
+        ShareLocationState.Dialog.LiveLocationDisclaimer -> ConfirmationDialog(
+            content = stringResource(R.string.screen_share_location_live_location_disclaimer_title),
+            submitText = stringResource(CommonStrings.action_accept),
+            cancelText = stringResource(CommonStrings.action_decline),
+            onSubmitClick = { state.eventSink(ShareLocationEvent.AcceptLiveLocationDisclaimer) },
+            onDismiss = { state.eventSink(ShareLocationEvent.DismissDialog) },
+        )
+        is ShareLocationState.Dialog.LiveLocationDurations -> LiveLocationDurationDialog(
+            durations = dialogState.durations,
+            onSelectDuration = { duration ->
+                state.eventSink(StartLiveLocationShare(duration))
+            },
+            onDismiss = { state.eventSink(ShareLocationEvent.DismissDialog) },
+        )
+    }
 }

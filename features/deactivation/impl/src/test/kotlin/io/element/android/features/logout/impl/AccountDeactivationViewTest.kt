@@ -14,6 +14,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.AndroidComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runAndroidComposeUiTest
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -21,6 +22,7 @@ import io.element.android.features.deactivation.impl.R
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.matrix.test.AN_EXCEPTION
 import io.element.android.libraries.matrix.test.A_PASSWORD
+import io.element.android.libraries.matrix.api.exception.AccountDeactivationException
 import io.element.android.libraries.testtags.TestTags
 import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.tests.testutils.EnsureNeverCalled
@@ -35,6 +37,34 @@ import org.robolectric.annotation.Config
 
 @RunWith(AndroidJUnit4::class)
 class AccountDeactivationViewTest {
+    @Test
+    fun `invalid password explains frozen resumable deletion`() = runAndroidComposeUiTest {
+        setAccountDeactivationView(
+            anAccountDeactivationState(
+                accountDeactivationAction = AsyncAction.Failure(
+                    AccountDeactivationException.InvalidCredentials(IllegalStateException("invalid password"))
+                ),
+            ),
+        )
+        onNodeWithText(
+            requireNotNull(activity).getString(R.string.screen_deactivate_account_invalid_password)
+        ).assertExists()
+    }
+
+    @Test
+    fun `upgrade rejection explains that account was not frozen`() = runAndroidComposeUiTest {
+        setAccountDeactivationView(
+            anAccountDeactivationState(
+                accountDeactivationAction = AsyncAction.Failure(
+                    io.element.android.security.dataprotection.api.PermanentAccountDeletionSubmissionBlockedException()
+                ),
+            ),
+        )
+        onNodeWithText(
+            requireNotNull(activity).getString(R.string.screen_deactivate_account_service_upgrading)
+        ).assertExists()
+    }
+
     @Test
     fun `clicking on back invokes the expected callback`() = runAndroidComposeUiTest {
         val eventsRecorder = EventsRecorder<AccountDeactivationEvents>(expectEvents = false)
@@ -96,30 +126,14 @@ class AccountDeactivationViewTest {
     }
 
     @Test
-    fun `switching on the erase all switch emits the expected Event`() = runAndroidComposeUiTest {
-        val eventsRecorder = EventsRecorder<AccountDeactivationEvents>()
+    fun `complete erase switch cannot be disabled`() = runAndroidComposeUiTest {
+        val eventsRecorder = EventsRecorder<AccountDeactivationEvents>(expectEvents = false)
         setAccountDeactivationView(
             state = anAccountDeactivationState(
                 eventSink = eventsRecorder,
             ),
         )
         clickOn(R.string.screen_deactivate_account_delete_all_messages)
-        eventsRecorder.assertSingle(AccountDeactivationEvents.SetEraseData(true))
-    }
-
-    @Test
-    fun `switching off the erase all switch emits the expected Event`() = runAndroidComposeUiTest {
-        val eventsRecorder = EventsRecorder<AccountDeactivationEvents>()
-        setAccountDeactivationView(
-            state = anAccountDeactivationState(
-                deactivateFormState = aDeactivateFormState(
-                    eraseData = true,
-                ),
-                eventSink = eventsRecorder,
-            ),
-        )
-        clickOn(R.string.screen_deactivate_account_delete_all_messages)
-        eventsRecorder.assertSingle(AccountDeactivationEvents.SetEraseData(false))
     }
 
     @Config(qualifiers = "h1024dp")

@@ -11,6 +11,8 @@ package io.element.android.libraries.matrix.impl.timeline
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.UniqueId
 import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageTypeWithAttachment
 import io.element.android.libraries.matrix.impl.timeline.item.event.EventTimelineItemMapper
 import io.element.android.libraries.matrix.impl.timeline.item.virtual.VirtualTimelineItemMapper
 import kotlinx.coroutines.CoroutineScope
@@ -32,7 +34,9 @@ class MatrixTimelineItemMapper(
                 fetchEventDetails(eventTimelineItem.eventId!!)
             }
 
-            return MatrixTimelineItem.Event(uniqueId, eventTimelineItem)
+            val transportName = ((eventTimelineItem.content as? MessageContent)?.type as? MessageTypeWithAttachment)
+                ?.filename?.takeIf { name -> name.protectedMediaContentIds().isNotEmpty() }
+            return MatrixTimelineItem.Event(uniqueId, eventTimelineItem, protectedMediaTransportName = transportName)
         }
         val asVirtual = it.asVirtual()
         if (asVirtual != null) {

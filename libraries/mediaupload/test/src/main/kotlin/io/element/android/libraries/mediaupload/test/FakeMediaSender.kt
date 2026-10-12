@@ -9,6 +9,7 @@ package io.element.android.libraries.mediaupload.test
 
 import android.net.Uri
 import io.element.android.libraries.matrix.api.core.EventId
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedMediaAlbum
 import io.element.android.libraries.mediaupload.api.MediaOptimizationConfig
 import io.element.android.libraries.mediaupload.api.MediaSender
 import io.element.android.libraries.mediaupload.api.MediaUploadInfo
@@ -18,14 +19,17 @@ class FakeMediaSender(
     private val preProcessMediaResult: () -> Result<MediaUploadInfo> = { lambdaError() },
     private val sendPreProcessedMediaResult: () -> Result<Unit> = { lambdaError() },
     private val sendMediaResult: () -> Result<Unit> = { lambdaError() },
-    private val sendVoiceMessageResult: () -> Result<Unit> = { lambdaError() },
+    private val beforeVoiceUploadStarted: suspend () -> Unit = {},
+    private val sendVoiceMessageResult: suspend () -> Result<Unit> = { lambdaError() },
     private val cleanUpResult: () -> Unit = { lambdaError() },
 ) : MediaSender {
     override suspend fun preProcessMedia(
         uri: Uri,
         mimeType: String,
         mediaOptimizationConfig: MediaOptimizationConfig,
+        onProgress: (Float) -> Unit,
     ): Result<MediaUploadInfo> {
+        onProgress(1f)
         return preProcessMediaResult()
     }
 
@@ -34,7 +38,13 @@ class FakeMediaSender(
         caption: String?,
         formattedCaption: String?,
         inReplyToEventId: EventId?,
+        burnAfterRead: Boolean,
+        mediaAlbum: ProtectedMediaAlbum?,
+        onProgress: (Float) -> Unit,
+        onUploadStarted: () -> Unit,
+        onUploadIdentity: (String) -> Unit,
     ): Result<Unit> {
+        onUploadStarted()
         return sendPreProcessedMediaResult()
     }
 
@@ -45,7 +55,10 @@ class FakeMediaSender(
         formattedCaption: String?,
         inReplyToEventId: EventId?,
         mediaOptimizationConfig: MediaOptimizationConfig,
+        burnAfterRead: Boolean,
+        onUploadStarted: () -> Unit,
     ): Result<Unit> {
+        onUploadStarted()
         return sendMediaResult()
     }
 
@@ -53,8 +66,13 @@ class FakeMediaSender(
         uri: Uri,
         mimeType: String,
         waveForm: List<Float>,
+        onUploadIdentity: (String) -> Unit,
         inReplyToEventId: EventId?,
+        burnAfterRead: Boolean,
+        onUploadStarted: () -> Unit,
     ): Result<Unit> {
+        beforeVoiceUploadStarted()
+        onUploadStarted()
         return sendVoiceMessageResult()
     }
 

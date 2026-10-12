@@ -18,10 +18,10 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.annotation.RequiresApi
 import androidx.core.content.getSystemService
+import androidx.core.content.ContextCompat
 import io.element.android.libraries.core.extensions.runCatchingExceptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -29,9 +29,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
 import timber.log.Timber
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.time.Duration.Companion.seconds
 
 /**
  * This class manages the audio devices for a WebView.
@@ -45,6 +43,8 @@ class WebViewAudioManager(
     private val webView: WebView,
     private val coroutineScope: CoroutineScope,
     private val onInvalidAudioDeviceAdded: (InvalidAudioDeviceReason) -> Unit,
+    private val preferSpeaker: Boolean = false,
+    private val startOnSpeaker: Boolean = preferSpeaker,
 ) {
     private val json by lazy {
         Json {
@@ -68,6 +68,7 @@ class WebViewAudioManager(
      * Store the device id requested by EC, and re-set it if something try to switch (only android S+).
      */
     private var ecRequestedDeviceId: String? = null
+    private var publishedDeviceId: String? = null
 
     /**
      * The list of device types that are considered as communication devices, sorted by likelihood of it being used for communication.
@@ -82,10 +83,10 @@ class WebViewAudioManager(
         // Wired audio devices
         AudioDeviceInfo.TYPE_WIRED_HEADSET,
         AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-        // The built-in speaker of the device
-        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
         // The built-in earpiece of the device
-        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE,
+        if (startOnSpeaker) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE,
+        // The built-in speaker of the device
+        if (startOnSpeaker) AudioDeviceInfo.TYPE_BUILTIN_EARPIECE else AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
     )
 
     private val audioDeviceComparator = Comparator<AudioDeviceInfo> { a, b ->
@@ -125,6 +126,7 @@ class WebViewAudioManager(
                 Timber.d("Audio device changed to unwanted device ${device?.id}, enforce using the expected device $wantedDevice")
                 audioManager.selectAudioDevice(wantedDevice)
             }
+            publishAudioRoute()
         }
     }
 
@@ -138,7 +140,7 @@ class WebViewAudioManager(
 
             // We need to calculate the available devices ourselves, since calling `listAudioDevices` will return an outdated list
             val audioDevices = (listAudioDevices() + validNewDevices).distinctBy { it.id }.sortedWith(audioDeviceComparator)
-            setAvailableAudioDevices(audioDevices.map(SerializableAudioDevice::fromAudioDeviceInfo))
+            setAvailableAudioDevices(audioDevices.map { SerializableAudioDevice.fromAudioDeviceInfo(it, webView.context) })
         }
 
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
@@ -187,7 +189,31 @@ class WebViewAudioManager(
             AudioManager.MODE_NORMAL
         }
 
+        // Route audio before WebRTC starts playback. Otherwise Android can briefly pick the
+        // speaker and Element Call only corrects it after its playback callback arrives.
+        val initialDevice = listAudioDevices().firstOrNull()
+        previousSelectedDevice = initialDevice
+        ecRequestedDeviceId = initialDevice?.id?.toString()
+        audioManager.selectAudioDevice(initialDevice)
+        registerAudioCallbacks()
         setWebViewAndroidNativeBridge()
+    }
+
+    /** Native admission can precede JS loading. Rebind when the real controls become available. */
+    fun onWidgetReady() {
+        setWebViewAndroidNativeBridge()
+        if (!isInCallMode.get()) return
+        ecRequestedDeviceId?.let { audioManager.selectAudioDevice(it) }
+        setAvailableAudioDevices()
+    }
+
+    private fun registerAudioCallbacks() {
+        if (hasRegisteredCallbacks) return
+        audioManager.registerAudioDeviceCallback(audioDeviceCallback, null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            audioManager.addOnCommunicationDeviceChangedListener(ContextCompat.getMainExecutor(webView.context), commsDeviceChangedListener)
+        }
+        hasRegisteredCallbacks = true
     }
 
     /**
@@ -208,17 +234,20 @@ class WebViewAudioManager(
 
         audioManager.mode = AudioManager.MODE_NORMAL
 
-        if (!hasRegisteredCallbacks) {
-            Timber.w("Audio: tried to disable webview in-call audio mode without registering callbacks")
-            return
-        }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             audioManager.clearCommunicationDevice()
-            audioManager.removeOnCommunicationDeviceChangedListener(commsDeviceChangedListener)
+            if (hasRegisteredCallbacks) {
+                audioManager.removeOnCommunicationDeviceChangedListener(commsDeviceChangedListener)
+            }
         }
 
-        audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
+        if (hasRegisteredCallbacks) {
+            audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
+        }
+        hasRegisteredCallbacks = false
+        ecRequestedDeviceId = null
+        publishedDeviceId = null
+        previousSelectedDevice = null
     }
 
     /**
@@ -235,21 +264,14 @@ class WebViewAudioManager(
             },
             onAudioPlaybackStarted = {
                 coroutineScope.launch(Dispatchers.Main) {
-                    // Even with the callback, it seems like starting the audio takes a bit on the webview side,
-                    // so we add an extra delay here to make sure it's ready
-                    delay(2.seconds)
-
-                    // Calling this ahead of time makes the default audio device to not use the right audio stream
+                    if (!isInCallMode.get()) return@launch
+                    ecRequestedDeviceId?.let { audioManager.selectAudioDevice(it) }
+                    // Playback is ready now, so expose devices immediately. Delaying this made the
+                    // UI and native route disagree for two seconds on every new call.
                     setAvailableAudioDevices()
 
                     // Registering the audio devices changed callback will also set the default audio device
-                    audioManager.registerAudioDeviceCallback(audioDeviceCallback, null)
-
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        audioManager.addOnCommunicationDeviceChangedListener(Executors.newSingleThreadExecutor(), commsDeviceChangedListener)
-                    }
-
-                    hasRegisteredCallbacks = true
+                    registerAudioCallbacks()
                 }
             }
         )
@@ -264,9 +286,9 @@ class WebViewAudioManager(
      */
     private fun setWebViewAndroidNativeBridge() {
         Timber.d("Adding callback in controls.onAudioPlaybackStarted")
-        webView.evaluateJavascript("controls.onAudioPlaybackStarted = () => { androidNativeBridge.onTrackReady(); };", null)
+        webView.evaluateJavascript("if (window.controls) window.controls.onAudioPlaybackStarted = () => { androidNativeBridge.onTrackReady(); };", null)
         Timber.d("Adding callback in controls.onOutputDeviceSelect")
-        webView.evaluateJavascript("controls.onOutputDeviceSelect = (id) => { androidNativeBridge.setOutputDevice(id); };", null)
+        webView.evaluateJavascript("if (window.controls) window.controls.onOutputDeviceSelect = (id) => { androidNativeBridge.setOutputDevice(id); };", null)
     }
 
     /**
@@ -289,13 +311,60 @@ class WebViewAudioManager(
      * @param devices The list of audio devices to set. If not provided, it will use the current list of audio devices.
      */
     private fun setAvailableAudioDevices(
-        devices: List<SerializableAudioDevice> = listAudioDevices().map(SerializableAudioDevice::fromAudioDeviceInfo),
+        devices: List<SerializableAudioDevice> = listAudioDevices().map {
+            SerializableAudioDevice.fromAudioDeviceInfo(it, webView.context)
+        },
     ) {
         Timber.d("Updating available audio devices")
-        val deviceList = json.encodeToString(devices)
-        webView.evaluateJavascript("controls.setAvailableOutputDevices($deviceList);", {
+        val deviceList = json.encodeToString(devices.map { it.forVideoCall(preferSpeaker) })
+        webView.evaluateJavascript("window.controls?.setAvailableOutputDevices($deviceList);", {
             Timber.d("Audio: setAvailableOutputDevices result: $it")
         })
+        publishAudioRoute()
+    }
+
+    /** Switch only Android's output route. Camera state belongs to the camera control. */
+    fun toggleSpeaker() {
+        if (!preferSpeaker || !isInCallMode.get()) return
+        val current = currentAudioDevice()
+        val targetType = if (current?.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+            AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+        } else {
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+        }
+        val target = listAudioDevices().firstOrNull { it.type == targetType } ?: return
+        previousSelectedDevice = target
+        ecRequestedDeviceId = target.id.toString()
+        audioManager.selectAudioDevice(target)
+        publishAudioRoute()
+    }
+
+    private fun currentAudioDevice(): AudioDeviceInfo? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        audioManager.communicationDevice
+    } else {
+        previousSelectedDevice
+    }
+
+    private fun publishAudioRoute() {
+        if (!preferSpeaker || !isInCallMode.get()) return
+        coroutineScope.launch(Dispatchers.Main) {
+            if (!isInCallMode.get()) return@launch
+            val devices = listAudioDevices()
+            val current = currentAudioDevice()
+            val speakerOn = current?.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+            // Publish confirmed OS routing, including asynchronous communication-device changes.
+            val selectedId = current?.id?.toString()
+            if (selectedId != null && selectedId != publishedDeviceId) {
+                publishedDeviceId = selectedId
+                webView.evaluateJavascript("window.controls?.setOutputDevice(${json.encodeToString(selectedId)});", null)
+            }
+            val canToggle = devices.any { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER } &&
+                devices.any { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+            webView.evaluateJavascript(
+                "window.yizheCallAudio = {speakerOn:$speakerOn,canToggle:$canToggle}; window.yizheRefreshCallPresentation?.();",
+                null,
+            )
+        }
     }
 
     /**
@@ -325,7 +394,10 @@ class WebViewAudioManager(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (device != null) {
                 runCatchingExceptions {
-                    Timber.d("Setting communication device: ${device.id} - ${deviceName(device.type, device.productName.toString())}")
+                    Timber.d(
+                        "Setting communication device: ${device.id} - " +
+                            deviceName(webView.context, device.type, device.productName.toString())
+                    )
                     if (!setCommunicationDevice(device)) {
                         Timber.w("Failed to setCommunication device")
                     }
@@ -363,7 +435,7 @@ class WebViewAudioManager(
         coroutineScope.launch {
             proximitySensorMutex.withLock {
                 @Suppress("WakeLock", "WakeLockTimeout")
-                if (device?.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) {
+                if (!preferSpeaker && device?.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) {
                     if (proximitySensorWakeLock?.isHeld == false) {
                         // If the device is the built-in earpiece, we need to acquire the proximity sensor wake lock
                         proximitySensorWakeLock?.acquire()
@@ -374,6 +446,7 @@ class WebViewAudioManager(
                 }
             }
         }
+        publishAudioRoute()
     }
 
     /**
@@ -384,7 +457,7 @@ class WebViewAudioManager(
         coroutineScope.launch(Dispatchers.Main) {
             Timber.d("Setting audio enabled in Element Call: $enabled")
             if (isWebViewAudioEnabled.getAndSet(enabled) != enabled) {
-                webView.evaluateJavascript("controls.setAudioEnabled($enabled);", null)
+                webView.evaluateJavascript("window.controls.setAudioEnabled($enabled);", null)
             }
         }
     }
@@ -414,18 +487,18 @@ private class AndroidWebViewAudioBridge(
     }
 }
 
-private fun deviceName(type: Int, name: String): String {
-    // TODO maybe translate these?
+private fun deviceName(context: Context, type: Int, name: String): String {
     val typePart = when (type) {
-        AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth"
-        AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB accessory"
-        AudioDeviceInfo.TYPE_USB_DEVICE -> "USB device"
-        AudioDeviceInfo.TYPE_USB_HEADSET -> "USB headset"
-        AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired headset"
-        AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired headphones"
-        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Built-in speaker"
-        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Built-in earpiece"
-        else -> "Unknown"
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> context.getString(io.element.android.features.call.impl.R.string.call_audio_output_bluetooth)
+        AudioDeviceInfo.TYPE_USB_ACCESSORY -> context.getString(io.element.android.features.call.impl.R.string.call_audio_output_usb_accessory)
+        AudioDeviceInfo.TYPE_USB_DEVICE -> context.getString(io.element.android.features.call.impl.R.string.call_audio_output_usb_device)
+        AudioDeviceInfo.TYPE_USB_HEADSET -> context.getString(io.element.android.features.call.impl.R.string.call_audio_output_usb_headset)
+        AudioDeviceInfo.TYPE_WIRED_HEADSET -> context.getString(io.element.android.features.call.impl.R.string.call_audio_output_wired_headset)
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> context.getString(io.element.android.features.call.impl.R.string.call_audio_output_wired_headphones)
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER_SAFE -> context.getString(io.element.android.features.call.impl.R.string.call_audio_output_speaker)
+        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> context.getString(io.element.android.features.call.impl.R.string.call_audio_output_earpiece)
+        else -> context.getString(io.element.android.features.call.impl.R.string.call_audio_output_unknown)
     }
     return if (isBuiltIn(type)) {
         typePart
@@ -460,11 +533,17 @@ internal data class SerializableAudioDevice(
     val isSpeaker: Boolean = type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
     val isExternalHeadset: Boolean = type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
 ) {
+    // Element Call interprets the earpiece hint as a request to disable video. For video
+    // calls retain the real id/name and route, but omit that camera-affecting policy hint.
+    // Android and the native output control remain the source of truth for routing.
+    fun forVideoCall(isVideoCall: Boolean): SerializableAudioDevice =
+        if (isVideoCall && isEarpiece) copy(isEarpiece = false) else this
+
     companion object {
-        fun fromAudioDeviceInfo(audioDeviceInfo: AudioDeviceInfo): SerializableAudioDevice {
+        fun fromAudioDeviceInfo(audioDeviceInfo: AudioDeviceInfo, context: Context): SerializableAudioDevice {
             return SerializableAudioDevice(
                 id = audioDeviceInfo.id.toString(),
-                name = deviceName(type = audioDeviceInfo.type, name = audioDeviceInfo.productName.toString()),
+                name = deviceName(context, type = audioDeviceInfo.type, name = audioDeviceInfo.productName.toString()),
                 type = audioDeviceInfo.type,
             )
         }

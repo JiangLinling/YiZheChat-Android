@@ -8,9 +8,11 @@
 
 package io.element.android.libraries.push.impl.notifications.factories
 
+import android.app.ActivityOptions
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import dev.zacsweers.metro.Inject
 import io.element.android.libraries.androidutils.uri.createIgnoredUri
@@ -24,6 +26,7 @@ import io.element.android.libraries.push.impl.notifications.NotificationActionId
 import io.element.android.libraries.push.impl.notifications.NotificationBroadcastReceiver
 import io.element.android.libraries.push.impl.notifications.TestNotificationReceiver
 import io.element.android.services.toolbox.api.systemclock.SystemClock
+import io.element.android.services.appnavstate.api.ROOM_OPENED_FROM_NOTIFICATION
 
 @Inject
 class PendingIntentFactory(
@@ -46,11 +49,40 @@ class PendingIntentFactory(
 
     private fun createRoomPendingIntent(sessionId: SessionId, roomId: RoomId?, eventId: EventId?, threadId: ThreadId?, extras: Bundle? = null): PendingIntent? {
         val intent = intentProvider.getViewRoomIntent(sessionId = sessionId, roomId = roomId, eventId = eventId, threadId = threadId, extras = extras)
+        if (roomId != null && extras?.getBoolean(ROOM_OPENED_FROM_NOTIFICATION) == true) {
+            intent.setClassName(context, NOTIFICATION_CHAT_ACTIVITY)
+        }
         return PendingIntent.getActivity(
             context,
             clock.epochMillis().toInt(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    fun createFloatingChatPendingIntent(sessionId: SessionId, roomId: RoomId, threadId: ThreadId?): PendingIntent {
+        val intent = intentProvider.getViewRoomIntent(
+            sessionId = sessionId, roomId = roomId, eventId = null, threadId = threadId,
+            extras = Bundle().apply { putBoolean(ROOM_OPENED_FROM_NOTIFICATION, true) },
+        ).setClassName(context, "io.element.android.x.FloatingNotificationChatActivity")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val options = ActivityOptions.makeBasic()
+        if (Build.VERSION.SDK_INT >= 36) {
+            options.setPendingIntentCreatorBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_IF_VISIBLE)
+        } else if (Build.VERSION.SDK_INT >= 35) {
+            options.setPendingIntentCreatorBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+        }
+        return PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE, options.toBundle())
+    }
+
+    fun createConversationBubblePendingIntent(sessionId: SessionId, roomId: RoomId): PendingIntent {
+        val intent = intentProvider.getViewRoomIntent(
+            sessionId = sessionId, roomId = roomId, eventId = null, threadId = null,
+            extras = Bundle().apply { putBoolean(ROOM_OPENED_FROM_NOTIFICATION, true) },
+        ).setClassName(context, NOTIFICATION_CHAT_ACTIVITY)
+        return PendingIntent.getActivity(
+            context, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0,
         )
     }
 
@@ -119,5 +151,9 @@ class PendingIntentFactory(
             testActionIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+    }
+
+    private companion object {
+        const val NOTIFICATION_CHAT_ACTIVITY = "io.element.android.x.NotificationChatActivity"
     }
 }

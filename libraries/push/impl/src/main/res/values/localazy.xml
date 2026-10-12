@@ -15,6 +15,8 @@
   </plurals>
   <string name="notification_error_unified_push_unregistered_android">"The UnifiedPush notification distributor couldn\'t be registered, so you will not receive notifications anymore. Please check the notifications settings of the app and the status of the push distributor."</string>
   <string name="notification_fallback_content">"You have new messages."</string>
+  <string name="notification_confidential_content">"You received a security message."</string>
+  <string name="notification_burn_after_read_content">"You received a burn-after-reading message."</string>
   <plurals name="notification_fallback_n_content">
     <item quantity="one">"You have %d new message."</item>
     <item quantity="other">"You have %d new messages."</item>

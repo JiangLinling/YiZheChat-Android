@@ -38,7 +38,7 @@ class DirectLogoutPresenterTest {
             presenter.present()
         }.test {
             val initialState = awaitFirstItem()
-            assertThat(initialState.canDoDirectSignOut).isTrue()
+            assertThat(initialState.canDoDirectSignOut).isFalse()
             assertThat(initialState.logoutAction).isEqualTo(AsyncAction.Uninitialized)
         }
     }
@@ -73,7 +73,6 @@ class DirectLogoutPresenterTest {
         moleculeFlow(RecompositionMode.Immediate) {
             presenter.present()
         }.test {
-            skipItems(1)
             val initialState = awaitFirstItem()
             assertThat(initialState.canDoDirectSignOut).isFalse()
             assertThat(initialState.logoutAction).isEqualTo(AsyncAction.Uninitialized)

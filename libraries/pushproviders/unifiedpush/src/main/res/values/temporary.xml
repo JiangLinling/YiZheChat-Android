@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="embedded_ntfy_channel_name">Built-in push connection</string>
+    <string name="embedded_ntfy_foreground_title">YiZheChat push is active</string>
+    <string name="embedded_ntfy_foreground_message">Maintaining a secure connection for new messages</string>
+</resources>

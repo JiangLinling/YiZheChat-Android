@@ -23,7 +23,18 @@ class NotificationBroadcastReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
         if (intent == null || context == null) return
         context.bindings<NotificationBroadcastReceiverBindings>().inject(this)
-        notificationBroadcastReceiverHandler.onReceive(intent)
+        val pendingResult = goAsync()
+        try {
+            val job = notificationBroadcastReceiverHandler.onReceive(intent)
+            if (job == null) {
+                pendingResult.finish()
+            } else {
+                job.invokeOnCompletion { pendingResult.finish() }
+            }
+        } catch (failure: Exception) {
+            pendingResult.finish()
+            throw failure
+        }
     }
 
     companion object {

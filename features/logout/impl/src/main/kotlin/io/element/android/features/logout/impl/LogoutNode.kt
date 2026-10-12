@@ -34,7 +34,7 @@ class LogoutNode(
         val state = presenter.present()
         LogoutView(
             state = state,
-            onChangeRecoveryKeyClick = callback::navigateToSecureBackup,
+            onRecoveryActionClick = callback::navigateToRecovery,
             onBackClick = ::navigateUp,
             modifier = modifier,
         )

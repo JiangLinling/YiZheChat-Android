@@ -42,3 +42,15 @@ internal fun String.containsOnlyEmojisInternal(): Boolean {
 
     return contiguous and (m?.end() == length)
 }
+
+internal fun String.emojiGraphemeCountInternal(): Int {
+    val matcher = GraphemeMatcher(this)
+    var count = 0
+    while (matcher.find()) {
+        val match = matcher.toMatchResult()
+        val isEmoji = match.grapheme().type == EMOJI ||
+            match.grapheme().type == PICTOGRAPHIC && match.group() in "🌍".."🗺"
+        if (isEmoji) count++
+    }
+    return count
+}

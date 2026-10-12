@@ -17,15 +17,27 @@ import java.io.File
 class MediaUploadHandlerImpl(
     private val filesToUpload: List<File>,
     private val sendAttachmentJoinHandle: SendAttachmentJoinHandle,
+    private val onFailure: suspend () -> Unit = {},
+    private val verifyAcceptance: (suspend () -> Unit)? = null,
+    private val onCancel: () -> Unit = {},
+    override val protectedMediaTransportName: String? = null,
 ) : MediaUploadHandler {
-    override suspend fun await(): Result<Unit> =
-        runCatchingExceptions {
+    override suspend fun await(): Result<Unit> {
+        val result = runCatchingExceptions {
             sendAttachmentJoinHandle.join()
+            // join() also returns successfully for cancellation. Only Matrix event evidence
+            // permits the protected draft to be checkpointed as accepted.
+            verifyAcceptance?.invoke()
+            Unit
         }
-            .also { cleanUpFiles() }
+        if (result.isFailure) onFailure()
+        cleanUpFiles()
+        return result
+    }
 
     override fun cancel() {
         sendAttachmentJoinHandle.cancel()
+        onCancel()
         cleanUpFiles()
     }
 

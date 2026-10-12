@@ -34,6 +34,30 @@ open class AttachmentsPreviewStateProvider : PreviewParameterProvider<Attachment
     override val values: Sequence<AttachmentsPreviewState>
         get() = sequenceOf(
             anAttachmentsPreviewState(),
+            *AttachmentFilePreviewState.entries.map { phase ->
+                anAttachmentsPreviewState().copy(filePreviewStates = mapOf(0 to phase))
+            }.toTypedArray(),
+            anAttachmentsPreviewState().let { sample ->
+                val items =
+                    List(
+                        4
+                    ) { index ->
+                        (sample.attachment as Attachment.Media).copy(
+                        localMedia = sample.attachment.localMedia.copy(lifecycleOperationId = "preview-$index")
+                    )
+                    }
+                sample.copy(attachments = items, selectedIndices = listOf(0, 2, 1), attachmentCount = 3)
+            },
+            anAttachmentsPreviewState().copy(selectedIndices = emptyList(), attachmentCount = 0),
+            anAttachmentsPreviewState().copy(draftError = true),
+            anAttachmentsPreviewState().copy(uncertainIndices = listOf(0), selectedIndices = emptyList()),
+            anAttachmentsPreviewState().copy(draftReady = false, recoveryDetailsVisible = true),
+            anAttachmentsPreviewState().copy(recoveryDetailsVisible = true, cancellationRequestedIndices = listOf(0), blockedIndices = listOf(0)),
+            anAttachmentsPreviewState().copy(recoveryDetailsVisible = true, discardedIndices = listOf(0), blockedIndices = listOf(0)),
+            anAttachmentsPreviewState().copy(recoveryDetailsVisible = true, checkingRecovery = true, blockedIndices = listOf(0)),
+            anAttachmentsPreviewState().copy(recoveryDetailsVisible = true, blockedIndices = listOf(0), uncertainIndices = listOf(0),
+                recoveryChecks = listOf(MediaRecoveryItemCheck(0, OriginalMediaOperationObservation("RUNNING", true, false, 4, false),
+                    MediaSubmissionCheck.MISSING_IDENTITY))),
             anAttachmentsPreviewState(
                 sendActionState = SendActionState.Sending.Processing(displayProgress = false),
                 textEditorState = aTextEditorStateMarkdown(
@@ -72,6 +96,7 @@ fun anAttachmentsPreviewState(
     imageEditorState: AttachmentImageEditorState? = null,
     mediaOptimizationSelectorState: MediaOptimizationSelectorState = aMediaOptimisationSelectorState(),
     displayFileTooLargeError: Boolean = false,
+    isBurnAfterRead: Boolean = false,
 ) = AttachmentsPreviewState(
     attachment = Attachment.Media(
         localMedia = LocalMedia("file://path".toUri(), mediaInfo),
@@ -84,6 +109,7 @@ fun anAttachmentsPreviewState(
     textEditorState = textEditorState,
     mediaOptimizationSelectorState = mediaOptimizationSelectorState,
     displayFileTooLargeError = displayFileTooLargeError,
+    isBurnAfterRead = isBurnAfterRead,
     eventSink = {}
 )
 

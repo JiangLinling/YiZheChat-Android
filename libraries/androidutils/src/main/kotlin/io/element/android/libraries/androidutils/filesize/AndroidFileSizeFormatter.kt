@@ -32,7 +32,8 @@ class AndroidFileSizeFormatter(
         } else {
             // First convert the size
             when {
-                fileSize <= 1 -> fileSize
+                // Formatter keeps values up to 900 in bytes; those values need no unit conversion.
+                fileSize <= 900 -> fileSize
                 fileSize < 1024 * 1024 -> fileSize * 1000 / 1024
                 fileSize < 1024 * 1024 * 1024 -> fileSize * 1000 / 1024 * 1000 / 1024
                 else -> fileSize * 1000 / 1024 * 1000 / 1024 * 1000 / 1024

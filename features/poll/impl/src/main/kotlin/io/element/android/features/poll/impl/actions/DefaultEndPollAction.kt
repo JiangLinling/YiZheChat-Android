@@ -11,21 +11,45 @@ package io.element.android.features.poll.impl.actions
 import dev.zacsweers.metro.ContributesBinding
 import im.vector.app.features.analytics.plan.PollEnd
 import io.element.android.features.poll.api.actions.EndPollAction
+import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.matrix.api.core.EventId
+import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.api.timeline.Timeline
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
 import io.element.android.services.analytics.api.AnalyticsService
+import java.security.MessageDigest
 
 @ContributesBinding(RoomScope::class)
 class DefaultEndPollAction(
     private val analyticsService: AnalyticsService,
+    private val room: JoinedRoom,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
 ) : EndPollAction {
     override suspend fun execute(timeline: Timeline, pollStartId: EventId): Result<Unit> {
-        return timeline.endPoll(
-            pollStartId = pollStartId,
-            text = "The poll with event id: $pollStartId has ended."
-        ).onSuccess {
+        return runCatchingExceptions {
+            appOperationalStateCoordinator.perform(pollOperationRequest(pollStartId)) {
+                timeline.endPoll(
+                    pollStartId = pollStartId,
+                    text = "The poll with event id: $pollStartId has ended."
+                ).getOrThrow()
+            }
+        }.onSuccess {
             analyticsService.capture(PollEnd())
         }
     }
+
+    private fun pollOperationRequest(eventId: EventId) = lifecycleOperationRequest(
+        lifecycleId = FullAppLifecycleId.LC_15,
+        trigger = "poll",
+        roomIdHash = room.roomId.value.sha256Hex(),
+        eventIdHash = eventId.value.sha256Hex(),
+    )
 }
+
+private fun String.sha256Hex(): String = MessageDigest.getInstance("SHA-256")
+    .digest(encodeToByteArray())
+    .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }

@@ -13,6 +13,7 @@ import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.push.impl.db.PushRequest
 import io.element.android.libraries.push.impl.push.PushRequestStatus
+import kotlinx.coroutines.flow.Flow
 import kotlin.time.Instant
 
 interface PushHistoryService {
@@ -31,6 +32,11 @@ interface PushHistoryService {
     )
 
     /**
+     * Adds a new [PushRequest] without resetting an existing request for the same event.
+     */
+    suspend fun enqueuePushRequest(pushRequest: PushRequest): Result<Unit>
+
+    /**
      * Adds or replaces an existing [PushRequest] in the local database.
      */
     suspend fun insertOrUpdatePushRequest(pushRequest: PushRequest): Result<Unit>
@@ -45,6 +51,8 @@ interface PushHistoryService {
      * A [since] param can optionally be provided to only return those received after that date.
      */
     suspend fun getPendingPushRequests(sessionId: SessionId, since: Instant?): Result<List<PushRequest>>
+
+    fun observePendingPushRequests(sessionId: SessionId, since: Instant): Flow<List<PushRequest>>
 
     /**
      * Removes the oldest push requests for a [SessionId].

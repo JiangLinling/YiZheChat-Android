@@ -21,6 +21,7 @@ import io.element.android.annotations.ContributesNode
 import io.element.android.features.rageshake.api.reporter.BugReporter
 import io.element.android.libraries.androidutils.system.toast
 import io.element.android.libraries.architecture.callback
+import io.element.android.libraries.mediapickers.api.PickerProvider
 import io.element.android.libraries.ui.strings.CommonStrings
 
 @ContributesNode(AppScope::class)
@@ -30,6 +31,7 @@ class BugReportNode(
     @Assisted plugins: List<Plugin>,
     private val presenter: BugReportPresenter,
     private val bugReporter: BugReporter,
+    private val pickerProvider: PickerProvider,
 ) : Node(buildContext, plugins = plugins) {
     interface Callback : Plugin {
         fun onDone()
@@ -42,10 +44,16 @@ class BugReportNode(
     override fun View(modifier: Modifier) {
         val state = presenter.present()
         val activity = LocalActivity.current
+        val galleryPicker = pickerProvider.registerGalleryPicker { media ->
+            state.eventSink(BugReportEvents.AddAttachments(media))
+        }
         BugReportView(
             state = state,
             modifier = modifier,
-            onBackClick = { navigateUp() },
+            onBackClick = {
+                state.eventSink(BugReportEvents.DiscardAttachments)
+                navigateUp()
+            },
             onSuccess = {
                 activity?.toast(CommonStrings.common_report_submitted)
                 callback.onDone()
@@ -54,7 +62,8 @@ class BugReportNode(
                 // Force a logcat dump
                 bugReporter.saveLogCat()
                 callback.navigateToViewLogs(bugReporter.logDirectory().absolutePath)
-            }
+            },
+            onAddAttachments = galleryPicker::launch,
         )
     }
 }

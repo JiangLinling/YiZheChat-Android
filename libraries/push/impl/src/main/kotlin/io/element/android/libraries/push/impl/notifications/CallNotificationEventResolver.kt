@@ -8,6 +8,8 @@
 
 package io.element.android.libraries.push.impl.notifications
 
+import android.os.Build
+import io.element.android.appconfig.NextDeploymentConfig
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import io.element.android.libraries.core.extensions.runCatchingExceptions
@@ -61,6 +63,13 @@ class DefaultCallNotificationEventResolver(
         val content = notificationData.content as? NotificationContent.MessageLike.RtcNotification
             ?: throw NotificationResolverException.UnknownError("content is not a call notify")
 
+        val isProjectionLagProneManufacturer = sequenceOf(Build.MANUFACTURER, Build.BRAND).any { value ->
+            val normalizedValue = value.orEmpty().trim()
+            normalizedValue.equals("huawei", ignoreCase = true) ||
+                normalizedValue.equals("honor", ignoreCase = true) ||
+                normalizedValue.equals("xiaomi", ignoreCase = true) ||
+                normalizedValue.equals("redmi", ignoreCase = true)
+        }
         val previousRingingCallStatus = appForegroundStateService.hasRingingCall.value
         // We need the sync service working to get the updated room info
         val isRoomCallActive = runCatchingExceptions {
@@ -73,20 +82,86 @@ class DefaultCallNotificationEventResolver(
                 val room = client.getRoom(
                     notificationData.roomId
                 ) ?: throw NotificationResolverException.UnknownError("Room ${notificationData.roomId} not found")
-                // Give a few seconds for the room info flow to catch up with the sync, if needed - this is usually instant
-                val isActive = withTimeoutOrNull(3.seconds) { room.roomInfoFlow.firstOrNull { it.hasRoomCall } }?.hasRoomCall ?: false
+                val currentRoomInfo = room.info()
+                val hasCallParticipants = currentRoomInfo.activeRoomCallParticipants.isNotEmpty()
+                val senderInCallParticipants = currentRoomInfo.activeRoomCallParticipants.contains(content.senderId)
+                // Give a few seconds for the room info flow to catch up with the sync, if needed - this is usually instant.
+                // On some Huawei/HarmonyOS cases, room info can be unavailable before timeout.
+                // The decrypted fresh RING already authorizes the existing OEM fallback.
+                // Do not delay that same decision behind a lagging membership projection.
+                // Exact invitation/terminal-event validation remains in ActiveCallManager.
+                val immediateRinging = shouldUseImmediateRinging(
+                    isNextDeployment = NextDeploymentConfig.isNextDeployment,
+                    isProjectionLagProneManufacturer = isProjectionLagProneManufacturer,
+                    expiration = content.expirationTimestampMillis,
+                    now = System.currentTimeMillis(),
+                )
+                val isActive = if (immediateRinging) {
+                    true
+                } else {
+                    withTimeoutOrNull(3.seconds) { room.roomInfoFlow.firstOrNull { it.hasRoomCall } }?.hasRoomCall
+                }
+                val resolvedIsActive = when {
+                    isActive == true -> true
+                    isActive == false -> false
+                    else -> {
+                        val now = System.currentTimeMillis()
+                        val expiration = content.expirationTimestampMillis
+                        val isExpired = expiration > 0 && expiration < now
+                        val hasFallbackByMembers = hasCallParticipants && senderInCallParticipants
+                        if (isExpired) {
+                            Timber.d(
+                                "RING call room state timeout for room ${notificationData.roomId}, " +
+                                    "push expired at $expiration, current time $now"
+                            )
+                        } else {
+                            Timber.d(
+                                "RING call room state timeout for room ${notificationData.roomId}, " +
+                                    "fallback to optimistic ringing; hasActiveCallParticipants=$hasCallParticipants, " +
+                                    "senderInCallParticipants=$senderInCallParticipants"
+                            )
+                        }
+                        shouldUseOptimisticRinging(
+                            isProjectionLagProneManufacturer = isProjectionLagProneManufacturer,
+                            isExpired = isExpired,
+                            hasFallbackByMembers = hasFallbackByMembers,
+                        )
+                    }
+                }
 
                 // We no longer need the sync service to be active because of a call notification.
                 appForegroundStateService.updateHasRingingCall(previousRingingCallStatus)
 
-                isActive
+                resolvedIsActive
             } else {
                 // If the call notification is not of ringing type, we don't need to check if the call is active
                 false
             }
-        }.onFailure {
+        }.recoverCatching { exception ->
             // Make sure to reset the hasRingingCall state in case of failure
+            Timber.w(exception, "Failed to resolve ringing call state for room ${notificationData.roomId}")
             appForegroundStateService.updateHasRingingCall(previousRingingCallStatus)
+            val shouldFallbackToRinging = content.type == RtcNotificationType.RING &&
+                (content.expirationTimestampMillis == 0L || content.expirationTimestampMillis > System.currentTimeMillis())
+            val fallbackRoom = runCatching {
+                clientProvider.getOrRestore(sessionId)
+                    .getOrNull()
+                    ?.getRoom(notificationData.roomId)
+            }.getOrNull()
+            val roomInfo = runCatching { fallbackRoom?.info() }.getOrNull()
+            val hasActiveCallParticipants = roomInfo?.activeRoomCallParticipants?.isNotEmpty() == true
+            val senderInCallParticipants = roomInfo?.activeRoomCallParticipants?.contains(content.senderId) == true
+            val now = System.currentTimeMillis()
+            Timber.w(
+                "RING call state resolution failed for room ${notificationData.roomId}. " +
+                    "Falling back only when the sender is in the authoritative room call projection, now=$now, " +
+                    "expiration=${content.expirationTimestampMillis}, activeParticipants=$hasActiveCallParticipants, " +
+                    "senderInParticipants=$senderInCallParticipants"
+            )
+            shouldFallbackToRinging && shouldUseFailureFallbackRinging(
+                isExpired = false,
+                hasFallbackByMembers = hasActiveCallParticipants && senderInCallParticipants,
+            )
         }.getOrDefault(false)
 
         notificationData.run {
@@ -144,3 +219,31 @@ class DefaultCallNotificationEventResolver(
         }
     }
 }
+
+/**
+ * Some OEM background-process implementations can wake the app before the room-call membership
+ * projection has caught up. At this point the event has already been fetched, decrypted, and
+ * identified as an unexpired Matrix RING notification, so waiting for the redundant membership
+ * projection would incorrectly downgrade a real incoming call to an ordinary message notification.
+ */
+internal fun shouldUseImmediateRinging(
+    isNextDeployment: Boolean,
+    isProjectionLagProneManufacturer: Boolean,
+    expiration: Long,
+    now: Long,
+): Boolean = isNextDeployment && isProjectionLagProneManufacturer && expiration > now
+
+internal fun shouldUseOptimisticRinging(
+    isProjectionLagProneManufacturer: Boolean,
+    isExpired: Boolean,
+    hasFallbackByMembers: Boolean,
+): Boolean = !isExpired && (hasFallbackByMembers || isProjectionLagProneManufacturer)
+
+/**
+ * An OEM-specific projection delay is only safe to use after the session and room were resolved.
+ * If resolution itself failed, require the sender to be present in the room call projection.
+ */
+internal fun shouldUseFailureFallbackRinging(
+    isExpired: Boolean,
+    hasFallbackByMembers: Boolean,
+): Boolean = !isExpired && hasFallbackByMembers

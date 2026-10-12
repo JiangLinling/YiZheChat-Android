@@ -10,6 +10,7 @@ package io.element.android.features.invite.impl
 
 import dev.zacsweers.metro.ContributesBinding
 import im.vector.app.features.analytics.plan.JoinedRoom
+import io.element.android.features.invite.api.InviteNotification
 import io.element.android.features.invite.api.SeenInvitesStore
 import io.element.android.libraries.core.extensions.mapFailure
 import io.element.android.libraries.di.SessionScope
@@ -43,7 +44,7 @@ class DefaultAcceptInvite(
             trigger = JoinedRoom.Trigger.Invite,
         ).onSuccess {
             notificationCleaner.clearMembershipNotificationForRoom(client.sessionId, roomId)
-            seenInvitesStore.markAsUnSeen(roomId)
+            seenInvitesStore.recordOutcome(roomId, InviteNotification.Outcome.ACCEPTED)
         }.mapFailure {
             if (it is ClientException.MatrixApi) {
                 when (it.kind) {

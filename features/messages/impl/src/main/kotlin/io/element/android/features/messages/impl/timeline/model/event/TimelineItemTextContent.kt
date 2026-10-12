@@ -16,6 +16,10 @@ data class TimelineItemTextContent(
     override val htmlDocument: Document?,
     override val formattedBody: CharSequence,
     override val isEdited: Boolean,
+    override val isBurnAfterRead: Boolean = false,
+    override val isBurnAfterReadUnopened: Boolean = false,
+    override val isProtectedContentShell: Boolean = false,
+    override val isTerminalProtectedContentShell: Boolean = false,
 ) : TimelineItemTextBasedContent {
     override val type: String = "TimelineItemTextContent"
     override val plainText: String = htmlDocument?.toPlainText() ?: body

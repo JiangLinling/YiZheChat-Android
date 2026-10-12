@@ -40,7 +40,7 @@ fun aLiveLocationMode(
     lastKnownLocation: Location? = aLocation(),
     endsAt: String = "Ends at 12:34",
     endTimestamp: Long = 0L,
-): TimelineItemLocationContent.Mode = TimelineItemLocationContent.Mode.Live(
+): TimelineItemLocationContent.Mode.Live = TimelineItemLocationContent.Mode.Live(
     isActive = isActive,
     endsAt = endsAt,
     endTimestamp = endTimestamp,

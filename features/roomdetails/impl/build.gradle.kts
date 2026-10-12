@@ -26,6 +26,9 @@ android {
 setupDependencyInjection()
 
 dependencies {
+    implementation(projects.libraries.qrcode)
+    implementation(projects.security.dataProtection.api)
+    implementation(projects.security.secureStorage.api)
     implementation(projects.appconfig)
     implementation(projects.libraries.core)
     implementation(projects.libraries.architecture)
@@ -50,6 +53,7 @@ dependencies {
     implementation(projects.features.startchat.api)
     implementation(projects.features.leaveroom.api)
     implementation(projects.features.userprofile.shared)
+    implementation(projects.features.userprofile.api)
     implementation(projects.services.analytics.compose)
     implementation(projects.features.poll.api)
     implementation(projects.features.messages.api)
@@ -83,5 +87,6 @@ dependencies {
     testImplementation(projects.features.reportroom.test)
     testImplementation(projects.features.startchat.test)
     testImplementation(projects.features.verifysession.test)
+    testImplementation(projects.features.userprofile.test)
     testImplementation(projects.services.analytics.test)
 }

@@ -10,9 +10,12 @@
 
 package io.element.android.features.messages.impl.timeline.components.event
 
+import android.graphics.Typeface
 import android.text.SpannableString
 import android.text.SpannedString
+import android.text.style.StyleSpan
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.AndroidComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -51,6 +54,21 @@ class TimelineTextViewTest {
     private val mentionSpanFormatter = FakeMentionSpanFormatter(formatLambda)
 
     @Test
+    fun `span-free text uses the Compose fast path`() {
+        assertThat(canUseComposeText("plain text")).isTrue()
+        assertThat(canUseComposeText(SpannedString("plain text"))).isTrue()
+    }
+
+    @Test
+    fun `styled text stays on the rich text path`() {
+        val text = SpannableString("styled").apply {
+            setSpan(StyleSpan(Typeface.BOLD), 0, length, 0)
+        }
+
+        assertThat(canUseComposeText(text)).isFalse()
+    }
+
+    @Test
     fun `getTextWithResolvedMentions - does nothing for a non spannable CharSequence`() = runAndroidComposeUiTest {
         val charSequence = "Hello <a href=\"https://matrix.to/#/@alice:example.com\">@alice:example.com</a>"
         val mentionSpanUpdater = aMentionSpanUpdater()
@@ -63,11 +81,11 @@ class TimelineTextViewTest {
     @Test
     fun `getTextWithResolvedMentions - does nothing if there are no mentions`() = runAndroidComposeUiTest {
         val charSequence = SpannableString("Hello <a href=\"https://matrix.to/#/@alice:example.com\">@alice:example.com</a>")
-        val mentionSpanUpdater = aMentionSpanUpdater()
+        val mentionSpanUpdater = RecordingMentionSpanUpdater()
         val result = getText(mentionSpanUpdater, aTextContentWithFormattedBody(charSequence))
 
         assertThat(result.getMentionSpans()).isEmpty()
-        assert(formatLambda).isNeverCalled()
+        assertThat(mentionSpanUpdater.rememberCalls).isEqualTo(0)
     }
 
     @Test
@@ -154,6 +172,18 @@ class TimelineTextViewTest {
             roomMemberProfilesCache = RoomMemberProfilesCache(),
             roomNamesCache = RoomNamesCache(),
         )
+    }
+
+    private class RecordingMentionSpanUpdater : MentionSpanUpdater {
+        var rememberCalls = 0
+
+        override fun updateMentionSpans(text: CharSequence): CharSequence = text
+
+        @Composable
+        override fun rememberMentionSpans(text: CharSequence): CharSequence {
+            rememberCalls++
+            return text
+        }
     }
 
     private fun aTextContentWithFormattedBody(formattedBody: CharSequence?, body: String = "") =

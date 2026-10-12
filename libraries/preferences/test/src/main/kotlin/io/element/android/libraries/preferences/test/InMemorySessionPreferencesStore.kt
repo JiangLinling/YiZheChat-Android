@@ -9,9 +9,11 @@
 package io.element.android.libraries.preferences.test
 
 import io.element.android.libraries.preferences.api.store.SessionPreferencesStore
+import io.element.android.libraries.preferences.api.store.RecentImageAcknowledgements
 import io.element.android.libraries.preferences.api.store.VideoCompressionPreset
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 
 class InMemorySessionPreferencesStore(
     isSharePresenceEnabled: Boolean = true,
@@ -31,6 +33,20 @@ class InMemorySessionPreferencesStore(
     private val isSessionVerificationSkipped = MutableStateFlow(isSessionVerificationSkipped)
     private val doesCompressMedia = MutableStateFlow(doesCompressMedia)
     private val videoCompressionPreset = MutableStateFlow(videoCompressionPreset)
+    private val acknowledgedHistoryRecoveryBanners = MutableStateFlow<Set<String>>(emptySet())
+    private val playedVoiceMessages = MutableStateFlow<Set<String>>(emptySet())
+    private var recentImageAcknowledgements = emptySet<String>()
+
+    override suspend fun claimRecentImageSuggestions(newestFirstIds: List<String>, nowEpochMillis: Long): Set<String> {
+        val records = RecentImageAcknowledgements.retain(recentImageAcknowledgements, nowEpochMillis)
+        val claimed = RecentImageAcknowledgements.claimable(newestFirstIds, records)
+        recentImageAcknowledgements = RecentImageAcknowledgements.acknowledge(records, claimed, nowEpochMillis)
+        return claimed
+    }
+
+    override suspend fun acknowledgeSelectedImages(ids: List<String>, nowEpochMillis: Long) {
+        recentImageAcknowledgements = RecentImageAcknowledgements.acknowledge(recentImageAcknowledgements, ids, nowEpochMillis)
+    }
     var clearCallCount = 0
         private set
 
@@ -84,8 +100,28 @@ class InMemorySessionPreferencesStore(
         return videoCompressionPreset
     }
 
+    override suspend fun acknowledgeHistoryRecoveryBanner(roomId: String, status: String) {
+        acknowledgedHistoryRecoveryBanners.value += "$roomId\u0000$status"
+    }
+
+    override suspend fun clearHistoryRecoveryBannerAcknowledgements(roomId: String) {
+        acknowledgedHistoryRecoveryBanners.value = acknowledgedHistoryRecoveryBanners.value
+            .filterNotTo(mutableSetOf()) { it.startsWith("$roomId\u0000") }
+    }
+
+    override fun isHistoryRecoveryBannerAcknowledged(roomId: String, status: String): Flow<Boolean> {
+        val token = "$roomId\u0000$status"
+        return acknowledgedHistoryRecoveryBanners.map { token in it }
+    }
+
     override suspend fun clear() {
         clearCallCount++
         isSendPublicReadReceiptsEnabled.tryEmit(true)
+        acknowledgedHistoryRecoveryBanners.value = emptySet()
+        playedVoiceMessages.value = emptySet()
+        recentImageAcknowledgements = emptySet()
     }
+
+    override suspend fun markVoiceMessagePlayed(eventId: String) { playedVoiceMessages.value += eventId }
+    override fun hasVoiceMessagePlayed(eventId: String): Flow<Boolean> = playedVoiceMessages.map { eventId in it }
 }

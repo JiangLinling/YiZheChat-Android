@@ -23,6 +23,7 @@ import dev.zacsweers.metro.AssistedInject
 import io.element.android.annotations.ContributesNode
 import io.element.android.features.share.api.ShareEntryPoint
 import io.element.android.features.share.api.ShareIntentData
+import io.element.android.features.share.api.ShareResult
 import io.element.android.libraries.architecture.NodeInputs
 import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.architecture.inputs
@@ -63,7 +64,7 @@ class ShareNode(
             }
 
             override fun onCancel() {
-                callback.onDone(emptyList())
+                callback.onDone(ShareResult(emptyList()))
             }
         }
 

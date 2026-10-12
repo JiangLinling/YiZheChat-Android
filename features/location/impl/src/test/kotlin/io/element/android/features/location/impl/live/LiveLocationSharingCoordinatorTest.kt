@@ -70,6 +70,58 @@ class LiveLocationSharingCoordinatorTest {
     }
 
     @Test
+    fun `dispatch without an owner retains no coordinate to replay`() = runTest {
+        val delivered = mutableListOf<Location>()
+        val coordinator = LiveLocationSharingCoordinator(
+            startService = { },
+            stopService = { },
+            nowMillis = { 4_000L },
+        )
+        val cachedLocation = Location(lat = 1.0, lon = 2.0, accuracy = 3f)
+        coordinator.dispatch(cachedLocation)
+
+        val replay = coordinator.register(A_SESSION_ID, liveLocationReceiver { delivered += it })
+
+        assertThat(replay).isNull()
+        assertThat(delivered).isEmpty()
+    }
+
+    @Test
+    fun `service cleanup is acknowledged only after original lease and replacement waits`() = runTest {
+        var starts = 0
+        val coordinator = LiveLocationSharingCoordinator(startService = { starts++ }, stopService = {}, nowMillis = { 4000 })
+        coordinator.register(A_SESSION_ID, liveLocationReceiver())
+        val original = coordinator.serviceCreated()
+        original.collectionStarted()
+        val release = coordinator.unregister(A_SESSION_ID)!!
+        assertThat(release.isCompleted).isFalse()
+        coordinator.register(A_SESSION_ID_2, liveLocationReceiver())
+        assertThat(starts).isEqualTo(1)
+        original.collectionFinished(true)
+        coordinator.serviceReleased(original)
+        release.await()
+        assertThat(starts).isEqualTo(2)
+        assertThat(coordinator.serviceCreated()).isNotSameInstanceAs(original)
+    }
+
+    @Test
+    fun `failed provider release cannot acknowledge cleanup and other owner keeps collection`() = runTest {
+        var stops = 0
+        val coordinator = LiveLocationSharingCoordinator(startService = {}, stopService = { stops++ }, nowMillis = { 4000 })
+        coordinator.register(A_SESSION_ID, liveLocationReceiver())
+        coordinator.register(A_SESSION_ID_2, liveLocationReceiver())
+        val original = coordinator.serviceCreated()
+        assertThat(coordinator.unregister(A_SESSION_ID)).isNull()
+        assertThat(stops).isEqualTo(0)
+        original.collectionStarted()
+        val release = coordinator.unregister(A_SESSION_ID_2)!!
+        original.collectionFinished(false)
+        val failure = runCatching { original.verifyReleased() }.exceptionOrNull()!!
+        coordinator.serviceReleased(original, failure)
+        assertThat(runCatching { release.await() }.isFailure).isTrue()
+    }
+
+    @Test
     fun `dispatch drops updates inside the throttle window`() = runTest {
         var nowMillis = 4_000L
         val delivered = mutableListOf<Location>()

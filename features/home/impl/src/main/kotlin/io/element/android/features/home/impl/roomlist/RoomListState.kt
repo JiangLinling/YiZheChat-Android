@@ -13,13 +13,16 @@ import io.element.android.features.home.impl.filters.RoomListFiltersState
 import io.element.android.features.home.impl.model.RoomListRoomSummary
 import io.element.android.features.home.impl.search.RoomListSearchState
 import io.element.android.features.home.impl.spacefilters.SpaceFiltersState
+import io.element.android.features.invite.api.InviteNotification
 import io.element.android.features.invite.api.acceptdecline.AcceptDeclineInviteState
 import io.element.android.features.leaveroom.api.LeaveRoomState
+import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.fullscreenintent.api.FullScreenIntentPermissionsState
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.push.api.battery.BatteryOptimizationState
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableSet
+import kotlinx.collections.immutable.persistentSetOf
 
 data class RoomListState(
     val contextMenu: ContextMenu,
@@ -29,10 +32,15 @@ data class RoomListState(
     val searchState: RoomListSearchState,
     val spaceFiltersState: SpaceFiltersState,
     val contentState: RoomListContentState,
+    val unreadSummary: HomeUnreadSummary,
     val acceptDeclineInviteState: AcceptDeclineInviteState,
     val hideInvitesAvatars: Boolean,
     val canReportRoom: Boolean,
     val eventSink: (RoomListEvent) -> Unit,
+    val contactsSummaries: AsyncData<ImmutableList<RoomListRoomSummary>> = AsyncData.Loading(),
+    val notifications: ImmutableList<InviteNotification> = kotlinx.collections.immutable.persistentListOf(),
+    val inviteActionsInPlace: Boolean = false,
+    val seenRoomInvites: ImmutableSet<RoomId> = persistentSetOf(),
 ) {
     val displayFilters = contentState is RoomListContentState.Rooms
 
@@ -43,8 +51,9 @@ data class RoomListState(
             val roomName: String?,
             val isDm: Boolean,
             val isFavorite: Boolean,
+            val isMuted: Boolean = false,
             val hasNewContent: Boolean,
-            val displayClearRoomCacheAction: Boolean,
+            val latestEventTimestamp: Long = 0L,
         ) : ContextMenu
     }
 

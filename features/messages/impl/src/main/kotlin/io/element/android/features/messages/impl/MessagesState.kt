@@ -8,6 +8,7 @@
 
 package io.element.android.features.messages.impl
 
+import io.element.android.features.location.api.live.PausedLiveLocationShare
 import io.element.android.features.messages.api.timeline.voicemessages.composer.VoiceMessageComposerState
 import io.element.android.features.messages.impl.actionlist.ActionListState
 import io.element.android.features.messages.impl.crypto.identity.IdentityChangeState
@@ -24,9 +25,12 @@ import io.element.android.features.roommembermoderation.api.RoomMemberModeration
 import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.designsystem.components.avatar.AvatarData
 import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
+import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
+import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.encryption.identity.IdentityState
 import io.element.android.libraries.matrix.api.room.tombstone.SuccessorRoom
+import io.element.android.libraries.matrix.api.room.DirectRoomRelationState
 import kotlinx.collections.immutable.ImmutableList
 
 data class MessagesState(
@@ -46,6 +50,7 @@ data class MessagesState(
     val reactionSummaryState: ReactionSummaryState,
     val readReceiptBottomSheetState: ReadReceiptBottomSheetState,
     val snackbarMessage: SnackbarMessage?,
+    val favouriteSnackbarMessage: SnackbarMessage?,
     val inviteProgress: AsyncData<Unit>,
     val showReinvitePrompt: Boolean,
     val enableTextFormatting: Boolean,
@@ -59,6 +64,11 @@ data class MessagesState(
     val successorRoom: SuccessorRoom?,
     val threads: Threads,
     val showLiveLocationShareBanner: Boolean,
+    val pausedLiveLocationShare: PausedLiveLocationShare? = null,
+    val reEditableWithdrawnEventIds: Set<EventId> = emptySet(),
+    val showHistoryRecoveryBanner: Boolean = false,
+    val directRoomRelationState: DirectRoomRelationState = DirectRoomRelationState.NOT_DIRECT,
+    val dmOtherUserId: UserId? = null,
     val eventSink: (MessagesEvent) -> Unit
 ) {
     val isTombstoned = successorRoom != null

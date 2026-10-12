@@ -26,6 +26,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
+import io.element.android.features.messages.impl.timeline.LocalTimelineIsTalkbackActive
 import io.element.android.features.messages.impl.timeline.TimelineEvent
 import io.element.android.features.messages.impl.timeline.TimelineRoomInfo
 import io.element.android.features.messages.impl.timeline.components.event.TimelineItemEventContentView
@@ -47,7 +48,6 @@ import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.ui.strings.CommonStrings
-import io.element.android.libraries.ui.utils.a11y.isTalkbackActive
 import io.element.android.wysiwyg.link.Link
 import kotlin.time.DurationUnit
 
@@ -86,7 +86,10 @@ internal fun TimelineItemRow(
                 onLinkLongClick = onLinkLongClick,
                 eventSink = eventSink,
                 modifier = contentModifier,
-                onContentLayoutChange = onContentLayoutChange
+                onContentLayoutChange = onContentLayoutChange,
+                isMine = event.isMine,
+                localSendState = event.localSendState,
+                trustedRedactionReason = event.trustedRedactionReason,
             )
         },
 ) {
@@ -129,30 +132,42 @@ internal fun TimelineItemRow(
                             content = timelineItem.content,
                             renderReadReceipts = renderReadReceipts,
                             isLastOutgoingMessage = isLastOutgoingMessage,
+                            onClick = onContentClick,
                             onLongClick = onLongClick,
                             onReadReceiptsClick = onReadReceiptClick,
                         )
                     }
                     else -> {
-                        val a11yVoiceMessage = stringResource(CommonStrings.a11y_voice_message)
+                        val isTalkbackActive = LocalTimelineIsTalkbackActive.current
+                        val voiceMessageDescription = if (isTalkbackActive && timelineItem.content is TimelineItemVoiceContent) {
+                            val a11yVoiceMessage = stringResource(CommonStrings.a11y_voice_message)
+                            String.format(a11yVoiceMessage, timelineItem.content.duration.toString(DurationUnit.MINUTES))
+                        } else {
+                            null
+                        }
+                        val accessibilityInfo = timelineItemAccessibilityInfo(
+                            isTalkbackActive = isTalkbackActive,
+                            safeSenderName = timelineItem.safeSenderName,
+                            voiceMessageDescription = voiceMessageDescription,
+                            isTraversalGroup = timelineItem.content is TimelineItemPollContent ||
+                                timelineItem.failedToSend ||
+                                timelineItem.messageShield != null,
+                        )
+                        val accessibilityModifier = if (accessibilityInfo != null) {
+                            Modifier.semantics(mergeDescendants = true) {
+                                contentDescription = accessibilityInfo.contentDescription
+                                // For Polls, allow the answers to be traversed by Talkback
+                                isTraversalGroup = accessibilityInfo.isTraversalGroup
+                                // TODO Also set to true when the event has link(s)
+                            }
+                        } else {
+                            Modifier
+                        }
                         TimelineItemEventRow(
-                            modifier = Modifier
-                                .semantics(mergeDescendants = true) {
-                                    contentDescription = if (timelineItem.content is TimelineItemVoiceContent) {
-                                        val voiceMessageText = String.format(a11yVoiceMessage, timelineItem.content.duration.toString(DurationUnit.MINUTES))
-                                        "${timelineItem.safeSenderName}, $voiceMessageText"
-                                    } else {
-                                        timelineItem.safeSenderName
-                                    }
-                                    // For Polls, allow the answers to be traversed by Talkback
-                                    isTraversalGroup = timelineItem.content is TimelineItemPollContent ||
-                                        timelineItem.failedToSend ||
-                                        timelineItem.messageShield != null
-                                    // TODO Also set to true when the event has link(s)
-                                }
+                            modifier = accessibilityModifier
                                 // Custom clickable that applies over the whole item for accessibility
                                 .then(
-                                    if (isTalkbackActive()) {
+                                    if (isTalkbackActive) {
                                         Modifier
                                             .combinedClickable(
                                                 onClick = { onContentClick(timelineItem) },
@@ -215,6 +230,29 @@ internal fun TimelineItemRow(
             }
         }
     }
+}
+
+internal data class TimelineItemAccessibilityInfo(
+    val contentDescription: String,
+    val isTraversalGroup: Boolean,
+)
+
+internal fun timelineItemAccessibilityInfo(
+    isTalkbackActive: Boolean,
+    safeSenderName: String,
+    voiceMessageDescription: String?,
+    isTraversalGroup: Boolean,
+): TimelineItemAccessibilityInfo? {
+    if (!isTalkbackActive) return null
+    val contentDescription = if (voiceMessageDescription == null) {
+        safeSenderName
+    } else {
+        "$safeSenderName, $voiceMessageDescription"
+    }
+    return TimelineItemAccessibilityInfo(
+        contentDescription = contentDescription,
+        isTraversalGroup = isTraversalGroup,
+    )
 }
 
 @Suppress("ModifierComposable")

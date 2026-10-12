@@ -10,8 +10,19 @@ package io.element.android.features.forward.impl
 
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.matrix.api.core.RoomId
+import io.element.android.libraries.matrix.api.core.EventId
+
+data class ForwardPair(val eventId: EventId, val roomId: RoomId)
+sealed interface ForwardPairState {
+    data object Pending : ForwardPairState
+    data object Sending : ForwardPairState
+    data object Success : ForwardPairState
+    data class Failed(val reason: String?) : ForwardPairState
+    data class Ambiguous(val reason: String?) : ForwardPairState
+}
 
 data class ForwardMessagesState(
     val forwardAction: AsyncAction<List<RoomId>>,
+    val pairStates: Map<ForwardPair, ForwardPairState>,
     val eventSink: (ForwardMessagesEvents) -> Unit
 )

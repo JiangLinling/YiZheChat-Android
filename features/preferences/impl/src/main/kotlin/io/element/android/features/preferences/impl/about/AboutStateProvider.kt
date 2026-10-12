@@ -9,6 +9,7 @@
 package io.element.android.features.preferences.impl.about
 
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
+import io.element.android.libraries.architecture.AsyncData
 import kotlinx.collections.immutable.toImmutableList
 
 open class AboutStateProvider : PreviewParameterProvider<AboutState> {
@@ -22,4 +23,9 @@ fun anAboutState(
     elementLegals: List<ElementLegal> = getAllLegals(),
 ) = AboutState(
     elementLegals = elementLegals.toImmutableList(),
+    currentVersion = "1.0.0",
+    updateCheck = AsyncData.Uninitialized,
+    preparedUpdate = AsyncData.Uninitialized,
+    downloadProgress = null,
+    eventSink = {},
 )

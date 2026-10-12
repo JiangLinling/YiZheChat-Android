@@ -27,6 +27,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -45,8 +46,14 @@ class DefaultLockScreenService(
     private val appForegroundStateService: AppForegroundStateService,
     private val biometricAuthenticatorManager: BiometricAuthenticatorManager,
 ) : LockScreenService {
-    private val _lockState = MutableStateFlow<LockScreenLockState>(LockScreenLockState.Unlocked)
+    // Next recovery workers can start before asynchronous PIN discovery completes.
+    // Unknown startup state must not grant a provisional unlocked authorization.
+    private val _lockState = MutableStateFlow<LockScreenLockState>(
+        if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment) LockScreenLockState.Locked else LockScreenLockState.Unlocked
+    )
     override val lockState: StateFlow<LockScreenLockState> = _lockState
+    private val _backgroundLockTimeouts = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    override val backgroundLockTimeouts: Flow<Unit> = _backgroundLockTimeouts
 
     private var lockJob: Job? = null
 
@@ -68,7 +75,9 @@ class DefaultLockScreenService(
                 }
             }
         })
-        coroutineScope.lockIfNeeded()
+        coroutineScope.launch {
+            _lockState.value = if (isPinSetup().first()) LockScreenLockState.Locked else LockScreenLockState.Unlocked
+        }
         observeAppForegroundState()
         observeSessionsState()
     }
@@ -116,7 +125,12 @@ class DefaultLockScreenService(
     private fun CoroutineScope.lockIfNeeded(gracePeriod: Duration = Duration.ZERO) = launch {
         if (isPinSetup().first()) {
             delay(gracePeriod)
-            _lockState.value = LockScreenLockState.Locked
+            if (_lockState.value != LockScreenLockState.Locked) {
+                // Lock locally before emitting the lifecycle trigger. Network/receipt latency must
+                // never delay protection, and startup/already-locked state is not a new timeout.
+                _lockState.value = LockScreenLockState.Locked
+                _backgroundLockTimeouts.emit(Unit)
+            }
         }
     }
 }

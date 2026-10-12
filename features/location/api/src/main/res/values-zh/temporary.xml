@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_room_live_location_paused">位置更新已暂停，请检查定位权限</string>
+    <string name="screen_room_live_location_paused_checking">位置更新已暂停，正在核对原共享状态</string>
+    <string name="screen_room_live_location_unrecoverable">位置更新已暂停，请结束当前共享</string>
+</resources>

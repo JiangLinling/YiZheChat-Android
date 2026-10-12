@@ -13,10 +13,10 @@ package io.element.android.features.roomdetails.impl
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.AndroidComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertHasNoClickAction
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onLast
-import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runAndroidComposeUiTest
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -26,9 +26,7 @@ import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.notification.CallIntent
 import io.element.android.libraries.matrix.api.room.RoomNotificationMode
 import io.element.android.libraries.matrix.test.A_USER_ID
-import io.element.android.libraries.testtags.TestTags
 import io.element.android.libraries.ui.strings.CommonStrings
-import io.element.android.tests.testutils.EnsureCalledOnceWithTwoParams
 import io.element.android.tests.testutils.EnsureNeverCalled
 import io.element.android.tests.testutils.EnsureNeverCalledWithParam
 import io.element.android.tests.testutils.EnsureNeverCalledWithTwoParams
@@ -41,6 +39,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 
+@Config(qualifiers = "h1500dp")
 @RunWith(AndroidJUnit4::class)
 class RoomDetailsViewTest {
     @Test
@@ -59,7 +58,7 @@ class RoomDetailsViewTest {
             setRoomDetailView(
                 onShareRoom = callback,
             )
-            clickOn(CommonStrings.action_share)
+            clickOn(R.string.screen_room_details_share_group)
         }
     }
 
@@ -70,7 +69,7 @@ class RoomDetailsViewTest {
             setRoomDetailView(
                 openRoomMemberList = callback,
             )
-            clickOn(CommonStrings.common_people)
+            clickOn(R.string.screen_room_details_group_members)
         }
     }
 
@@ -92,21 +91,11 @@ class RoomDetailsViewTest {
             setRoomDetailView(
                 openMediaGallery = callback,
             )
-            clickOn(R.string.screen_room_details_media_gallery_title)
+            clickOn(R.string.screen_room_details_chat_media)
         }
     }
 
     @Config(qualifiers = "h1024dp")
-    @Test
-    fun `click on notification invokes expected callback`() = runAndroidComposeUiTest {
-        ensureCalledOnce { callback ->
-            setRoomDetailView(
-                openRoomNotificationSettings = callback,
-            )
-            clickOn(R.string.screen_room_details_notification_title)
-        }
-    }
-
     @Test
     fun `click on invite invokes expected callback`() = runAndroidComposeUiTest {
         ensureCalledOnce { callback ->
@@ -117,37 +106,27 @@ class RoomDetailsViewTest {
                 ),
                 invitePeople = callback,
             )
-            clickOn(CommonStrings.action_invite)
+            clickOn(R.string.screen_room_details_add_members)
         }
     }
 
     @Test
-    fun `click on call invokes expected callback`() = runAndroidComposeUiTest {
-        ensureCalledOnceWithParam(CallIntent.AUDIO) { callback ->
-            setRoomDetailView(
-                state = aRoomDetailsState(
-                    eventSink = EventsRecorder(expectEvents = false),
-                    canInvite = true,
-                    roomType = RoomDetailsType.Dm(aRoomMember(UserId("@other:local.org"))),
-                ),
-                onJoinCallClick = callback,
-            )
-            clickOn(CommonStrings.action_call)
-        }
-    }
-
-    @Test
-    fun `click on video call invokes expected callback`() = runAndroidComposeUiTest {
-        ensureCalledOnceWithParam(CallIntent.VIDEO) { callback ->
-            setRoomDetailView(
-                state = aRoomDetailsState(
-                    eventSink = EventsRecorder(expectEvents = false),
-                    canInvite = true,
-                ),
-                onJoinCallClick = callback,
-            )
-            clickOn(CommonStrings.common_video)
-        }
+    fun `direct chat settings hides duplicate actions and group management`() = runAndroidComposeUiTest {
+        setRoomDetailView(
+            state = aRoomDetailsState(
+                eventSink = EventsRecorder(expectEvents = false),
+                canInvite = true,
+                roomType = RoomDetailsType.Dm(aRoomMember(UserId("@other:local.org"))),
+            ),
+        )
+        listOf(
+            CommonStrings.action_call,
+            CommonStrings.common_video,
+            CommonStrings.action_invite,
+            R.string.screen_roomlist_mark_as_unread,
+            R.string.screen_room_details_message_notifications,
+            R.string.screen_room_details_star_conversation,
+        ).forEach { resId -> onAllNodesWithText(activity!!.getString(resId)).assertCountEquals(0) }
     }
 
     @Config(qualifiers = "h1024dp")
@@ -161,7 +140,7 @@ class RoomDetailsViewTest {
                 ),
                 onPinnedMessagesClick = callback,
             )
-            clickOn(R.string.screen_room_details_pinned_events_row_title)
+            clickOn(R.string.screen_room_details_chat_pinned_messages)
         }
     }
 
@@ -176,6 +155,7 @@ class RoomDetailsViewTest {
                 ),
                 onSecurityAndPrivacyClick = callback,
             )
+            clickOn(R.string.screen_room_details_chat_security)
             clickOn(R.string.screen_room_details_security_and_privacy_title)
         }
     }
@@ -196,7 +176,7 @@ class RoomDetailsViewTest {
     }
 
     @Test
-    fun `click on menu edit emit expected event`() = runAndroidComposeUiTest {
+    fun `click on editable group header opens group information`() = runAndroidComposeUiTest {
         ensureCalledOnceWithParam<RoomDetailsAction>(RoomDetailsAction.Edit) { callback ->
             setRoomDetailView(
                 state = aRoomDetailsState(
@@ -205,43 +185,28 @@ class RoomDetailsViewTest {
                 ),
                 onActionClick = callback,
             )
-            val menuContentDescription = activity!!.getString(CommonStrings.a11y_user_menu)
-            onNodeWithContentDescription(menuContentDescription).performClick()
-            clickOn(CommonStrings.action_edit)
+            onNodeWithText(aRoomDetailsState().roomName).performClick()
         }
     }
 
     @Test
-    fun `click on avatar test`() = runAndroidComposeUiTest {
-        val eventsRecorder = EventsRecorder<RoomDetailsEvent>(expectEvents = false)
-        val state = aRoomDetailsState(
-            eventSink = eventsRecorder,
-            roomAvatarUrl = "an_avatar_url",
-        )
-        val callback = EnsureCalledOnceWithTwoParams(state.roomName, "an_avatar_url")
-        setRoomDetailView(
-            state = state,
-            openAvatarPreview = callback,
-        )
-        onNodeWithTag(TestTags.roomDetailAvatar.value).performClick()
-        callback.assertSuccess()
+    fun `read only group header does not open avatar preview`() = runAndroidComposeUiTest {
+        setRoomDetailView(state = aRoomDetailsState(eventSink = EventsRecorder(expectEvents = false)))
+        onNodeWithText(aRoomDetailsState().roomName).assertHasNoClickAction()
     }
 
     @Test
-    fun `click on avatar test on DM`() = runAndroidComposeUiTest {
+    fun `click on contact header opens profile even without an avatar`() = runAndroidComposeUiTest {
         val eventsRecorder = EventsRecorder<RoomDetailsEvent>(expectEvents = false)
         val state = aRoomDetailsState(
-            roomType = RoomDetailsType.Dm(aDmRoomMember(avatarUrl = "an_avatar_url"),),
+            roomType = RoomDetailsType.Dm(aDmRoomMember(userId = A_USER_ID, avatarUrl = null)),
             roomName = "Daniel",
             eventSink = eventsRecorder,
         )
-        val callback = EnsureCalledOnceWithTwoParams("Daniel", "an_avatar_url")
-        setRoomDetailView(
-            state = state,
-            openAvatarPreview = callback,
-        )
-        onNodeWithTag(TestTags.roomDetailAvatar.value).performClick()
-        callback.assertSuccess()
+        ensureCalledOnceWithParam(A_USER_ID) { callback ->
+            setRoomDetailView(state = state, onProfileClick = callback)
+            clickOn(R.string.screen_room_details_view_profile)
+        }
     }
 
     @Test
@@ -254,7 +219,7 @@ class RoomDetailsViewTest {
         setRoomDetailView(
             state = state,
         )
-        clickOn(CommonStrings.common_mute)
+        clickOn(R.string.screen_room_details_do_not_disturb)
         eventsRecorder.assertSingle(RoomDetailsEvent.MuteNotification)
     }
 
@@ -268,7 +233,7 @@ class RoomDetailsViewTest {
         setRoomDetailView(
             state = state,
         )
-        clickOn(CommonStrings.common_unmute)
+        clickOn(R.string.screen_room_details_do_not_disturb)
         eventsRecorder.assertSingle(RoomDetailsEvent.UnmuteNotification)
     }
 
@@ -281,7 +246,7 @@ class RoomDetailsViewTest {
                 eventSink = eventsRecorder,
             ),
         )
-        clickOn(CommonStrings.common_favourite)
+        clickOn(R.string.screen_room_details_pin_chat)
         eventsRecorder.assertSingle(RoomDetailsEvent.SetFavorite(true))
     }
 
@@ -294,7 +259,7 @@ class RoomDetailsViewTest {
                 eventSink = eventsRecorder,
             ),
         )
-        clickOn(R.string.screen_room_details_leave_room_title)
+        clickOn(R.string.screen_room_details_leave_group)
         eventsRecorder.assertSingle(RoomDetailsEvent.LeaveRoom(needsConfirmation = true))
     }
 
@@ -339,27 +304,59 @@ class RoomDetailsViewTest {
                 ),
                 onProfileClick = callback,
             )
-            clickOn(R.string.screen_room_details_profile_row_title)
+            clickOn(R.string.screen_room_details_view_profile)
         }
     }
 
     @Config(qualifiers = "h1024dp")
     @Test
-    fun `click on invite invokes the expected callback`() = runAndroidComposeUiTest {
-        ensureCalledOnce { callback ->
-            setRoomDetailView(
-                state = aRoomDetailsState(
-                    eventSink = EventsRecorder(expectEvents = false),
-                    roomType = RoomDetailsType.Dm(
-                        aDmRoomMember(userId = UserId("@other:local.org")),
-                    ),
-                    dmOtherMemberDetailsState = aUserProfileState(userId = A_USER_ID),
-                    canInvite = true,
+    fun `invite is hidden for direct conversations`() = runAndroidComposeUiTest {
+        setRoomDetailView(
+            state = aRoomDetailsState(
+                eventSink = EventsRecorder(expectEvents = false),
+                roomType = RoomDetailsType.Dm(
+                    aDmRoomMember(userId = UserId("@other:local.org")),
                 ),
-                invitePeople = callback,
-            )
-            onAllNodesWithText(activity!!.getString(R.string.screen_room_details_invite_title)).onLast().performClick()
-        }
+                dmOtherMemberDetailsState = aUserProfileState(userId = A_USER_ID),
+                canInvite = true,
+            ),
+        )
+        onAllNodesWithText(activity!!.getString(CommonStrings.action_invite)).assertCountEquals(0)
+    }
+
+    @Test
+    fun `direct chat do not disturb emits mute`() = runAndroidComposeUiTest {
+        val events = EventsRecorder<RoomDetailsEvent>()
+        setRoomDetailView(state = aRoomDetailsState(
+            roomType = RoomDetailsType.Dm(aDmRoomMember()),
+            roomNotificationSettings = aRoomNotificationSettings(mode = RoomNotificationMode.ALL_MESSAGES),
+            eventSink = events,
+        ))
+        clickOn(R.string.screen_room_details_do_not_disturb)
+        events.assertSingle(RoomDetailsEvent.MuteNotification)
+    }
+
+    @Test
+    fun `direct chat do not disturb emits unmute`() = runAndroidComposeUiTest {
+        val events = EventsRecorder<RoomDetailsEvent>()
+        setRoomDetailView(state = aRoomDetailsState(
+            roomType = RoomDetailsType.Dm(aDmRoomMember()),
+            roomNotificationSettings = aRoomNotificationSettings(mode = RoomNotificationMode.MUTE),
+            eventSink = events,
+        ))
+        clickOn(R.string.screen_room_details_do_not_disturb)
+        events.assertSingle(RoomDetailsEvent.UnmuteNotification)
+    }
+
+    @Test
+    fun `direct chat pin uses authoritative favorite setting`() = runAndroidComposeUiTest {
+        val events = EventsRecorder<RoomDetailsEvent>()
+        setRoomDetailView(state = aRoomDetailsState(
+            roomType = RoomDetailsType.Dm(aDmRoomMember()),
+            eventSink = events,
+        ))
+        clickOn(R.string.screen_room_details_pin_chat)
+        events.assertSingle(RoomDetailsEvent.SetFavorite(true))
     }
 }
 
@@ -379,6 +376,7 @@ private fun AndroidComposeUiTest<ComponentActivity>.setRoomDetailView(
     openAdminSettings: () -> Unit = EnsureNeverCalled(),
     onJoinCallClick: (CallIntent) -> Unit = EnsureNeverCalledWithParam(),
     onPinnedMessagesClick: () -> Unit = EnsureNeverCalled(),
+    onFindChatContentClick: () -> Unit = EnsureNeverCalled(),
     onKnockRequestsClick: () -> Unit = EnsureNeverCalled(),
     onSecurityAndPrivacyClick: () -> Unit = EnsureNeverCalled(),
     onProfileClick: (UserId) -> Unit = EnsureNeverCalledWithParam(),
@@ -399,6 +397,7 @@ private fun AndroidComposeUiTest<ComponentActivity>.setRoomDetailView(
             openAdminSettings = openAdminSettings,
             onJoinCallClick = onJoinCallClick,
             onPinnedMessagesClick = onPinnedMessagesClick,
+            onFindChatContentClick = onFindChatContentClick,
             onKnockRequestsClick = onKnockRequestsClick,
             onSecurityAndPrivacyClick = onSecurityAndPrivacyClick,
             onProfileClick = onProfileClick,

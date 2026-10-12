@@ -15,11 +15,14 @@ sealed interface ShareLocationEvent {
     data class ShareStaticLocation(
         val location: Location,
         val isPinned: Boolean,
+        val name: String? = null,
+        val address: String? = null,
     ) : ShareLocationEvent
 
     data object InitiateLiveLocationShare : ShareLocationEvent
     data object AcceptLiveLocationDisclaimer : ShareLocationEvent
     data class StartLiveLocationShare(val duration: Duration) : ShareLocationEvent
+    data object ResumeLiveLocationShare : ShareLocationEvent
 
     data object StartTrackingUserLocation : ShareLocationEvent
     data object StopTrackingUserLocation : ShareLocationEvent

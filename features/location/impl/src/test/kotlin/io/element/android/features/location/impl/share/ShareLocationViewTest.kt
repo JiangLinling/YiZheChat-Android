@@ -25,7 +25,7 @@ import io.element.android.tests.testutils.EnsureNeverCalled
 import io.element.android.tests.testutils.EventsRecorder
 import io.element.android.tests.testutils.clickOn
 import io.element.android.tests.testutils.ensureCalledOnce
-import io.element.android.tests.testutils.pressBack
+import io.element.android.tests.testutils.pressTag
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -41,7 +41,7 @@ class ShareLocationViewTest {
                 ),
                 navigateUp = callback,
             )
-            pressBack()
+            clickOn(CommonStrings.action_cancel)
         }
     }
 
@@ -82,7 +82,7 @@ class ShareLocationViewTest {
             ),
             navigateUp = EnsureNeverCalled(),
         )
-        clickOn(CommonStrings.action_cancel)
+        pressTag(TestTags.dialogNegative.value)
         eventsRecorder.assertSingle(ShareLocationEvent.DismissDialog)
     }
 
@@ -110,7 +110,7 @@ class ShareLocationViewTest {
             ),
             navigateUp = EnsureNeverCalled(),
         )
-        clickOn(CommonStrings.action_cancel)
+        pressTag(TestTags.dialogNegative.value)
         eventsRecorder.assertSingle(ShareLocationEvent.DismissDialog)
     }
 
@@ -140,7 +140,7 @@ class ShareLocationViewTest {
             ),
             navigateUp = EnsureNeverCalled(),
         )
-        clickOn(CommonStrings.action_cancel)
+        pressTag(TestTags.dialogNegative.value)
         eventsRecorder.assertSingle(ShareLocationEvent.DismissDialog)
     }
 

@@ -10,12 +10,13 @@ package io.element.android.features.messages.impl.timeline.factories.event
 
 import dev.zacsweers.metro.Inject
 import io.element.android.features.location.api.Location
-import io.element.android.features.messages.impl.timeline.model.event.RtcNotificationState
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemEventContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemLegacyCallInviteContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemLocationContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRtcNotificationContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemUnknownContent
+import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRelayContent
+import kotlinx.collections.immutable.toPersistentSet
 import io.element.android.libraries.dateformatter.api.DateFormatter
 import io.element.android.libraries.dateformatter.api.DateFormatterMode
 import io.element.android.libraries.matrix.api.core.EventId
@@ -32,6 +33,7 @@ import io.element.android.libraries.matrix.api.timeline.item.event.MessageConten
 import io.element.android.libraries.matrix.api.timeline.item.event.PollContent
 import io.element.android.libraries.matrix.api.timeline.item.event.ProfileChangeContent
 import io.element.android.libraries.matrix.api.timeline.item.event.ProfileDetails
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedOperationContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RedactedContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RoomMembershipContent
 import io.element.android.libraries.matrix.api.timeline.item.event.StateContent
@@ -85,7 +87,12 @@ class TimelineItemContentFactory(
                     senderProfile = senderProfile,
                     content = itemContent,
                     eventId = eventId,
-                )
+                ).let { projected ->
+                    if (projected is TimelineItemRelayContent) projected.copy(
+                        editableItemIds = projected.itemDetails.filter { it.author == sessionId && it.isConfirmed && !projected.closed }
+                            .map { it.id }.toPersistentSet(),
+                    ) else projected
+                }
             }
             is ProfileChangeContent -> {
                 val senderDisambiguatedDisplayName = senderProfile.getDisambiguatedDisplayName(sender)
@@ -106,13 +113,10 @@ class TimelineItemContentFactory(
             is UnableToDecryptContent -> utdFactory.create(itemContent)
             is CallNotifyContent -> TimelineItemRtcNotificationContent(
                 callIntent = itemContent.callIntent,
-                state = if (itemContent.declinedBy.isEmpty()) {
-                    RtcNotificationState.Started
-                } else {
-                    RtcNotificationState.Declined(itemContent.declinedBy.any { it == sessionId })
-                }
+                state = itemContent.toRtcNotificationState(sessionId),
             )
             is UnknownContent -> TimelineItemUnknownContent
+            is ProtectedOperationContent -> TimelineItemUnknownContent
             is LiveLocationContent -> {
                 val lastKnownLocation = itemContent.locations.mapNotNull { beacon ->
                     Location.fromGeoUri(beacon.geoUri)
@@ -133,7 +137,8 @@ class TimelineItemContentFactory(
                         isActive = itemContent.isLive,
                         endsAt = stringProvider.getString(CommonStrings.common_ends_at, endsAt),
                         endTimestamp = itemContent.endTimestamp,
-                        isOwnUser = sessionId == sender
+                        isOwnUser = sessionId == sender,
+                        protectedAggregateId = itemContent.protectedAggregateId,
                     ),
                 )
             }

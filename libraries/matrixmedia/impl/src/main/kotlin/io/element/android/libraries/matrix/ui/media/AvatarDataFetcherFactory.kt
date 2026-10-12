@@ -28,6 +28,7 @@ internal class AvatarDataFetcherFactory(
             data.url?.startsWith("mxc") == true -> CoilMediaFetcher(
                 mediaLoader = matrixMediaLoader,
                 mediaData = data.toMediaRequestData(),
+                publicProfileMedia = true,
             )
             else -> {
                 // If the URL does not use the mxc scheme, it might be a local one using `content://`, try using a fallback fetcher

@@ -29,7 +29,7 @@ import io.element.android.libraries.designsystem.text.toDp
 import io.element.android.libraries.designsystem.theme.components.Text
 
 private const val MAX_COUNT = 99
-private const val MAX_COUNT_STRING = "+$MAX_COUNT"
+private const val MAX_COUNT_STRING = "$MAX_COUNT+"
 
 /**
  * A counter atom that displays a number in a circle.

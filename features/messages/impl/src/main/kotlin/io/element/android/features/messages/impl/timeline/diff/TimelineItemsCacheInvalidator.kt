@@ -22,7 +22,13 @@ internal class TimelineItemsCacheInvalidator : DiffCacheInvalidator<TimelineItem
     private val delegate = DefaultDiffCacheInvalidator<TimelineItem>()
 
     override fun onChanged(position: Int, count: Int, cache: MutableDiffCache<TimelineItem>) {
-        delegate.onChanged(position, count, cache)
+        for (index in position until position + count) {
+            // Retain event rows so acknowledgement can update a local echo in place. Virtual
+            // presentations do not have a reconciliation path and must be rebuilt.
+            if (cache.get(index) !is TimelineItem.Event) {
+                cache[index] = null
+            }
+        }
     }
 
     override fun onMoved(fromPosition: Int, toPosition: Int, cache: MutableDiffCache<TimelineItem>) {

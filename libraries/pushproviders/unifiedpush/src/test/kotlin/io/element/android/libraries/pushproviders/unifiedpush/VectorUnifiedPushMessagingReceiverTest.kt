@@ -22,11 +22,14 @@ import io.element.android.libraries.push.test.push.FakeFetchPushForegroundServic
 import io.element.android.libraries.push.test.test.FakePushHandler
 import io.element.android.libraries.pushproviders.api.PushData
 import io.element.android.libraries.pushproviders.api.PushHandler
+import io.element.android.libraries.pushproviders.unifiedpush.embedded.EmbeddedNtfyMessageHandler
 import io.element.android.libraries.pushproviders.unifiedpush.registration.EndpointRegistrationHandler
 import io.element.android.libraries.pushproviders.unifiedpush.registration.RegistrationResult
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.tests.testutils.lambda.lambdaError
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import io.element.android.tests.testutils.lambda.value
+import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -96,7 +99,7 @@ class VectorUnifiedPushMessagingReceiverTest {
                     )
                 ),
                 value(
-                    UnifiedPushConfig.NAME + " - " + A_SECRET
+                    UnifiedPushConfig.NAME + " - external distributor"
                 )
             )
     }
@@ -266,8 +269,13 @@ class VectorUnifiedPushMessagingReceiverTest {
         pushHandlingWakeLock: FakeFetchPushForegroundServiceManager = FakeFetchPushForegroundServiceManager(),
     ): VectorUnifiedPushMessagingReceiver {
         return VectorUnifiedPushMessagingReceiver().apply {
-            this.pushParser = unifiedPushParser
-            this.pushHandler = pushHandler
+            this.messageHandler = EmbeddedNtfyMessageHandler(
+                pushParser = unifiedPushParser,
+                pushHandler = pushHandler,
+                fetchPushForegroundServiceManager = pushHandlingWakeLock,
+                registrar = mockk(relaxed = true),
+                appOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
+            )
             this.guardServiceStarter = NoopGuardServiceStarter()
             this.unifiedPushStore = unifiedPushStore
             this.unifiedPushGatewayResolver = unifiedPushGatewayResolver

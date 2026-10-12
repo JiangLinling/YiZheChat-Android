@@ -15,6 +15,9 @@ import io.element.android.libraries.textcomposer.model.MessageComposerMode
 import io.element.android.libraries.textcomposer.model.TextEditorState
 import io.element.android.wysiwyg.display.TextDisplay
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import io.element.android.libraries.mediapickers.api.RecentImage
+import io.element.android.features.messages.impl.commoninfo.CommonInfoRepository
 
 @Stable
 data class MessageComposerState(
@@ -22,11 +25,20 @@ data class MessageComposerState(
     val isFullScreen: Boolean,
     val mode: MessageComposerMode,
     val showAttachmentSourcePicker: Boolean,
+    val showRelayDialog: Boolean,
     val showTextFormatting: Boolean,
     val canShareLocation: Boolean,
+    val canPasteFromInAppClipboard: Boolean,
+    val isBurnAfterReadEnabled: Boolean,
+    /** True only while recalled plaintext is held in the current composer's volatile RAM state. */
+    val containsVolatileWithdrawnText: Boolean,
     val suggestions: ImmutableList<ResolvedSuggestion>,
     val resolveMentionDisplay: (String, String) -> TextDisplay,
     val resolveAtRoomMentionDisplay: () -> TextDisplay,
     val slashCommandAction: AsyncAction<Unit>,
     val eventSink: (MessageComposerEvent) -> Unit,
+    val isFlashReadPreparing: Boolean = false,
+    val commonInfoRepository: CommonInfoRepository? = null,
+    val showCameraPermissionRationaleDialog: Boolean = false,
+    val recentImages: ImmutableList<RecentImage> = persistentListOf(),
 )

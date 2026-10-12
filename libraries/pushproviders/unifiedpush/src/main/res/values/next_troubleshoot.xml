@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="troubleshoot_notifications_test_push_gateway_title">Test push gateway</string>
+    <string name="troubleshoot_notifications_test_push_gateway_description">Ensure that the push gateway is valid.</string>
+    <string name="troubleshoot_notifications_test_push_gateway_success">%1$s is a Matrix push gateway.</string>
+    <string name="troubleshoot_notifications_test_push_gateway_not_matrix">%1$s is not a Matrix push gateway.</string>
+    <string name="troubleshoot_notifications_test_push_gateway_failure">Failed to check %1$s: %2$s</string>
+</resources>

@@ -14,17 +14,17 @@ import coil3.fetch.FetchResult
 import coil3.fetch.Fetcher
 import coil3.fetch.SourceFetchResult
 import io.element.android.libraries.matrix.api.media.MatrixMediaLoader
+import io.element.android.libraries.matrix.api.media.MediaCachePolicy
 import io.element.android.libraries.matrix.api.media.MediaSource
-import io.element.android.libraries.matrix.api.media.toFile
 import okio.Buffer
 import okio.FileSystem
-import okio.Path.Companion.toOkioPath
 import timber.log.Timber
 import java.nio.ByteBuffer
 
 internal class CoilMediaFetcher(
     private val mediaLoader: MatrixMediaLoader,
     private val mediaData: MediaRequestData,
+    private val publicProfileMedia: Boolean = false,
 ) : Fetcher {
     override suspend fun fetch(): FetchResult? {
         val mediaSource = mediaData.source
@@ -47,16 +47,16 @@ internal class CoilMediaFetcher(
     private suspend fun fetchFile(mediaSource: MediaSource, kind: MediaRequestData.Kind.File): FetchResult? {
         return mediaLoader.downloadMediaFile(mediaSource, kind.mimeType, kind.fileName)
             .map { mediaFile ->
-                val file = mediaFile.toFile()
-                SourceFetchResult(
-                    source = ImageSource(
-                        file = file.toOkioPath(),
-                        fileSystem = FileSystem.SYSTEM,
-                        closeable = mediaFile,
-                    ),
-                    mimeType = null,
-                    dataSource = DataSource.DISK
-                )
+                mediaFile.transferToSource { secureSource ->
+                    SourceFetchResult(
+                        source = ImageSource(
+                            source = secureSource,
+                            fileSystem = FileSystem.SYSTEM,
+                        ),
+                        mimeType = null,
+                        dataSource = DataSource.MEMORY,
+                    )
+                }
             }
             .onFailure {
                 Timber.e(it)
@@ -75,11 +75,17 @@ internal class CoilMediaFetcher(
     }
 
     private suspend fun fetchThumbnail(mediaSource: MediaSource, kind: MediaRequestData.Kind.Thumbnail): FetchResult? {
-        return mediaLoader.loadMediaThumbnail(
-            source = mediaSource,
-            width = kind.width,
-            height = kind.height,
-        ).map { byteArray ->
+        val result = if (publicProfileMedia) {
+            mediaLoader.loadPublicProfileThumbnail(mediaSource, kind.width, kind.height)
+        } else {
+            mediaLoader.loadMediaThumbnail(
+                source = mediaSource,
+                width = kind.width,
+                height = kind.height,
+                cachePolicy = if (mediaData.cacheable) MediaCachePolicy.REUSABLE else MediaCachePolicy.EPHEMERAL,
+            )
+        }
+        return result.map { byteArray ->
             byteArray.asSourceResult()
         }.onFailure {
             Timber.e(it)
@@ -91,7 +97,7 @@ internal class CoilMediaFetcher(
         val bufferedSource = try {
             Buffer().apply { write(byteBuffer) }
         } finally {
-            byteBuffer.position(0)
+            fill(0)
         }
         return SourceFetchResult(
             source = ImageSource(

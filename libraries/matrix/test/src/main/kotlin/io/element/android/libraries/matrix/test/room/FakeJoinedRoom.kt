@@ -61,7 +61,6 @@ class FakeJoinedRoom(
     override val threadsListService: FakeThreadsListService = FakeThreadsListService(),
     private val roomNotificationSettingsService: FakeNotificationSettingsService = FakeNotificationSettingsService(),
     private var createTimelineResult: (CreateTimelineParams) -> Result<Timeline> = { lambdaError() },
-    private val editMessageLambda: (EventId, String, String?, List<IntentionalMention>) -> Result<Unit> = { _, _, _, _ -> lambdaError() },
     private val progressCallbackValues: List<Pair<Long, Long>> = emptyList(),
     private val generateWidgetWebViewUrlResult: (MatrixWidgetSettings, String, String?, String?) -> Result<String> = { _, _, _, _ -> lambdaError() },
     private val getWidgetDriverResult: (MatrixWidgetSettings) -> Result<MatrixWidgetDriver> = { lambdaError() },
@@ -91,7 +90,8 @@ class FakeJoinedRoom(
     private val liveLocationSharesFlow: Flow<List<LiveLocationShare>> = MutableStateFlow(emptyList()),
     private val startLiveLocationShareResult: (Long) -> Result<EventId> = { lambdaError() },
     private val stopLiveLocationShareResult: () -> Result<Unit> = { lambdaError() },
-    private val sendLiveLocationResult: (String) -> Result<Unit> = { lambdaError() },
+    private val beforeStopLiveLocationShare: suspend () -> Unit = {},
+    private val sendLiveLocationResult: suspend (String) -> Result<Unit> = { lambdaError() },
 ) : JoinedRoom, BaseRoom by baseRoom {
     private val sendQueueUpdates = MutableSharedFlow<SendQueueUpdate>(extraBufferCapacity = 10)
 
@@ -107,14 +107,9 @@ class FakeJoinedRoom(
         createTimelineResult(createTimelineParams)
     }
 
-    override suspend fun editMessage(
-        eventId: EventId,
-        body: String,
-        htmlBody: String?,
-        intentionalMentions: List<IntentionalMention>
-    ): Result<Unit> = simulateLongTask {
-        editMessageLambda(eventId, body, htmlBody, intentionalMentions)
-    }
+    val invitationDepartures = mutableMapOf<EventId, Flow<Boolean>>()
+    override fun observeCallInvitationDeparture(notificationEventId: EventId): Flow<Boolean> =
+        invitationDepartures[notificationEventId] ?: kotlinx.coroutines.flow.emptyFlow()
 
     override suspend fun typingNotice(isTyping: Boolean): Result<Unit> = simulateLongTask {
         typingNoticeResult(isTyping)
@@ -244,12 +239,15 @@ class FakeJoinedRoom(
     }
 
     override suspend fun startLiveLocationShare(durationMillis: Long): Result<EventId> = simulateLongTask {
-        startLiveLocationShareResult(durationMillis).map { AN_EVENT_ID }
+        startLiveLocationShareResult(durationMillis)
     }
 
-    override suspend fun stopLiveLocationShare(): Result<Unit> = simulateLongTask {
+    override suspend fun stopLiveLocationShare(protectedAggregateId: String?): Result<Unit> = simulateLongTask {
+        beforeStopLiveLocationShare()
         stopLiveLocationShareResult()
     }
+
+    override suspend fun releaseLiveLocationProducer(): Result<Unit> = Result.success(Unit)
 
     override suspend fun sendLiveLocation(geoUri: String): Result<Unit> = simulateLongTask {
         sendLiveLocationResult(geoUri)

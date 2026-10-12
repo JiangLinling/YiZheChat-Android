@@ -13,12 +13,12 @@ import androidx.datastore.preferences.core.mutablePreferencesOf
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.location.impl.live.LiveLocationStore
+import io.element.android.features.location.impl.live.PendingLiveLocationStop
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.test.A_ROOM_ID
 import io.element.android.libraries.matrix.test.A_SESSION_ID
 import io.element.android.libraries.preferences.api.store.PreferenceDataStoreFactory
-import io.element.android.libraries.preferences.test.FakePreferenceDataStoreFactory
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -26,7 +26,20 @@ import org.junit.Test
 import kotlin.time.Instant
 
 class LiveLocationStoreTest {
-    private val preferenceDataStoreFactory = FakePreferenceDataStoreFactory()
+    private val preferenceDataStoreFactory = object : PreferenceDataStoreFactory {
+        override fun create(name: String): DataStore<Preferences> {
+            var preferences: Preferences = mutablePreferencesOf()
+            return object : DataStore<Preferences> {
+                override val data: Flow<Preferences>
+                    get() = flowOf(preferences)
+
+                override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+                    preferences = transform(preferences)
+                    return preferences
+                }
+            }
+        }
+    }
 
     @Test
     fun `disclaimer defaults to false`() = runTest {
@@ -96,6 +109,59 @@ class LiveLocationStoreTest {
 
         assertThat(store.getLiveLocationExpiries())
             .containsExactly(A_ROOM_ID, Instant.fromEpochMilliseconds(2_000L))
+    }
+
+    @Test
+    fun `pending stop persists only room and opaque aggregate target`() = runTest {
+        val store = LiveLocationStore(
+            preferenceDataStoreFactory = preferenceDataStoreFactory,
+            sessionId = A_SESSION_ID,
+        )
+
+        store.setPendingLiveLocationStop(A_ROOM_ID, "yizhe-live-test-target").getOrThrow()
+
+        assertThat(store.getPendingLiveLocationStops()).containsExactly(
+            PendingLiveLocationStop(A_ROOM_ID, "yizhe-live-test-target")
+        )
+    }
+
+    @Test
+    fun `removing pending stop keeps other rooms`() = runTest {
+        val otherRoomId = RoomId("!other:server")
+        val store = LiveLocationStore(
+            preferenceDataStoreFactory = preferenceDataStoreFactory,
+            sessionId = A_SESSION_ID,
+        )
+        store.setPendingLiveLocationStop(A_ROOM_ID, null).getOrThrow()
+        store.setPendingLiveLocationStop(otherRoomId, "other-target").getOrThrow()
+
+        store.removePendingLiveLocationStop(A_ROOM_ID).getOrThrow()
+
+        assertThat(store.getPendingLiveLocationStops()).containsExactly(
+            PendingLiveLocationStop(otherRoomId, "other-target")
+        )
+    }
+
+    @Test
+    fun `lifecycle operation identity persists per room and can be removed independently`() = runTest {
+        val otherRoomId = RoomId("!other:server")
+        val store = LiveLocationStore(
+            preferenceDataStoreFactory = preferenceDataStoreFactory,
+            sessionId = A_SESSION_ID,
+        )
+        store.setLifecycleOperationId(A_ROOM_ID, "operation-for-first-room").getOrThrow()
+        store.setLifecycleOperationId(otherRoomId, "operation-for-other-room").getOrThrow()
+
+        assertThat(store.getLifecycleOperationIds()).containsExactly(
+            A_ROOM_ID, "operation-for-first-room",
+            otherRoomId, "operation-for-other-room",
+        )
+
+        store.removeLifecycleOperationId(A_ROOM_ID).getOrThrow()
+
+        assertThat(store.getLifecycleOperationIds()).containsExactly(
+            otherRoomId, "operation-for-other-room",
+        )
     }
 
     @Test

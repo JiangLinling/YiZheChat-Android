@@ -21,6 +21,7 @@ setupDependencyInjection()
 
 dependencies {
     api(projects.features.leaveroom.api)
+    implementation(projects.features.preferences.api)
     implementation(projects.libraries.core)
     implementation(projects.libraries.architecture)
     implementation(projects.libraries.matrix.api)

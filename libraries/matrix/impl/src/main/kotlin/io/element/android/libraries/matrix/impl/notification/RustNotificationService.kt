@@ -10,12 +10,24 @@ package io.element.android.libraries.matrix.impl.notification
 
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.core.extensions.runCatchingExceptions
+import io.element.android.libraries.matrix.api.core.DeviceId
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.exception.NotificationResolverException
 import io.element.android.libraries.matrix.api.notification.GetNotificationDataResult
+import io.element.android.libraries.matrix.api.notification.NotificationContent
+import io.element.android.libraries.matrix.api.notification.NotificationData
 import io.element.android.libraries.matrix.api.notification.NotificationService
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageType
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageTypeWithAttachment
+import io.element.android.libraries.matrix.api.timeline.item.event.OtherMessageType
+import io.element.android.libraries.matrix.api.timeline.item.event.TextMessageType
+import io.element.android.libraries.matrix.impl.timeline.DisabledMatrixProtectedContentAdapterFactory
+import io.element.android.libraries.matrix.impl.timeline.MatrixProtectedContentAdapter
+import io.element.android.libraries.matrix.impl.timeline.MatrixProtectedContentAdapterFactory
+import io.element.android.libraries.matrix.impl.timeline.ProtectedReadDiagnosticOrigin
 import io.element.android.services.toolbox.api.systemclock.SystemClock
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.BatchNotificationResult
@@ -27,11 +39,14 @@ import timber.log.Timber
 
 class RustNotificationService(
     private val sessionId: SessionId,
+    private val deviceId: DeviceId,
     private val notificationClient: NotificationClient,
     private val dispatchers: CoroutineDispatchers,
     clock: SystemClock,
+    private val protectedContentAdapterFactory: MatrixProtectedContentAdapterFactory = DisabledMatrixProtectedContentAdapterFactory,
 ) : NotificationService {
     private val notificationMapper: NotificationMapper = NotificationMapper(clock)
+    private val previewAdapters = java.util.concurrent.ConcurrentHashMap<RoomId, MatrixProtectedContentAdapter>()
 
     override suspend fun getNotifications(
         ids: Map<RoomId, List<EventId>>
@@ -55,6 +70,7 @@ class RustNotificationService(
                                 when (val status = result.status) {
                                     is NotificationStatus.Event -> {
                                         val result = notificationMapper.map(sessionId, eventId, roomId, status.item)
+                                            .authorizeProtectedPreview(eventId, roomId)
                                         result.onFailure { Timber.e(it, "Could not map notification event $eventId") }
                                         put(eventId, result)
                                     }
@@ -96,4 +112,49 @@ class RustNotificationService(
     fun close() {
         notificationClient.close()
     }
+
+    private suspend fun Result<NotificationData>.authorizeProtectedPreview(
+        eventId: EventId,
+        roomId: RoomId,
+    ): Result<NotificationData> {
+        val notificationData = getOrElse { return this }
+        val roomMessage = notificationData.content as? NotificationContent.MessageLike.RoomMessage
+            ?: return this
+        val outerMessage = MessageContent(
+            body = roomMessage.messageType.previewTransportBody(),
+            inReplyTo = null,
+            isEdited = false,
+            threadInfo = null,
+            type = roomMessage.messageType,
+        )
+        val adapter = previewAdapters.getOrPut(roomId) {
+            protectedContentAdapterFactory.create(
+                sessionId = sessionId,
+                deviceId = deviceId,
+                roomId = roomId,
+                activeMemberAccountIdHashes = { emptySet() },
+            )
+        }
+        val authorized = adapter.decryptMessageContent(
+            eventId.value, outerMessage, diagnosticOrigin = ProtectedReadDiagnosticOrigin.NOTIFICATION_PREVIEW,
+            senderAccountIdHash = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(roomMessage.senderId.value.encodeToByteArray()).joinToString("") { "%02x".format(it.toInt() and 0xff) },
+        )
+        return Result.success(
+            notificationData.copy(
+                content = roomMessage.copy(
+                    messageType = authorized.type,
+                    isContentProtectionAuthorized = authorized.isContentProtectionAuthorized,
+                    isBurnAfterRead = authorized.isBurnAfterRead,
+                )
+            )
+        )
+    }
+}
+
+private fun MessageType.previewTransportBody(): String = when (this) {
+    is TextMessageType -> body
+    is OtherMessageType -> body
+    is MessageTypeWithAttachment -> bestDescription
+    else -> ""
 }

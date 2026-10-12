@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.securebackup.impl.R
 import io.element.android.features.securebackup.impl.setup.views.RecoveryKeyView
-import io.element.android.libraries.androidutils.system.copyToClipboard
+import io.element.android.libraries.androidutils.system.copyToSystemClipboard
 import io.element.android.libraries.androidutils.system.startSharePlainTextIntent
 import io.element.android.libraries.designsystem.atomic.pages.FlowStepPage
 import io.element.android.libraries.designsystem.components.BigIcon
@@ -119,9 +119,10 @@ private fun Content(
     val toastMessage = stringResource(R.string.screen_recovery_key_copied_to_clipboard)
     val clickLambda = if (formattedRecoveryKey != null) {
         {
-            context.copyToClipboard(
+            context.copyToSystemClipboard(
                 text = formattedRecoveryKey,
                 toastMessage = toastMessage,
+                isSensitive = true,
             )
             state.eventSink.invoke(SecureBackupSetupEvents.RecoveryKeyHasBeenSaved)
         }

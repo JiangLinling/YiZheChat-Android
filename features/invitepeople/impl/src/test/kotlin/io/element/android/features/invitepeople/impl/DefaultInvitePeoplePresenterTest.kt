@@ -44,6 +44,7 @@ import io.element.android.libraries.usersearch.api.UserSearchResultState
 import io.element.android.libraries.usersearch.test.FakeUserRepository
 import io.element.android.services.apperror.api.AppErrorStateService
 import io.element.android.services.apperror.test.FakeAppErrorStateService
+import io.element.android.security.dataprotection.test.FakeDeletedIdentityProjection
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.awaitLastSequentialItem
 import io.element.android.tests.testutils.lambda.lambdaError
@@ -58,6 +59,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
+import java.security.MessageDigest
 
 @Suppress("LargeClass")
 internal class DefaultInvitePeoplePresenterTest {
@@ -409,7 +411,9 @@ internal class DefaultInvitePeoplePresenterTest {
             userRepository = repository,
             inviteUserResult = inviteUserResult,
             coroutineDispatchers = testCoroutineDispatchers(useUnconfinedTestDispatcher = true),
-            matrixClient = FakeMatrixClient(encryptionService = encryptionService),
+            matrixClient = FakeMatrixClient(encryptionService = encryptionService).apply {
+                givenAcceptedDirectRelationship()
+            },
         )
         presenter.test {
             val initialState = awaitItem()
@@ -446,6 +450,45 @@ internal class DefaultInvitePeoplePresenterTest {
     }
 
     @Test
+    fun `present - user without an accepted friendship cannot be invited`() = runTest {
+        val repository = FakeUserRepository()
+        val inviteUserResult = lambdaRecorder<UserId, Result<Unit>> { Result.success(Unit) }
+        val showErrorResResult = lambdaRecorder<Int, Int, Unit> { _, _ -> }
+        val presenter = createDefaultInvitePeoplePresenter(
+            userRepository = repository,
+            inviteUserResult = inviteUserResult,
+            coroutineDispatchers = testCoroutineDispatchers(useUnconfinedTestDispatcher = true),
+            appErrorStateService = FakeAppErrorStateService(showErrorResResult = showErrorResResult),
+            matrixClient = FakeMatrixClient(
+                encryptionService = FakeEncryptionService(
+                    getUserIdentityResult = { Result.success(IdentityState.Pinned) }
+                )
+            ).apply {
+                givenFindDmResult(Result.success(null))
+            },
+        )
+
+        presenter.test {
+            val initialState = awaitItem()
+            skipItems(1)
+            val selectedUser = aMatrixUser()
+            repository.emitStateWithUsers(users = listOf(selectedUser))
+            skipItems(1)
+            initialState.eventSink(DefaultInvitePeopleEvents.ToggleUser(selectedUser))
+            delay(100)
+            initialState.eventSink(InvitePeopleEvents.SendInvites)
+            delay(1_000)
+
+            inviteUserResult.assertions().isNeverCalled()
+            showErrorResResult.assertions().isCalledOnce().with(
+                value(CommonStrings.common_unable_to_invite_title),
+                value(R.string.screen_invite_people_friends_only),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `present - toggling a user and send invite error`() = runTest {
         val repository = FakeUserRepository()
         val inviteUserResult = lambdaRecorder<UserId, Result<Unit>> { _: UserId ->
@@ -463,7 +506,9 @@ internal class DefaultInvitePeoplePresenterTest {
             appErrorStateService = FakeAppErrorStateService(
                 showErrorResResult = showErrorResResult,
             ),
-            matrixClient = FakeMatrixClient(encryptionService = encryptionService),
+            matrixClient = FakeMatrixClient(encryptionService = encryptionService).apply {
+                givenAcceptedDirectRelationship()
+            },
         )
         presenter.test {
             val initialState = awaitItem()
@@ -579,6 +624,41 @@ internal class DefaultInvitePeoplePresenterTest {
     }
 
     @Test
+    fun `present - suggestions exclude a permanently deleted identity`() = runTest {
+        val dmRoomId = RoomId("!deleted_dm:server.org")
+        val deletedUserId = UserId("@deleted:server.org")
+        val matrixClient = FakeMatrixClient(sessionId = A_USER_ID).apply {
+            trackRecentlyVisitedRoom(dmRoomId)
+            givenGetRoomResult(
+                dmRoomId,
+                FakeBaseRoom(
+                    sessionId = A_USER_ID,
+                    roomId = dmRoomId,
+                    initialRoomInfo = aRoomInfo(
+                        id = dmRoomId,
+                        isDm = true,
+                        activeMembersCount = 2,
+                        currentUserMembership = CurrentUserMembership.JOINED,
+                    ),
+                    getDirectRoomMemberResult = { aRoomMember(userId = deletedUserId) },
+                )
+            )
+        }
+        val presenter = createDefaultInvitePeoplePresenter(
+            matrixClient = matrixClient,
+            roomMembersState = RoomMembersState.Ready(persistentListOf()),
+            deletedIdentityProjection = FakeDeletedIdentityProjection(setOf(hash(deletedUserId.value))),
+            coroutineDispatchers = testCoroutineDispatchers(useUnconfinedTestDispatcher = true),
+        )
+
+        presenter.test {
+            skipItems(1)
+            assertThat(awaitItemAsDefault().suggestions).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `present - suggestions filters out existing room members`() = runTest {
         val dmRoomId = RoomId("!dm_room:server.org")
         val alreadyJoinedUserId = UserId("@frank:server.org")
@@ -642,7 +722,9 @@ internal class DefaultInvitePeoplePresenterTest {
         val presenter = createDefaultInvitePeoplePresenter(
             coroutineDispatchers = testCoroutineDispatchers(useUnconfinedTestDispatcher = true),
             inviteUserResult = inviteUserResult,
-            matrixClient = FakeMatrixClient(encryptionService = encryptionService),
+            matrixClient = FakeMatrixClient(encryptionService = encryptionService).apply {
+                givenAcceptedDirectRelationship()
+            },
         )
         presenter.test {
             val initialState = awaitItem()
@@ -841,7 +923,9 @@ internal class DefaultInvitePeoplePresenterTest {
                     Result.success(IdentityState.Pinned)
                 }
             )
-        )
+        ).apply {
+            givenAcceptedDirectRelationship()
+        }
         val presenter = createDefaultInvitePeoplePresenter(
             coroutineDispatchers = testCoroutineDispatchers(useUnconfinedTestDispatcher = true),
             matrixClient = matrixClient,
@@ -921,6 +1005,7 @@ fun TestScope.createDefaultInvitePeoplePresenter(
     coroutineDispatchers: CoroutineDispatchers = testCoroutineDispatchers(),
     appErrorStateService: AppErrorStateService = FakeAppErrorStateService(),
     matrixClient: MatrixClient = FakeMatrixClient(),
+    deletedIdentityProjection: FakeDeletedIdentityProjection = FakeDeletedIdentityProjection(),
 ): DefaultInvitePeoplePresenter {
     return DefaultInvitePeoplePresenter(
         joinedRoom = joinedRoom,
@@ -930,5 +1015,27 @@ fun TestScope.createDefaultInvitePeoplePresenter(
         sessionCoroutineScope = backgroundScope,
         appErrorStateService = appErrorStateService,
         matrixClient = matrixClient,
+        deletedIdentityProjection = deletedIdentityProjection,
+    )
+}
+
+private fun hash(value: String): String = MessageDigest.getInstance("SHA-256")
+    .digest(value.encodeToByteArray())
+    .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+
+private fun FakeMatrixClient.givenAcceptedDirectRelationship() {
+    givenFindDmResult(Result.success(A_ROOM_ID))
+    givenGetRoomResult(
+        A_ROOM_ID,
+        FakeBaseRoom(
+            initialRoomInfo = aRoomInfo(
+                id = A_ROOM_ID,
+                isDm = true,
+                activeMembersCount = 2,
+                invitedMembersCount = 0,
+                joinedMembersCount = 2,
+                currentUserMembership = CurrentUserMembership.JOINED,
+            )
+        )
     )
 }

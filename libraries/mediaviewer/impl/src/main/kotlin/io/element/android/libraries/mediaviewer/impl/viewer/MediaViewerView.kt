@@ -29,13 +29,19 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -51,7 +57,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.stringResource
@@ -72,6 +77,7 @@ import io.element.android.features.viewfolder.api.TextFileViewer
 import io.element.android.libraries.androidutils.text.safeLinkify
 import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.audio.api.AudioFocus
+import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.core.mimetype.MimeTypes.isMimeTypeVideo
 import io.element.android.libraries.designsystem.components.async.AsyncFailure
 import io.element.android.libraries.designsystem.components.async.AsyncLoading
@@ -91,12 +97,16 @@ import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.matrix.ui.media.MediaRequestData
 import io.element.android.libraries.mediaviewer.api.MediaInfo
 import io.element.android.libraries.mediaviewer.api.local.LocalMedia
+import io.element.android.libraries.mediaviewer.impl.R
 import io.element.android.libraries.mediaviewer.impl.details.MediaBottomSheetState
 import io.element.android.libraries.mediaviewer.impl.details.MediaDeleteConfirmationBottomSheet
 import io.element.android.libraries.mediaviewer.impl.details.MediaDetailsBottomSheet
+import io.element.android.libraries.mediaviewer.impl.local.pdf.PdfMediaPreparationView
 import io.element.android.libraries.mediaviewer.impl.local.LocalMediaView
 import io.element.android.libraries.mediaviewer.impl.local.PlayableState
+import io.element.android.libraries.mediaviewer.impl.local.isOfficeDocument
 import io.element.android.libraries.mediaviewer.impl.local.rememberLocalMediaViewState
+import io.element.android.libraries.mediaviewer.impl.local.office.OfficePreviewService
 import io.element.android.libraries.mediaviewer.impl.util.bgCanvasWithTransparency
 import io.element.android.libraries.textcomposer.ElementRichTextEditorStyle
 import io.element.android.libraries.ui.strings.CommonStrings
@@ -107,6 +117,11 @@ import me.saket.telephoto.zoomable.ZoomSpec
 import me.saket.telephoto.zoomable.rememberZoomableState
 
 val topAppBarHeight = 112.dp
+internal val officeDocumentTopBarContentHeight = 64.dp
+
+private val officeDocumentBackground = Color(0xFFF2F2F2)
+private val officeDocumentTopBarBackground = Color(0xFFF7F7F7)
+private val officeDocumentForeground = Color(0xFF191919)
 
 /**
  * Ref: https://www.figma.com/design/pDlJZGBsri47FNTXMnEdXB/Compound-Android-Templates?node-id=3361-16623
@@ -118,17 +133,27 @@ fun MediaViewerView(
     onBackClick: () -> Unit,
     audioFocus: AudioFocus?,
     modifier: Modifier = Modifier,
+    isOneTimeView: Boolean = false,
+    onPlaybackEnded: () -> Unit = {},
+    officePreviewService: OfficePreviewService? = null,
+    officePreviewAccountId: String? = null,
+    officePreviewDeviceId: String? = null,
 ) {
     val snackbarHostState = rememberSnackbarHostState(snackbarMessage = state.snackbarMessage)
     var showOverlay by remember { mutableStateOf(true) }
 
     val currentData = state.listData.getOrNull(state.currentIndex)
+    val isOfficeDocument = (currentData as? MediaViewerPageData.MediaViewerData)?.mediaInfo.isOfficeDocument()
     val defaultBottomPaddingInPixels = if (LocalInspectionMode.current && !hasCompactHeightWindowSize()) 303 else 0
+
+    LaunchedEffect(isOfficeDocument) {
+        if (isOfficeDocument) showOverlay = true
+    }
 
     BackHandler { onBackClick() }
     Scaffold(
         modifier,
-        containerColor = Color.Transparent,
+        containerColor = if (isOfficeDocument) officeDocumentBackground else Color.Transparent,
         topBar = {
             AnimatedVisibility(
                 visible = showOverlay,
@@ -137,20 +162,35 @@ fun MediaViewerView(
             ) {
                 when (currentData) {
                     is MediaViewerPageData.MediaViewerData -> {
-                        MediaViewerTopBar(
-                            data = currentData,
-                            canShowInfo = state.canShowInfo,
-                            onBackClick = onBackClick,
-                            onShareClick = {
-                                state.eventSink(MediaViewerEvent.Share(currentData))
-                            },
-                            onSaveClick = {
-                                state.eventSink(MediaViewerEvent.SaveOnDisk(currentData))
-                            },
-                            onInfoClick = {
-                                state.eventSink(MediaViewerEvent.OpenInfo(currentData))
-                            },
-                        )
+                        if (isOfficeDocument) {
+                            OfficeDocumentTopBar(
+                                data = currentData,
+                                allowExport = !isOneTimeView,
+                                onBackClick = onBackClick,
+                                onSaveClick = {
+                                    state.eventSink(MediaViewerEvent.SaveOnDisk(currentData))
+                                },
+                                onOpenWithClick = {
+                                    state.eventSink(MediaViewerEvent.OpenWith(currentData))
+                                },
+                            )
+                        } else {
+                            MediaViewerTopBar(
+                                data = currentData,
+                                canShowInfo = state.canShowInfo && !isOneTimeView,
+                                allowExport = !isOneTimeView,
+                                onBackClick = onBackClick,
+                                onShareClick = {
+                                    state.eventSink(MediaViewerEvent.Share(currentData))
+                                },
+                                onSaveClick = {
+                                    state.eventSink(MediaViewerEvent.SaveOnDisk(currentData))
+                                },
+                                onInfoClick = {
+                                    state.eventSink(MediaViewerEvent.OpenInfo(currentData))
+                                },
+                            )
+                        }
                     }
                     else -> {
                         TopAppBar(
@@ -190,10 +230,14 @@ fun MediaViewerView(
         HorizontalPager(
             state = pagerState,
             modifier = Modifier,
-            // Pre-load previous and next pages
-            beyondViewportPageCount = 1,
+            // A document page owns a vertical native scroll surface. Do not
+            // keep adjacent media pages warm while a document is open.
+            beyondViewportPageCount = if (isOfficeDocument || isOneTimeView) 0 else 1,
             key = { index -> state.listData[index].pagerKey },
             reverseLayout = true,
+            // The native document viewer owns drag gestures. Allowing the
+            // outer pager to compete makes vertical reading feel sticky.
+            userScrollEnabled = !isOfficeDocument,
         ) { page ->
             when (val dataForPage = state.listData[page]) {
                 is MediaViewerPageData.Failure -> {
@@ -212,22 +256,23 @@ fun MediaViewerView(
                 }
                 is MediaViewerPageData.MediaViewerData -> {
                     var bottomPaddingInPixels by remember { mutableIntStateOf(defaultBottomPaddingInPixels) }
-                    Box(
-                        modifier = Modifier
-                            .onVisibilityChanged(minDurationMs = 200L) { isVisible ->
-                                if (isVisible) {
-                                    state.eventSink(MediaViewerEvent.LoadMedia(dataForPage))
-                                } else {
-                                    state.eventSink(MediaViewerEvent.CancelLoadingMedia(dataForPage))
-                                }
-                            }
-                            .fillMaxSize()
-                    ) {
-                        val isDisplayed = remember(pagerState.settledPage) {
-                            // This 'item provider' lambda will be called when the data source changes with an outdated `settlePage` value
-                            // So we need to update this value only when the `settledPage` value changes. It seems like a bug that needs to be fixed in Compose.
-                            page == pagerState.settledPage
+                    val isDisplayed = remember(pagerState.settledPage) {
+                        // This 'item provider' lambda can be called with an outdated settledPage when the data source changes.
+                        page == pagerState.settledPage
+                    }
+                    DisposableEffect(isDisplayed, dataForPage.mediaLoadIdentity) {
+                        if (isDisplayed) {
+                            state.eventSink(MediaViewerEvent.LoadMedia(dataForPage))
                         }
+                        onDispose {
+                            if (isDisplayed) {
+                                state.eventSink(MediaViewerEvent.CancelLoadingMedia(dataForPage))
+                            }
+                        }
+                    }
+                    Box(
+                        modifier = Modifier.fillMaxSize()
+                    ) {
                         val navigationBarPadding = WindowInsets.navigationBars.getBottom(LocalDensity.current)
                         MediaViewerPage(
                             isDisplayed = isDisplayed,
@@ -241,7 +286,7 @@ fun MediaViewerView(
                             },
                             onOpenWith = {
                                 state.eventSink(MediaViewerEvent.OpenWith(dataForPage))
-                            },
+                            }.takeUnless { isOneTimeView },
                             onDismissError = {
                                 state.eventSink(MediaViewerEvent.ClearLoadingError(dataForPage))
                             },
@@ -249,21 +294,28 @@ fun MediaViewerView(
                                 showOverlay = it
                             },
                             audioFocus = audioFocus,
+                            onPlaybackEnded = onPlaybackEnded,
                             isUserSelected = (state.listData[page] as? MediaViewerPageData.MediaViewerData)?.eventId == state.initiallySelectedEventId,
+                            officePreviewService = officePreviewService,
+                            officePreviewAccountId = officePreviewAccountId,
+                            officePreviewDeviceId = officePreviewDeviceId,
+                            isOneTimeView = isOneTimeView,
                         )
                         // Bottom bar
-                        AnimatedVisibility(
-                            visible = showOverlay,
-                            enter = fadeIn(),
-                            exit = fadeOut(),
-                            modifier = Modifier.align(Alignment.BottomCenter),
-                        ) {
-                            MediaViewerBottomBar(
-                                showDivider = dataForPage.mediaInfo.mimeType.isMimeTypeVideo(),
-                                caption = dataForPage.mediaInfo.caption,
-                                formattedCaption = dataForPage.mediaInfo.formattedCaption,
-                                onHeightChange = { bottomPaddingInPixels = it },
-                            )
+                        if (!dataForPage.mediaInfo.isOfficeDocument()) {
+                            AnimatedVisibility(
+                                visible = showOverlay,
+                                enter = fadeIn(),
+                                exit = fadeOut(),
+                                modifier = Modifier.align(Alignment.BottomCenter),
+                            ) {
+                                MediaViewerBottomBar(
+                                    showDivider = dataForPage.mediaInfo.mimeType.isMimeTypeVideo(),
+                                    caption = dataForPage.mediaInfo.caption,
+                                    formattedCaption = dataForPage.mediaInfo.formattedCaption,
+                                    onHeightChange = { bottomPaddingInPixels = it },
+                                )
+                            }
                         }
                     }
                 }
@@ -338,10 +390,15 @@ private fun MediaViewerPage(
     isUserSelected: Boolean,
     onDismiss: () -> Unit,
     onRetry: () -> Unit,
-    onOpenWith: () -> Unit,
+    onOpenWith: (() -> Unit)?,
     onDismissError: () -> Unit,
     onShowOverlayChange: (Boolean) -> Unit,
     audioFocus: AudioFocus?,
+    onPlaybackEnded: () -> Unit,
+    officePreviewService: OfficePreviewService?,
+    officePreviewAccountId: String?,
+    officePreviewDeviceId: String?,
+    isOneTimeView: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val currentShowOverlay by rememberUpdatedState(showOverlay)
@@ -370,7 +427,8 @@ private fun MediaViewerPage(
                     zoomSpec = ZoomSpec(maxZoomFactor = 4f, overzoomEffect = OverzoomEffect.NoLimits)
                 )
                 val localMediaViewState = rememberLocalMediaViewState(zoomableState)
-                val showThumbnail = !localMediaViewState.isReady
+                val showThumbnail = !localMediaViewState.isReady && !data.mediaInfo.isOfficeDocument() &&
+                    data.mediaInfo.mimeType != MimeTypes.Pdf
                 val playableState = localMediaViewState.playableState
                 val showError = downloadedMedia.isFailure()
 
@@ -380,33 +438,49 @@ private fun MediaViewerPage(
                     }
                 }
 
-                LocalMediaView(
-                    modifier = Modifier.fillMaxSize(),
-                    isDisplayed = isDisplayed,
-                    bottomPaddingInPixels = bottomPaddingInPixels,
-                    localMediaViewState = localMediaViewState,
-                    localMedia = downloadedMedia.dataOrNull(),
-                    mediaInfo = data.mediaInfo,
-                    textFileViewer = textFileViewer,
-                    onClick = {
-                        if (playableState is PlayableState.NotPlayable) {
-                            currentOnShowOverlayChange(!currentShowOverlay)
-                        }
-                    },
-                    onOpenWith = onOpenWith,
-                    isUserSelected = isUserSelected,
-                    audioFocus = audioFocus,
-                )
+                val renderMedia: @Composable (LocalMedia?) -> Unit = { localMedia ->
+                    LocalMediaView(
+                        modifier = Modifier.fillMaxSize(),
+                        isDisplayed = isDisplayed,
+                        bottomPaddingInPixels = bottomPaddingInPixels,
+                        localMediaViewState = localMediaViewState,
+                        localMedia = localMedia,
+                        mediaInfo = data.mediaInfo,
+                        textFileViewer = textFileViewer,
+                        onClick = {
+                            if (!data.mediaInfo.isOfficeDocument() && playableState is PlayableState.NotPlayable) {
+                                currentOnShowOverlayChange(!currentShowOverlay)
+                            }
+                        },
+                        onOpenWith = onOpenWith,
+                        onPlaybackEnded = onPlaybackEnded,
+                        isUserSelected = isUserSelected,
+                        audioFocus = audioFocus,
+                        officePreviewService = officePreviewService,
+                        officePreviewAccountId = officePreviewAccountId,
+                        officePreviewDeviceId = officePreviewDeviceId,
+                        isOneTimeView = isOneTimeView,
+                    )
+                }
+                if (data.mediaInfo.mimeType == MimeTypes.Pdf) {
+                    PdfMediaPreparationView(downloadedMedia, localMediaViewState) { localMedia -> renderMedia(localMedia) }
+                } else {
+                    renderMedia(downloadedMedia.dataOrNull())
+                }
                 if (showThumbnail) {
                     ThumbnailView(
                         mediaInfo = data.mediaInfo,
                         thumbnailSource = data.thumbnailSource,
+                        isOneTimeView = isOneTimeView,
                     )
                 }
                 if (showError) {
                     ErrorView(
-                        errorMessage = stringResource(id = CommonStrings.error_unknown),
-                        onRetry = onRetry,
+                        errorMessage = stringResource(id = if ((downloadedMedia as? AsyncData.Failure)?.error is
+                            io.element.android.security.contentprotection.api.ContentProtectionException.RoomEpochMaterialUnavailable
+                        ) R.string.error_historical_media_key_unavailable else CommonStrings.error_unknown),
+                        onRetry = onRetry.takeUnless { (downloadedMedia as? AsyncData.Failure)?.error is
+                            io.element.android.security.contentprotection.api.ContentProtectionException.RoomEpochMaterialUnavailable },
                         onDismiss = onDismissError
                     )
                 }
@@ -487,11 +561,114 @@ private fun rememberShowProgress(downloadedMedia: AsyncData<LocalMedia>): Boolea
     return showProgress
 }
 
+@Composable
+private fun OfficeDocumentTopBar(
+    data: MediaViewerPageData.MediaViewerData,
+    allowExport: Boolean,
+    onBackClick: () -> Unit,
+    onSaveClick: () -> Unit,
+    onOpenWithClick: () -> Unit,
+) {
+    val downloadedMedia by data.downloadedMedia
+    val actionsEnabled = downloadedMedia.isSuccess()
+    var showMenu by remember { mutableStateOf(false) }
+    TopAppBar(
+        title = {
+            Text(
+                text = data.mediaInfo.filename,
+                color = officeDocumentForeground,
+                style = ElementTheme.typography.fontBodyLgMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.semantics { heading() },
+            )
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = officeDocumentTopBarBackground,
+            titleContentColor = officeDocumentForeground,
+            navigationIconContentColor = officeDocumentForeground,
+            actionIconContentColor = officeDocumentForeground,
+        ),
+        navigationIcon = {
+            IconButton(onClick = onBackClick) {
+                Icon(
+                    imageVector = CompoundIcons.ArrowLeft(),
+                    contentDescription = stringResource(CommonStrings.action_back),
+                    tint = officeDocumentForeground,
+                )
+            }
+        },
+        actions = {
+            if (allowExport) {
+                IconButton(
+                    onClick = { showMenu = true },
+                    enabled = actionsEnabled,
+                ) {
+                    Icon(
+                        imageVector = CompoundIcons.OverflowVertical(),
+                        contentDescription = stringResource(R.string.screen_media_office_more_actions),
+                        tint = officeDocumentForeground,
+                    )
+                }
+                MaterialTheme(
+                    colorScheme = lightColorScheme(
+                        surface = officeDocumentTopBarBackground,
+                        onSurface = officeDocumentForeground,
+                    )
+                ) {
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = stringResource(CommonStrings.action_download),
+                                    color = officeDocumentForeground,
+                                )
+                            },
+                            onClick = {
+                                showMenu = false
+                                onSaveClick()
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = CompoundIcons.Download(),
+                                    contentDescription = null,
+                                    tint = officeDocumentForeground,
+                                )
+                            },
+                            colors = MenuDefaults.itemColors(
+                                textColor = officeDocumentForeground,
+                                leadingIconColor = officeDocumentForeground,
+                            ),
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = stringResource(CommonStrings.action_open_with),
+                                    color = officeDocumentForeground,
+                                )
+                            },
+                            onClick = {
+                                showMenu = false
+                                onOpenWithClick()
+                            },
+                            colors = MenuDefaults.itemColors(textColor = officeDocumentForeground),
+                        )
+                    }
+                }
+            }
+        },
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MediaViewerTopBar(
     data: MediaViewerPageData.MediaViewerData,
     canShowInfo: Boolean,
+    allowExport: Boolean,
     onBackClick: () -> Unit,
     onShareClick: () -> Unit,
     onSaveClick: () -> Unit,
@@ -539,23 +716,25 @@ private fun MediaViewerTopBar(
         ),
         navigationIcon = { BackButton(onClick = onBackClick) },
         actions = {
-            IconButton(
-                onClick = onShareClick,
-                enabled = actionsEnabled,
-            ) {
-                Icon(
-                    imageVector = CompoundIcons.ShareAndroid(),
-                    contentDescription = stringResource(id = CommonStrings.action_share),
-                )
-            }
-            IconButton(
-                onClick = onSaveClick,
-                enabled = actionsEnabled,
-            ) {
-                Icon(
-                    imageVector = CompoundIcons.Download(),
-                    contentDescription = stringResource(id = CommonStrings.action_download),
-                )
+            if (allowExport) {
+                IconButton(
+                    onClick = onShareClick,
+                    enabled = actionsEnabled,
+                ) {
+                    Icon(
+                        imageVector = CompoundIcons.ShareAndroid(),
+                        contentDescription = stringResource(id = CommonStrings.action_share),
+                    )
+                }
+                IconButton(
+                    onClick = onSaveClick,
+                    enabled = actionsEnabled,
+                ) {
+                    Icon(
+                        imageVector = CompoundIcons.Download(),
+                        contentDescription = stringResource(id = CommonStrings.action_download),
+                    )
+                }
             }
             if (canShowInfo) {
                 IconButton(
@@ -649,6 +828,7 @@ private val maxCaptionHeightLandscape = 128.dp
 private fun ThumbnailView(
     thumbnailSource: MediaSource?,
     mediaInfo: MediaInfo,
+    isOneTimeView: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -657,7 +837,8 @@ private fun ThumbnailView(
     ) {
         val mediaRequestData = MediaRequestData(
             source = thumbnailSource,
-            kind = MediaRequestData.Kind.File(mediaInfo.filename, mediaInfo.mimeType)
+            kind = MediaRequestData.Kind.File(mediaInfo.filename, mediaInfo.mimeType),
+            cacheable = !isOneTimeView,
         )
         val alpha = if (LocalInspectionMode.current) 0.1f else 1f
         AsyncImage(
@@ -674,14 +855,14 @@ private fun ThumbnailView(
 @Composable
 private fun ErrorView(
     errorMessage: String,
-    onRetry: () -> Unit,
+    onRetry: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
-    RetryDialog(
-        content = errorMessage,
-        onRetry = onRetry,
-        onDismiss = onDismiss
-    )
+    if (onRetry == null) {
+        io.element.android.libraries.designsystem.components.dialogs.ErrorDialog(content = errorMessage, onSubmit = onDismiss)
+    } else {
+        RetryDialog(content = errorMessage, onRetry = onRetry, onDismiss = onDismiss)
+    }
 }
 
 // Only preview in dark, dark theme is forced on the Node.

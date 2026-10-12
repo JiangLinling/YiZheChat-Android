@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.RequestDisallowInterceptTouchEvent
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -41,7 +42,7 @@ import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
-import kotlin.math.roundToInt
+import kotlin.math.abs
 
 private const val DEFAULT_GRAPHICS_LAYER_ALPHA: Float = 0.99F
 
@@ -52,6 +53,8 @@ private const val DEFAULT_GRAPHICS_LAYER_ALPHA: Float = 0.99F
  * @param showCursor Whether to show the cursor or not.
  * @param waveform The waveform to display.
  * @param onSeek Callback when the user seeks the waveform. Called with a value between 0 and 1.
+ * @param onSeekPreview Callback while the user drags the waveform. Called with null when the gesture ends.
+ * @param onTap Optional callback for a tap that does not cross the drag threshold. When null, taps keep seeking.
  * @param modifier The modifier to be applied to the view.
  * @param seekEnabled Whether the user can seek the waveform or not.
  * @param brush The brush to use to draw the waveform.
@@ -66,6 +69,8 @@ fun WaveformPlaybackView(
     showCursor: Boolean,
     waveform: ImmutableList<Float>,
     onSeek: (progress: Float) -> Unit,
+    onSeekPreview: (progress: Float?) -> Unit = {},
+    onTap: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     seekEnabled: Boolean = true,
     brush: Brush = SolidColor(ElementTheme.colors.iconQuaternary),
@@ -95,11 +100,14 @@ fun WaveformPlaybackView(
     }
 
     val density = LocalDensity.current
+    val touchSlop = LocalViewConfiguration.current.touchSlop
     val waveformWidthPx by remember {
         derivedStateOf { with(density) { normalizedWaveformData.size * (lineWidth + linePadding).roundToPx().toFloat() } }
     }
 
     val requestDisallowInterceptTouchEvent = remember { RequestDisallowInterceptTouchEvent() }
+    var pointerDownX by remember { mutableStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
@@ -111,22 +119,46 @@ fun WaveformPlaybackView(
                         MotionEvent.ACTION_DOWN -> {
                             if (e.x in 0F..waveformWidthPx) {
                                 requestDisallowInterceptTouchEvent.invoke(true)
-                                seekProgress.value = e.x / waveformWidthPx
+                                pointerDownX = e.x
+                                isDragging = false
+                                if (onTap == null) {
+                                    val progress = (e.x / waveformWidthPx).coerceIn(0f, 1f)
+                                    seekProgress.value = progress
+                                    onSeekPreview(progress)
+                                }
                                 true
                             } else {
                                 false
                             }
                         }
                         MotionEvent.ACTION_MOVE -> {
-                            if (e.x in 0F..waveformWidthPx) {
-                                seekProgress.value = e.x / waveformWidthPx
+                            if (!isDragging && abs(e.x - pointerDownX) >= touchSlop) {
+                                isDragging = true
+                            }
+                            if (isDragging || onTap == null) {
+                                val progress = (e.x / waveformWidthPx).coerceIn(0f, 1f)
+                                seekProgress.value = progress
+                                onSeekPreview(progress)
                             }
                             true
                         }
                         MotionEvent.ACTION_UP -> {
                             requestDisallowInterceptTouchEvent.invoke(false)
-                            seekProgress.value?.let(onSeek)
+                            if (onTap != null && !isDragging) {
+                                onTap()
+                            } else {
+                                seekProgress.value?.let(onSeek)
+                            }
                             seekProgress.value = null
+                            onSeekPreview(null)
+                            isDragging = false
+                            true
+                        }
+                        MotionEvent.ACTION_CANCEL -> {
+                            requestDisallowInterceptTouchEvent.invoke(false)
+                            seekProgress.value = null
+                            onSeekPreview(null)
+                            isDragging = false
                             true
                         }
                         else -> false
@@ -200,21 +232,23 @@ internal fun WaveformPlaybackViewPreview() = ElementPreview {
     }
 }
 
-private fun ImmutableList<Float>.normalisedData(maxSamplesCount: Int): ImmutableList<Float> {
-    if (maxSamplesCount <= 0) {
+internal fun ImmutableList<Float>.normalisedData(maxSamplesCount: Int): ImmutableList<Float> {
+    if (maxSamplesCount <= 0 || isEmpty()) {
         return persistentListOf()
     }
-
-    // Filter the data to keep only the expected number of samples
-    val result = if (this.size > maxSamplesCount) {
-        (0..<maxSamplesCount)
-            .map { index ->
-                val targetIndex = (index.toDouble() * (this.count().toDouble() / maxSamplesCount.toDouble())).roundToInt()
-                this[targetIndex]
-            }
-    } else {
-        this
+    if (size == maxSamplesCount) {
+        return this
+    }
+    if (maxSamplesCount == 1) {
+        return persistentListOf(first())
     }
 
-    return result.toImmutableList()
+    // Stretch or condense the samples to the available width so short recordings do not leave a large blank tail.
+    return List(maxSamplesCount) { index ->
+        val sourcePosition = index.toFloat() * lastIndex / (maxSamplesCount - 1)
+        val lowerIndex = sourcePosition.toInt()
+        val upperIndex = (lowerIndex + 1).coerceAtMost(lastIndex)
+        val fraction = sourcePosition - lowerIndex
+        this[lowerIndex] + (this[upperIndex] - this[lowerIndex]) * fraction
+    }.toImmutableList()
 }

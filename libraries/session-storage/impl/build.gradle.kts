@@ -23,6 +23,7 @@ dependencies {
     implementation(projects.libraries.androidutils)
     implementation(projects.libraries.core)
     implementation(projects.libraries.encryptedDb)
+    implementation(projects.security.secureStorage.api)
     api(projects.libraries.sessionStorage.api)
     implementation(libs.sqldelight.driver.android)
     implementation(libs.sqlcipher)
@@ -32,6 +33,7 @@ dependencies {
 
     testCommonDependencies(libs)
     testImplementation(libs.sqldelight.driver.jvm)
+    testImplementation(projects.security.secureStorage.test)
 }
 
 sqldelight {

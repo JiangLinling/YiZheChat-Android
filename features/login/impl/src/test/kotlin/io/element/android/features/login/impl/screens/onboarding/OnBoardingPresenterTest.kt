@@ -83,10 +83,10 @@ class OnBoardingPresenterTest {
         presenter.test {
             val initialState = awaitItem()
             assertThat(initialState.showBackButton).isFalse()
-            assertThat(initialState.defaultAccountProvider).isNull()
+            assertThat(initialState.defaultAccountProvider).isEqualTo(OnBoardingConfig.DEFAULT_HOMESERVER_URL)
             assertThat(initialState.canLoginWithQrCode).isFalse()
             assertThat(initialState.productionApplicationName).isEqualTo("B")
-            assertThat(initialState.canCreateAccount).isEqualTo(OnBoardingConfig.CAN_CREATE_ACCOUNT)
+            assertThat(initialState.canCreateAccount).isFalse()
             assertThat(initialState.canReportBug).isFalse()
             assertThat(initialState.isAddingAccount).isFalse()
             val finalState = awaitItem()
@@ -209,7 +209,7 @@ class OnBoardingPresenterTest {
         presenter.test {
             skipItems(1)
             awaitItem().also {
-                assertThat(it.defaultAccountProvider).isNull()
+                assertThat(it.defaultAccountProvider).isEqualTo(OnBoardingConfig.DEFAULT_HOMESERVER_URL)
                 assertThat(it.canLoginWithQrCode).isTrue()
                 assertThat(it.canCreateAccount).isFalse()
             }

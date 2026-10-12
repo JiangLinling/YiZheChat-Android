@@ -9,15 +9,12 @@
 package io.element.android.features.location.impl
 
 import com.google.common.truth.Truth.assertThat
-import io.element.android.features.location.api.BuildConfig
 import org.junit.Test
 
 class DefaultLocationServiceTest {
     @Test
-    fun `isServiceAvailable should return value depending on BuildConfig MAPTILER_API_KEY`() {
+    fun `isServiceAvailable returns true because a keyless map fallback is available`() {
         val locationService = DefaultLocationService()
-        assertThat(locationService.isServiceAvailable()).isEqualTo(
-            BuildConfig.MAPTILER_API_KEY.isNotEmpty()
-        )
+        assertThat(locationService.isServiceAvailable()).isTrue()
     }
 }

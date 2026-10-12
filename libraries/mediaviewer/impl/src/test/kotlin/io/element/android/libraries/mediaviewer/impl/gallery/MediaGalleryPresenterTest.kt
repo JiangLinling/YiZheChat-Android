@@ -39,6 +39,7 @@ import io.element.android.libraries.mediaviewer.test.FakeLocalMediaFactory
 import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.lambda.lambdaRecorder
+import io.element.android.tests.testutils.lambda.matching
 import io.element.android.tests.testutils.lambda.value
 import io.element.android.tests.testutils.test
 import io.mockk.mockk
@@ -339,12 +340,11 @@ class MediaGalleryPresenterTest {
             val finalState = awaitItem()
             assertThat(finalState.snackbarMessage?.messageResId).isEqualTo(CommonStrings.common_file_saved_on_disk_android)
             saveOnDiskResult.assertions().isCalledOnce().with(
-                value(
-                    LocalMedia(
-                        uri = mockMediaUri,
-                        info = media.mediaInfo,
-                    )
-                )
+                matching<LocalMedia> {
+                    it.uri == mockMediaUri &&
+                        it.info == media.mediaInfo &&
+                        it.lifecycleOperationId.isNotBlank()
+                }
             )
         }
     }
@@ -392,12 +392,11 @@ class MediaGalleryPresenterTest {
             assertThat(finalState.mediaBottomSheetState).isEqualTo(MediaBottomSheetState.Hidden)
             advanceUntilIdle()
             openWithResult.assertions().isCalledOnce().with(
-                value(
-                    LocalMedia(
-                        uri = mockMediaUri,
-                        info = item.mediaInfo,
-                    )
-                )
+                matching<LocalMedia> {
+                    it.uri == mockMediaUri &&
+                        it.info == item.mediaInfo &&
+                        it.lifecycleOperationId.isNotBlank()
+                }
             )
         }
     }

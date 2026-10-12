@@ -21,6 +21,7 @@ import io.element.android.features.logout.api.direct.aDirectLogoutState
 import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.user.MatrixUser
+import io.element.android.libraries.matrix.api.sync.SyncState
 import io.element.android.libraries.ui.strings.CommonStrings
 import kotlinx.collections.immutable.toImmutableList
 
@@ -41,12 +42,12 @@ open class HomeStateProvider : PreviewParameterProvider<HomeState> {
                 homeSpacesState = aHomeSpacesState(),
             ),
             aHomeState(
-                currentHomeNavigationBarItem = HomeNavigationBarItem.Spaces,
+                currentHomeNavigationBarItem = HomeNavigationBarItem.Contacts,
             ),
         ) + RoomListStateProvider().values.map {
             aHomeState(roomListState = it)
         } + aHomeState(
-            currentHomeNavigationBarItem = HomeNavigationBarItem.Spaces,
+            currentHomeNavigationBarItem = HomeNavigationBarItem.Contacts,
             homeSpacesState = aHomeSpacesState(
                 spaceRooms = emptyList(),
             ),
@@ -58,6 +59,7 @@ internal fun aHomeState(
     currentUserAndNeighbors: List<MatrixUser> = listOf(matrixUser),
     showAvatarIndicator: Boolean = false,
     hasNetworkConnection: Boolean = true,
+    syncState: SyncState = SyncState.Idle,
     snackbarMessage: SnackbarMessage? = null,
     currentHomeNavigationBarItem: HomeNavigationBarItem = HomeNavigationBarItem.Chats,
     roomListState: RoomListState = aRoomListState(),
@@ -69,6 +71,7 @@ internal fun aHomeState(
     currentUserAndNeighbors = currentUserAndNeighbors.toImmutableList(),
     showAvatarIndicator = showAvatarIndicator,
     hasNetworkConnection = hasNetworkConnection,
+    syncState = syncState,
     snackbarMessage = snackbarMessage,
     canReportBug = canReportBug,
     directLogoutState = directLogoutState,

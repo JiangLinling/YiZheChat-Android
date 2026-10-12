@@ -1,0 +1,6 @@
+<resources>
+    <string name="screen_group_invite_title">群邀请</string>
+    <string name="screen_group_invite_confirm">是否打开此群邀请？将核对邀请权限和有效期。</string>
+    <string name="screen_group_invite_open">打开邀请</string>
+    <string name="screen_group_invite_error">邀请不可用或已过期，请检查网络或联系分享者重新分享。</string>
+</resources>

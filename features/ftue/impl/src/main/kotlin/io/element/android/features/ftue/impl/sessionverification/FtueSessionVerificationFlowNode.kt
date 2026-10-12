@@ -12,12 +12,10 @@ import android.os.Parcelable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.lifecycleScope
 import com.bumble.appyx.core.modality.BuildContext
 import com.bumble.appyx.core.node.Node
 import com.bumble.appyx.core.plugin.Plugin
 import com.bumble.appyx.navmodel.backstack.BackStack
-import com.bumble.appyx.navmodel.backstack.operation.newRoot
 import com.bumble.appyx.navmodel.backstack.operation.pop
 import com.bumble.appyx.navmodel.backstack.operation.push
 import dev.zacsweers.metro.Assisted
@@ -34,7 +32,6 @@ import io.element.android.libraries.architecture.createNode
 import io.element.android.libraries.designsystem.utils.OpenUrlInTabView
 import io.element.android.libraries.di.SessionScope
 import io.element.android.libraries.matrix.api.verification.VerificationRequest
-import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
 
 @ContributesNode(SessionScope::class)
@@ -74,10 +71,10 @@ class FtueSessionVerificationFlowNode(
 
     private val secureBackupEntryPointCallback = object : SecureBackupEntryPoint.Callback {
         override fun onDone() {
-            lifecycleScope.launch {
-                // Move to the completed state view in the verification flow
-                backstack.newRoot(NavTarget.UseAnotherDevice)
-            }
+            // A successfully restored recovery key completes self-verification. Routing back to
+            // "use another device" started a second verification cycle and left users staring at
+            // the loading screen until process restart.
+            callback.onDone()
         }
     }
 

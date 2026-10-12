@@ -8,6 +8,8 @@
 
 package io.element.android.features.preferences.impl.notifications
 
+import android.Manifest
+import android.annotation.SuppressLint
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -32,6 +34,8 @@ import io.element.android.libraries.fullscreenintent.api.FullScreenIntentPermiss
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.notificationsettings.NotificationSettingsService
 import io.element.android.libraries.matrix.api.room.RoomNotificationMode
+import io.element.android.libraries.permissions.api.PermissionsEvent
+import io.element.android.libraries.permissions.api.PermissionsPresenter
 import io.element.android.libraries.preferences.api.store.AppPreferencesStore
 import io.element.android.libraries.preferences.api.store.NotificationSound
 import io.element.android.libraries.push.api.PushService
@@ -66,6 +70,7 @@ class NotificationSettingsPresenter(
     private val pushService: PushService,
     private val systemNotificationsEnabledProvider: SystemNotificationsEnabledProvider,
     private val fullScreenIntentPermissionsPresenter: Presenter<FullScreenIntentPermissionsState>,
+    private val permissionsPresenterFactory: PermissionsPresenter.Factory,
     private val appPreferencesStore: AppPreferencesStore,
     private val notificationSoundUpdater: NotificationSoundUpdater,
     private val notificationSoundCopier: NotificationSoundCopier,
@@ -83,7 +88,11 @@ class NotificationSettingsPresenter(
     private val callRingtoneLock = Mutex()
 
     @Composable
+    @SuppressLint("InlinedApi")
     override fun present(): NotificationSettingsState {
+        val notificationPermissionsState = remember(permissionsPresenterFactory) {
+            permissionsPresenterFactory.create(Manifest.permission.POST_NOTIFICATIONS)
+        }.present()
         val userPushStore = remember { userPushStoreFactory.getOrCreate(matrixClient.sessionId) }
         val systemNotificationsEnabled: MutableState<Boolean> = remember {
             mutableStateOf(systemNotificationsEnabledProvider.notificationsEnabled())
@@ -198,6 +207,9 @@ class NotificationSettingsPresenter(
 
         fun handleEvent(event: NotificationSettingsEvents) {
             when (event) {
+                is NotificationSettingsEvents.OpenSystemNotificationSettings -> {
+                    notificationPermissionsState.eventSink(PermissionsEvent.OpenSystemSettingsUsingActivity(event.launchSettings))
+                }
                 is NotificationSettingsEvents.SetAtRoomNotificationsEnabled -> {
                     localCoroutineScope.setAtRoomNotificationsEnabled(event.enabled, changeNotificationSettingAction)
                 }

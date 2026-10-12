@@ -7,12 +7,12 @@
  */
 package io.element.android.features.call.impl.notifications
 
+import android.app.ActivityOptions
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.AudioManager
-import android.provider.Settings
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.PendingIntentCompat
 import androidx.core.app.Person
@@ -70,6 +70,7 @@ class RingingCallNotificationCreator(
         expirationTimestamp: Long,
         textContent: String?,
         audioOnly: Boolean,
+        fullScreenData: CallNotificationData? = null,
     ): Notification? {
         val matrixClient = matrixClientProvider.getOrRestore(sessionId).getOrNull() ?: return null
         val imageLoader = imageLoaderHolder.get(matrixClient)
@@ -95,6 +96,7 @@ class RingingCallNotificationCreator(
                 sessionId = sessionId,
                 roomId = roomId,
                 isAudioCall = audioOnly,
+                notificationEventId = eventId.value,
             ),
         )
         val notificationData = CallNotificationData(
@@ -116,46 +118,66 @@ class RingingCallNotificationCreator(
             context,
             DECLINE_REQUEST_CODE,
             Intent(context, DeclineCallBroadcastReceiver::class.java).apply {
+                data = android.net.Uri.parse("yizhe-call:decline/" + android.net.Uri.encode(eventId.value))
                 putExtra(DeclineCallBroadcastReceiver.EXTRA_NOTIFICATION_DATA, notificationData)
             },
             PendingIntent.FLAG_CANCEL_CURRENT,
             false,
         )!!
 
-        val fullScreenIntent = PendingIntentCompat.getActivity(
+        val fullScreenIntent = PendingIntent.getActivity(
             context,
             FULL_SCREEN_INTENT_REQUEST_CODE,
             Intent(context, IncomingCallActivity::class.java).apply {
-                putExtra(IncomingCallActivity.EXTRA_NOTIFICATION_DATA, notificationData)
+                data = android.net.Uri.parse("yizhe-call:incoming/" + android.net.Uri.encode(eventId.value))
+                putExtra(IncomingCallActivity.EXTRA_NOTIFICATION_DATA, fullScreenData ?: notificationData)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             },
-            PendingIntent.FLAG_CANCEL_CURRENT,
-            false
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            fullScreenActivityOptions(),
         )
 
         return NotificationCompat.Builder(context, notificationChannelId)
             .setSmallIcon(CommonDrawables.ic_notification)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setStyle(
-                NotificationCompat.CallStyle
-                    .forIncomingCall(caller, declineIntent, answerIntent)
-                    .setIsVideo(!audioOnly)
-            )
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .addPerson(caller)
+            .setContentTitle(senderDisplayName)
             .setAutoCancel(true)
             .setWhen(timestamp)
             .setOngoing(true)
             .setShowWhen(false)
             // If textContent is null, the content text is set by the style (will be "Incoming call")
             .setContentText(textContent)
-            .setSound(Settings.System.DEFAULT_RINGTONE_URI, AudioManager.STREAM_RING)
             .setTimeoutAfter(ElementCallConfig.RINGING_CALL_DURATION_SECONDS.seconds.inWholeMilliseconds)
             .setContentIntent(answerIntent)
             .setDeleteIntent(declineIntent)
+            .setStyle(
+                NotificationCompat.CallStyle
+                    .forIncomingCall(caller, declineIntent, answerIntent)
+                    .setIsVideo(!audioOnly)
+            )
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setFullScreenIntent(fullScreenIntent, true)
             .build()
             .apply {
                 flags = flags.or(Notification.FLAG_INSISTENT)
             }
+    }
+
+    private fun fullScreenActivityOptions() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        ActivityOptions.makeBasic()
+            .setPendingIntentCreatorBackgroundActivityStartMode(backgroundActivityStartMode())
+            .toBundle()
+    } else {
+        null
+    }
+
+    @Suppress("DEPRECATION")
+    private fun backgroundActivityStartMode(): Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS
+    } else {
+        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
     }
 }

@@ -9,6 +9,7 @@
 package io.element.android.features.call.impl.ui
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -37,7 +40,6 @@ import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.call.impl.R
 import io.element.android.features.call.impl.notifications.CallNotificationData
-import io.element.android.libraries.designsystem.background.OnboardingBackground
 import io.element.android.libraries.designsystem.components.avatar.Avatar
 import io.element.android.libraries.designsystem.components.avatar.AvatarData
 import io.element.android.libraries.designsystem.components.avatar.AvatarSize
@@ -57,25 +59,25 @@ internal fun IncomingCallScreen(
     onAnswer: (CallNotificationData) -> Unit,
     onCancel: () -> Unit,
 ) {
-    OnboardingBackground()
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().background(Color(0xFF252A2E)).statusBarsPadding().navigationBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Bottom
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 124.dp)
+                .padding(start = 24.dp, end = 24.dp, top = 24.dp)
                 .weight(1f),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            Spacer(modifier = Modifier.weight(0.35f))
             Avatar(
                 avatarData = AvatarData(
                     id = notificationData.senderId.value,
                     name = notificationData.senderName,
                     url = notificationData.avatarUrl,
-                    size = AvatarSize.IncomingCall,
+                    size = AvatarSize.UserHeader,
                 ),
                 avatarType = AvatarType.User,
             )
@@ -83,28 +85,37 @@ internal fun IncomingCallScreen(
             Text(
                 text = notificationData.senderName ?: notificationData.senderId.value,
                 style = ElementTheme.typography.fontHeadingMdBold,
+                color = Color.White,
                 textAlign = TextAlign.Center,
             )
             Spacer(modifier = Modifier.height(8.dp))
+            if (notificationData.isGroupCall && !notificationData.roomName.isNullOrBlank()) {
+                Text(
+                    text = notificationData.roomName,
+                    style = ElementTheme.typography.fontBodySmRegular,
+                    color = Color(0xFFCDD5CF),
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             Text(
-                text = stringResource(R.string.screen_incoming_call_subtitle_android),
-                style = ElementTheme.typography.fontBodyLgRegular,
-                color = ElementTheme.colors.textSecondary,
+                text = stringResource(if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment)
+                    (if (notificationData.isGroupCall) {
+                        if (notificationData.audioOnly) R.string.call_group_voice_incoming else R.string.call_group_video_incoming
+                    } else if (notificationData.audioOnly) R.string.call_voice_incoming else R.string.call_video_incoming)
+                    else R.string.screen_incoming_call_subtitle_android),
+                style = ElementTheme.typography.fontBodySmRegular,
+                color = Color(0xFFCDD5CF),
                 textAlign = TextAlign.Center,
             )
+            Spacer(modifier = Modifier.weight(0.65f))
         }
         Row(
-            modifier = Modifier.padding(bottom = 64.dp),
-            horizontalArrangement = Arrangement.spacedBy(48.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
         ) {
-            ActionButton(
-                size = 64.dp,
-                onClick = { onAnswer(notificationData) },
-                icon = if (notificationData.audioOnly) CompoundIcons.VoiceCallSolid() else CompoundIcons.VideoCallSolid(),
-                title = stringResource(CommonStrings.action_accept),
-                backgroundColor = ElementTheme.colors.iconSuccessPrimary,
-                borderColor = ElementTheme.colors.borderSuccessSubtle
-            )
             ActionButton(
                 size = 64.dp,
                 onClick = onCancel,
@@ -112,6 +123,14 @@ internal fun IncomingCallScreen(
                 title = stringResource(CommonStrings.action_reject),
                 backgroundColor = ElementTheme.colors.iconCriticalPrimary,
                 borderColor = ElementTheme.colors.borderCriticalSubtle
+            )
+            ActionButton(
+                size = 64.dp,
+                onClick = { onAnswer(notificationData) },
+                icon = if (notificationData.audioOnly) CompoundIcons.VoiceCallSolid() else CompoundIcons.VideoCallSolid(),
+                title = stringResource(CommonStrings.action_accept),
+                backgroundColor = ElementTheme.colors.iconSuccessPrimary,
+                borderColor = ElementTheme.colors.borderSuccessSubtle
             )
         }
     }
@@ -151,8 +170,8 @@ private fun ActionButton(
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = title,
-            style = ElementTheme.typography.fontBodyLgMedium,
-            color = ElementTheme.colors.textPrimary,
+            style = ElementTheme.typography.fontBodySmMedium,
+            color = Color.White,
             overflow = TextOverflow.Ellipsis,
         )
     }

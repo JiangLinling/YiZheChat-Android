@@ -18,20 +18,36 @@ import io.element.android.libraries.matrix.api.room.draft.ComposerDraft
 class DefaultComposerDraftService(
     private val volatileComposerDraftStore: VolatileComposerDraftStore,
     private val matrixComposerDraftStore: MatrixComposerDraftStore,
+    private val protectedCaptionDraftStore: ProtectedCaptionDraftStore,
 ) : ComposerDraftService {
+    override suspend fun bindTextSendDraft(roomId: RoomId, draft: ComposerDraft, operationId: String) =
+        protectedCaptionDraftStore.bindTextSendDraft(roomId, draft, operationId, matrixComposerDraftStore)
+
+    override suspend fun textDraftVersion(roomId: RoomId): String? = protectedCaptionDraftStore.textDraftVersion(roomId)
+    override suspend fun hasPendingTextSendDraft(roomId: RoomId): Boolean = protectedCaptionDraftStore.hasPendingTextSendDraft(roomId)
+
+    override suspend fun reconcileSentTextDraft(roomId: RoomId, canConsume: () -> Boolean): ConsumedTextDraft? =
+        protectedCaptionDraftStore.reconcileSentTextDraft(roomId, matrixComposerDraftStore, canConsume)
+
+    override suspend fun preparePersistentDraftWrite(roomId: RoomId, threadRoot: ThreadId?) =
+        protectedCaptionDraftStore.prepareComposerDraftWrite(roomId, threadRoot, matrixComposerDraftStore)
+
+    override suspend fun captureProtectedCaptionDraftVersion(roomId: RoomId, threadRoot: ThreadId?): String? =
+        protectedCaptionDraftStore.captureComposerDraftVersion(roomId, threadRoot, matrixComposerDraftStore)
+
+    override suspend fun clearProtectedCaptionDraftIfVersion(roomId: RoomId, threadRoot: ThreadId?, version: String?): Boolean =
+        protectedCaptionDraftStore.clearComposerDraftIfVersion(roomId, threadRoot, version, matrixComposerDraftStore)
+
     override suspend fun loadDraft(roomId: RoomId, threadRoot: ThreadId?, isVolatile: Boolean): ComposerDraft? {
-        return getStore(isVolatile).loadDraft(roomId, threadRoot)
+        if (isVolatile) return volatileComposerDraftStore.loadDraft(roomId, threadRoot)
+        return protectedCaptionDraftStore.loadComposerDraft(roomId, threadRoot, matrixComposerDraftStore)
     }
 
     override suspend fun updateDraft(roomId: RoomId, threadRoot: ThreadId?, draft: ComposerDraft?, isVolatile: Boolean) {
-        getStore(isVolatile).updateDraft(roomId, threadRoot, draft)
-    }
-
-    private fun getStore(isVolatile: Boolean): ComposerDraftStore {
-        return if (isVolatile) {
-            volatileComposerDraftStore
+        if (isVolatile) {
+            volatileComposerDraftStore.updateDraft(roomId, threadRoot, draft)
         } else {
-            matrixComposerDraftStore
+            protectedCaptionDraftStore.updateComposerDraft(roomId, threadRoot, draft, matrixComposerDraftStore)
         }
     }
 }

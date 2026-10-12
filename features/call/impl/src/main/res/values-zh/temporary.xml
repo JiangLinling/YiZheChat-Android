@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_private_caller_name">受保护通话</string>
+    <string name="call_audio_output_bluetooth">蓝牙</string>
+    <string name="call_audio_output_usb_accessory">USB 音频配件</string>
+    <string name="call_audio_output_usb_device">USB 音频设备</string>
+    <string name="call_audio_output_usb_headset">USB 耳机</string>
+    <string name="call_audio_output_wired_headset">有线麦克风耳机</string>
+    <string name="call_audio_output_wired_headphones">有线耳机</string>
+    <string name="call_audio_output_speaker">扬声器</string>
+    <string name="call_audio_output_earpiece">听筒</string>
+    <string name="call_audio_output_unknown">其他音频设备</string>
+    <string name="call_preparing">正在连接…</string>
+    <string name="call_accept_connecting">正在接通…</string>
+    <string name="call_voice_type">语音通话</string>
+    <string name="call_video_type">视频通话</string>
+    <string name="call_cancel_preparation">取消呼叫</string>
+    <string name="call_back_to_chat">返回聊天</string>
+    <string name="call_invitation_ended">该通话已结束。</string>
+    <string name="call_connection_failed">连接失败，请返回后重试。</string>
+    <string name="call_vault_locked">应用已锁定，请解锁后继续。</string>
+    <string name="call_device_unavailable">当前设备不满足通话安全要求。</string>
+    <string name="call_authorization_unavailable">暂时无法确认通话授权，请稍后重试。</string>
+    <string name="call_voice_incoming">语音来电</string>
+    <string name="call_video_incoming">视频来电</string>
+    <string name="call_network_disconnected">网络已断开，正在尝试恢复…</string>
+    <string name="call_control_mic_on">静音</string>
+    <string name="call_control_mic_off">取消静音</string>
+    <string name="call_control_camera_on">摄像头</string>
+    <string name="call_control_camera_off">摄像头</string>
+    <string name="call_control_speaker_on">免提</string>
+    <string name="call_control_speaker_off">免提</string>
+    <string name="call_control_hangup">挂断</string>
+    <string name="call_control_more">更多</string>
+    <string name="call_control_flip">切换摄像头</string>
+    <string name="call_group_return">返回多人画面</string>
+    <string name="call_group_focus">放大画面</string>
+    <string name="call_network_unavailable">当前无法连接网络，请检查网络后重试。</string>
+    <string name="call_waiting_peer">正在等待对方接听…</string>
+    <string name="call_lobby_ready">准备好后加入通话</string>
+    <string name="call_waiting_members">等待其他成员加入…</string>
+    <string name="call_group_voice_incoming">邀请你加入群语音通话</string>
+    <string name="call_group_video_incoming">邀请你加入群视频通话</string>
+    <string name="call_security_notice_title">端到端加密即时通话</string>
+    <string name="call_security_notice_description">结束后清除本次通话密钥，不保存音视频内容</string>
+</resources>

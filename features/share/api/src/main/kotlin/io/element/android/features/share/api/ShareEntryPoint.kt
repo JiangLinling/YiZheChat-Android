@@ -12,7 +12,6 @@ import com.bumble.appyx.core.modality.BuildContext
 import com.bumble.appyx.core.node.Node
 import com.bumble.appyx.core.plugin.Plugin
 import io.element.android.libraries.architecture.FeatureEntryPoint
-import io.element.android.libraries.matrix.api.core.RoomId
 
 interface ShareEntryPoint : FeatureEntryPoint {
     data class Params(val shareIntentData: ShareIntentData)
@@ -25,6 +24,6 @@ interface ShareEntryPoint : FeatureEntryPoint {
     ): Node
 
     interface Callback : Plugin {
-        fun onDone(roomIds: List<RoomId>)
+        fun onDone(result: ShareResult)
     }
 }

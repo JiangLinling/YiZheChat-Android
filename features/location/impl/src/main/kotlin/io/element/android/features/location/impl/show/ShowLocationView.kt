@@ -10,6 +10,7 @@
 
 package io.element.android.features.location.impl.show
 
+import io.element.android.features.location.api.LiveLocationSharingBanner
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -56,6 +57,8 @@ import org.maplibre.compose.camera.CameraMoveReason
 import org.maplibre.compose.camera.CameraPosition
 import org.maplibre.compose.camera.rememberCameraState
 import org.maplibre.spatialk.geojson.Position
+import kotlin.math.ln
+import kotlin.math.max
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,12 +78,21 @@ fun ShowLocationView(
 
     val cameraState = rememberCameraState(firstPosition = MapDefaults.defaultCameraPosition)
     var hasAnimatedToFocusedLocation by remember { mutableStateOf(false) }
-    LaunchedEffect(state.focusedLocation) {
-        if (state.focusedLocation != null && !hasAnimatedToFocusedLocation) {
+    LaunchedEffect(state.locationShares) {
+        if (state.locationShares.isNotEmpty() && !hasAnimatedToFocusedLocation) {
             hasAnimatedToFocusedLocation = true
+            val latitudes = state.locationShares.map { it.location.lat }
+            val longitudes = state.locationShares.map { it.location.lon }
+            val latitudeSpan = (latitudes.max() - latitudes.min()).coerceAtLeast(0.001)
+            val longitudeSpan = (longitudes.max() - longitudes.min()).coerceAtLeast(0.001)
+            val span = max(longitudeSpan, latitudeSpan * 1.6)
+            val fittedZoom = (ln(180.0 / span) / ln(2.0)).coerceIn(2.0, MapDefaults.DEFAULT_ZOOM)
             val position = CameraPosition(
-                target = Position(latitude = state.focusedLocation.location.lat, longitude = state.focusedLocation.location.lon),
-                zoom = MapDefaults.DEFAULT_ZOOM
+                target = Position(
+                    longitude = (longitudes.min() + longitudes.max()) / 2.0,
+                    latitude = (latitudes.min() + latitudes.max()) / 2.0,
+                ),
+                zoom = if (state.locationShares.size == 1) MapDefaults.DEFAULT_ZOOM else fittedZoom,
             )
             cameraState.position = position
         }
@@ -126,6 +138,13 @@ fun ShowLocationView(
             if (!state.isSheetDraggable) {
                 // If sheet is draggable the DragHandle has already some padding
                 Spacer(Modifier.height(20.dp))
+            }
+            if (state.pausedLiveLocationShare != null) {
+                LiveLocationSharingBanner(
+                    onClick = null,
+                    onStopClick = { state.eventSink(ShowLocationEvent.StopLocationSharing) },
+                    pausedState = state.pausedLiveLocationShare,
+                )
             }
             if (state.locationShares.isEmpty()) {
                 Text(

@@ -44,7 +44,7 @@ fun UserLocationPuck(
             cameraState = cameraState,
             accuracyThreshold = Float.POSITIVE_INFINITY,
             showBearingAccuracy = false,
-            showBearing = false,
+            showBearing = true,
             sizes = LocationPuckSizes(
                 dotRadius = 8.dp,
                 dotStrokeWidth = 2.dp,

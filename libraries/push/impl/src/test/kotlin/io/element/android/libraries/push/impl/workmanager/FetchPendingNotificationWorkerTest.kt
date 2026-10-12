@@ -34,6 +34,8 @@ import io.element.android.libraries.workmanager.api.di.MetroWorkerFactory
 import io.element.android.services.analytics.test.FakeAnalyticsService
 import io.element.android.services.toolbox.test.systemclock.FakeSystemClock
 import io.element.android.tests.testutils.lambda.lambdaRecorder
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -50,6 +52,37 @@ import kotlin.time.Instant
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
 class FetchPendingNotificationWorkerTest {
+    @Test
+    fun `Next worker yields its sync when another durable notification arrives`() = runTest {
+        org.junit.Assume.assumeTrue(io.element.android.appconfig.NextDeploymentConfig.isNextDeployment)
+        val earlier = aPushRequest()
+        val pending = kotlinx.coroutines.flow.MutableStateFlow(listOf(earlier))
+        var syncCancelled = false
+        val history = FakePushHistoryService(
+            getPendingPushRequests = { _, _ -> Result.success(listOf(earlier)) },
+            replacePushRequests = { pending.value = emptyList(); Result.success(Unit) },
+            removeOldPushRequests = { Result.success(Unit) },
+            pendingRequests = pending,
+        )
+        val worker = createWorker(
+            input = "@alice:matrix.org", pushHistoryService = history,
+            resultProcessor = FakeNotificationResultProcessor(emit = {}),
+            syncOnNotifiableEvent = SyncOnNotifiableEvent {
+                try { kotlinx.coroutines.delay(10_000) } finally { syncCancelled = true }
+            },
+        )
+        val result = kotlinx.coroutines.CompletableDeferred<ListenableWorker.Result>()
+        backgroundScope.launch { result.complete(worker.doWork()) }
+        runCurrent()
+        advanceTimeBy(100)
+        pending.value = listOf(earlier.copy(eventId = "incoming-call-event"))
+        runCurrent()
+        assertThat(result.isCompleted).isTrue()
+        assertThat(result.await()).isEqualTo(ListenableWorker.Result.success())
+        assertThat(syncCancelled).isTrue()
+        assertThat(pending.value.single().eventId).isEqualTo("incoming-call-event")
+    }
+
     @Test
     fun `test - success`() = runTest {
         var synced = false

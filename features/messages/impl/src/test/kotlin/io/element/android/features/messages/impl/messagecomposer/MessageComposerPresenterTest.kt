@@ -48,6 +48,8 @@ import io.element.android.libraries.matrix.api.room.RoomMembershipState
 import io.element.android.libraries.matrix.api.room.draft.ComposerDraft
 import io.element.android.libraries.matrix.api.room.draft.ComposerDraftType
 import io.element.android.libraries.matrix.api.timeline.MsgType
+import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
+import io.element.android.libraries.matrix.api.core.UniqueId
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.api.timeline.TimelineException
 import io.element.android.libraries.matrix.api.timeline.item.event.EventOrTransactionId
@@ -73,6 +75,9 @@ import io.element.android.libraries.matrix.test.room.aRoomInfo
 import io.element.android.libraries.matrix.test.room.aRoomMember
 import io.element.android.libraries.matrix.test.room.powerlevels.FakeRoomPermissions
 import io.element.android.libraries.matrix.test.timeline.FakeTimeline
+import io.element.android.libraries.matrix.test.timeline.anEventTimelineItem
+import io.element.android.libraries.matrix.test.timeline.aMessageContent
+import io.element.android.libraries.matrix.test.timeline.aProfileDetails
 import io.element.android.libraries.matrix.ui.messages.reply.InReplyToDetails
 import io.element.android.libraries.mediapickers.api.PickerProvider
 import io.element.android.libraries.mediapickers.test.FakePickerProvider
@@ -101,6 +106,21 @@ import io.element.android.libraries.textcomposer.model.MessageComposerMode
 import io.element.android.libraries.textcomposer.model.Suggestion
 import io.element.android.libraries.textcomposer.model.SuggestionType
 import io.element.android.libraries.textcomposer.model.TextEditorState
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.LifecycleClientReceipt
+import io.element.android.libraries.mediapickers.api.MediaPickCancellation
+import io.element.android.security.dataprotection.api.LifecycleOperation
+import io.element.android.security.dataprotection.api.LifecycleOperationRequest
+import io.element.android.security.dataprotection.api.LifecycleOperationStatus
+import io.element.android.security.dataprotection.api.LifecycleComponent
+import io.element.android.security.dataprotection.api.LifecycleStep
+import io.element.android.security.dataprotection.api.LifecycleStepStatus
+import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
+import io.element.android.security.dataprotection.api.perform
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
+import io.element.android.libraries.matrix.api.MatrixClient
+import io.element.android.libraries.matrix.test.FakeMatrixClient
+import io.element.android.security.securestorage.api.accountIdHash
 import io.element.android.services.analytics.test.FakeAnalyticsService
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.lambda.any
@@ -110,11 +130,19 @@ import io.element.android.tests.testutils.lambda.value
 import io.element.android.tests.testutils.test
 import io.element.android.tests.testutils.waitForPredicate
 import io.mockk.mockk
+import io.mockk.coEvery
+import io.mockk.every
+import io.element.android.features.messages.impl.commoninfo.CommonInfoItem
+import io.element.android.features.messages.impl.commoninfo.CommonInfoRepository
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
@@ -130,20 +158,174 @@ class MessageComposerPresenterTest {
     val warmUpRule = WarmUpRule()
 
     private val pickerProvider = FakePickerProvider().apply {
-        givenResult(mockk()) // Uri is not available in JVM, so the only way to have a non-null Uri is using Mockk
+        givenResult(Uri.parse("content://media/external/images/media/test"))
     }
     private val mediaPreProcessor = FakeMediaPreProcessor()
     private val snackbarDispatcher = SnackbarDispatcher()
-    private val mockMediaUrl: Uri = mockk("localMediaUri")
+    private val mockMediaUrl: Uri = Uri.parse("content://media/external/images/media/local-test")
     private val localMediaFactory = FakeLocalMediaFactory(mockMediaUrl)
     private val analyticsService = FakeAnalyticsService()
     private val notificationConversationService = FakeNotificationConversationService()
+
+    @Test
+    fun `BUG041 durable intent and original draft precede editor clear`() = runTest {
+        val staged = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var stored: ComposerDraft? = null
+        val drafts = FakeComposerDraftService().apply {
+            saveDraftLambda = { _, _, value, _ -> stored = value }
+        }
+        val timeline = FakeTimeline().apply { sendMessageLambda = { _, _, _, _, _ -> Result.success(Unit) } }
+        val room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) })
+        val outbox = object : io.element.android.security.contentprotection.api.OfflineOutboxService {
+            override suspend fun stage(message: io.element.android.security.contentprotection.api.OfflineTextOutboxMessage): Boolean {
+                staged.complete(Unit)
+                release.await()
+                return true
+            }
+            override suspend fun messages(accountId: String, roomId: String) = emptyList<io.element.android.security.contentprotection.api.OfflineTextOutboxMessage>()
+            override suspend fun remove(accountId: String, roomId: String, transactionId: String) = true
+        }
+        val presenter = createPresenter(room = room, draftService = drafts,
+            timelineController = TimelineController(room, timeline, offlineOutboxService = outbox),
+            slashCommandService = FakeSlashCommandService(parseResult = { _, _, _ -> SlashCommand.NotACommand }))
+        presenter.test {
+            val state = awaitFirstItem()
+            state.textEditorState.setHtml(A_MESSAGE)
+            state.eventSink(MessageComposerEvent.SendMessage)
+            staged.await()
+            try {
+                // Simulated process interruption at the durable handoff, before the 500ms save timer.
+                assertThat(stored?.plainText).isEqualTo(A_MESSAGE)
+                assertThat(state.textEditorState.messageHtml()).isEqualTo(A_MESSAGE)
+            } finally { release.complete(Unit) }
+            advanceUntilIdle()
+            assertThat(state.textEditorState.messageHtml()).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `BUG041 original restored editor is cleared by its consumed storage version`() = runTest {
+        val queried = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val original = ComposerDraft(A_MESSAGE, A_MESSAGE, ComposerDraftType.NewMessage)
+        var once = true
+        val saved = mutableListOf<ComposerDraft?>()
+        val drafts = FakeComposerDraftService().apply {
+            loadDraftLambda = { _, _, _ -> original }
+            saveDraftLambda = { _, _, draft, _ -> saved += draft }
+            textDraftVersionLambda = { "original-version" }
+            reconcileSentTextDraftLambda = {
+                if (once) {
+                    once = false
+                    queried.complete(Unit)
+                    release.await()
+                    io.element.android.features.messages.impl.draft.ConsumedTextDraft("original-version", original)
+                } else null
+            }
+        }
+        val presenter = createPresenter(draftService = drafts)
+        presenter.test {
+            val state = awaitFirstItem()
+            queried.await()
+            assertThat(state.textEditorState.messageHtml()).isEqualTo(A_MESSAGE)
+            // Programmatic restoration may emit a typing notice. That is not a newer user edit.
+            state.eventSink(MessageComposerEvent.TypingNotice(true))
+            state.eventSink(MessageComposerEvent.ToggleFullScreenState)
+            // Background/pause saves without an edit must keep the original pending version.
+            state.eventSink(MessageComposerEvent.SaveDraft)
+            runCurrent()
+            assertThat(saved).isEmpty()
+            release.complete(Unit)
+            advanceUntilIdle()
+            // The rich editor consumes a queued view action outside the test scheduler.
+            waitForPredicate { state.textEditorState.messageHtml() == "" }
+            assertThat(state.textEditorState.messageHtml()).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `BUG041 unsaved later identical user edit survives original receipt`() = runTest {
+        val queried = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val original = ComposerDraft(A_MESSAGE, A_MESSAGE, ComposerDraftType.NewMessage)
+        var once = true
+        val saved = mutableListOf<ComposerDraft?>()
+        val drafts = FakeComposerDraftService().apply {
+            loadDraftLambda = { _, _, _ -> original }
+            saveDraftLambda = { _, _, draft, _ -> saved += draft }
+            textDraftVersionLambda = { "original-version" }
+            reconcileSentTextDraftLambda = {
+                if (once) {
+                    once = false
+                    queried.complete(Unit)
+                    release.await()
+                    io.element.android.features.messages.impl.draft.ConsumedTextDraft("original-version", original)
+                } else null
+            }
+        }
+        val presenter = createPresenter(draftService = drafts)
+        presenter.test {
+            val state = awaitFirstItem()
+            queried.await()
+            state.textEditorState.setHtml("")
+            state.eventSink(MessageComposerEvent.TypingNotice(false))
+            runCurrent()
+            state.textEditorState.setHtml(A_MESSAGE)
+            state.eventSink(MessageComposerEvent.TypingNotice(true))
+            runCurrent()
+            state.eventSink(MessageComposerEvent.SaveDraft)
+            runCurrent()
+            assertThat(saved.last()?.plainText).isEqualTo(A_MESSAGE)
+            release.complete(Unit)
+            advanceUntilIdle()
+            assertThat(state.textEditorState.messageHtml()).isEqualTo(A_MESSAGE)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `BUG041 identical new input while initial draft query waits keeps its user ownership`() = runTest {
+        val loading = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val original = ComposerDraft(A_MESSAGE, A_MESSAGE, ComposerDraftType.NewMessage)
+        val saved = mutableListOf<ComposerDraft?>()
+        val base = FakeComposerDraftService().apply {
+            saveDraftLambda = { _, _, draft, _ -> saved += draft }
+            textDraftVersionLambda = { "original-version" }
+            reconcileSentTextDraftLambda = {
+                io.element.android.features.messages.impl.draft.ConsumedTextDraft("original-version", original)
+            }
+        }
+        val drafts = object : ComposerDraftService by base {
+            override suspend fun loadDraft(roomId: RoomId, threadRoot: ThreadId?, isVolatile: Boolean): ComposerDraft? {
+                loading.complete(Unit)
+                release.await()
+                return original
+            }
+        }
+        createPresenter(draftService = drafts).test {
+            val state = awaitFirstItem()
+            loading.await()
+            state.textEditorState.setHtml(A_MESSAGE)
+            state.eventSink(MessageComposerEvent.TypingNotice(true))
+            runCurrent()
+            release.complete(Unit)
+            advanceUntilIdle()
+            assertThat(state.textEditorState.messageHtml()).isEqualTo(A_MESSAGE)
+            assertThat(saved.last()?.plainText).isEqualTo(A_MESSAGE)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
 
     @Test
     fun `present - initial state`() = runTest {
         val presenter = createPresenter()
         presenter.test {
             val initialState = awaitFirstItem()
+            assertThat(initialState.commonInfoRepository).isNotNull()
             assertThat(initialState.isFullScreen).isFalse()
             assertThat(initialState.textEditorState.messageHtml()).isEqualTo("")
             assertThat(initialState.mode).isEqualTo(MessageComposerMode.Normal)
@@ -264,6 +446,16 @@ class MessageComposerPresenterTest {
 
     @Test
     fun `present - change mode to edit caption and send the caption`() = runTest {
+        val savedDrafts = mutableListOf<Pair<ComposerDraft?, Boolean>>()
+        val clearedVersions = mutableListOf<String?>()
+        val draftService = FakeComposerDraftService().apply {
+            saveDraftLambda = { _, _, draft, isVolatile -> savedDrafts += draft to isVolatile }
+            captureProtectedCaptionDraftVersionLambda = { _, _ -> "draft-v1" }
+            clearProtectedCaptionDraftIfVersionLambda = { _, _, version ->
+                clearedVersions += version
+                true
+            }
+        }
         val editCaptionLambda = lambdaRecorder { _: EventOrTransactionId, _: String?, _: String? ->
             Result.success(Unit)
         }
@@ -277,6 +469,7 @@ class MessageComposerPresenterTest {
         val presenter = createPresenter(
             room = joinedRoom,
             isRichTextEditorEnabled = false,
+            draftService = draftService,
         )
         val permalinkBuilder = FakePermalinkBuilder(permalinkForUserLambda = { Result.success("") })
         presenter.test {
@@ -301,6 +494,124 @@ class MessageComposerPresenterTest {
             assert(editCaptionLambda)
                 .isCalledOnce()
                 .with(value(AN_EVENT_ID.toEventOrTransactionId()), value(A_CAPTION), value(null))
+            assertThat(clearedVersions).containsExactly("draft-v1")
+        }
+    }
+
+    @Test
+    fun `present - successful caption edit does not clear a replacement draft`() = runTest {
+        val draftService = FakeComposerDraftService().apply {
+            captureProtectedCaptionDraftVersionLambda = { _, _ -> "draft-v1" }
+            clearProtectedCaptionDraftIfVersionLambda = { _, _, expected ->
+                assertThat(expected).isEqualTo("draft-v1")
+                false // A controlled save-vs-clear interleaving installed draft-v2.
+            }
+        }
+        val timeline = FakeTimeline().apply {
+            editCaptionLambda = { _, _, _ -> Result.success(Unit) }
+        }
+        val presenter = createPresenter(
+            room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+            isRichTextEditorEnabled = false,
+            draftService = draftService,
+        )
+        val permalinkBuilder = FakePermalinkBuilder(permalinkForUserLambda = { Result.success("") })
+        presenter.test {
+            var state = awaitFirstItem()
+            val mode = anEditCaptionMode(caption = A_CAPTION)
+            state.eventSink(MessageComposerEvent.SetMode(mode))
+            state = awaitItem()
+            state.eventSink(MessageComposerEvent.SendMessage)
+            advanceUntilIdle()
+            // A rejected versioned clear deliberately leaves the composer unchanged.
+            expectNoEvents()
+            val current = state
+            assertThat(current.mode).isEqualTo(mode)
+            assertThat(current.textEditorState.messageMarkdown(permalinkBuilder)).isEqualTo(A_CAPTION)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - clear success fences a SaveDraft queued with the sent caption`() = runTest {
+        val clearStarted = CompletableDeferred<Unit>()
+        val allowClear = CompletableDeferred<Unit>()
+        val savedDrafts = mutableListOf<ComposerDraft?>()
+        val draftService = FakeComposerDraftService().apply {
+            captureProtectedCaptionDraftVersionLambda = { _, _ -> "draft-v1" }
+            clearProtectedCaptionDraftIfVersionLambda = { _, _, _ ->
+                clearStarted.complete(Unit)
+                allowClear.await()
+                true
+            }
+            saveDraftLambda = { _, _, draft, _ -> savedDrafts += draft }
+        }
+        val timeline = FakeTimeline().apply {
+            editCaptionLambda = { _, _, _ -> Result.success(Unit) }
+        }
+        val presenter = createPresenter(
+            room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+            isRichTextEditorEnabled = false,
+            draftService = draftService,
+        )
+        presenter.test {
+            var state = awaitFirstItem()
+            state.eventSink(MessageComposerEvent.SetMode(anEditCaptionMode(caption = A_CAPTION)))
+            state = awaitItem()
+            state.eventSink(MessageComposerEvent.SendMessage)
+            clearStarted.await()
+            // Captures the still-visible sent caption, then queues behind the clear/reset mutex.
+            state.eventSink(MessageComposerEvent.SaveDraft)
+            allowClear.complete(Unit)
+            advanceUntilIdle()
+            assertThat(savedDrafts.filter { it?.draftType is ComposerDraftType.EditCaption }).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - old cleanup cannot reset a new same-text caption edit generation`() = runTest {
+        val clearStarted = CompletableDeferred<Unit>()
+        val allowOldClear = CompletableDeferred<Unit>()
+        val savedDrafts = mutableListOf<ComposerDraft?>()
+        val draftService = FakeComposerDraftService().apply {
+            captureProtectedCaptionDraftVersionLambda = { _, _ -> "draft-v1" }
+            clearProtectedCaptionDraftIfVersionLambda = { _, _, _ ->
+                clearStarted.complete(Unit)
+                allowOldClear.await()
+                true
+            }
+            saveDraftLambda = { _, _, draft, _ -> savedDrafts += draft }
+        }
+        val timeline = FakeTimeline().apply {
+            editCaptionLambda = { _, _, _ -> Result.success(Unit) }
+        }
+        val presenter = createPresenter(
+            room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+            isRichTextEditorEnabled = false,
+            draftService = draftService,
+        )
+        presenter.test {
+            var state = awaitFirstItem()
+            val sameTextMode = anEditCaptionMode(caption = A_CAPTION)
+            state.eventSink(MessageComposerEvent.SetMode(sameTextMode))
+            state = awaitItem()
+            state.eventSink(MessageComposerEvent.SendMessage)
+            clearStarted.await()
+
+            // Starts a distinct edit generation while old send cleanup is suspended.
+            state.eventSink(MessageComposerEvent.SetMode(sameTextMode))
+            allowOldClear.complete(Unit)
+            advanceUntilIdle()
+            // Equal mode/text need not emit a new Compose state; generation is internal.
+            expectNoEvents()
+            val newSession = state
+            assertThat(newSession.mode).isEqualTo(sameTextMode)
+            assertThat(newSession.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo(A_CAPTION)
+            newSession.eventSink(MessageComposerEvent.SaveDraft)
+            advanceUntilIdle()
+            assertThat(savedDrafts.filter { it?.draftType is ComposerDraftType.EditCaption }).hasSize(1)
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
@@ -412,6 +723,241 @@ class MessageComposerPresenterTest {
     }
 
     @Test
+    fun `present - send retains room before lifecycle admission and releases after enqueue`() = runTest {
+        var retained = false
+        var closing = false
+        var destroyed = false
+        var sent = 0
+        val timeline = FakeTimeline().apply {
+            sendMessageLambda = { _, _, _, _, _ ->
+                check(retained && !destroyed)
+                sent++
+                Result.success(Unit)
+            }
+        }
+        val room = object : JoinedRoom by FakeJoinedRoom(
+            liveTimeline = timeline,
+            typingNoticeResult = { Result.success(Unit) },
+        ) {
+            override suspend fun <T> withSendLifetime(block: suspend () -> T): T {
+                check(!closing)
+                retained = true
+                try {
+                    return block()
+                } finally {
+                    retained = false
+                    if (closing) destroyed = true
+                }
+            }
+
+            override fun destroy() {
+                closing = true
+                if (!retained) destroyed = true
+            }
+        }
+        val coordinator = FakeAppOperationalStateCoordinator(startFailure = {
+            if (it.lifecycleId == io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_13) {
+                // Reproduce Back during the first remote admission, before Matrix protection starts.
+                room.destroy()
+                check(retained && !destroyed)
+            }
+            null
+        })
+        val presenter = createPresenter(
+            room = room,
+            appOperationalStateCoordinator = coordinator,
+            slashCommandService = FakeSlashCommandService(parseResult = { _, _, _ -> SlashCommand.NotACommand }),
+        )
+        presenter.test {
+            val state = awaitFirstItem()
+            state.textEditorState.setHtml(A_MESSAGE)
+            state.eventSink(MessageComposerEvent.SendMessage)
+            advanceUntilIdle()
+            assertThat(sent).isEqualTo(1)
+            assertThat(retained).isFalse()
+            assertThat(destroyed).isTrue()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - ordinary text clears before remote admission and keeps later draft`() = runTest {
+        val admitted = CompletableDeferred<Unit>()
+        val allowAdmission = CompletableDeferred<Unit>()
+        val fakeCoordinator = FakeAppOperationalStateCoordinator()
+        val coordinator = object : io.element.android.security.dataprotection.api.AppOperationalStateCoordinator by fakeCoordinator {
+            override suspend fun start(request: io.element.android.security.dataprotection.api.LifecycleOperationRequest):
+                io.element.android.security.dataprotection.api.LifecycleOperation {
+                if (request.trigger == "send") {
+                    admitted.complete(Unit)
+                    allowAdmission.await()
+                }
+                return fakeCoordinator.start(request)
+            }
+        }
+        val sent = mutableListOf<String>()
+        val timeline = FakeTimeline().apply {
+            sendMessageLambda = { body, _, _, _, _ -> sent += body; Result.success(Unit) }
+        }
+        val presenter = createPresenter(
+            room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+            appOperationalStateCoordinator = coordinator,
+            slashCommandService = FakeSlashCommandService(parseResult = { _, _, _ -> SlashCommand.NotACommand }),
+        )
+        presenter.test {
+            val state = awaitFirstItem()
+            state.textEditorState.setHtml(A_MESSAGE)
+            state.eventSink(MessageComposerEvent.SendMessage)
+            admitted.await()
+            assertThat(state.textEditorState.messageHtml()).isEmpty()
+            assertThat(sent).isEmpty()
+            state.textEditorState.setHtml(ANOTHER_MESSAGE)
+            allowAdmission.complete(Unit)
+            advanceUntilIdle()
+            assertThat(sent).containsExactly(A_MESSAGE)
+            assertThat(state.textEditorState.messageHtml()).isEqualTo(ANOTHER_MESSAGE)
+            val admittedRequest = fakeCoordinator.startedRequests.single { it.trigger == "send" }
+            assertThat(admittedRequest.accountIdHash).isEqualTo(accountIdHash(FakeMatrixClient().sessionId.value))
+            assertThat(admittedRequest.matrixDeviceIdHash).isEqualTo(accountIdHash(FakeMatrixClient().deviceId.value))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - next text sends while previous protected transport is pending`() = runTest {
+        val firstStarted = CompletableDeferred<Unit>()
+        val allowFirst = CompletableDeferred<Unit>()
+        val sent = mutableListOf<String>()
+        val timeline = object : Timeline by FakeTimeline() {
+            override suspend fun sendMessage(
+                body: String,
+                htmlBody: String?,
+                intentionalMentions: List<IntentionalMention>,
+                msgType: MsgType,
+                asPlainText: Boolean,
+            ): Result<Unit> {
+                sent += body
+                if (body == A_MESSAGE) { firstStarted.complete(Unit); allowFirst.await() }
+                return Result.success(Unit)
+            }
+            override suspend fun sendMessageTransaction(
+                transactionId: io.element.android.libraries.matrix.api.core.TransactionId,
+                body: String,
+                htmlBody: String?,
+                intentionalMentions: List<IntentionalMention>,
+                repliedToEventId: EventId?,
+                msgType: MsgType,
+                asPlainText: Boolean,
+            ): Result<Unit> {
+                return sendMessage(body, htmlBody, intentionalMentions, msgType, asPlainText)
+            }
+        }
+        val presenter = createPresenter(
+            room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+            slashCommandService = FakeSlashCommandService(parseResult = { _, _, _ -> SlashCommand.NotACommand }),
+        )
+        presenter.test {
+            val state = awaitFirstItem()
+            state.textEditorState.setHtml(A_MESSAGE)
+            state.eventSink(MessageComposerEvent.SendMessage)
+            firstStarted.await()
+            state.textEditorState.setHtml(ANOTHER_MESSAGE)
+            state.eventSink(MessageComposerEvent.SendMessage)
+            advanceUntilIdle()
+            assertThat(sent).containsExactly(A_MESSAGE, ANOTHER_MESSAGE).inOrder()
+            allowFirst.complete(Unit)
+            advanceUntilIdle()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - repeated send taps submit one message`() = runTest {
+        val sendMessageResult = lambdaRecorder { _: String, _: String?, _: List<IntentionalMention>, _: MsgType, _: Boolean ->
+            Result.success(Unit)
+        }
+        val presenter = createPresenter(
+            room = FakeJoinedRoom(
+                liveTimeline = FakeTimeline().apply { sendMessageLambda = sendMessageResult },
+                typingNoticeResult = { Result.success(Unit) },
+            ),
+            slashCommandService = FakeSlashCommandService(
+                parseResult = { _, _, _ -> SlashCommand.NotACommand }
+            ),
+        )
+
+        presenter.test {
+            val state = awaitFirstItem()
+            state.textEditorState.setHtml(A_MESSAGE)
+            state.eventSink(MessageComposerEvent.SendMessage)
+            state.eventSink(MessageComposerEvent.SendMessage)
+
+            advanceUntilIdle()
+
+            sendMessageResult.assertions().isCalledOnce()
+                .with(value(A_MESSAGE), any(), value(emptyList<IntentionalMention>()), value(MsgType.MSG_TYPE_TEXT), value(false))
+        }
+    }
+
+    @Test
+    fun `present - empty send request is ignored`() = runTest {
+        val sendMessageResult = lambdaRecorder(ensureNeverCalled = true) { _: String, _: String?, _: List<IntentionalMention>, _: MsgType, _: Boolean ->
+            Result.success(Unit)
+        }
+        val presenter = createPresenter(
+            room = FakeJoinedRoom(
+                liveTimeline = FakeTimeline().apply { sendMessageLambda = sendMessageResult },
+                typingNoticeResult = { Result.success(Unit) },
+            ),
+            slashCommandService = FakeSlashCommandService(
+                parseResult = { _, _, _ -> SlashCommand.NotACommand }
+            ),
+        )
+
+        presenter.test {
+            val state = awaitFirstItem()
+            state.eventSink(MessageComposerEvent.SendMessage)
+
+            advanceUntilIdle()
+
+            sendMessageResult.assertions().isNeverCalled()
+        }
+    }
+
+    @Test
+    fun `present - failed send clears composer immediately and exposes the error`() = runTest {
+        val failure = IllegalStateException("Secure delivery is unavailable")
+        val presenter = createPresenter(
+            room = FakeJoinedRoom(
+                liveTimeline = FakeTimeline().apply {
+                    sendMessageLambda = { _, _, _, _, _ -> Result.failure(failure) }
+                },
+                typingNoticeResult = { Result.success(Unit) }
+            ),
+            slashCommandService = FakeSlashCommandService(
+                parseResult = { _, _, _ -> SlashCommand.NotACommand }
+            ),
+        )
+        moleculeFlow(RecompositionMode.Immediate) {
+            val state = presenter.present()
+            remember(state, state.textEditorState.messageHtml(), state.slashCommandAction) { state }
+        }.test {
+            val initialState = awaitFirstItem()
+            initialState.textEditorState.setHtml(A_MESSAGE)
+            val withMessageState = awaitItem()
+            withMessageState.eventSink.invoke(MessageComposerEvent.SendMessage)
+
+            var failedState = awaitItem()
+            while (failedState.slashCommandAction !is AsyncAction.Failure) {
+                failedState = awaitItem()
+            }
+            assertThat(failedState.textEditorState.messageHtml()).isEmpty()
+            assertThat(failedState.slashCommandAction).isEqualTo(AsyncAction.Failure(failure))
+            assertThat(analyticsService.capturedEvents).isEmpty()
+        }
+    }
+
+    @Test
     fun `present - send message with plain text enabled`() = runTest {
         val permalinkBuilder = FakePermalinkBuilder(permalinkForUserLambda = { Result.success("") })
         val presenter = createPresenter(
@@ -503,27 +1049,23 @@ class MessageComposerPresenterTest {
     }
 
     @Test
-    fun `present - edit sent message event not found`() = runTest {
+    fun `present - protected edit event not found fails closed and preserves draft`() = runTest {
         val timelineEditMessageLambda = lambdaRecorder { _: EventOrTransactionId, _: String, _: String?, _: List<IntentionalMention> ->
             Result.failure<Unit>(TimelineException.EventNotFound)
         }
         val timeline = FakeTimeline().apply {
             this.editMessageLambda = timelineEditMessageLambda
         }
-        val roomEditMessageLambda = lambdaRecorder { _: EventId?, _: String, _: String?, _: List<IntentionalMention> ->
-            Result.success(Unit)
-        }
         val joinedRoom = FakeJoinedRoom(
             liveTimeline = timeline,
             typingNoticeResult = { Result.success(Unit) },
-            editMessageLambda = roomEditMessageLambda,
         )
         val presenter = createPresenter(
             joinedRoom,
         )
         moleculeFlow(RecompositionMode.Immediate) {
             val state = presenter.present()
-            remember(state, state.textEditorState.messageHtml()) { state }
+            remember(state, state.textEditorState.messageHtml(), state.slashCommandAction) { state }
         }.test {
             val initialState = awaitFirstItem()
             assertThat(initialState.textEditorState.messageHtml()).isEqualTo("")
@@ -536,28 +1078,19 @@ class MessageComposerPresenterTest {
             val withEditedMessageState = awaitItem()
             assertThat(withEditedMessageState.textEditorState.messageHtml()).isEqualTo(ANOTHER_MESSAGE)
             withEditedMessageState.eventSink.invoke(MessageComposerEvent.SendMessage)
-            skipItems(1)
-            val messageSentState = awaitItem()
-            assertThat(messageSentState.textEditorState.messageHtml()).isEqualTo("")
-
             advanceUntilIdle()
+
+            val failedState = awaitItem()
+            assertThat(failedState.mode).isEqualTo(mode)
+            assertThat(failedState.textEditorState.messageHtml()).isEqualTo(ANOTHER_MESSAGE)
+            assertThat(failedState.slashCommandAction).isEqualTo(AsyncAction.Failure(TimelineException.EventNotFound))
 
             assert(timelineEditMessageLambda)
                 .isCalledOnce()
                 .with(value(AN_EVENT_ID.toEventOrTransactionId()), value(ANOTHER_MESSAGE), value(ANOTHER_MESSAGE), any())
 
-            assert(roomEditMessageLambda)
-                .isCalledOnce()
-                .with(value(AN_EVENT_ID), value(ANOTHER_MESSAGE), value(ANOTHER_MESSAGE), any())
-
-            assertThat(analyticsService.capturedEvents).containsExactly(
-                Composer(
-                    inThread = false,
-                    isEditing = true,
-                    isReply = false,
-                    messageType = Composer.MessageType.Text,
-                )
-            )
+            // A protected edit that never commits must not be reported as a sent message.
+            assertThat(analyticsService.capturedEvents).isEmpty()
         }
     }
 
@@ -684,16 +1217,21 @@ class MessageComposerPresenterTest {
 
     @Test
     fun `present - Pick image from gallery`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
         val room = FakeJoinedRoom(
             typingNoticeResult = { Result.success(Unit) }
         )
-        val onPreviewAttachmentLambda = lambdaRecorder { _: ImmutableList<Attachment>, _: EventId? -> }
+        var previewAttachments: ImmutableList<Attachment>? = null
+        val onPreviewAttachmentLambda = lambdaRecorder { attachments: ImmutableList<Attachment>, _: EventId? ->
+            previewAttachments = attachments
+        }
         val navigator = FakeMessagesNavigator(
             onPreviewAttachmentLambda = onPreviewAttachmentLambda
         )
         val presenter = createPresenter(
             room = room,
             navigator = navigator,
+            appOperationalStateCoordinator = coordinator,
         )
         pickerProvider.givenMimeType(MimeTypes.Images)
         mediaPreProcessor.givenResult(
@@ -716,7 +1254,13 @@ class MessageComposerPresenterTest {
         presenter.test {
             val initialState = awaitFirstItem()
             initialState.eventSink(MessageComposerEvent.PickAttachmentSource.FromGallery)
+            advanceUntilIdle()
             onPreviewAttachmentLambda.assertions().isCalledOnce()
+            val request = coordinator.startedRequests.single()
+            val localMedia = (previewAttachments?.single() as Attachment.Media).localMedia
+            assertThat(localMedia.lifecycleOperationId).isEqualTo("fake-picked-${request.operationId}-0")
+            assertThat(localMedia.lifecycleRoomIdHash).isEqualTo(request.roomIdHash)
+            assertThat(pickerProvider.completedOperationIds).containsExactly(request.operationId)
         }
     }
 
@@ -761,7 +1305,8 @@ class MessageComposerPresenterTest {
 
     @Test
     fun `present - Pick media from gallery & cancel does nothing`() = runTest {
-        val presenter = createPresenter()
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val presenter = createPresenter(appOperationalStateCoordinator = coordinator)
         with(pickerProvider) {
             givenResult(null) // Simulate a user canceling the flow
             givenMimeType(MimeTypes.Images)
@@ -769,7 +1314,267 @@ class MessageComposerPresenterTest {
         presenter.test {
             val initialState = awaitFirstItem()
             initialState.eventSink(MessageComposerEvent.PickAttachmentSource.FromGallery)
-            // No crashes here, otherwise it fails
+            advanceUntilIdle()
+            assertThat(pickerProvider.completedOperationIds).containsExactly(coordinator.startedRequests.single().operationId)
+            assertThat(coordinator.startedRequests.single().accountIdHash).isNotNull()
+            assertThat(coordinator.startedRequests.single().matrixDeviceIdHash).isNotNull()
+            assertThat(coordinator.clientReceipts).hasSize(2)
+            assertThat(coordinator.clientReceipts.map { it.operationId }.distinct())
+                .containsExactly(coordinator.startedRequests.single().operationId)
+            assertThat(coordinator.clientReceipts.map { it.resultCode }.distinct()).containsExactly("GALLERY_PICK_CANCELLED")
+        }
+    }
+
+    @Test
+    fun `present - gallery result with mismatched room authority is rejected`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val onPreviewAttachmentLambda = lambdaRecorder { _: ImmutableList<Attachment>, _: EventId? -> }
+        val presenter = createPresenter(
+            navigator = FakeMessagesNavigator(onPreviewAttachmentLambda = onPreviewAttachmentLambda),
+            appOperationalStateCoordinator = coordinator,
+        )
+        pickerProvider.givenMimeType(MimeTypes.Images)
+        pickerProvider.givenOperationTransform { operation ->
+            operation.copy(roomIdHash = "b".repeat(64))
+        }
+
+        presenter.test {
+            val initialState = awaitFirstItem()
+            initialState.eventSink(MessageComposerEvent.PickAttachmentSource.FromGallery)
+            advanceUntilIdle()
+
+            onPreviewAttachmentLambda.assertions().isNeverCalled()
+            assertThat(pickerProvider.completedOperationIds).containsExactly(coordinator.startedRequests.single().operationId)
+            assertThat(coordinator.clientReceipts).isEmpty()
+        }
+    }
+
+    @Test
+    fun `present - gallery cancellation with failed cleanup cannot receipt success`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val presenter = createPresenter(appOperationalStateCoordinator = coordinator)
+        pickerProvider.givenResult(null)
+        pickerProvider.completeOperationResult = false
+        presenter.test {
+            awaitFirstItem().eventSink(MessageComposerEvent.PickAttachmentSource.FromGallery)
+            advanceUntilIdle()
+            assertThat(coordinator.clientReceipts).isEmpty()
+            assertThat(pickerProvider.completedOperationIds).containsExactly(coordinator.startedRequests.single().operationId)
+        }
+    }
+
+    @Test
+    fun `present - gallery cancellation from another account cannot receipt success`() = runTest {
+        val base = FakeAppOperationalStateCoordinator()
+        val coordinator = object : io.element.android.security.dataprotection.api.AppOperationalStateCoordinator by base {
+            override suspend fun operation(operationId: String): io.element.android.security.dataprotection.api.LifecycleOperation {
+                val operation = base.operation(operationId)
+                return operation.copy(subjects = operation.subjects.copy(accountIdHash = "a".repeat(64)))
+            }
+        }
+        val presenter = createPresenter(appOperationalStateCoordinator = coordinator)
+        pickerProvider.givenResult(null)
+        presenter.test {
+            awaitFirstItem().eventSink(MessageComposerEvent.PickAttachmentSource.FromGallery)
+            advanceUntilIdle()
+            assertThat(base.clientReceipts).isEmpty()
+            assertThat(pickerProvider.completedOperationIds).containsExactly(base.startedRequests.single().operationId)
+        }
+    }
+
+    @Test
+    fun `present - camera cancellation receipts the original operation after cleanup`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val presenter = createPresenter(
+            permissionPresenter = FakePermissionsPresenter().apply { setPermissionGranted() },
+            appOperationalStateCoordinator = coordinator,
+        )
+        pickerProvider.givenResult(null)
+        presenter.test {
+            awaitFirstItem().eventSink(MessageComposerEvent.PickAttachmentSource.PhotoFromCamera)
+            advanceUntilIdle()
+            val operationId = coordinator.startedRequests.single().operationId
+            assertThat(pickerProvider.completedOperationIds).containsExactly(operationId)
+            assertThat(coordinator.clientReceipts).hasSize(2)
+            assertThat(coordinator.clientReceipts.map { it.operationId }.distinct()).containsExactly(operationId)
+            assertThat(coordinator.clientReceipts.map { it.resultCode }.distinct()).containsExactly("CAMERA_PICK_CANCELLED")
+        }
+    }
+
+    @Test
+    fun `camera cancellation survives receipt handoff failure and reopens with original fact`() = runTest {
+        val base = FakeAppOperationalStateCoordinator()
+        pickerProvider.givenResult(null)
+        val failing = object : AppOperationalStateCoordinator by base {
+            override suspend fun enqueueClientReceipts(receipts: List<LifecycleClientReceipt>) {
+                error("Simulated durable receipt storage failure")
+            }
+        }
+        val first = createPresenter(
+            permissionPresenter = FakePermissionsPresenter().apply { setPermissionGranted() },
+            appOperationalStateCoordinator = failing,
+        )
+        first.test {
+            awaitFirstItem().eventSink(MessageComposerEvent.PickAttachmentSource.PhotoFromCamera)
+            advanceUntilIdle()
+            assertThat(base.clientReceipts).isEmpty()
+            assertThat(pickerProvider.pendingCancellations()).hasSize(1)
+            cancelAndIgnoreRemainingEvents()
+        }
+        val original = pickerProvider.pendingCancellations().single()
+        createPresenter(appOperationalStateCoordinator = base).test {
+            awaitFirstItem()
+            advanceUntilIdle()
+            assertThat(base.clientReceipts).hasSize(2)
+            assertThat(base.clientReceipts.map { it.operationId }.distinct()).containsExactly(original.operation.operationId)
+            assertThat(base.clientReceipts.map { it.occurredAtEpochMillis }.distinct()).containsExactly(original.completedAtEpochMillis)
+            assertThat(base.clientReceipts.map { it.resultCode }.distinct()).containsExactly("CAMERA_PICK_CANCELLED")
+            assertThat(pickerProvider.pendingCancellations()).isEmpty()
+            assertThat(base.startedRequests).hasSize(1)
+            assertThat(pickerProvider.completedOperationIds).containsExactly(original.operation.operationId)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `cold cancellation recovery rejects changed account device room time or lifecycle`() = runTest {
+        val base = FakeAppOperationalStateCoordinator()
+        pickerProvider.givenResult(null)
+        val first = createPresenter(
+            permissionPresenter = FakePermissionsPresenter().apply { setPermissionGranted() },
+            appOperationalStateCoordinator = base,
+        )
+        pickerProvider.acknowledgeCancellationResult = false
+        first.test {
+            awaitFirstItem().eventSink(MessageComposerEvent.PickAttachmentSource.PhotoFromCamera)
+            advanceUntilIdle()
+            cancelAndIgnoreRemainingEvents()
+        }
+        val original = pickerProvider.pendingCancellations().single()
+        val authority = base.operation(original.operation.operationId)
+        base.clientReceipts.clear()
+        pickerProvider.acknowledgeCancellationResult = true
+        listOf(
+            authority.copy(operationId = "another-operation-0001"),
+            authority.copy(lifecycleId = io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_16),
+            authority.copy(subjects = authority.subjects.copy(accountIdHash = "a".repeat(64))),
+            authority.copy(subjects = authority.subjects.copy(matrixDeviceIdHash = "a".repeat(64))),
+            authority.copy(subjects = authority.subjects.copy(roomIdHash = "a".repeat(64))),
+            authority.copy(createdAtEpochMillis = authority.createdAtEpochMillis - 1),
+            authority.copy(deadlineEpochMillis = authority.deadlineEpochMillis + 1),
+        ).forEach { changed ->
+            val coordinator = object : AppOperationalStateCoordinator by base {
+                override suspend fun operation(operationId: String) = changed
+            }
+            createPresenter(appOperationalStateCoordinator = coordinator).test {
+                awaitFirstItem()
+                advanceUntilIdle()
+                assertThat(base.clientReceipts).isEmpty()
+                assertThat(pickerProvider.pendingCancellations()).containsExactly(original)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+    }
+
+    @Test
+    fun `expired cancellation recovery retains original deadline and completion time without launching picker`() = runTest {
+        val base = FakeAppOperationalStateCoordinator()
+        pickerProvider.givenResult(null)
+        pickerProvider.acknowledgeCancellationResult = false
+        createPresenter(
+            permissionPresenter = FakePermissionsPresenter().apply { setPermissionGranted() },
+            appOperationalStateCoordinator = base,
+        ).test {
+            awaitFirstItem().eventSink(MessageComposerEvent.PickAttachmentSource.PhotoFromCamera)
+            advanceUntilIdle()
+            cancelAndIgnoreRemainingEvents()
+        }
+        val retained = pickerProvider.pendingCancellations().single()
+        val now = System.currentTimeMillis()
+        val original = MediaPickCancellation(retained.operation.copy(createdAtEpochMillis = now - 10_000, deadlineEpochMillis = now - 5_000), now - 9_000)
+        pickerProvider.cancellationFacts.clear()
+        pickerProvider.cancellationFacts += original
+        pickerProvider.acknowledgeCancellationResult = true
+        val authority = base.operation(original.operation.operationId).copy(
+            createdAtEpochMillis = original.operation.createdAtEpochMillis,
+            deadlineEpochMillis = original.operation.deadlineEpochMillis,
+        )
+        val enqueued = mutableListOf<LifecycleClientReceipt>()
+        val coordinator = object : AppOperationalStateCoordinator by base {
+            override suspend fun operation(operationId: String) = authority
+            override suspend fun enqueueClientReceipts(receipts: List<LifecycleClientReceipt>) {
+                enqueued += receipts
+            }
+        }
+        base.clientReceipts.clear()
+        pickerProvider.completedOperationIds.clear()
+        createPresenter(appOperationalStateCoordinator = coordinator).test {
+            awaitFirstItem()
+            advanceUntilIdle()
+            assertThat(enqueued).hasSize(2)
+            assertThat(enqueued.map { it.operationId }.distinct()).containsExactly(original.operation.operationId)
+            assertThat(enqueued.map { it.occurredAtEpochMillis }.distinct()).containsExactly(original.completedAtEpochMillis)
+            assertThat(pickerProvider.pendingCancellations()).isEmpty()
+            assertThat(pickerProvider.completedOperationIds).isEmpty()
+            assertThat(base.startedRequests).hasSize(1)
+            assertThat(coordinator.operation(original.operation.operationId).deadlineEpochMillis).isEqualTo(original.operation.deadlineEpochMillis)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - camera cancellation with journal cleanup failure cannot receipt success`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val presenter = createPresenter(
+            permissionPresenter = FakePermissionsPresenter().apply { setPermissionGranted() },
+            appOperationalStateCoordinator = coordinator,
+        )
+        pickerProvider.givenResult(null)
+        pickerProvider.completeOperationResult = false
+        presenter.test {
+            awaitFirstItem().eventSink(MessageComposerEvent.PickAttachmentSource.PhotoFromCamera)
+            advanceUntilIdle()
+            assertThat(coordinator.clientReceipts).isEmpty()
+            assertThat(pickerProvider.completedOperationIds).containsExactly(coordinator.startedRequests.single().operationId)
+        }
+    }
+
+    @Test
+    fun `present - camera plaintext cleanup failure retains the recovery journal and submits no receipt`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val presenter = createPresenter(
+            permissionPresenter = FakePermissionsPresenter().apply { setPermissionGranted() },
+            appOperationalStateCoordinator = coordinator,
+        )
+        pickerProvider.givenResult(null)
+        pickerProvider.operationFailureReason = io.element.android.libraries.mediapickers.api.MediaPickFailureReason.TEMPORARY_FILE_CLEANUP_FAILED
+        presenter.test {
+            awaitFirstItem().eventSink(MessageComposerEvent.PickAttachmentSource.PhotoFromCamera)
+            advanceUntilIdle()
+            assertThat(coordinator.clientReceipts).isEmpty()
+            assertThat(pickerProvider.completedOperationIds).isEmpty()
+        }
+    }
+
+    @Test
+    fun `present - camera cancellation from another account cannot receipt success`() = runTest {
+        val base = FakeAppOperationalStateCoordinator()
+        val coordinator = object : io.element.android.security.dataprotection.api.AppOperationalStateCoordinator by base {
+            override suspend fun operation(operationId: String): io.element.android.security.dataprotection.api.LifecycleOperation {
+                val operation = base.operation(operationId)
+                return operation.copy(subjects = operation.subjects.copy(accountIdHash = "a".repeat(64)))
+            }
+        }
+        val presenter = createPresenter(
+            permissionPresenter = FakePermissionsPresenter().apply { setPermissionGranted() },
+            appOperationalStateCoordinator = coordinator,
+        )
+        pickerProvider.givenResult(null)
+        presenter.test {
+            awaitFirstItem().eventSink(MessageComposerEvent.PickAttachmentSource.PhotoFromCamera)
+            advanceUntilIdle()
+            assertThat(base.clientReceipts).isEmpty()
+            assertThat(pickerProvider.completedOperationIds).containsExactly(base.startedRequests.single().operationId)
         }
     }
 
@@ -869,6 +1674,48 @@ class MessageComposerPresenterTest {
             initialState.eventSink(MessageComposerEvent.PickAttachmentSource.PhotoFromCamera)
             permissionPresenter.setPermissionGranted()
             onPreviewAttachmentLambda.assertions().isCalledOnce()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `camera denial exposes settings recovery and resumes original photo once`() = runTest {
+        val permissionPresenter = FakePermissionsPresenter().apply { setPermissionDenied() }
+        val preview = lambdaRecorder { _: ImmutableList<Attachment>, _: EventId? -> }
+        val presenter = createPresenter(
+            permissionPresenter = permissionPresenter,
+            navigator = FakeMessagesNavigator(onPreviewAttachmentLambda = preview),
+        )
+        presenter.test {
+            awaitFirstItem().eventSink(MessageComposerEvent.PickAttachmentSource.PhotoFromCamera)
+            val denied = awaitItem()
+            assertThat(denied.showCameraPermissionRationaleDialog).isTrue()
+            preview.assertions().isNeverCalled()
+            denied.eventSink(MessageComposerEvent.OpenCameraPermissionSettings)
+            assertThat(awaitItem().showCameraPermissionRationaleDialog).isFalse()
+            permissionPresenter.setPermissionGranted()
+            preview.assertions().isCalledOnce()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `camera denial cancel drops pending photo before later grant`() = runTest {
+        val permissionPresenter = FakePermissionsPresenter().apply { setPermissionDenied() }
+        val preview = lambdaRecorder { _: ImmutableList<Attachment>, _: EventId? -> }
+        val presenter = createPresenter(
+            permissionPresenter = permissionPresenter,
+            navigator = FakeMessagesNavigator(onPreviewAttachmentLambda = preview),
+        )
+        presenter.test {
+            awaitFirstItem().eventSink(MessageComposerEvent.PickAttachmentSource.PhotoFromCamera)
+            val denied = awaitItem()
+            assertThat(denied.showCameraPermissionRationaleDialog).isTrue()
+            denied.eventSink(MessageComposerEvent.DismissCameraPermissionRationale)
+            assertThat(awaitItem().showCameraPermissionRationaleDialog).isFalse()
+            permissionPresenter.setPermissionGranted()
+            advanceUntilIdle()
+            preview.assertions().isNeverCalled()
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -1156,6 +2003,7 @@ class MessageComposerPresenterTest {
                 hasAtRoomMention = false
             )
 
+            initialState.textEditorState.setHtml(A_MESSAGE)
             initialState.eventSink(MessageComposerEvent.SendMessage)
             advanceUntilIdle()
 
@@ -1174,6 +2022,7 @@ class MessageComposerPresenterTest {
                 hasAtRoomMention = false
             )
 
+            initialState.textEditorState.setHtml(A_MESSAGE)
             initialState.eventSink(MessageComposerEvent.SendMessage)
             advanceUntilIdle()
 
@@ -1244,6 +2093,42 @@ class MessageComposerPresenterTest {
             initialState.eventSink.invoke(MessageComposerEvent.TypingNotice(true))
             initialState.eventSink.invoke(MessageComposerEvent.TypingNotice(false))
             typingNoticeResult.assertions().isNeverCalled()
+        }
+    }
+
+    @Test
+    fun `present - active normal editor durably saves the latest draft without pause`() = runTest {
+        val saved = mutableListOf<ComposerDraft?>()
+        val service = FakeComposerDraftService().apply { saveDraftLambda = { _, _, draft, volatile -> if (!volatile) saved += draft } }
+        val presenter = createPresenter(isRichTextEditorEnabled = false, draftService = service)
+        presenter.test {
+            val state = awaitFirstItem()
+            state.textEditorState.setMarkdown("unfinished first")
+            state.textEditorState.setMarkdown("unfinished latest")
+            advanceUntilIdle()
+            assertThat(saved.map { it?.plainText }).containsExactly("unfinished latest")
+            state.textEditorState.reset()
+            advanceUntilIdle()
+            assertThat(saved.last()).isNull()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - restored durable draft is not replaced by the initially empty editor`() = runTest {
+        val saved = mutableListOf<ComposerDraft?>()
+        val draft = ComposerDraft("retained unsent", null, ComposerDraftType.NewMessage)
+        val service = FakeComposerDraftService().apply {
+            loadDraftLambda = { _, _, _ -> draft }
+            saveDraftLambda = { _, _, value, _ -> saved += value }
+        }
+        val presenter = createPresenter(isRichTextEditorEnabled = false, draftService = service)
+        presenter.test {
+            val state = awaitFirstItem()
+            advanceUntilIdle()
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo(draft.plainText)
+            assertThat(saved).isEmpty()
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
@@ -1356,6 +2241,81 @@ class MessageComposerPresenterTest {
     }
 
     @Test
+    fun `present - when there is a caption edit draft, it is restored as caption edit`() = runTest {
+        val loadDraftLambda = lambdaRecorder<RoomId, ThreadId?, Boolean, ComposerDraft?> { _, _, _ ->
+            ComposerDraft(
+                plainText = A_CAPTION,
+                htmlText = null,
+                draftType = ComposerDraftType.EditCaption(AN_EVENT_ID),
+            )
+        }
+        val composerDraftService = FakeComposerDraftService().apply {
+            this.loadDraftLambda = loadDraftLambda
+        }
+        val permalinkBuilder = FakePermalinkBuilder()
+        val presenter = createPresenter(
+            draftService = composerDraftService,
+            permalinkBuilder = permalinkBuilder,
+        )
+
+        presenter.test {
+            skipItems(2)
+            awaitItem().also { state ->
+                assertThat(state.mode).isEqualTo(anEditCaptionMode(caption = A_CAPTION))
+                assertThat(state.textEditorState.messageMarkdown(permalinkBuilder)).isEqualTo(A_CAPTION)
+            }
+            assert(loadDraftLambda)
+                .isCalledOnce()
+                .with(value(A_ROOM_ID), value(null), value(false))
+            ensureAllEventsConsumed()
+        }
+    }
+
+    @Test
+    fun `present - restored caption draft target failure never falls back to new message`() = runTest {
+        val targetFailure = IllegalStateException("target is no longer editable")
+        val editCaptionLambda = lambdaRecorder { _: EventOrTransactionId, _: String?, _: String? ->
+            Result.failure<Unit>(targetFailure)
+        }
+        val timeline = FakeTimeline().apply {
+            this.editCaptionLambda = editCaptionLambda
+        }
+        val composerDraftService = FakeComposerDraftService().apply {
+            loadDraftLambda = { _, _, _ ->
+                ComposerDraft(A_CAPTION, null, ComposerDraftType.EditCaption(AN_EVENT_ID))
+            }
+        }
+        val permalinkBuilder = FakePermalinkBuilder()
+        val presenter = createPresenter(
+            room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+            draftService = composerDraftService,
+            isRichTextEditorEnabled = false,
+            permalinkBuilder = permalinkBuilder,
+        )
+
+        moleculeFlow(RecompositionMode.Immediate) {
+            val state = presenter.present()
+            remember(state, state.textEditorState.messageMarkdown(permalinkBuilder), state.slashCommandAction) { state }
+        }.test {
+            var restored = awaitFirstItem()
+            while (restored.mode !is MessageComposerMode.EditCaption ||
+                restored.textEditorState.messageMarkdown(permalinkBuilder) != A_CAPTION) {
+                restored = awaitItem()
+            }
+            restored.eventSink(MessageComposerEvent.SendMessage)
+            advanceUntilIdle()
+
+            val failed = expectMostRecentItem()
+            assertThat(failed.mode).isEqualTo(anEditCaptionMode(caption = A_CAPTION))
+            assertThat(failed.textEditorState.messageMarkdown(permalinkBuilder)).isEqualTo(A_CAPTION)
+            assertThat(failed.slashCommandAction).isEqualTo(AsyncAction.Failure(targetFailure))
+            assert(editCaptionLambda).isCalledOnce()
+            assertThat(analyticsService.capturedEvents).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `present - when there is a draft for reply, it is restored`() = runTest {
         val loadDraftLambda = lambdaRecorder<RoomId, ThreadId?, Boolean, ComposerDraft?> { _, _, _ ->
             ComposerDraft(
@@ -1404,6 +2364,63 @@ class MessageComposerPresenterTest {
     }
 
     @Test
+    fun `present - cold reply draft resolves when its timeline target arrives`() = runTest {
+        verifyDelayedReplyDraft(cancelReply = false)
+    }
+
+    @Test
+    fun `present - delayed reply restoration cannot replace a cancelled reply`() = runTest {
+        verifyDelayedReplyDraft(cancelReply = true)
+    }
+
+    private suspend fun TestScope.verifyDelayedReplyDraft(cancelReply: Boolean) {
+        val items = MutableStateFlow<List<MatrixTimelineItem>>(emptyList())
+        var reads = 0
+        val timeline = FakeTimeline(timelineItems = items).apply {
+            loadReplyDetailsLambda = { eventId ->
+                reads++
+                if (items.value.isEmpty()) InReplyTo.Pending(eventId) else InReplyTo.Ready(
+                    eventId, aMessageContent(body = A_REPLY), A_USER_ID, aProfileDetails(),
+                )
+            }
+        }
+        val drafts = FakeComposerDraftService().apply {
+            loadDraftLambda = { _, _, _ -> ComposerDraft(A_MESSAGE, null, ComposerDraftType.Reply(AN_EVENT_ID)) }
+        }
+        val presenter = createPresenter(
+            room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+            draftService = drafts,
+            isRichTextEditorEnabled = false,
+        )
+        presenter.test {
+            var state = awaitFirstItem()
+            while (state.mode !is MessageComposerMode.Reply) state = awaitItem()
+            runCurrent()
+            assertThat(reads).isEqualTo(1)
+            if (cancelReply) {
+                state.eventSink(MessageComposerEvent.SetMode(MessageComposerMode.Normal))
+                runCurrent()
+            }
+            items.value = listOf(MatrixTimelineItem.Event(UniqueId("restored-target"), anEventTimelineItem(content = aMessageContent(A_REPLY))))
+            runCurrent()
+            state = expectMostRecentItem()
+            if (cancelReply) {
+                assertThat(state.mode).isEqualTo(MessageComposerMode.Normal)
+                assertThat(reads).isEqualTo(1)
+            } else {
+                val reply = state.mode as MessageComposerMode.Reply
+                assertThat(reply.replyToDetails).isInstanceOf(InReplyToDetails.Ready::class.java)
+                assertThat((reply.replyToDetails as InReplyToDetails.Ready).textContent).isEqualTo(A_REPLY)
+                assertThat(reply.eventId).isEqualTo(AN_EVENT_ID)
+                assertThat(reads).isEqualTo(2)
+            }
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo(A_MESSAGE)
+            assertThat(analyticsService.capturedEvents).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `present - when save draft event is invoked and composer is empty then service is called with null draft`() = runTest {
         val saveDraftLambda = lambdaRecorder<RoomId, ThreadId?, ComposerDraft?, Boolean, Unit> { _, _, _, _ -> }
         val composerDraftService = FakeComposerDraftService().apply {
@@ -1417,6 +2434,49 @@ class MessageComposerPresenterTest {
             assert(saveDraftLambda)
                 .isCalledOnce()
                 .with(value(A_ROOM_ID), value(null), value(null), value(false))
+        }
+    }
+
+    @Test
+    fun `present - withdrawn re-edit text is never written to persistent drafts across pause ordering`() = runTest {
+        val persistedDrafts = mutableListOf<ComposerDraft?>()
+        val composerDraftService = FakeComposerDraftService().apply {
+            saveDraftLambda = { _, _, draft, isVolatile ->
+                if (!isVolatile) persistedDrafts += draft
+            }
+        }
+        val permalinkBuilder = FakePermalinkBuilder()
+        val presenter = createPresenter(
+            isRichTextEditorEnabled = false,
+            draftService = composerDraftService,
+            permalinkBuilder = permalinkBuilder,
+        )
+
+        moleculeFlow(RecompositionMode.Immediate) {
+            val state = presenter.present()
+            val messageMarkdown = state.textEditorState.messageMarkdown(permalinkBuilder)
+            remember(state, messageMarkdown) { state }
+        }.test {
+            val initialState = awaitFirstItem()
+            initialState.eventSink(MessageComposerEvent.RestoreWithdrawnText(A_MESSAGE))
+            advanceUntilIdle()
+
+            val withdrawnState = expectMostRecentItem()
+            assertThat(withdrawnState.containsVolatileWithdrawnText).isTrue()
+            assertThat(withdrawnState.textEditorState.messageMarkdown(permalinkBuilder)).isEqualTo(A_MESSAGE)
+
+            // SaveDraft and ClearWithdrawnText are emitted by separate lifecycle observers.
+            // Both orderings must only clear persistent storage, never expose the plaintext.
+            withdrawnState.eventSink(MessageComposerEvent.SaveDraft)
+            withdrawnState.eventSink(MessageComposerEvent.ClearWithdrawnText)
+            withdrawnState.eventSink(MessageComposerEvent.SaveDraft)
+            advanceUntilIdle()
+
+            val clearedState = expectMostRecentItem()
+            assertThat(clearedState.containsVolatileWithdrawnText).isFalse()
+            assertThat(clearedState.textEditorState.messageMarkdown(permalinkBuilder)).isEmpty()
+            assertThat(persistedDrafts).isNotEmpty()
+            assertThat(persistedDrafts).containsExactlyElementsIn(List(persistedDrafts.size) { null })
         }
     }
 
@@ -1503,12 +2563,790 @@ class MessageComposerPresenterTest {
         }
     }
 
+    @Test
+    fun `present - caption edit draft preserves target identity and room scope`() = runTest {
+        val saveDraftLambda = lambdaRecorder<RoomId, ThreadId?, ComposerDraft?, Boolean, Unit> { _, _, _, _ -> }
+        val composerDraftService = FakeComposerDraftService().apply {
+            // Entering edit mode also saves the prior normal draft as volatile.
+            this.saveDraftLambda = { roomId, threadRoot, draft, isVolatile ->
+                if (!isVolatile) saveDraftLambda(roomId, threadRoot, draft, isVolatile)
+            }
+        }
+        val permalinkBuilder = FakePermalinkBuilder()
+        val presenter = createPresenter(
+            isRichTextEditorEnabled = false,
+            draftService = composerDraftService,
+            permalinkBuilder = permalinkBuilder,
+        )
+
+        presenter.test {
+            val initialState = awaitFirstItem()
+            initialState.eventSink(MessageComposerEvent.SetMode(anEditCaptionMode(caption = A_CAPTION)))
+            val captionState = awaitItem()
+            captionState.textEditorState.setMarkdown(A_CAPTION)
+            // Writing identical text must not require a synthetic state emission.
+            captionState.eventSink(MessageComposerEvent.SaveDraft)
+            advanceUntilIdle()
+
+            assert(saveDraftLambda)
+                .isCalledOnce()
+                .with(
+                    value(A_ROOM_ID),
+                    value(null),
+                    value(ComposerDraft(A_CAPTION, null, ComposerDraftType.EditCaption(AN_EVENT_ID))),
+                    value(false),
+                )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `superseded autosave never receipts an unapplied draft`() = runTest {
+        verifySupersededDraftAdmission(isCaption = false)
+    }
+
+    @Test
+    fun `unresolved previous draft blocks repeated new intent admission`() = runTest {
+        var preparations = 0
+        var writes = 0
+        var admissions = 0
+        val drafts = FakeComposerDraftService().apply {
+            preparePersistentDraftWriteLambda = { _, _ -> preparations++; error("original draft transition is unresolved") }
+            saveDraftLambda = { _, _, _, _ -> writes++ }
+        }
+        val coordinator = object : AppOperationalStateCoordinator by FakeAppOperationalStateCoordinator() {
+            override suspend fun performLocalDraft(request: LifecycleOperationRequest, block: suspend (String) -> Unit) {
+                admissions++
+                error("must recover before admitting a new intent")
+            }
+        }
+        createPresenter(isRichTextEditorEnabled = false, draftService = drafts, appOperationalStateCoordinator = coordinator).test {
+            val state = awaitFirstItem()
+            state.textEditorState.setMarkdown("keep current text")
+            advanceUntilIdle()
+            repeat(3) { state.eventSink(MessageComposerEvent.SaveDraft); advanceUntilIdle() }
+            assertThat(preparations).isAtLeast(3)
+            assertThat(admissions).isEqualTo(0)
+            assertThat(writes).isEqualTo(0)
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo("keep current text")
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `draft superseded during prior recovery is never admitted`() = runTest {
+        val preparing = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var holdNext = false
+        val saved = mutableListOf<String?>()
+        var admissions = 0
+        val drafts = FakeComposerDraftService().apply {
+            preparePersistentDraftWriteLambda = { _, _ ->
+                if (holdNext) { holdNext = false; preparing.complete(Unit); release.await() }
+            }
+            saveDraftLambda = { _, _, draft, _ -> saved += draft?.plainText }
+        }
+        val coordinator = object : AppOperationalStateCoordinator by FakeAppOperationalStateCoordinator() {
+            override suspend fun performLocalDraft(request: LifecycleOperationRequest, block: suspend (String) -> Unit) {
+                admissions++
+                block(request.operationId)
+            }
+        }
+        createPresenter(isRichTextEditorEnabled = false, draftService = drafts, appOperationalStateCoordinator = coordinator).test {
+            val state = awaitFirstItem()
+            holdNext = true
+            state.textEditorState.setMarkdown("superseded during recovery")
+            runCurrent(); advanceTimeBy(501); runCurrent()
+            assertThat(preparing.isCompleted).isTrue()
+            state.textEditorState.setMarkdown("current draft")
+            runCurrent()
+            release.complete(Unit)
+            advanceUntilIdle()
+            assertThat(saved).containsExactly("current draft")
+            assertThat(admissions).isEqualTo(1)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `cancelled caption mode never receipts its unapplied draft`() = runTest {
+        verifySupersededDraftAdmission(isCaption = true)
+    }
+
+    private suspend fun TestScope.verifySupersededDraftAdmission(isCaption: Boolean) {
+        val base = FakeAppOperationalStateCoordinator()
+        val admitted = CompletableDeferred<LifecycleOperationRequest>()
+        val returnAdmission = CompletableDeferred<Unit>()
+        var holdNextAdmission = !isCaption
+        val coordinator = object : AppOperationalStateCoordinator by base {
+            override suspend fun performLocalDraft(request: LifecycleOperationRequest, block: suspend (operationId: String) -> Unit) {
+                perform(request, block)
+            }
+            override suspend fun start(request: LifecycleOperationRequest): LifecycleOperation {
+                val operation = base.start(request)
+                if (request.lifecycleId.name == "LC_14" && holdNextAdmission) {
+                    holdNextAdmission = false
+                    admitted.complete(request)
+                    returnAdmission.await()
+                }
+                return operation
+            }
+        }
+        val saved = mutableListOf<Pair<String?, ComposerDraft?>>()
+        val drafts = object : ComposerDraftService by FakeComposerDraftService() {
+            override suspend fun updateDraft(roomId: RoomId, threadRoot: ThreadId?, draft: ComposerDraft?, isVolatile: Boolean) {
+                if (!isVolatile) saved += currentLifecycleOperationContext()?.operationId to draft
+            }
+        }
+        createPresenter(isRichTextEditorEnabled = false, draftService = drafts,
+            appOperationalStateCoordinator = coordinator).test {
+            val state = awaitFirstItem()
+            if (isCaption) {
+                state.eventSink(MessageComposerEvent.SetMode(anEditCaptionMode(caption = A_CAPTION)))
+                runCurrent()
+                holdNextAdmission = true
+                expectMostRecentItem().eventSink(MessageComposerEvent.SaveDraft)
+                runCurrent()
+            } else {
+                state.textEditorState.setMarkdown("superseded draft")
+                runCurrent()
+                advanceTimeBy(501)
+                runCurrent()
+            }
+            assertThat(admitted.isCompleted).isTrue()
+            val original = admitted.await()
+            assertThat(original.accountIdHash).isNotNull()
+            assertThat(original.matrixDeviceIdHash).isNotNull()
+            assertThat(original.roomIdHash).isNotNull()
+            if (isCaption) {
+                state.eventSink(MessageComposerEvent.SetMode(MessageComposerMode.Normal))
+            } else {
+                state.textEditorState.setMarkdown("current draft")
+            }
+            runCurrent()
+            returnAdmission.complete(Unit)
+            advanceUntilIdle()
+            assertThat(saved.map { it.first }).doesNotContain(original.operationId)
+            assertThat(base.clientReceipts.filter { it.operationId == original.operationId }).isEmpty()
+            assertThat(saved.none { it.second?.draftType is ComposerDraftType.EditCaption }).isTrue()
+            if (!isCaption) {
+                assertThat(saved.map { it.second?.plainText }).containsExactly("current draft")
+                val currentId = saved.single().first
+                assertThat(currentId).isNotNull()
+                assertThat(base.clientReceipts.filter { it.operationId == currentId }).hasSize(2)
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `offline draft admission preserves the current local draft without claiming completion`() = runTest {
+        val saved = mutableListOf<ComposerDraft?>()
+        val coordinator = FakeAppOperationalStateCoordinator(startFailure = { java.io.IOException("TEST_OFFLINE") })
+        val drafts = FakeComposerDraftService().apply {
+            saveDraftLambda = { _, _, draft, isVolatile -> if (!isVolatile) saved += draft }
+        }
+        createPresenter(isRichTextEditorEnabled = false, draftService = drafts,
+            appOperationalStateCoordinator = coordinator).test {
+            val state = awaitFirstItem()
+            state.textEditorState.setMarkdown("offline draft")
+            state.eventSink(MessageComposerEvent.SaveDraft)
+            advanceUntilIdle()
+            assertThat(saved.map { it?.plainText }).containsExactly("offline draft")
+            assertThat(coordinator.startedRequests.filter { it.lifecycleId.name == "LC_14" }).hasSize(1)
+            assertThat(coordinator.clientReceipts).isEmpty()
+            assertThat(coordinator.pendingLocalDraftReceipts).hasSize(2)
+            assertThat(coordinator.pendingLocalDraftReceipts.map { it.operationId }.distinct())
+                .containsExactly(coordinator.startedRequests.single { it.lifecycleId.name == "LC_14" }.operationId)
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo("offline draft")
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `draft receipt transport failure retains both original facts without a second draft write`() = runTest {
+        val base = FakeAppOperationalStateCoordinator()
+        val pending = mutableListOf<LifecycleClientReceipt>()
+        val coordinator = object : AppOperationalStateCoordinator by base {
+            override suspend fun performLocalDraft(request: LifecycleOperationRequest, block: suspend (operationId: String) -> Unit) {
+                perform(request, block)
+            }
+            override suspend fun persistClientReceipts(receipts: List<LifecycleClientReceipt>) {
+                pending += receipts
+            }
+            override suspend fun recordClientReceipt(receipt: LifecycleClientReceipt): LifecycleOperation {
+                if (receipt.component == LifecycleComponent.ANDROID_SERVICE) throw java.io.IOException("TEST_RECEIPT_RESPONSE_LOST")
+                return base.recordClientReceipt(receipt)
+            }
+        }
+        val saved = mutableListOf<ComposerDraft?>()
+        val drafts = FakeComposerDraftService().apply {
+            saveDraftLambda = { _, _, draft, isVolatile -> if (!isVolatile) saved += draft }
+        }
+        createPresenter(isRichTextEditorEnabled = false, draftService = drafts,
+            appOperationalStateCoordinator = coordinator).test {
+            val state = awaitFirstItem()
+            state.textEditorState.setMarkdown("retained draft")
+            state.eventSink(MessageComposerEvent.SaveDraft)
+            advanceUntilIdle()
+            assertThat(saved.map { it?.plainText }).containsExactly("retained draft")
+            val original = base.startedRequests.single { it.lifecycleId.name == "LC_14" }
+            assertThat(pending.map { it.operationId }.distinct()).containsExactly(original.operationId)
+            assertThat(pending.map { it.component }).containsExactly(LifecycleComponent.ANDROID_SERVICE, LifecycleComponent.ANDROID_FRONTEND)
+            assertThat(base.clientReceipts.single().component).isEqualTo(LifecycleComponent.ANDROID_FRONTEND)
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo("retained draft")
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - common insertion preserves drafts and never sends in both editors`() = runTest {
+        for (rich in listOf(false, true)) {
+            val generation = MutableStateFlow(0L)
+            val repository = mockk<CommonInfoRepository>(relaxed = true) {
+                every { authorizationRevision } returns generation
+                coEvery { sendText(any()) } returns "COMMON VALUE"
+            }
+            val sent = mutableListOf<String>()
+            val timeline = FakeTimeline().apply {
+                sendMessageLambda = { body, _, _, _, _ -> sent += body; Result.success(Unit) }
+            }
+            val presenter = createPresenter(
+                room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+                commonInfoRepository = repository, isRichTextEditorEnabled = rich,
+            )
+            presenter.test {
+                val state = awaitFirstItem()
+                state.textEditorState.setMarkdown("draft ")
+                var completed: Result<Unit>? = null
+                state.eventSink(MessageComposerEvent.InsertCommonInfo(CommonInfoItem(title = "test")) { completed = it })
+                advanceUntilIdle()
+                assertThat(completed?.isSuccess).isTrue()
+                assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo("draft COMMON VALUE")
+                assertThat(sent).isEmpty()
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+    }
+
+    @Test
+    fun `present - common insertion keeps text typed during read and rejects concurrent insertion`() = runTest {
+        val started = CompletableDeferred<Unit>()
+        val allowRead = CompletableDeferred<Unit>()
+        val generation = MutableStateFlow(0L)
+        val repository = mockk<CommonInfoRepository>(relaxed = true) {
+            every { authorizationRevision } returns generation
+            coEvery { sendText(any()) } coAnswers { started.complete(Unit); allowRead.await(); "COMMON" }
+        }
+        val presenter = createPresenter(commonInfoRepository = repository)
+        presenter.test {
+            val state = awaitFirstItem()
+            var completed: Result<Unit>? = null
+            state.eventSink(MessageComposerEvent.InsertCommonInfo(CommonInfoItem(title = "test")) { completed = it })
+            started.await()
+            state.textEditorState.setMarkdown("new draft ")
+            var second: Result<Unit>? = null
+            state.eventSink(MessageComposerEvent.InsertCommonInfo(CommonInfoItem(title = "test")) { second = it })
+            assertThat(second?.isFailure).isTrue()
+            allowRead.complete(Unit)
+            advanceUntilIdle()
+            assertThat(completed?.isSuccess).isTrue()
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo("new draft COMMON")
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - common insertion rejects plaintext returned after authorization change`() = runTest {
+        val generation = MutableStateFlow(0L)
+        val repository = mockk<CommonInfoRepository>(relaxed = true) {
+            every { authorizationRevision } returns generation
+            coEvery { sendText(any()) } coAnswers { generation.value = 1L; "PRIVATE VALUE" }
+        }
+        val presenter = createPresenter(commonInfoRepository = repository)
+        presenter.test {
+            val state = awaitFirstItem()
+            state.textEditorState.setMarkdown("keep draft")
+            var completed: Result<Unit>? = null
+            state.eventSink(MessageComposerEvent.InsertCommonInfo(CommonInfoItem(title = "test")) { completed = it })
+            advanceUntilIdle()
+            assertThat(completed?.isFailure).isTrue()
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo("keep draft")
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - common direct send sends only the item and preserves the composer draft`() = runTest {
+        val repository = mockk<CommonInfoRepository>(relaxed = true) {
+            coEvery { sendText(any()) } returns "COMMON ONLY"
+        }
+        val sent = mutableListOf<String>()
+        val timeline = FakeTimeline().apply {
+            sendMessageLambda = { body, _, _, _, _ -> sent += body; Result.success(Unit) }
+        }
+        val presenter = createPresenter(
+            room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }), commonInfoRepository = repository,
+        )
+        presenter.test {
+            val state = awaitFirstItem()
+            state.textEditorState.setMarkdown("keep draft")
+            var completed: Result<Unit>? = null
+            state.eventSink(MessageComposerEvent.SendCommonInfo(CommonInfoItem(title = "test")) { completed = it })
+            advanceUntilIdle()
+            assertThat(completed?.isSuccess).isTrue()
+            assertThat(sent).containsExactly("COMMON ONLY")
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo("keep draft")
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test fun `emotion sends preserve draft and each tap has its own lifecycle operation`() = runTest {
+        val sent = mutableListOf<String>()
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val timeline = FakeTimeline().apply {
+            sendMessageLambda = { body, _, _, _, _ ->
+                assertThat(coordinator.startedRequests).isNotEmpty()
+                sent += body
+                Result.success(Unit)
+            }
+        }
+        createPresenter(room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+            appOperationalStateCoordinator = coordinator).test {
+            val state = awaitFirstItem()
+            state.textEditorState.setMarkdown("keep draft")
+            state.eventSink(MessageComposerEvent.SendEmotion("fireworks"))
+            state.eventSink(MessageComposerEvent.SendEmotion("fortune"))
+            advanceUntilIdle()
+            assertThat(sent).containsExactly("🎆", "[福气满满]").inOrder()
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo("keep draft")
+            assertThat(coordinator.startedRequests.filter { it.lifecycleId == io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_13 }
+                .map { it.operationId }.toSet()).hasSize(2)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test fun `emotion cannot bypass edit mode or send an unknown identifier`() = runTest {
+        val sent = mutableListOf<String>()
+        val timeline = FakeTimeline().apply { sendMessageLambda = { body, _, _, _, _ -> sent += body; Result.success(Unit) } }
+        createPresenter(room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) })).test {
+            val state = awaitFirstItem()
+            state.eventSink(MessageComposerEvent.SendEmotion("not-in-catalog"))
+            state.eventSink(MessageComposerEvent.SetMode(anEditMode()))
+            advanceUntilIdle()
+            expectMostRecentItem().eventSink(MessageComposerEvent.SendEmotion("fireworks"))
+            advanceUntilIdle()
+            assertThat(sent).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test fun `emotion cannot bypass flash read mode`() = runTest {
+        val sent = mutableListOf<String>()
+        val timeline = FakeTimeline().apply { sendMessageLambda = { body, _, _, _, _ -> sent += body; Result.success(Unit) } }
+        createPresenter(room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) })).test {
+            awaitFirstItem().eventSink(MessageComposerEvent.ToggleBurnAfterRead)
+            advanceUntilIdle()
+            val state = expectMostRecentItem()
+            assertThat(state.isBurnAfterReadEnabled).isTrue()
+            state.eventSink(MessageComposerEvent.SendEmotion("fireworks"))
+            advanceUntilIdle()
+            assertThat(sent).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test fun `emotion lifecycle rejection preserves draft and does not call transport`() = runTest {
+        val sent = mutableListOf<String>()
+        val timeline = FakeTimeline().apply { sendMessageLambda = { body, _, _, _, _ -> sent += body; Result.success(Unit) } }
+        createPresenter(room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+            appOperationalStateCoordinator = FakeAppOperationalStateCoordinator(startFailure = { IllegalStateException("test rejection") })).test {
+            val state = awaitFirstItem()
+            state.textEditorState.setMarkdown("keep draft")
+            state.eventSink(MessageComposerEvent.SendEmotion("fireworks"))
+            advanceUntilIdle()
+            assertThat(sent).isEmpty()
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo("keep draft")
+            assertThat(expectMostRecentItem().slashCommandAction).isInstanceOf(AsyncAction.Failure::class.java)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private suspend fun ReceiveTurbine<MessageComposerState>.backToNormalMode(state: MessageComposerState, skipCount: Int = 0): MessageComposerState {
         state.eventSink.invoke(MessageComposerEvent.CloseSpecialMode)
         skipItems(skipCount)
         val normalState = awaitItem()
         assertThat(normalState.mode).isEqualTo(MessageComposerMode.Normal)
         return normalState
+    }
+
+    @Test fun `recent image batch appears once and does not cascade on reopen`() = runTest {
+        val provider = object : PickerProvider by FakePickerProvider() {
+            override suspend fun recentImages(nowEpochMillis: Long) = listOf(
+                io.element.android.libraries.mediapickers.api.RecentImage(Uri.parse("content://media/1"), nowEpochMillis),
+                io.element.android.libraries.mediapickers.api.RecentImage(Uri.parse("content://media/2"), nowEpochMillis),
+            )
+        }
+        createPresenter(pickerProvider = provider).test {
+            awaitFirstItem().eventSink(MessageComposerEvent.AddAttachment)
+            advanceUntilIdle()
+            val opened = expectMostRecentItem()
+            assertThat(opened.showAttachmentSourcePicker).isTrue()
+            assertThat(opened.recentImages).hasSize(2)
+            opened.eventSink(MessageComposerEvent.DismissAttachmentMenu)
+            advanceUntilIdle()
+            expectMostRecentItem().eventSink(MessageComposerEvent.AddAttachment)
+            advanceUntilIdle()
+            assertThat(expectMostRecentItem().recentImages).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test fun `recent query cancelled by another action cannot reopen the panel`() = runTest {
+        val provider = object : PickerProvider by FakePickerProvider() {
+            override suspend fun recentImages(nowEpochMillis: Long): List<io.element.android.libraries.mediapickers.api.RecentImage> {
+                kotlinx.coroutines.delay(100L)
+                return listOf(io.element.android.libraries.mediapickers.api.RecentImage(Uri.parse("content://media/1"), nowEpochMillis))
+            }
+        }
+        createPresenter(pickerProvider = provider).test {
+            val state = awaitFirstItem()
+            state.eventSink(MessageComposerEvent.AddAttachment)
+            state.eventSink(MessageComposerEvent.DismissAttachmentMenu)
+            advanceUntilIdle()
+            assertThat(state.showAttachmentSourcePicker).isFalse()
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test fun `recent query timeout still opens normal attachments without a late row`() = runTest {
+        val provider = object : PickerProvider by FakePickerProvider() {
+            override suspend fun recentImages(nowEpochMillis: Long): List<io.element.android.libraries.mediapickers.api.RecentImage> {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    kotlinx.coroutines.delay(1_000L)
+                }
+                return emptyList()
+            }
+        }
+        createPresenter(pickerProvider = provider).test {
+            awaitFirstItem().eventSink(MessageComposerEvent.AddAttachment)
+            advanceTimeBy(251L)
+            runCurrent()
+            val state = expectMostRecentItem()
+            assertThat(state.showAttachmentSourcePicker).isTrue()
+            assertThat(state.recentImages).isEmpty()
+            advanceUntilIdle()
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test fun `recent selection opens one preview with only tapped image selected`() = runTest {
+        val one = Uri.parse("content://media/1")
+        val two = Uri.parse("content://media/2")
+        val provider = object : PickerProvider by FakePickerProvider() {
+            override suspend fun recentImages(nowEpochMillis: Long) = listOf(one, two).map {
+                io.element.android.libraries.mediapickers.api.RecentImage(it, nowEpochMillis)
+            }
+            override suspend fun selectRecentImages(operation: io.element.android.libraries.mediapickers.api.MediaPickOperation, uris: List<Uri>) =
+                io.element.android.libraries.mediapickers.api.MediaPickBatchResult(operation, uris.map {
+                    io.element.android.libraries.mediapickers.api.MediaPickItemResult.Ready(
+                        io.element.android.libraries.mediapickers.api.PickedMedia(it, "image/png", operationId = operation.operationId),
+                    )
+                })
+        }
+        var previews = 0
+        var attachments = emptyList<Attachment>()
+        val navigator = FakeMessagesNavigator(onPreviewAttachmentLambda = { items, _ -> previews++; attachments = items })
+        createPresenter(pickerProvider = provider, navigator = navigator).test {
+            awaitFirstItem().eventSink(MessageComposerEvent.AddAttachment)
+            advanceUntilIdle()
+            val state = expectMostRecentItem()
+            state.eventSink(MessageComposerEvent.SelectRecentImage(two))
+            state.eventSink(MessageComposerEvent.SelectRecentImage(two))
+            advanceUntilIdle()
+            assertThat(previews).isEqualTo(1)
+            assertThat(attachments).hasSize(1)
+            assertThat(attachments.map { (it as Attachment.Media).initiallySelected }).containsExactly(true)
+            assertThat(attachments.map { (it as Attachment.Media).focused }).containsExactly(true)
+            assertThat(attachments.all { (it as Attachment.Media).fromRecentImages }).isTrue()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+
+    @Test fun `relay edit retries the original operation and preserves the composer draft`() = runTest {
+        val base = FakeAppOperationalStateCoordinator()
+        val coordinator = relayAdmissionCoordinator(base)
+        val calls = mutableListOf<Pair<String?, String>>()
+        val timeline = object : Timeline by FakeTimeline() {
+            override suspend fun editRelayEntry(relayEventId: EventId, itemId: String, expectedRevision: Long, entry: String): Result<Unit> {
+                assertThat(relayEventId).isEqualTo(AN_EVENT_ID)
+                assertThat(itemId).isEqualTo("my-stable-entry")
+                assertThat(expectedRevision).isEqualTo(3L)
+                assertThat(currentLifecycleOperationContext()?.lifecycleId?.name).isEqualTo("LC_15")
+                calls += currentLifecycleOperationContext()?.operationId to entry
+                return if (calls.size == 1) Result.failure(IllegalStateException("queue response lost")) else Result.success(Unit)
+            }
+        }
+        createPresenter(room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+            appOperationalStateCoordinator = coordinator).test {
+            val state = awaitFirstItem()
+            state.textEditorState.setMarkdown("keep draft")
+            val results = mutableListOf<Result<Unit>>()
+            val edit = MessageComposerEvent.EditRelayEntry(AN_EVENT_ID, "my-stable-entry", 3L, "  edited entry  ",
+                onComplete = { results += it }, operationId = "11111111-1111-4111-8111-111111111111")
+            state.eventSink(edit)
+            advanceUntilIdle()
+            assertThat(results.single().isFailure).isTrue()
+            assertThat(base.clientReceipts.filter { it.operationId.startsWith("relay-edit-") }).isEmpty()
+            var recovered: io.element.android.libraries.matrix.api.timeline.RelayEditRecovery? = null
+            state.eventSink(MessageComposerEvent.LoadRelayEditRecovery(AN_EVENT_ID) { recovered = it.getOrThrow() })
+            advanceUntilIdle()
+            assertThat(recovered).isEqualTo(io.element.android.libraries.matrix.api.timeline.RelayEditRecovery(
+                "relay-edit-${edit.operationId}", AN_EVENT_ID.value, "my-stable-entry", 3L, "edited entry",
+            ))
+            state.eventSink(edit)
+            advanceUntilIdle()
+            assertThat(results.last().isSuccess).isTrue()
+            assertThat(calls.map { it.first }.distinct()).containsExactly("relay-edit-${edit.operationId}")
+            assertThat(calls.map { it.second }).containsExactly("edited entry", "edited entry").inOrder()
+            assertThat(base.startedRequests.filter { it.lifecycleId.name == "LC_15" }).hasSize(2)
+            assertThat(base.startedRequests.filter { it.lifecycleId.name == "LC_15" }.map { it.eventIdHash }.distinct()).hasSize(1)
+            assertThat(base.startedRequests.filter { it.lifecycleId.name == "LC_15" }.all { it.accountIdHash != null && it.matrixDeviceIdHash != null && it.roomIdHash != null }).isTrue()
+            assertThat(base.clientReceipts.filter { it.operationId.startsWith("relay-edit-") }).hasSize(2)
+            assertThat(base.clientReceipts.filter { it.operationId.startsWith("relay-edit-") }.map { it.operationId }.distinct()).containsExactly("relay-edit-${edit.operationId}")
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo("keep draft")
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test fun `relay accepted original intent is observed without a second edit`() = runTest {
+        for (terminal in listOf(false, true)) {
+            val base = FakeAppOperationalStateCoordinator()
+            val coordinator = relayAdmissionCoordinator(base, terminal = terminal, externalComplete = true)
+            var edits = 0
+            var observations = 0
+            val timeline = object : Timeline by FakeTimeline() {
+                override suspend fun editRelayEntry(relayEventId: EventId, itemId: String, expectedRevision: Long, entry: String): Result<Unit> {
+                    edits++
+                    return Result.success(Unit)
+                }
+                override suspend fun verifyAcceptedRelayEditIntent(relayEventId: EventId, itemId: String,
+                    expectedRevision: Long, entry: String,
+                ): Result<Unit> {
+                    assertThat(currentLifecycleOperationContext()?.operationId).isEqualTo("relay-edit-22222222-2222-4222-8222-222222222222")
+                    assertThat(relayEventId).isEqualTo(AN_EVENT_ID)
+                    assertThat(itemId).isEqualTo("my-stable-entry")
+                    assertThat(expectedRevision).isEqualTo(3L)
+                    assertThat(entry).isEqualTo("original edited entry")
+                    observations++
+                    return Result.success(Unit)
+                }
+            }
+            createPresenter(room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+                appOperationalStateCoordinator = coordinator).test {
+                val state = awaitFirstItem()
+                var result: Result<Unit>? = null
+                state.eventSink(MessageComposerEvent.EditRelayEntry(AN_EVENT_ID, "my-stable-entry", 3L, "original edited entry",
+                    onComplete = { result = it }, operationId = "22222222-2222-4222-8222-222222222222"))
+                advanceUntilIdle()
+                assertThat(result?.isSuccess).isTrue()
+                assertThat(observations).isEqualTo(if (terminal) 2 else 1)
+                assertThat(edits).isEqualTo(0)
+                assertThat(base.clientReceipts.filter { it.operationId.startsWith("relay-edit-") }).hasSize(if (terminal) 0 else 2)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+    }
+
+    @Test fun `relay accepted operation with conflicting intent preserves draft and reports failure`() = runTest {
+        val base = FakeAppOperationalStateCoordinator()
+        var edits = 0
+        val timeline = object : Timeline by FakeTimeline() {
+            override suspend fun editRelayEntry(relayEventId: EventId, itemId: String, expectedRevision: Long, entry: String): Result<Unit> {
+                edits++
+                return Result.success(Unit)
+            }
+            override suspend fun verifyAcceptedRelayEditIntent(relayEventId: EventId, itemId: String,
+                expectedRevision: Long, entry: String,
+            ): Result<Unit> = Result.failure(IllegalStateException("immutable encrypted intent differs"))
+        }
+        createPresenter(room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+            appOperationalStateCoordinator = relayAdmissionCoordinator(base, terminal = true)).test {
+            val state = awaitFirstItem()
+            state.textEditorState.setMarkdown("keep draft")
+            var result: Result<Unit>? = null
+            state.eventSink(MessageComposerEvent.EditRelayEntry(AN_EVENT_ID, "my-stable-entry", 3L, "changed entry",
+                onComplete = { result = it }, operationId = "33333333-3333-4333-8333-333333333333"))
+            advanceUntilIdle()
+            assertThat(result?.isFailure).isTrue()
+            assertThat(edits).isEqualTo(0)
+            assertThat(base.clientReceipts.filter { it.operationId.startsWith("relay-edit-") }).isEmpty()
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo("keep draft")
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+
+    @Test fun `loading relay recovery observes original terminal and clears only verified journal without admission`() = runTest {
+        val base = FakeAppOperationalStateCoordinator()
+        val recovery = io.element.android.libraries.matrix.api.timeline.RelayEditRecovery(
+            "relay-edit-22222222-2222-4222-8222-222222222222", AN_EVENT_ID.value, "my-stable-entry", 3, "original edited entry")
+        val delegate = FakeTimeline()
+        delegate.retainRelayEditRecovery(recovery).getOrThrow()
+        var verified = 0
+        val timeline = object : Timeline by delegate {
+            override suspend fun verifyAcceptedRelayEditIntent(relayEventId: EventId, itemId: String,
+                expectedRevision: Long, entry: String): Result<Unit> {
+                assertThat(currentLifecycleOperationContext()?.operationId).isEqualTo(recovery.operationId)
+                assertThat(entry).isEqualTo(recovery.entry)
+                verified++
+                return Result.success(Unit)
+            }
+            override suspend fun editRelayEntry(relayEventId: EventId, itemId: String, expectedRevision: Long, entry: String): Result<Unit> =
+                error("Recovery cannot edit")
+        }
+        val template = relayAdmissionCoordinator(base, terminal = true).start(io.element.android.security.dataprotection.api.lifecycleOperationRequest(
+            io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_15, "relay_operation", "a".repeat(64), "b".repeat(64), "c".repeat(64), "d".repeat(64), recovery.operationId))
+        val coordinator = object : AppOperationalStateCoordinator by base {
+            override suspend fun start(request: LifecycleOperationRequest): LifecycleOperation = error("Recovery cannot admit")
+            override suspend fun operation(operationId: String): LifecycleOperation = template.copy(subjects = template.subjects.copy(
+                accountIdHash = accountIdHash(FakeJoinedRoom().sessionId.value),
+                matrixDeviceIdHash = accountIdHash(FakeMatrixClient().deviceId.value),
+                roomIdHash = accountIdHash(A_ROOM_ID.value),
+                eventIdHash = accountIdHash(AN_EVENT_ID.value)))
+        }
+        createPresenter(room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+            appOperationalStateCoordinator = coordinator).test {
+            val state = awaitFirstItem()
+            state.textEditorState.setMarkdown("keep ordinary draft")
+            var result: Result<io.element.android.libraries.matrix.api.timeline.RelayEditRecovery?>? = null
+            state.eventSink(MessageComposerEvent.LoadRelayEditRecovery(AN_EVENT_ID) { result = it })
+            advanceUntilIdle()
+            assertThat(result?.isSuccess).isTrue()
+            assertThat(result?.getOrThrow()).isNull()
+            assertThat(verified).isEqualTo(1)
+            assertThat(delegate.pendingRelayEditRecovery(AN_EVENT_ID).getOrThrow()).isNull()
+            assertThat(base.clientReceipts.filter { it.operationId.startsWith("relay-edit-") }).isEmpty()
+            assertThat(state.textEditorState.messageMarkdown(FakePermalinkBuilder())).isEqualTo("keep ordinary draft")
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    private fun relayAdmissionCoordinator(base: FakeAppOperationalStateCoordinator, terminal: Boolean = false,
+        externalComplete: Boolean = false,
+    ) = object : AppOperationalStateCoordinator by base {
+        override suspend fun operation(operationId: String): LifecycleOperation = admission(base.operation(operationId))
+        override suspend fun start(request: LifecycleOperationRequest): LifecycleOperation = admission(base.start(request))
+        private fun admission(operation: LifecycleOperation): LifecycleOperation {
+            if (operation.lifecycleId.name != "LC_15") return operation
+            val android = setOf(LifecycleComponent.ANDROID_FRONTEND, LifecycleComponent.ANDROID_SERVICE)
+            val required = android + setOf(LifecycleComponent.MATRIX, LifecycleComponent.CONTROL_PLANE,
+                LifecycleComponent.DATABASE, LifecycleComponent.KMS)
+            return operation.copy(status = if (terminal) LifecycleOperationStatus.SUCCEEDED else LifecycleOperationStatus.RUNNING,
+                terminalReceiptId = "original-terminal".takeIf { terminal },
+                steps = required.map { component ->
+                    val complete = terminal || externalComplete && component !in android
+                    LifecycleStep(stepId = "original-${component.name}", component = component,
+                        status = if (complete) LifecycleStepStatus.COMPLETE else LifecycleStepStatus.PENDING,
+                        attemptCount = 1, authorityRevision = "authority-1".takeIf { complete },
+                        receiptReference = "original-receipt-${component.name}".takeIf { complete },
+                        updatedAtEpochMillis = operation.updatedAtEpochMillis)
+                })
+        }
+    }
+
+    @Test
+    fun `gallery opens a new selection even when an old editor draft exists`() = runTest {
+        val store = mockk<io.element.android.features.messages.impl.draft.MediaSelectionDraftStore>(relaxed = true)
+        val old = mockk<Attachment.Media>()
+        coEvery { store.latestSources(any(), any()) } returns listOf(old)
+        val preview = lambdaRecorder { _: ImmutableList<Attachment>, _: EventId? -> }
+        pickerProvider.givenResult(null)
+        createPresenter(mediaSelectionDraftStore = store,
+            navigator = FakeMessagesNavigator(onPreviewAttachmentLambda = preview)).test {
+            val state = awaitFirstItem()
+            state.eventSink(MessageComposerEvent.AddAttachment)
+            advanceUntilIdle()
+            assertThat(awaitItem().showAttachmentSourcePicker).isTrue()
+            state.eventSink(MessageComposerEvent.PickAttachmentSource.FromGallery)
+            advanceUntilIdle()
+            assertThat(pickerProvider.completedOperationIds).hasSize(1)
+            preview.assertions().isNeverCalled()
+            io.mockk.coVerify(exactly = 0) { store.clear(any()) }
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test fun `fresh screenshot expands to older gallery pages and selects only the tapped older image`() = runTest {
+        val images = (80 downTo 40).map {
+            io.element.android.libraries.mediapickers.api.RecentImage(Uri.parse("content://media/$it"), it * 1000L)
+        }
+        var selectedUris = emptyList<Uri>()
+        var nextPageCalls = 0
+        val provider = object : PickerProvider by FakePickerProvider() {
+            override suspend fun recentImages(nowEpochMillis: Long) = listOf(images.first().copy(addedAtEpochMillis = nowEpochMillis))
+            override suspend fun galleryImages(nowEpochMillis: Long, before: io.element.android.libraries.mediapickers.api.RecentImage?, pageSize: Int) =
+                if (before == null) listOf(images.first().copy(addedAtEpochMillis = nowEpochMillis)) + images.drop(1).take(39)
+                else {
+                    nextPageCalls++
+                    assertThat(before.uri).isEqualTo(images[39].uri)
+                    images.drop(40)
+                }
+            override suspend fun selectRecentImages(operation: io.element.android.libraries.mediapickers.api.MediaPickOperation, uris: List<Uri>):
+                io.element.android.libraries.mediapickers.api.MediaPickBatchResult {
+                selectedUris = uris
+                return io.element.android.libraries.mediapickers.api.MediaPickBatchResult(operation, uris.map {
+                    io.element.android.libraries.mediapickers.api.MediaPickItemResult.Ready(
+                        io.element.android.libraries.mediapickers.api.PickedMedia(it, "image/png", operationId = operation.operationId))
+                })
+            }
+        }
+        val preview = lambdaRecorder { _: ImmutableList<Attachment>, _: EventId? -> }
+        createPresenter(pickerProvider = provider, navigator = FakeMessagesNavigator(onPreviewAttachmentLambda = preview)).test {
+            awaitFirstItem().eventSink(MessageComposerEvent.AddAttachment)
+            advanceUntilIdle()
+            val first = expectMostRecentItem()
+            assertThat(first.recentImages).hasSize(40)
+            first.eventSink(MessageComposerEvent.LoadMoreRecentImages(images[39].uri))
+            first.eventSink(MessageComposerEvent.LoadMoreRecentImages(images[39].uri))
+            advanceUntilIdle()
+            val loaded = expectMostRecentItem()
+            assertThat(nextPageCalls).isEqualTo(1)
+            assertThat(loaded.recentImages.map { it.uri }).containsExactlyElementsIn(images.map { it.uri }).inOrder()
+            loaded.eventSink(MessageComposerEvent.SelectRecentImage(images.last().uri))
+            advanceUntilIdle()
+            assertThat(selectedUris).containsExactly(images.last().uri)
+            preview.assertions().isCalledOnce()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test fun `gallery page completing after dismissal cannot restore the strip`() = runTest {
+        val provider = object : PickerProvider by FakePickerProvider() {
+            override suspend fun recentImages(nowEpochMillis: Long) = listOf(
+                io.element.android.libraries.mediapickers.api.RecentImage(Uri.parse("content://media/100"), nowEpochMillis))
+            override suspend fun galleryImages(nowEpochMillis: Long, before: io.element.android.libraries.mediapickers.api.RecentImage?, pageSize: Int):
+                List<io.element.android.libraries.mediapickers.api.RecentImage> {
+                if (before != null) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { kotlinx.coroutines.delay(100L) }
+                return (100 downTo 61).map {
+                    io.element.android.libraries.mediapickers.api.RecentImage(Uri.parse("content://media/$it"), nowEpochMillis)
+                }
+            }
+        }
+        createPresenter(pickerProvider = provider).test {
+            awaitFirstItem().eventSink(MessageComposerEvent.AddAttachment)
+            advanceUntilIdle()
+            val state = expectMostRecentItem()
+            state.eventSink(MessageComposerEvent.LoadMoreRecentImages(state.recentImages.last().uri))
+            runCurrent()
+            state.eventSink(MessageComposerEvent.DismissRecentImages)
+            advanceUntilIdle()
+            assertThat(expectMostRecentItem().recentImages).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     private fun TestScope.createPresenter(
@@ -1536,11 +3374,17 @@ class MessageComposerPresenterTest {
         mediaOptimizationConfigProvider: FakeMediaOptimizationConfigProvider = FakeMediaOptimizationConfigProvider(),
         isInThread: Boolean = false,
         slashCommandService: SlashCommandService = FakeSlashCommandService(),
+        appOperationalStateCoordinator: io.element.android.security.dataprotection.api.AppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
+        matrixClient: MatrixClient = FakeMatrixClient(sessionId = room.sessionId),
+        commonInfoRepository: CommonInfoRepository = mockk(relaxed = true),
+        mediaSelectionDraftStore: io.element.android.features.messages.impl.draft.MediaSelectionDraftStore? = null,
+        timelineController: TimelineController = TimelineController(room, timeline),
     ) = MessageComposerPresenter(
         navigator = navigator,
         sessionCoroutineScope = this,
         isInThread = isInThread,
         room = room,
+        matrixClient = matrixClient,
         mediaPickerProvider = pickerProvider,
         sessionPreferencesStore = sessionPreferencesStore,
         localMediaFactory = localMediaFactory,
@@ -1566,7 +3410,7 @@ class MessageComposerPresenterTest {
         permissionsPresenterFactory = FakePermissionsPresenterFactory(permissionPresenter),
         permalinkParser = permalinkParser,
         permalinkBuilder = permalinkBuilder,
-        timelineController = TimelineController(room, timeline),
+        timelineController = timelineController,
         draftService = draftService,
         mentionSpanProvider = mentionSpanProvider,
         pillificationHelper = textPillificationHelper,
@@ -1574,6 +3418,10 @@ class MessageComposerPresenterTest {
         mediaOptimizationConfigProvider = mediaOptimizationConfigProvider,
         notificationConversationService = notificationConversationService,
         slashCommandService = slashCommandService,
+        appOperationalStateCoordinator = appOperationalStateCoordinator,
+        localAttachmentPreviewLeaseService = io.mockk.mockk(relaxed = true),
+        commonInfoRepository = commonInfoRepository,
+        mediaSelectionDraftStore = mediaSelectionDraftStore,
     ).apply {
         isTesting = true
         showTextFormatting = isRichTextEditorEnabled

@@ -19,6 +19,7 @@ import io.element.android.libraries.matrix.api.core.ThreadId
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.room.BaseRoom
 import io.element.android.libraries.matrix.api.room.RoomInfo
+import io.element.android.libraries.matrix.api.room.RoomAlreadyRemovedException
 import io.element.android.libraries.matrix.api.room.RoomMember
 import io.element.android.libraries.matrix.api.room.RoomMembersState
 import io.element.android.libraries.matrix.api.room.RoomMembershipObserver
@@ -61,6 +62,7 @@ class RustBaseRoom(
     sessionCoroutineScope: CoroutineScope,
     roomInfoMapper: RoomInfoMapper,
     initialRoomInfo: RoomInfo,
+    private val membershipLifecycle: RoomMembershipLifecycle? = null,
 ) : BaseRoom {
     override val roomId = RoomId(innerRoom.id())
 
@@ -171,9 +173,23 @@ class RustBaseRoom(
 
     override suspend fun leave(): Result<Unit> = withContext(roomDispatcher) {
         val membershipBeforeLeft = roomInfoFlow.value.currentUserMembership
-        runCatchingExceptions {
-            innerRoom.leave()
-        }.onSuccess {
+        val leaveResult = runCatchingExceptions {
+            performMembership(sessionId.value, "leave") { innerRoom.leave() }
+        }
+        val terminalResult = if (leaveResult.exceptionOrNull()?.isLocallyForgettableLeaveFailure() == true) {
+            // LC-22 can dissolve and purge a room while another device still has a joined-room
+            // snapshot in its local SDK store. Synapse then correctly rejects leave with
+            // M_FORBIDDEN because the account is already absent. Forget through this SDK
+            // instance so its local room store converges instead of leaving an unusable ghost.
+            runCatchingExceptions {
+                innerRoom.forget()
+            }.recoverCatching { forgetFailure ->
+                throw RoomAlreadyRemovedException(roomId, forgetFailure)
+            }
+        } else {
+            leaveResult
+        }
+        terminalResult.onSuccess {
             roomMembershipObserver.notifyUserLeftRoom(
                 roomId = roomId,
                 isSpace = roomInfoFlow.value.isSpace,
@@ -184,14 +200,29 @@ class RustBaseRoom(
 
     override suspend fun join(): Result<Unit> = withContext(roomDispatcher) {
         runCatchingExceptions {
-            innerRoom.join()
+            performMembership(sessionId.value, "join") { innerRoom.join() }
         }
+    }
+
+    internal suspend fun performMembership(target: String, action: String, reason: String? = null, block: suspend () -> Unit) {
+        membershipLifecycle?.perform(roomId.value, target, action, block, reason) ?: block()
     }
 
     override suspend fun forget(): Result<Unit> = withContext(roomDispatcher) {
         runCatchingExceptions {
             innerRoom.forget()
         }
+    }
+
+    private fun Throwable.isLocallyForgettableLeaveFailure(): Boolean {
+        val description = generateSequence(this) { it.cause }
+            .joinToString(separator = " ") { "${it.message.orEmpty()} $it" }
+            .lowercase()
+        val forbidden = "m_forbidden" in description || "[403" in description
+        val absent = "not in room" in description || "not a member of the room" in description
+        val notFound = "m_not_found" in description || "[404" in description || "status_code: 404" in description
+        val unknownRoom = "not a known room" in description || "unknown room" in description
+        return (forbidden && absent) || (notFound && unknownRoom)
     }
 
     override suspend fun roomPermissions(): Result<RoomPermissions> = withContext(roomDispatcher) {
@@ -250,7 +281,7 @@ class RustBaseRoom(
 
     override suspend fun saveComposerDraft(composerDraft: ComposerDraft, threadRoot: ThreadId?): Result<Unit> = withContext(roomDispatcher) {
         runCatchingExceptions {
-            Timber.d("saveComposerDraft: $composerDraft into $roomId for thread root: $threadRoot")
+            Timber.d("saveComposerDraft into $roomId for thread root: $threadRoot")
             innerRoom.saveComposerDraft(composerDraft.into(), threadRoot = threadRoot?.value)
         }
     }
@@ -299,4 +330,23 @@ class RustBaseRoom(
             }
         }
     }
+
+    override suspend fun loadRtcNotification(eventId: EventId): Result<io.element.android.libraries.matrix.api.notification.RtcNotificationAuthority> =
+        withContext(roomDispatcher) {
+            runCatchingExceptions {
+                val event = innerRoom.loadOrFetchEvent(eventId.value)
+                val timestamp = try {
+                    require(event.eventId() == eventId.value) { "RTC notification identity mismatch" }
+                    event.timestamp().toLong()
+                } catch (failure: Exception) {
+                    event.close()
+                    throw failure
+                }
+                // The existing mapper owns/retire the SDK event and only returns decrypted typed protocol metadata.
+                val content = io.element.android.libraries.matrix.impl.notification.TimelineEventToNotificationContentMapper()
+                    .map(event).getOrThrow() as? io.element.android.libraries.matrix.api.notification.NotificationContent.MessageLike.RtcNotification
+                    ?: error("Event is not a decrypted RTC notification")
+                io.element.android.libraries.matrix.api.notification.RtcNotificationAuthority(eventId, timestamp, content)
+            }
+        }
 }

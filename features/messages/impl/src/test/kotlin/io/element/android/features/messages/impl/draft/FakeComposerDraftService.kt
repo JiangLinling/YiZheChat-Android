@@ -13,6 +13,26 @@ import io.element.android.libraries.matrix.api.core.ThreadId
 import io.element.android.libraries.matrix.api.room.draft.ComposerDraft
 
 class FakeComposerDraftService : ComposerDraftService {
+    override suspend fun bindTextSendDraft(roomId: RoomId, draft: ComposerDraft, operationId: String) = updateDraft(roomId, null, draft, false)
+    var textDraftVersionLambda: suspend (RoomId) -> String? = { null }
+    override suspend fun textDraftVersion(roomId: RoomId): String? = textDraftVersionLambda(roomId)
+    override suspend fun hasPendingTextSendDraft(roomId: RoomId): Boolean = false
+    var reconcileSentTextDraftLambda: suspend (RoomId) -> ConsumedTextDraft? = { null }
+    override suspend fun reconcileSentTextDraft(roomId: RoomId, canConsume: () -> Boolean): ConsumedTextDraft? =
+        reconcileSentTextDraftLambda(roomId).takeIf { canConsume() }
+
+    var preparePersistentDraftWriteLambda: suspend (RoomId, ThreadId?) -> Unit = { _, _ -> }
+    override suspend fun preparePersistentDraftWrite(roomId: RoomId, threadRoot: ThreadId?) =
+        preparePersistentDraftWriteLambda(roomId, threadRoot)
+
+    var captureProtectedCaptionDraftVersionLambda: (RoomId, ThreadId?) -> String? = { _, _ -> null }
+    override suspend fun captureProtectedCaptionDraftVersion(roomId: RoomId, threadRoot: ThreadId?): String? =
+        captureProtectedCaptionDraftVersionLambda(roomId, threadRoot)
+
+    var clearProtectedCaptionDraftIfVersionLambda: suspend (RoomId, ThreadId?, String?) -> Boolean = { _, _, _ -> true }
+    override suspend fun clearProtectedCaptionDraftIfVersion(roomId: RoomId, threadRoot: ThreadId?, version: String?): Boolean =
+        clearProtectedCaptionDraftIfVersionLambda(roomId, threadRoot, version)
+
     var loadDraftLambda: (RoomId, ThreadId?, Boolean) -> ComposerDraft? = { _, _, _ -> null }
     override suspend fun loadDraft(
         roomId: RoomId,

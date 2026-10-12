@@ -11,10 +11,25 @@ package io.element.android.libraries.mediaviewer.impl.local.pdf
 import android.content.Context
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.provider.OpenableColumns
 import io.element.android.libraries.core.extensions.runCatchingExceptions
 import java.io.File
 
 class ParcelFileDescriptorFactory(private val context: Context) {
+    /** Metadata query reuses the existing provider admission; it neither reads payload nor issues a lease. */
+    internal fun sourceAccessCheck(model: Any?, encodedSize: () -> Long): (() -> Unit)? {
+        val uri = (model as? Uri)?.takeIf {
+            it.scheme == "content" && it.authority == "${context.packageName}.securemedia"
+        } ?: return null
+        val guard = PdfProtectedSourceAccess(encodedSize) {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                val column = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (!cursor.moveToFirst() || column < 0 || cursor.isNull(column)) -1L else cursor.getLong(column)
+            } ?: -1L
+        }
+        return guard::check
+    }
+
     fun create(model: Any?) = runCatchingExceptions {
         when (model) {
             is File -> ParcelFileDescriptor.open(model, ParcelFileDescriptor.MODE_READ_ONLY)

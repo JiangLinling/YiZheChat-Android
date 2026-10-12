@@ -30,6 +30,20 @@ class SendQueuesTest {
     private val sut = SendQueues(matrixClient, syncService)
 
     @Test
+    fun `test initially running sync enables queues without a disabled queue event`() = runTest {
+        val setAllSendQueuesEnabledLambda = lambdaRecorder { _: Boolean -> }
+        matrixClient.setAllSendQueuesEnabledLambda = setAllSendQueuesEnabledLambda
+
+        sut.launchIn(backgroundScope)
+        advanceTimeBy(SEND_QUEUES_RETRY_DELAY_MILLIS)
+        runCurrent()
+
+        assert(setAllSendQueuesEnabledLambda)
+            .isCalledOnce()
+            .with(value(true))
+    }
+
+    @Test
     fun `test network status online and sending queue failed`() = runTest {
         val sendQueueDisabledFlow = MutableSharedFlow<RoomId>(replay = 1)
         val setAllSendQueuesEnabledLambda = lambdaRecorder { _: Boolean -> }

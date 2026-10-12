@@ -10,6 +10,7 @@ package io.element.android.libraries.push.impl.notifications
 
 import android.content.Intent
 import dev.zacsweers.metro.Inject
+import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.core.log.logger.LoggerTag
 import io.element.android.libraries.di.annotations.AppCoroutineScope
 import io.element.android.libraries.matrix.api.MatrixClientProvider
@@ -19,6 +20,7 @@ import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.core.ThreadId
 import io.element.android.libraries.matrix.api.room.CreateTimelineParams
 import io.element.android.libraries.matrix.api.room.JoinedRoom
+import io.element.android.libraries.matrix.api.room.directRoomRelationState
 import io.element.android.libraries.matrix.api.timeline.ReceiptType
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.preferences.api.store.SessionPreferencesStoreFactory
@@ -29,10 +31,16 @@ import io.element.android.libraries.push.impl.push.OnNotifiableEventReceived
 import io.element.android.services.appnavstate.api.ActiveRoomsHolder
 import io.element.android.services.toolbox.api.strings.StringProvider
 import io.element.android.services.toolbox.api.systemclock.SystemClock
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import java.security.MessageDigest
 import java.util.UUID
 
 private val loggerTag = LoggerTag("NotificationBroadcastReceiverHandler", LoggerTag.NotificationLoggerTag)
@@ -50,29 +58,35 @@ class NotificationBroadcastReceiverHandler(
     private val stringProvider: StringProvider,
     private val replyMessageExtractor: ReplyMessageExtractor,
     private val activeRoomsHolder: ActiveRoomsHolder,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
 ) {
-    fun onReceive(intent: Intent) {
-        val sessionId = intent.getStringExtra(NotificationBroadcastReceiver.KEY_SESSION_ID)?.let(::SessionId) ?: return
+    fun onReceive(intent: Intent): Job? {
+        val sessionId = intent.getStringExtra(NotificationBroadcastReceiver.KEY_SESSION_ID)?.let(::SessionId) ?: return null
         val roomId = intent.getStringExtra(NotificationBroadcastReceiver.KEY_ROOM_ID)?.let(::RoomId)
         val threadId = intent.getStringExtra(NotificationBroadcastReceiver.KEY_THREAD_ID)?.let(::ThreadId)
         val eventId = intent.getStringExtra(NotificationBroadcastReceiver.KEY_EVENT_ID)?.let(::EventId)
 
         Timber.tag(loggerTag.value).d("onReceive: ${intent.action} ${intent.data} for: ${roomId?.value}/${eventId?.value}")
-        when (intent.action) {
+        return when (intent.action) {
             actionIds.smartReply -> if (roomId != null) {
                 handleSmartReply(sessionId, roomId, eventId, threadId, intent)
-            }
+            } else null
             actionIds.dismissRoom -> if (roomId != null) {
                 notificationCleaner.clearMessagesForRoom(sessionId, roomId)
-            }
-            actionIds.dismissSummary ->
+                null
+            } else null
+            actionIds.dismissSummary -> {
                 notificationCleaner.clearAllMessagesEvents(sessionId)
+                null
+            }
             actionIds.dismissInvite -> if (roomId != null) {
                 notificationCleaner.clearMembershipNotificationForRoom(sessionId, roomId)
-            }
+                null
+            } else null
             actionIds.dismissEvent -> if (eventId != null) {
                 notificationCleaner.clearEvent(sessionId, eventId)
-            }
+                null
+            } else null
             actionIds.markRoomRead -> if (roomId != null) {
                 if (threadId == null) {
                     notificationCleaner.clearMessagesForRoom(sessionId, roomId)
@@ -80,15 +94,16 @@ class NotificationBroadcastReceiverHandler(
                     notificationCleaner.clearMessagesForThread(sessionId, roomId, threadId)
                 }
                 handleMarkAsRead(sessionId, roomId, threadId)
-            }
+            } else null
             actionIds.join -> if (roomId != null) {
                 notificationCleaner.clearMembershipNotificationForRoom(sessionId, roomId)
                 handleJoinRoom(sessionId, roomId)
-            }
+            } else null
             actionIds.reject -> if (roomId != null) {
                 notificationCleaner.clearMembershipNotificationForRoom(sessionId, roomId)
                 handleRejectRoom(sessionId, roomId)
-            }
+            } else null
+            else -> null
         }
     }
 
@@ -149,15 +164,28 @@ class NotificationBroadcastReceiverHandler(
         val client = matrixClientProvider.getOrRestore(sessionId).getOrNull() ?: return@launch
         val room = activeRoomsHolder.getActiveRoomMatching(sessionId, roomId) ?: client.getJoinedRoom(roomId)
 
-        room?.let {
-            sendMatrixEvent(
-                sessionId = sessionId,
-                roomId = roomId,
-                replyToEventId = replyToEventId,
-                threadId = threadId,
-                room = it,
-                message = message,
-            )
+        room?.let { joinedRoom ->
+            runCatchingExceptions {
+                appOperationalStateCoordinator.perform(
+                    lifecycleOperationRequest(
+                        lifecycleId = FullAppLifecycleId.LC_13,
+                        trigger = "reply",
+                        roomIdHash = roomId.value.sha256Hex(),
+                        eventIdHash = replyToEventId?.value?.sha256Hex(),
+                    )
+                ) {
+                    sendMatrixEvent(
+                        sessionId = sessionId,
+                        roomId = roomId,
+                        replyToEventId = replyToEventId,
+                        threadId = threadId,
+                        room = joinedRoom,
+                        message = message,
+                    )
+                }
+            }.onFailure { failure ->
+                Timber.tag(loggerTag.value).e(failure, "Smart reply lifecycle failed")
+            }
         }
     }
 
@@ -169,6 +197,10 @@ class NotificationBroadcastReceiverHandler(
         room: JoinedRoom,
         message: String,
     ) {
+        if (!room.info().directRoomRelationState().canInteract) {
+            Timber.tag(loggerTag.value).w("Smart reply blocked until the direct-room invitation is accepted for $roomId")
+            return
+        }
         // Create a new event to be displayed in the notification drawer, right now
         val notifiableMessageEvent = NotifiableMessageEvent(
             sessionId = sessionId,
@@ -193,7 +225,7 @@ class NotificationBroadcastReceiverHandler(
         )
         onNotifiableEventReceived.onNotifiableEventsReceived(listOf(notifiableMessageEvent))
 
-        if (threadId != null && replyToEventId != null) {
+        val sendResult = if (threadId != null && replyToEventId != null) {
             room.liveTimeline.replyMessage(
                 body = message,
                 htmlBody = null,
@@ -207,7 +239,8 @@ class NotificationBroadcastReceiverHandler(
                 htmlBody = null,
                 intentionalMentions = emptyList()
             )
-        }.onFailure {
+        }
+        sendResult.onFailure {
             Timber.e(it, "Failed to send smart reply message")
             onNotifiableEventReceived.onNotifiableEventsReceived(
                 listOf(
@@ -217,5 +250,10 @@ class NotificationBroadcastReceiverHandler(
                 )
             )
         }
+        sendResult.getOrThrow()
     }
+
+    private fun String.sha256Hex(): String = MessageDigest.getInstance("SHA-256")
+        .digest(encodeToByteArray())
+        .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 }

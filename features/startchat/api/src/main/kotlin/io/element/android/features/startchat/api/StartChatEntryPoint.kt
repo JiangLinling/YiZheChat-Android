@@ -12,17 +12,24 @@ import com.bumble.appyx.core.modality.BuildContext
 import com.bumble.appyx.core.node.Node
 import com.bumble.appyx.core.plugin.Plugin
 import io.element.android.libraries.architecture.FeatureEntryPoint
+import io.element.android.libraries.architecture.NodeInputs
 import io.element.android.libraries.matrix.api.core.RoomIdOrAlias
+import io.element.android.libraries.matrix.api.core.UserId
 
 interface StartChatEntryPoint : FeatureEntryPoint {
+    enum class InitialTarget { SEARCH, SCANNER, MY_QR_CODE }
+    data class Params(val initialTarget: InitialTarget = InitialTarget.SEARCH) : NodeInputs
+
     fun createNode(
         parentNode: Node,
         buildContext: BuildContext,
         callback: Callback,
+        params: Params = Params(),
     ): Node
 
     interface Callback : Plugin {
         fun onRoomCreated(roomIdOrAlias: RoomIdOrAlias, serverNames: List<String>)
         fun navigateToRoomDirectory()
+        fun navigateToUserProfile(userId: UserId)
     }
 }

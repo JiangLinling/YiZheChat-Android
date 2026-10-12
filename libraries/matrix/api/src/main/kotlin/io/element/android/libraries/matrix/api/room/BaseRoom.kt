@@ -213,6 +213,10 @@ interface BaseRoom : Closeable {
 
     suspend fun threadRootIdForEvent(eventId: EventId): Result<ThreadId?>
 
+    /** Load/decrypt the exact RTC event; never returns ordinary message content or bypasses Matrix authorization. */
+    suspend fun loadRtcNotification(eventId: EventId): Result<io.element.android.libraries.matrix.api.notification.RtcNotificationAuthority> =
+        Result.failure(UnsupportedOperationException("RTC notification lookup unavailable"))
+
     /**
      * Destroy the room and release all resources associated to it.
      */

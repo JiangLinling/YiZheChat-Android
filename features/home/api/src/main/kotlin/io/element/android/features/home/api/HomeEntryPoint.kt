@@ -12,6 +12,7 @@ import com.bumble.appyx.core.modality.BuildContext
 import com.bumble.appyx.core.node.Node
 import com.bumble.appyx.core.plugin.Plugin
 import io.element.android.libraries.architecture.FeatureEntryPoint
+import io.element.android.features.preferences.api.PreferencesRootDestination
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 
@@ -23,10 +24,16 @@ interface HomeEntryPoint : FeatureEntryPoint {
     ): Node
 
     interface Callback : Plugin {
+        /** Presentation only: the first real home content has committed, including a legitimate empty list. */
+        fun onInitialContentReady() = Unit
         fun navigateToRoom(roomId: RoomId, joinedRoom: JoinedRoom?)
+        fun navigateToAddFriend()
+        fun navigateToFriendScanner()
+        fun navigateToMyQrCode()
+        fun navigateToFriendProfile(userId: io.element.android.libraries.matrix.api.core.UserId)
         fun navigateToCreateRoom()
         fun navigateToCreateSpace()
-        fun navigateToSettings()
+        fun navigateToSettings(destination: PreferencesRootDestination)
         fun navigateToSetUpRecovery()
         fun navigateToEnterRecoveryKey()
         fun navigateToRoomSettings(roomId: RoomId)

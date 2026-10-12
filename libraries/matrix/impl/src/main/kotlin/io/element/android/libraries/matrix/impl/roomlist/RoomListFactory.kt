@@ -8,11 +8,15 @@
 
 package io.element.android.libraries.matrix.impl.roomlist
 
+import io.element.android.libraries.matrix.api.core.DeviceId
+import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.roomlist.DynamicRoomList
 import io.element.android.libraries.matrix.api.roomlist.RoomList
 import io.element.android.libraries.matrix.api.roomlist.RoomListFilter
 import io.element.android.libraries.matrix.api.roomlist.RoomListFilter.Companion.all
 import io.element.android.libraries.matrix.api.roomlist.RoomSummary
+import io.element.android.libraries.matrix.impl.timeline.DisabledMatrixProtectedContentAdapterFactory
+import io.element.android.libraries.matrix.impl.timeline.MatrixProtectedContentAdapterFactory
 import io.element.android.services.analytics.api.AnalyticsLongRunningTransaction
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.analytics.api.finishLongRunningTransaction
@@ -23,7 +27,6 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import org.matrix.rustcomponents.sdk.RoomListDynamicEntriesController
 import org.matrix.rustcomponents.sdk.RoomListLoadingState
 import org.matrix.rustcomponents.sdk.RoomListService
 import kotlin.coroutines.CoroutineContext
@@ -32,8 +35,15 @@ import org.matrix.rustcomponents.sdk.RoomList as InnerRoomList
 internal class RoomListFactory(
     private val innerRoomListService: RoomListService,
     private val analyticsService: AnalyticsService,
+    sessionId: SessionId? = null,
+    deviceId: DeviceId? = null,
+    protectedContentAdapterFactory: MatrixProtectedContentAdapterFactory = DisabledMatrixProtectedContentAdapterFactory,
 ) {
-    private val roomSummaryFactory: RoomSummaryFactory = RoomSummaryFactory()
+    private val roomSummaryFactory: RoomSummaryFactory = RoomSummaryFactory(
+        sessionId = sessionId,
+        deviceId = deviceId,
+        protectedContentAdapterFactory = protectedContentAdapterFactory,
+    )
 
     /**
      * Creates a room list that can be used to load more rooms and filter them dynamically.
@@ -49,7 +59,7 @@ internal class RoomListFactory(
         val summariesFlow = MutableSharedFlow<List<RoomSummary>>(replay = 1, extraBufferCapacity = 1)
         val processor = RoomSummaryListProcessor(summariesFlow, innerRoomListService, coroutineContext, roomSummaryFactory, analyticsService)
         var innerRoomList: InnerRoomList? = null
-        var dynamicController: RoomListDynamicEntriesController? = null
+        val controllerOwner = RoomListControllerOwner()
 
         val firstRoomsTransaction = analyticsService.startTransaction("Load first set of rooms", "innerRoomList.entriesFlow")
 
@@ -59,9 +69,8 @@ internal class RoomListFactory(
                 innerRoomList.entriesFlow(
                     pageSize = pageSize,
                     initialFilterKind = RoomListFilterMapper.toRustFilter(initialFilter),
-                    onControllerCreated = { controller ->
-                        dynamicController = controller
-                    }
+                    onControllerCreated = controllerOwner::install,
+                    onControllerReleased = controllerOwner::release,
                 ).onEach { update ->
                     if (!firstRoomsTransaction.isFinished()) {
                         analyticsService.finishLongRunningTransaction(AnalyticsLongRunningTransaction.FirstRoomsDisplayed)
@@ -85,7 +94,7 @@ internal class RoomListFactory(
             loadingState = loadingStateFlow,
             processor = processor,
             pageSize = pageSize,
-            dynamicController = { dynamicController }
+            controllerOwner = controllerOwner
         )
     }
 }

@@ -13,6 +13,21 @@ import org.junit.Test
 
 class MediaSourceTest {
     @Test
+    fun `diagnostic description never exposes URL or encrypted descriptor`() {
+        val source = MediaSource(
+            url = "https://example.invalid/media?signature=private-url-signature",
+            json = """{"file":{"key":{"k":"private-media-key"},"iv":"private-iv"}}""",
+        )
+        assertThat(source.toString()).isEqualTo("MediaSource(encrypted=true)")
+        assertThat(listOf(source).toString()).doesNotContain("private-")
+        assertThat(source.copy(json = null).toString()).isEqualTo("MediaSource(encrypted=false)")
+        // Redaction is diagnostic-only: transport data and equality remain intact.
+        assertThat(source.copy()).isEqualTo(source)
+        assertThat(source.json).contains("private-media-key")
+        assertThat(source.safeUrl).contains("private-url-signature")
+    }
+
+    @Test
     fun `safeUrl removes the fragment part in MXC urls`() {
         val mediaSource = aMediaSource(url = "mxc://matrix.org/url#fragment")
         assertThat(mediaSource.safeUrl).isEqualTo("mxc://matrix.org/url")

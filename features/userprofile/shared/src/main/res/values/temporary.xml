@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_user_profile_private_details">Remark and contact details</string>
+    <string name="screen_user_profile_private_details_description">Private to this account and device</string>
+    <string name="screen_user_profile_edit_private_details">Edit friend details</string>
+    <string name="screen_user_profile_remark_name">Remark name</string>
+    <string name="screen_user_profile_phone">Phone</string>
+    <string name="screen_user_profile_tags">Tags</string>
+    <string name="screen_user_profile_description">Description</string>
+    <string name="screen_user_profile_add_friend">Add friend</string>
+    <string name="screen_user_profile_calls">Voice and video calls</string>
+    <string name="screen_user_profile_voice_call">Voice call</string>
+    <string name="screen_user_profile_video_call">Video call</string>
+    <string name="screen_user_profile_more">Profile options</string>
+    <string name="screen_user_profile_account_info">Account information</string>
+    <string name="screen_user_profile_verify_identity">Verify identity</string>
+    <string name="screen_user_profile_save_details_error">Could not save contact details. Your edits have been kept. Please try again.</string>
+    <string name="screen_identity_share_title">Share contact</string>
+    <string name="screen_identity_share_card">Send contact card</string>
+    <string name="screen_identity_share_link">Share link</string>
+    <string name="screen_user_profile_remove_friend">Remove friend</string>
+    <string name="screen_user_profile_removing_friend">Updating friend relationship…</string>
+    <string name="screen_user_profile_remove_friend_confirmation">Remove %1$s as a friend? You will leave your direct chats with this person. These chats will disappear from your chat list; the other person keeps their history. This action does not delete messages, media or drafts. To chat again, send a new invitation and wait for acceptance.</string>
+    <string name="screen_user_profile_remove_friend_error">Could not finish removing this friend. The relationship may be partly updated. Check your connection and retry; completed steps will not be repeated.</string>
+    <string name="screen_user_profile_remove_friend_done">Friend removal completed on this device</string>
+    <string name="screen_user_profile_remove_friend_sync">The other person’s contacts and chat permissions update when their device syncs. To chat again, send a new invitation and wait for acceptance.</string>
+    <string name="screen_user_profile_remove_friend_diagnostic">Diagnostic code: %1$s</string>
+</resources>

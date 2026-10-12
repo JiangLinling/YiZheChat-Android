@@ -16,6 +16,8 @@ import io.element.android.features.invite.api.SeenInvitesStore
 import io.element.android.libraries.di.annotations.ApplicationContext
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.sessionstorage.api.observer.SessionObserver
+import io.element.android.libraries.sessionstorage.api.observer.SessionListener
+import io.element.android.security.securestorage.api.SensitiveFileStore
 import kotlinx.coroutines.CoroutineScope
 import java.util.concurrent.ConcurrentHashMap
 
@@ -24,21 +26,36 @@ import java.util.concurrent.ConcurrentHashMap
 class DefaultSeenInvitesStoreFactory(
     @ApplicationContext private val context: Context,
     private val sessionObserver: SessionObserver,
+    private val sensitiveFileStore: SensitiveFileStore,
 ) : SeenInvitesStoreFactory {
     // We can have only one class accessing a single data store, so keep a cache of them.
-    private val cache = ConcurrentHashMap<SessionId, SeenInvitesStore>()
+    private data class Entry(val deviceId: String, val store: SeenInvitesStore)
+    private val cache = ConcurrentHashMap<SessionId, Entry>()
+
+    init {
+        sessionObserver.addListener(object : SessionListener {
+            override suspend fun onSessionDeleted(userId: String, wasLastSession: Boolean) {
+                cache.remove(SessionId(userId))
+            }
+        })
+    }
 
     override fun getOrCreate(
         sessionId: SessionId,
         sessionCoroutineScope: CoroutineScope,
+        deviceId: String,
     ): SeenInvitesStore {
-        return cache.getOrPut(sessionId) {
-            DefaultSeenInvitesStore(
+        val entry = cache.computeIfAbsent(sessionId) {
+            Entry(deviceId, DefaultSeenInvitesStore(
                 context = context,
                 sessionId = sessionId,
                 sessionCoroutineScope = sessionCoroutineScope,
                 sessionObserver = sessionObserver,
-            )
+                sensitiveFileStore = sensitiveFileStore,
+                deviceId = deviceId,
+            ))
         }
+        check(entry.deviceId == deviceId) { "Notification history device identity changed before session disposal" }
+        return entry.store
     }
 }

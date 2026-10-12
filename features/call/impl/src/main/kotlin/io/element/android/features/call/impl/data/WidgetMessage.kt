@@ -19,6 +19,7 @@ data class WidgetMessage(
     @SerialName("requestId") val requestId: String,
     @SerialName("action") val action: Action,
     @SerialName("data") val data: JsonElement? = null,
+    @SerialName("response") val response: JsonElement? = null,
 ) {
     @Serializable
     enum class Direction {
@@ -45,5 +46,14 @@ data class WidgetMessage(
 
         @SerialName("content_loaded")
         ContentLoaded,
+
+        @SerialName("set_always_on_screen")
+        SetAlwaysOnScreen,
+
+        @SerialName("io.element.device_mute")
+        DeviceMute,
+
+        @SerialName("org.yizhe.rtc.media_ready")
+        MediaReady,
     }
 }

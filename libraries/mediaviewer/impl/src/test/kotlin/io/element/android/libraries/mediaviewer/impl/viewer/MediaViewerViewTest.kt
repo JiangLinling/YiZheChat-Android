@@ -28,7 +28,13 @@ import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.v2.runAndroidComposeUiTest
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.element.android.libraries.architecture.AsyncData
+import io.element.android.libraries.matrix.api.core.UniqueId
+import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.matrix.api.timeline.Timeline
+import io.element.android.libraries.matrix.api.timeline.item.event.SegmentedVideoCandidate
+import io.element.android.libraries.matrix.test.AN_EVENT_ID
+import io.element.android.libraries.mediaviewer.api.anImageMediaInfo
+import io.element.android.libraries.mediaviewer.impl.R
 import io.element.android.libraries.mediaviewer.impl.details.aMediaBottomSheetStateDetails
 import io.element.android.libraries.mediaviewer.test.viewer.aLocalMedia
 import io.element.android.libraries.ui.strings.CommonStrings
@@ -106,6 +112,37 @@ class MediaViewerViewTest {
             data,
             CommonStrings.action_download,
             MediaViewerEvent.SaveOnDisk(data),
+        )
+    }
+
+    @Test
+    fun `office document menu emits download event`() = runAndroidComposeUiTest {
+        val eventsRecorder = EventsRecorder<MediaViewerEvent>()
+        val mediaInfo = anImageMediaInfo().copy(
+            filename = "expense-report.docx",
+            mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            fileExtension = "docx",
+        )
+        val data = aMediaViewerPageData(
+            downloadedMedia = AsyncData.Success(aLocalMedia(uri = mockMediaUrl, mediaInfo = mediaInfo)),
+            mediaInfo = mediaInfo,
+        )
+        setMediaViewerView(
+            aMediaViewerState(
+                listData = listOf(data),
+                eventSink = eventsRecorder,
+            ),
+        )
+        mainClock.advanceTimeBy(200)
+
+        onNodeWithContentDescription(activity!!.getString(R.string.screen_media_office_more_actions)).performClick()
+        clickOn(CommonStrings.action_download)
+
+        eventsRecorder.assertList(
+            listOf(
+                MediaViewerEvent.LoadMedia(data),
+                MediaViewerEvent.SaveOnDisk(data),
+            )
         )
     }
 
@@ -197,20 +234,18 @@ class MediaViewerViewTest {
     }
 
     @Test
-    fun `clicking swipe on the image invokes the expected callback`() = runAndroidComposeUiTest {
+    fun `swiping on the image does not dismiss the viewer`() = runAndroidComposeUiTest {
         val eventsRecorder = EventsRecorder<MediaViewerEvent>()
         val state = aMediaViewerState(
             eventSink = eventsRecorder
         )
-        ensureCalledOnce { callback ->
-            setMediaViewerView(
-                state = state,
-                onBackClick = callback,
-            )
-            val imageContentDescription = activity!!.getString(CommonStrings.common_image)
-            onNodeWithContentDescription(imageContentDescription).performTouchInput { swipeDown(startY = centerY) }
-            mainClock.advanceTimeBy(1_000)
-        }
+        setMediaViewerView(
+            state = state,
+            onBackClick = EnsureNeverCalled(),
+        )
+        val imageContentDescription = activity!!.getString(CommonStrings.common_image)
+        onNodeWithContentDescription(imageContentDescription).performTouchInput { swipeDown(startY = centerY) }
+        mainClock.advanceTimeBy(1_000)
         eventsRecorder.assertList(
             listOf(
                 MediaViewerEvent.LoadMedia(state.listData.first() as MediaViewerPageData.MediaViewerData),
@@ -264,6 +299,45 @@ class MediaViewerViewTest {
             listOf(
                 MediaViewerEvent.LoadMedia(data),
                 MediaViewerEvent.ClearLoadingError(data)
+            )
+        )
+    }
+
+    @Test
+    fun `segmented identity change with the same source releases old identity before loading new`() = runAndroidComposeUiTest {
+        val eventsRecorder = EventsRecorder<MediaViewerEvent>()
+        val sharedSource = MediaSource("mxc://matrix.example/shared-init")
+        val first = aMediaViewerPageData(mediaSource = sharedSource).copy(
+            eventId = AN_EVENT_ID,
+            segmentedVideo = mockk<SegmentedVideoCandidate>("firstCandidate"),
+            mediaItemId = UniqueId("first-item"),
+        )
+        val second = first.copy(
+            segmentedVideo = mockk<SegmentedVideoCandidate>("secondCandidate"),
+        )
+        setSafeContent {
+            var state by remember {
+                mutableStateOf(aMediaViewerState(listData = listOf(first), eventSink = eventsRecorder))
+            }
+            LaunchedEffect(Unit) {
+                delay(200.milliseconds)
+                state = aMediaViewerState(listData = listOf(second), eventSink = eventsRecorder)
+            }
+            MediaViewerView(
+                state = state,
+                audioFocus = null,
+                textFileViewer = { _, _ -> },
+                onBackClick = EnsureNeverCalled(),
+            )
+        }
+
+        mainClock.advanceTimeBy(1_000)
+
+        eventsRecorder.assertList(
+            listOf(
+                MediaViewerEvent.LoadMedia(first),
+                MediaViewerEvent.CancelLoadingMedia(first),
+                MediaViewerEvent.LoadMedia(second),
             )
         )
     }

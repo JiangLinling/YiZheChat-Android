@@ -3,11 +3,18 @@
   <string name="screen_signout_confirmation_dialog_content">"Are you sure you want to remove this device?"</string>
   <string name="screen_signout_confirmation_dialog_submit">"Remove this device"</string>
   <string name="screen_signout_confirmation_dialog_title">"Remove this device"</string>
+  <string name="screen_signout_unbacked_keys_title">"Some message keys are not backed up"</string>
+  <string name="screen_signout_unbacked_keys_content">"Removing this device deletes its local keys. Messages whose keys have not finished uploading may be impossible to recover after signing in again."</string>
+  <string name="screen_signout_unbacked_keys_submit">"Remove without backup"</string>
+  <string name="screen_signout_unbacked_keys_wait">"Wait for backup"</string>
   <string name="screen_signout_in_progress_dialog_content">"Removing device…"</string>
   <string name="screen_signout_key_backup_disabled_subtitle">"This is your only device. If you remove it you’ll need a recovery key in order to confirm your digital identity and restore your encrypted chats the next time you sign in."</string>
   <string name="screen_signout_key_backup_disabled_title">"You’re about to lose access to your encrypted chats"</string>
   <string name="screen_signout_key_backup_offline_subtitle">"Your keys were still being backed up when you went offline. Reconnect so that your keys can be backed up before you remove this device."</string>
   <string name="screen_signout_key_backup_offline_title">"Your keys are still being backed up"</string>
+  <string name="screen_signout_key_backup_disabled_state_subtitle">"Key backup is disabled. Message keys that exist only on this device will be lost if you remove it."</string>
+  <string name="screen_signout_key_backup_lagged_subtitle">"Backup status fell behind and cannot confirm that all current message keys were saved. Keep this device and try again."</string>
+  <string name="screen_signout_key_backup_failed_subtitle">"This device could not finish backing up its message keys. Keep this device until backup succeeds."</string>
   <string name="screen_signout_key_backup_ongoing_subtitle">"Please wait for this to complete before removing this device."</string>
   <string name="screen_signout_key_backup_ongoing_title">"Your keys are still being backed up"</string>
   <string name="screen_signout_preference_item">"Remove this device"</string>
@@ -15,4 +22,11 @@
   <string name="screen_signout_recovery_disabled_title">"You’re about to lose access to your encrypted chats"</string>
   <string name="screen_signout_save_recovery_key_subtitle">"This is your only device. If you remove it you’ll need a recovery key in order to confirm your digital identity and restore your encrypted chats the next time you sign in."</string>
   <string name="screen_signout_save_recovery_key_title">"Make sure you have access to your recovery key before removing this device"</string>
+  <string name="screen_signout_recovery_readiness_title">"History recovery readiness"</string>
+  <string name="screen_signout_recovery_readiness_summary">"Recovery setup: %1$s\nKey backup: %2$s\nAnother device available: %3$s"</string>
+  <string name="screen_signout_readiness_ready">"ready"</string>
+  <string name="screen_signout_readiness_attention">"needs attention"</string>
+  <string name="screen_signout_readiness_available">"available"</string>
+  <string name="screen_signout_readiness_unavailable">"unavailable"</string>
+  <string name="screen_signout_non_recoverable_notice">"Removing this device erases its local keys and cache. After signing in again, standard history requires Matrix recovery and device authorization. Confidential history may require additional approval. Expired, withdrawn, destroyed and burn-after-read messages cannot be recovered."</string>
 </resources>

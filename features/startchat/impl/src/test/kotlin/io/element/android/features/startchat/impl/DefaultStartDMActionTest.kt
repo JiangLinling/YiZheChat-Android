@@ -129,6 +129,8 @@ class DefaultStartDMActionTest {
         return DefaultStartDMAction(
             matrixClient = matrixClient,
             analyticsService = analyticsService,
+            managementControlService = io.mockk.mockk(relaxed = true),
+            appOperationalStateCoordinator = io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator(),
         )
     }
 }

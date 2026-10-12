@@ -19,4 +19,10 @@
   <string name="screen_media_details_title">"File info"</string>
   <string name="screen_media_details_uploaded_by">"Uploaded by"</string>
   <string name="screen_media_details_uploaded_on">"Uploaded on"</string>
+  <string name="screen_media_office_secure_preview_empty">"This document has no text that can be shown in secure preview."</string>
+  <string name="screen_media_archive_secure_preview_error">"This archive could not be safely previewed."</string>
+  <string name="screen_media_archive_secure_preview_empty">"This archive contains no visible entries."</string>
+  <string name="screen_media_archive_directory">"Folder"</string>
+  <string name="screen_media_archive_entry_bytes">"%1$d bytes"</string>
+  <string name="screen_media_archive_entry_size_unknown">"Size unavailable"</string>
 </resources>

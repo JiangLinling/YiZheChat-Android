@@ -9,8 +9,11 @@
 package io.element.android.libraries.push.impl.notifications.factories
 
 import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.google.common.truth.Truth.assertThat
@@ -32,6 +35,7 @@ import io.element.android.libraries.push.impl.notifications.DefaultNotificationB
 import io.element.android.libraries.push.impl.notifications.NotificationActionIds
 import io.element.android.libraries.push.impl.notifications.RoomEventGroupInfo
 import io.element.android.libraries.push.impl.notifications.channels.DefaultNotificationChannels
+import io.element.android.libraries.push.impl.notifications.channels.FakeNotificationChannels
 import io.element.android.libraries.push.impl.notifications.channels.NotificationChannels
 import io.element.android.libraries.push.impl.notifications.factories.action.AcceptInvitationActionFactory
 import io.element.android.libraries.push.impl.notifications.factories.action.MarkAsReadActionFactory
@@ -50,9 +54,91 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 class DefaultNotificationCreatorTest {
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.R])
+    fun `direct conversation shows only latest message and supplies a chat bubble`() = runTest {
+        val result = createNotificationCreator().createMessagesListNotification(
+            notificationAccountParams = aNotificationAccountParams(),
+            roomInfo = RoomEventGroupInfo(A_SESSION_ID, A_ROOM_ID, "Alice", isDm = true),
+            threadId = null,
+            largeIcon = null,
+            lastMessageTimestamp = 200L,
+            tickerText = "Alice: Latest message",
+            existingNotification = null,
+            imageLoader = FakeImageLoader(),
+            events = listOf(
+                aNotifiableMessageEvent().copy(body = "Earlier message", timestamp = 100L),
+                aNotifiableMessageEvent().copy(body = "Latest message", senderDisambiguatedDisplayName = "Alice", timestamp = 200L),
+            ),
+        )
+        val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(result)!!
+        assertThat(style.messages.map { it.text.toString() }).containsExactly("Latest message")
+        assertThat(style.conversationTitle).isNull()
+        assertThat(style.messages.single().person!!.name.toString()).isEqualTo("Alice")
+        assertThat(result.bubbleMetadata).isNotNull()
+        assertThat(result.contentIntent).isNotNull()
+        assertThat(result.actions.orEmpty()).isEmpty()
+        assertThat(result.allowSystemGeneratedContextualActions).isFalse()
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.R])
+    fun `hidden update drops old message sender conversation shortcut and bubble extras`() = runTest {
+        val context: Context = RuntimeEnvironment.getApplication()
+        val previous = NotificationCompat.Builder(context, "messages")
+            .setStyle(NotificationCompat.MessagingStyle("Me").addMessage("Private old body", 100L, "Alice"))
+            .setShortcutId("private-room")
+            .build()
+        val result = createNotificationCreator().createMessagesListNotification(
+            notificationAccountParams = aNotificationAccountParams(),
+            roomInfo = RoomEventGroupInfo(A_SESSION_ID, A_ROOM_ID, "New messages", isDm = true),
+            threadId = null,
+            largeIcon = null,
+            lastMessageTimestamp = 200L,
+            tickerText = "New messages: New messages",
+            existingNotification = previous,
+            imageLoader = FakeImageLoader(),
+            events = listOf(aNotifiableMessageEvent().redactPresentation("You have a new message", keepSender = false)),
+        )
+        assertThat(result.extras.getCharSequence(Notification.EXTRA_TEXT).toString()).isEqualTo("You have a new message")
+        assertThat(result.extras.containsKey(Notification.EXTRA_MESSAGES)).isFalse()
+        assertThat(result.extras.containsKey(Notification.EXTRA_CONVERSATION_TITLE)).isFalse()
+        assertThat(result.shortcutId).isNull()
+        assertThat(result.bubbleMetadata).isNull()
+        assertThat(result.tickerText.toString()).isEqualTo("You have a new message")
+        assertThat(result.visibility).isEqualTo(NotificationCompat.VISIBILITY_SECRET)
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.R])
+    fun `ntfy hidden sender never becomes current user and background restores alert channel`() = runTest {
+        val context: Context = RuntimeEnvironment.getApplication()
+        val sut = createNotificationCreator(notificationChannels = FakeNotificationChannels(channelIdForMessage = { _, _ -> "messages" }))
+        val old = NotificationCompat.Builder(context, "ntfy_foreground_history").setSilent(true).build()
+        val result = sut.createMessagesListNotification(
+            notificationAccountParams = aNotificationAccountParams(),
+            roomInfo = RoomEventGroupInfo(A_SESSION_ID, A_ROOM_ID, "", isDm = true, shouldBing = true),
+            threadId = null,
+            largeIcon = null,
+            lastMessageTimestamp = 123L,
+            tickerText = "New message",
+            existingNotification = old,
+            imageLoader = FakeImageLoader(),
+            events = listOf(aNotifiableMessageEvent().copy(senderDisambiguatedDisplayName = "", isNtfyDelivery = true)),
+        )
+        val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(result)!!
+        assertThat(style.messages.last().person!!.name.toString()).isEqualTo("test")
+        assertThat(result.extras.getBoolean(DefaultNotificationCreator.EXTRA_NTFY_DELIVERY)).isTrue()
+        assertThat(result.actions.orEmpty()).isEmpty()
+        assertThat(result.allowSystemGeneratedContextualActions).isFalse()
+        assertThat(result.channelId).isEqualTo("messages")
+        assertThat(result.groupAlertBehavior).isEqualTo(NotificationCompat.GROUP_ALERT_CHILDREN)
+    }
+
     @Test
     fun `test createDiagnosticNotification`() {
         val sut = createNotificationCreator()
@@ -217,6 +303,7 @@ class DefaultNotificationCreatorTest {
     }
 
     @Test
+    @Config(sdk = [Build.VERSION_CODES.O])
     fun `test createSummaryListNotification`() {
         val sut = createNotificationCreator()
         val matrixUser = aMatrixUser()
@@ -229,9 +316,11 @@ class DefaultNotificationCreatorTest {
         result.commonAssertions(
             expectedGroup = matrixUser.userId.value,
         )
+        assertThat(result.groupAlertBehavior).isEqualTo(NotificationCompat.GROUP_ALERT_CHILDREN)
     }
 
     @Test
+    @Config(sdk = [Build.VERSION_CODES.O])
     fun `test createSummaryListNotification noisy`() {
         val sut = createNotificationCreator(
             enterpriseService = FakeEnterpriseService(
@@ -248,6 +337,7 @@ class DefaultNotificationCreatorTest {
         result.commonAssertions(
             expectedGroup = matrixUser.userId.value,
         )
+        assertThat(result.groupAlertBehavior).isEqualTo(NotificationCompat.GROUP_ALERT_CHILDREN)
     }
 
     @Test
@@ -276,10 +366,23 @@ class DefaultNotificationCreatorTest {
     }
 
     @Test
+    @Config(sdk = [Build.VERSION_CODES.O])
     fun `test createMessagesListNotification should bing and thread`() = runTest {
+        val context: Context = RuntimeEnvironment.getApplication()
+        val channelId = "message_alert_fallback_test"
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(channelId, "Messages", NotificationManager.IMPORTANCE_HIGH).apply {
+                setSound(Settings.System.DEFAULT_NOTIFICATION_URI, null)
+                enableVibration(true)
+            }
+        )
         val sut = createNotificationCreator(
+            context = context,
             enterpriseService = FakeEnterpriseService(
                 getNoisyNotificationChannelIdResult = { null },
+            ),
+            notificationChannels = FakeNotificationChannels(
+                channelIdForMessage = { _, _ -> channelId },
             ),
         )
         val result = sut.createMessagesListNotification(
@@ -302,6 +405,9 @@ class DefaultNotificationCreatorTest {
             events = listOf(aNotifiableMessageEvent()),
         )
         result.commonAssertions()
+        assertThat(result.priority).isEqualTo(NotificationCompat.PRIORITY_HIGH)
+        assertThat(result.sound).isNotNull()
+        assertThat(result.vibrate?.toList()).containsExactly(0L, 350L, 250L, 350L).inOrder()
     }
 
     private fun Notification.commonAssertions(

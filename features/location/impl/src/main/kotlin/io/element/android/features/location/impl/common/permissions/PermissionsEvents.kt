@@ -10,4 +10,5 @@ package io.element.android.features.location.impl.common.permissions
 
 sealed interface PermissionsEvents {
     data object RequestPermissions : PermissionsEvents
+    data object OpenAppSettings : PermissionsEvents
 }

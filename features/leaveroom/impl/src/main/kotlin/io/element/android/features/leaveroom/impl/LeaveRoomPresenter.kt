@@ -16,6 +16,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import dev.zacsweers.metro.Inject
 import io.element.android.features.leaveroom.api.LeaveRoomEvent
 import io.element.android.features.leaveroom.api.LeaveRoomState
+import io.element.android.features.preferences.api.ClearCacheUseCase
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.architecture.runCatchingUpdatingState
@@ -23,6 +24,7 @@ import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.room.BaseRoom
+import io.element.android.libraries.matrix.api.room.RoomAlreadyRemovedException
 import io.element.android.libraries.matrix.api.room.RoomMember
 import io.element.android.libraries.matrix.api.room.powerlevels.usersWithRole
 import io.element.android.libraries.push.api.notifications.conversations.NotificationConversationService
@@ -36,6 +38,7 @@ class LeaveRoomPresenter(
     private val client: MatrixClient,
     private val dispatchers: CoroutineDispatchers,
     private val notificationConversationService: NotificationConversationService,
+    private val clearCacheUseCase: ClearCacheUseCase,
 ) : Presenter<LeaveRoomState> {
     @Composable
     override fun present(): LeaveRoomState {
@@ -79,11 +82,20 @@ class LeaveRoomPresenter(
     ) = launch(dispatchers.io) {
         leaveAction.runCatchingUpdatingState {
             client.getRoom(roomId)!!.use { room ->
-                room
-                    .leave()
-                    .onSuccess { notificationConversationService.onLeftRoom(client.sessionId, roomId) }
-                    .onFailure { Timber.e(it, "Error while leaving room ${room.roomId}") }
-                    .getOrThrow()
+                val failure = room.leave().exceptionOrNull()
+                when (failure) {
+                    null -> notificationConversationService.onLeftRoom(client.sessionId, roomId)
+                    is RoomAlreadyRemovedException -> {
+                        // The Rust SDK cannot forget a stale Joined room after the homeserver has
+                        // purged it. Rebuild the session's non-crypto caches from server state.
+                        notificationConversationService.onLeftRoom(client.sessionId, roomId)
+                        clearCacheUseCase()
+                    }
+                    else -> {
+                        Timber.e(failure, "Error while leaving room ${room.roomId}")
+                        throw failure
+                    }
+                }
             }
         }
     }

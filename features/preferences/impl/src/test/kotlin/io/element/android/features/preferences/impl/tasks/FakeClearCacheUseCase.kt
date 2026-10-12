@@ -8,6 +8,7 @@
 
 package io.element.android.features.preferences.impl.tasks
 
+import io.element.android.features.preferences.api.ClearCacheUseCase
 import io.element.android.tests.testutils.simulateLongTask
 
 class FakeClearCacheUseCase : ClearCacheUseCase {

@@ -69,6 +69,7 @@ import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.dateformatter.api.DateFormatter
 import io.element.android.libraries.dateformatter.api.DateFormatterMode
 import io.element.android.libraries.dateformatter.api.toHumanReadableDuration
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
@@ -91,6 +92,7 @@ import io.element.android.libraries.mediaviewer.api.MediaViewerEntryPoint
 import io.element.android.libraries.textcomposer.mentions.LocalMentionSpanUpdater
 import io.element.android.libraries.textcomposer.mentions.MentionSpanTheme
 import io.element.android.libraries.textcomposer.mentions.MentionSpanUpdater
+import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.analyticsproviders.api.trackers.captureInteraction
 import kotlinx.collections.immutable.ImmutableList
@@ -150,20 +152,30 @@ class MessagesFlowNode(
             val mediaSource: MediaSource,
             val thumbnailSource: MediaSource?,
             val canUseOverlay: Boolean,
+            val isOneTimeView: Boolean,
         ) : NavTarget
 
         @Parcelize
-        data class AttachmentPreview(val timelineMode: Timeline.Mode, val attachment: Attachment, val inReplyToEventId: EventId?) : NavTarget
+        data class AttachmentPreview(
+            val timelineMode: Timeline.Mode,
+            val attachments: List<Attachment>,
+            val inReplyToEventId: EventId?,
+            val burnAfterRead: Boolean,
+        ) : NavTarget
 
         @Parcelize
-        data class LocationViewer(val mode: ShowLocationMode) : NavTarget
+        data class LocationViewer(
+            val mode: ShowLocationMode,
+            val eventId: EventId? = null,
+            val isOneTimeView: Boolean = false,
+        ) : NavTarget
 
         @Parcelize
         data class EventDebugInfo(val eventId: EventId?, val debugInfo: TimelineItemDebugInfo) : NavTarget
 
         @Parcelize
         data class ForwardEvent(
-            val eventId: EventId,
+            val eventIds: List<String>,
             val fromPinnedEvents: Boolean,
         ) : NavTarget
 
@@ -171,7 +183,10 @@ class MessagesFlowNode(
         data class ReportMessage(val eventId: EventId, val senderId: UserId) : NavTarget
 
         @Parcelize
-        data class SendLocation(val timelineMode: Timeline.Mode) : NavTarget
+        data class SendLocation(
+            val timelineMode: Timeline.Mode,
+            val burnAfterRead: Boolean,
+        ) : NavTarget
 
         @Parcelize
         data class CreatePoll(val timelineMode: Timeline.Mode) : NavTarget
@@ -195,6 +210,8 @@ class MessagesFlowNode(
     private val callback: MessagesEntryPoint.Callback = callback()
 
     private var displayVulkanNotSupportedError by mutableStateOf(false)
+    private var reportSnackbarMessage: SnackbarMessage? by mutableStateOf(null)
+    private val oneTimeViewEndCallbacks = mutableMapOf<EventId, (Timeline.BurnAfterReadEndReason) -> Unit>()
 
     override fun onBuilt() {
         super.onBuilt()
@@ -232,24 +249,44 @@ class MessagesFlowNode(
         return when (navTarget) {
             is NavTarget.Messages -> {
                 val callback = object : MessagesNode.Callback {
+                    override val reportSnackbarMessage: SnackbarMessage?
+                        get() = this@MessagesFlowNode.reportSnackbarMessage
+
+                    override fun dismissReportSnackbar(messageId: Long) {
+                        if (this@MessagesFlowNode.reportSnackbarMessage?.id == messageId) {
+                            this@MessagesFlowNode.reportSnackbarMessage = null
+                        }
+                    }
+
                     override fun navigateToRoomDetails() {
                         callback.navigateToRoomDetails()
                     }
 
-                    override fun handleEventClick(timelineMode: Timeline.Mode, event: TimelineItem.Event, canUseOverlay: Boolean): Boolean {
+                    override fun handleEventClick(
+                        timelineMode: Timeline.Mode,
+                        event: TimelineItem.Event,
+                        canUseOverlay: Boolean,
+                        onOneTimeViewEnded: ((Timeline.BurnAfterReadEndReason) -> Unit)?,
+                    ): Boolean {
                         return processEventClick(
                             timelineMode = timelineMode,
                             event = event,
                             canUseOverlay = canUseOverlay,
+                            onOneTimeViewEnded = onOneTimeViewEnded,
                         )
                     }
 
-                    override fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?) {
+                    override fun navigateToPreviewAttachments(
+                        attachments: ImmutableList<Attachment>,
+                        inReplyToEventId: EventId?,
+                        burnAfterRead: Boolean,
+                    ) {
                         backstack.push(
                             NavTarget.AttachmentPreview(
-                                attachment = attachments.first(),
+                                attachments = attachments,
                                 timelineMode = Timeline.Mode.Live,
                                 inReplyToEventId = inReplyToEventId,
+                                burnAfterRead = burnAfterRead,
                             )
                         )
                     }
@@ -267,16 +304,21 @@ class MessagesFlowNode(
                     }
 
                     override fun forwardEvent(eventId: EventId) {
-                        backstack.push(NavTarget.ForwardEvent(eventId, fromPinnedEvents = false))
+                        backstack.push(NavTarget.ForwardEvent(listOf(eventId.value), fromPinnedEvents = false))
+                    }
+
+                    override fun forwardEvents(eventIds: List<EventId>) {
+                        backstack.push(NavTarget.ForwardEvent(eventIds.map(EventId::value), fromPinnedEvents = false))
                     }
 
                     override fun navigateToReportMessage(eventId: EventId, senderId: UserId) {
+                        this@MessagesFlowNode.reportSnackbarMessage = null
                         backstack.push(NavTarget.ReportMessage(eventId, senderId))
                     }
 
-                    override fun navigateToSendLocation() {
+                    override fun navigateToSendLocation(burnAfterRead: Boolean) {
                         if (hasVulkanSupport()) {
-                            backstack.push(NavTarget.SendLocation(Timeline.Mode.Live))
+                            backstack.push(NavTarget.SendLocation(Timeline.Mode.Live, burnAfterRead))
                         } else {
                             displayVulkanNotSupportedError = true
                         }
@@ -327,6 +369,10 @@ class MessagesFlowNode(
                     override fun navigateToDeveloperSettings() {
                         callback.navigateToDeveloperSettings()
                     }
+
+                    override fun navigateToChatSecurity() {
+                        callback.navigateToChatSecurity()
+                    }
                 }
                 val inputs = MessagesNode.Inputs(focusedEventId = navTarget.focusedEventId)
                 createNode<MessagesNode>(buildContext, listOf(callback, inputs))
@@ -338,10 +384,20 @@ class MessagesFlowNode(
                     mediaInfo = navTarget.mediaInfo,
                     mediaSource = navTarget.mediaSource,
                     thumbnailSource = navTarget.thumbnailSource,
-                    canShowInfo = true,
+                    canShowInfo = !navTarget.isOneTimeView,
+                    isOneTimeView = navTarget.isOneTimeView,
                 )
                 val callback = object : MediaViewerEntryPoint.Callback {
                     override fun onDone() {
+                        finish(Timeline.BurnAfterReadEndReason.VIEW_CLOSED)
+                    }
+
+                    override fun onPlaybackEnded() {
+                        finish(Timeline.BurnAfterReadEndReason.PLAYBACK_ENDED)
+                    }
+
+                    private fun finish(reason: Timeline.BurnAfterReadEndReason) {
+                        navTarget.eventId?.let { oneTimeViewEndCallbacks.remove(it)?.invoke(reason) }
                         if (navTarget.canUseOverlay) {
                             overlay.hide()
                         } else {
@@ -367,9 +423,10 @@ class MessagesFlowNode(
             }
             is NavTarget.AttachmentPreview -> {
                 val inputs = AttachmentsPreviewNode.Inputs(
-                    attachment = navTarget.attachment,
+                    attachments = navTarget.attachments,
                     timelineMode = navTarget.timelineMode,
                     inReplyToEventId = navTarget.inReplyToEventId,
+                    burnAfterRead = navTarget.burnAfterRead,
                 )
                 createNode<AttachmentsPreviewNode>(buildContext, listOf(inputs))
             }
@@ -379,6 +436,13 @@ class MessagesFlowNode(
                     parentNode = this,
                     buildContext = buildContext,
                     inputs = inputs,
+                    callback = ShowLocationEntryPoint.Callback {
+                        if (navTarget.isOneTimeView) {
+                            navTarget.eventId?.let { eventId ->
+                                oneTimeViewEndCallbacks.remove(eventId)?.invoke(Timeline.BurnAfterReadEndReason.VIEW_CLOSED)
+                            }
+                        }
+                    },
                 )
             }
             is NavTarget.EventDebugInfo -> {
@@ -391,7 +455,7 @@ class MessagesFlowNode(
                 } else {
                     timelineController
                 }
-                val params = ForwardEntryPoint.Params(navTarget.eventId, timelineProvider)
+                val params = ForwardEntryPoint.Params(navTarget.eventIds.map(::EventId), timelineProvider)
                 val callback = object : ForwardEntryPoint.Callback {
                     override fun onDone(roomIds: List<RoomId>) {
                         backstack.pop()
@@ -409,13 +473,24 @@ class MessagesFlowNode(
             }
             is NavTarget.ReportMessage -> {
                 val inputs = ReportMessageNode.Inputs(navTarget.eventId, navTarget.senderId)
-                createNode<ReportMessageNode>(buildContext, listOf(inputs))
+                val callback = object : ReportMessageNode.Callback {
+                    override fun onBack() {
+                        backstack.pop()
+                    }
+
+                    override fun onReportSuccess() {
+                        this@MessagesFlowNode.reportSnackbarMessage = SnackbarMessage(CommonStrings.common_report_submitted)
+                        backstack.pop()
+                    }
+                }
+                createNode<ReportMessageNode>(buildContext, listOf(inputs, callback))
             }
             is NavTarget.SendLocation -> {
                 shareLocationEntryPoint.createNode(
                     parentNode = this,
                     buildContext = buildContext,
                     timelineMode = navTarget.timelineMode,
+                    burnAfterRead = navTarget.burnAfterRead,
                 )
             }
             is NavTarget.CreatePoll -> {
@@ -465,7 +540,7 @@ class MessagesFlowNode(
                     }
 
                     override fun handleForwardEventClick(eventId: EventId) {
-                        backstack.push(NavTarget.ForwardEvent(eventId = eventId, fromPinnedEvents = true))
+                        backstack.push(NavTarget.ForwardEvent(eventIds = listOf(eventId.value), fromPinnedEvents = true))
                     }
 
                     override fun navigateToThread(threadRootId: ThreadId) {
@@ -483,20 +558,40 @@ class MessagesFlowNode(
                     focusedEventId = navTarget.focusedEventId,
                 )
                 val callback = object : ThreadedMessagesNode.Callback {
-                    override fun handleEventClick(timelineMode: Timeline.Mode, event: TimelineItem.Event, canUseOverlay: Boolean): Boolean {
+                    override val reportSnackbarMessage: SnackbarMessage?
+                        get() = this@MessagesFlowNode.reportSnackbarMessage
+
+                    override fun dismissReportSnackbar(messageId: Long) {
+                        if (this@MessagesFlowNode.reportSnackbarMessage?.id == messageId) {
+                            this@MessagesFlowNode.reportSnackbarMessage = null
+                        }
+                    }
+
+                    override fun handleEventClick(
+                        timelineMode: Timeline.Mode,
+                        event: TimelineItem.Event,
+                        canUseOverlay: Boolean,
+                        onOneTimeViewEnded: ((Timeline.BurnAfterReadEndReason) -> Unit)?,
+                    ): Boolean {
                         return processEventClick(
                             timelineMode = timelineMode,
                             event = event,
                             canUseOverlay = canUseOverlay,
+                            onOneTimeViewEnded = onOneTimeViewEnded,
                         )
                     }
 
-                    override fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?) {
+                    override fun navigateToPreviewAttachments(
+                        attachments: ImmutableList<Attachment>,
+                        inReplyToEventId: EventId?,
+                        burnAfterRead: Boolean,
+                    ) {
                         backstack.push(
                             NavTarget.AttachmentPreview(
-                                attachment = attachments.first(),
+                                attachments = attachments,
                                 timelineMode = Timeline.Mode.Thread(navTarget.threadRootId),
                                 inReplyToEventId = inReplyToEventId,
+                                burnAfterRead = burnAfterRead,
                             )
                         )
                     }
@@ -514,16 +609,22 @@ class MessagesFlowNode(
                     }
 
                     override fun handleForwardEventClick(eventId: EventId) {
-                        backstack.push(NavTarget.ForwardEvent(eventId, fromPinnedEvents = false))
+                        backstack.push(NavTarget.ForwardEvent(listOf(eventId.value), fromPinnedEvents = false))
                     }
 
                     override fun navigateToReportMessage(eventId: EventId, senderId: UserId) {
+                        this@MessagesFlowNode.reportSnackbarMessage = null
                         backstack.push(NavTarget.ReportMessage(eventId, senderId))
                     }
 
-                    override fun navigateToSendLocation() {
+                    override fun navigateToSendLocation(burnAfterRead: Boolean) {
                         if (hasVulkanSupport()) {
-                            backstack.push(NavTarget.SendLocation(Timeline.Mode.Thread(navTarget.threadRootId)))
+                            backstack.push(
+                                NavTarget.SendLocation(
+                                    Timeline.Mode.Thread(navTarget.threadRootId),
+                                    burnAfterRead,
+                                )
+                            )
                         } else {
                             displayVulkanNotSupportedError = true
                         }
@@ -588,6 +689,7 @@ class MessagesFlowNode(
         timelineMode: Timeline.Mode,
         event: TimelineItem.Event,
         canUseOverlay: Boolean,
+        onOneTimeViewEnded: ((Timeline.BurnAfterReadEndReason) -> Unit)? = null,
     ): Boolean {
         val navTarget = when (event.content) {
             is TimelineItemImageContent -> {
@@ -630,6 +732,16 @@ class MessagesFlowNode(
                     canUseOverlay = canUseOverlay,
                 )
             }
+            is TimelineItemVoiceContent -> {
+                buildMediaViewerNavTarget(
+                    mode = MediaViewerEntryPoint.MediaViewerMode.TimelineFilesAndAudios(timelineMode),
+                    event = event,
+                    content = event.content,
+                    mediaSource = event.content.mediaSource,
+                    thumbnailSource = null,
+                    canUseOverlay = canUseOverlay,
+                )
+            }
             is TimelineItemLocationContent -> {
                 if (hasVulkanSupport()) {
                     val mode = when (event.content.mode) {
@@ -643,7 +755,11 @@ class MessagesFlowNode(
                             assetType = event.content.assetType,
                         )
                     }
-                    NavTarget.LocationViewer(mode = mode).takeIf { locationService.isServiceAvailable() }
+                    NavTarget.LocationViewer(
+                        mode = mode,
+                        eventId = event.eventId,
+                        isOneTimeView = event.content.isBurnAfterRead,
+                    ).takeIf { locationService.isServiceAvailable() }
                 } else {
                     displayVulkanNotSupportedError = true
                     null
@@ -653,6 +769,11 @@ class MessagesFlowNode(
         }
         return when (navTarget) {
             is NavTarget.MediaViewer -> {
+                if (navTarget.isOneTimeView) {
+                    val eventId = requireNotNull(navTarget.eventId) { "A one-time view must have a server event id." }
+                    requireNotNull(onOneTimeViewEnded) { "A one-time view must provide a session closer." }
+                    oneTimeViewEndCallbacks[eventId] = onOneTimeViewEnded
+                }
                 if (canUseOverlay) {
                     overlay.show(navTarget)
                 } else {
@@ -661,6 +782,11 @@ class MessagesFlowNode(
                 true
             }
             is NavTarget.LocationViewer -> {
+                if (navTarget.isOneTimeView) {
+                    val eventId = requireNotNull(navTarget.eventId) { "A one-time location must have a server event id." }
+                    requireNotNull(onOneTimeViewEnded) { "A one-time location must provide a session closer." }
+                    oneTimeViewEndCallbacks[eventId] = onOneTimeViewEnded
+                }
                 backstack.push(navTarget)
                 true
             }
@@ -676,8 +802,9 @@ class MessagesFlowNode(
         thumbnailSource: MediaSource?,
         canUseOverlay: Boolean,
     ): NavTarget {
+        val isOneTimeView = content.isBurnAfterRead
         return NavTarget.MediaViewer(
-            mode = mode,
+            mode = if (isOneTimeView) MediaViewerEntryPoint.MediaViewerMode.SingleMedia else mode,
             eventId = event.eventId,
             mediaInfo = MediaInfo(
                 filename = content.filename,
@@ -704,6 +831,7 @@ class MessagesFlowNode(
             mediaSource = mediaSource,
             thumbnailSource = thumbnailSource,
             canUseOverlay = canUseOverlay,
+            isOneTimeView = isOneTimeView,
         )
     }
 

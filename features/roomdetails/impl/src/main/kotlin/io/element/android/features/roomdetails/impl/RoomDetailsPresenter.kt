@@ -31,6 +31,9 @@ import io.element.android.features.roomdetailsedit.api.RoomDetailsEditPermission
 import io.element.android.features.roomdetailsedit.api.roomDetailsEditPermissions
 import io.element.android.features.securityandprivacy.api.SecurityAndPrivacyPermissions
 import io.element.android.features.securityandprivacy.api.securityAndPrivacyPermissions
+import io.element.android.features.userprofile.api.FriendProfileRepository
+import io.element.android.features.userprofile.api.privateDirectDisplayName
+import io.element.android.features.userprofile.api.matrixDisplayNameOrNull
 import io.element.android.libraries.androidutils.clipboard.ClipboardHelper
 import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
@@ -77,6 +80,7 @@ class RoomDetailsPresenter(
     private val appPreferencesStore: AppPreferencesStore,
     private val sessionPreferencesStore: SessionPreferencesStore,
     private val notificationCleaner: NotificationCleaner,
+    private val friendProfileRepository: FriendProfileRepository,
 ) : Presenter<RoomDetailsState> {
     @AssistedFactory
     interface Factory {
@@ -92,7 +96,8 @@ class RoomDetailsPresenter(
         val roomInfo by room.roomInfoFlow.collectAsState()
         val roomAvatar by remember { derivedStateOf { roomInfo.avatarUrl } }
 
-        val roomName by remember { derivedStateOf { roomInfo.name?.trim().orEmpty() } }
+        val matrixRoomName by remember { derivedStateOf { roomInfo.name?.trim().orEmpty() } }
+        val friendProfiles by friendProfileRepository.profiles.collectAsState()
         val roomTopic by remember { derivedStateOf { roomInfo.topic } }
         val isFavorite by remember { derivedStateOf { roomInfo.isFavorite } }
         val joinRule by remember { derivedStateOf { roomInfo.joinRule } }
@@ -110,6 +115,7 @@ class RoomDetailsPresenter(
         LaunchedEffect(Unit) {
             room.updateRoomNotificationSettings()
             observeNotificationSettings()
+            friendProfileRepository.load()
         }
 
         val isDm = roomInfo.isDm
@@ -118,6 +124,17 @@ class RoomDetailsPresenter(
         val canonicalAlias by remember { derivedStateOf { roomInfo.canonicalAlias } }
         val isEncrypted by remember { derivedStateOf { roomInfo.isEncrypted == true } }
         val dmMember by room.getDirectRoomMember(membersState)
+        val resolvedDmMember = dmMember
+        val roomName = if (isDm && resolvedDmMember != null) {
+            friendProfiles.privateDirectDisplayName(resolvedDmMember.userId, resolvedDmMember.displayName)
+        } else if (isDm) {
+            roomInfo.heroes.firstOrNull()?.displayName.matrixDisplayNameOrNull()
+                ?: roomInfo.heroes.firstOrNull()?.userId?.value
+                ?: matrixRoomName.matrixDisplayNameOrNull()
+                ?: room.roomId.value
+        } else {
+            matrixRoomName
+        }
         val roomMemberDetailsPresenter = roomMemberDetailsPresenter(dmMember?.userId)
         val roomType = getRoomType(dmMember)
         val roomCallState = roomCallStatePresenter.present()
@@ -216,6 +233,7 @@ class RoomDetailsPresenter(
             roomVersion = roomInfo.roomVersion,
             roomHistoryVisibility = roomInfo.historyVisibility,
             hasNewContent = hasNewContent,
+            isDirect = isDm,
             eventSink = ::handleEvent,
         )
     }

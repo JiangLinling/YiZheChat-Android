@@ -13,12 +13,18 @@ import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.mediaplayer.test.FakeMediaPlayer
+import io.element.android.libraries.preferences.api.store.SessionPreferencesStore
+import io.mockk.coEvery
+import io.mockk.every
+import io.mockk.mockk
+import kotlinx.coroutines.flow.flowOf
 import io.element.android.libraries.voiceplayer.api.VoiceMessageEvent
 import io.element.android.libraries.voiceplayer.api.VoiceMessageException
 import io.element.android.libraries.voiceplayer.api.VoiceMessageState
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.analytics.test.FakeAnalyticsService
 import io.element.android.tests.testutils.test
+import io.element.android.tests.testutils.consumeItemsUntilPredicate
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -30,6 +36,8 @@ class VoiceMessagePresenterTest {
     fun `initial state has proper default values`() = runTest {
         val presenter = createVoiceMessagePresenter()
         presenter.test {
+            // Preference read is asynchronous; unknown must not show an unread dot.
+            assertThat(awaitItem().hasBeenPlayed).isNull()
             awaitItem().let {
                 assertThat(it.buttonType).isEqualTo(VoiceMessageState.ButtonType.Play)
                 assertThat(it.progress).isEqualTo(0f)
@@ -45,6 +53,8 @@ class VoiceMessagePresenterTest {
             duration = 2_000.milliseconds,
         )
         presenter.test {
+            // Preference read is asynchronous; unknown must not show an unread dot.
+            assertThat(awaitItem().hasBeenPlayed).isNull()
             val initialState = awaitItem().also {
                 assertThat(it.buttonType).isEqualTo(VoiceMessageState.ButtonType.Play)
                 assertThat(it.progress).isEqualTo(0f)
@@ -58,12 +68,8 @@ class VoiceMessagePresenterTest {
                 assertThat(it.progress).isEqualTo(0f)
                 assertThat(it.time).isEqualTo("0:02")
             }
-            awaitItem().also {
-                assertThat(it.buttonType).isEqualTo(VoiceMessageState.ButtonType.Downloading)
-                assertThat(it.progress).isEqualTo(0f)
-                assertThat(it.time).isEqualTo("0:00")
-            }
-            awaitItem().also {
+            // READY is published only after the lease is owned; intermediate emissions can vary.
+            consumeItemsUntilPredicate { it.buttonType == VoiceMessageState.ButtonType.Pause }.last().also {
                 assertThat(it.buttonType).isEqualTo(VoiceMessageState.ButtonType.Pause)
                 assertThat(it.progress).isEqualTo(0.5f)
                 assertThat(it.time).isEqualTo("0:01")
@@ -81,6 +87,8 @@ class VoiceMessagePresenterTest {
             duration = 2_000.milliseconds,
         )
         presenter.test {
+            // Preference read is asynchronous; unknown must not show an unread dot.
+            assertThat(awaitItem().hasBeenPlayed).isNull()
             val initialState = awaitItem().also {
                 assertThat(it.buttonType).isEqualTo(VoiceMessageState.ButtonType.Play)
                 assertThat(it.progress).isEqualTo(0f)
@@ -115,6 +123,8 @@ class VoiceMessagePresenterTest {
             duration = 2_000.milliseconds,
         )
         presenter.test {
+            // Preference read is asynchronous; unknown must not show an unread dot.
+            assertThat(awaitItem().hasBeenPlayed).isNull()
             val initialState = awaitItem().also {
                 assertThat(it.buttonType).isEqualTo(VoiceMessageState.ButtonType.Play)
                 assertThat(it.progress).isEqualTo(0f)
@@ -122,9 +132,7 @@ class VoiceMessagePresenterTest {
             }
 
             initialState.eventSink(VoiceMessageEvent.PlayPause)
-            skipItems(2) // skip downloading states
-
-            val playingState = awaitItem().also {
+            val playingState = consumeItemsUntilPredicate { it.buttonType == VoiceMessageState.ButtonType.Pause }.last().also {
                 assertThat(it.buttonType).isEqualTo(VoiceMessageState.ButtonType.Pause)
                 assertThat(it.progress).isEqualTo(0.5f)
                 assertThat(it.time).isEqualTo("0:01")
@@ -145,6 +153,8 @@ class VoiceMessagePresenterTest {
             eventId = null,
         )
         presenter.test {
+            // Preference read is asynchronous; unknown must not show an unread dot.
+            assertThat(awaitItem().hasBeenPlayed).isNull()
             awaitItem().also {
                 assertThat(it.buttonType).isEqualTo(VoiceMessageState.ButtonType.Disabled)
                 assertThat(it.progress).isEqualTo(0f)
@@ -160,6 +170,8 @@ class VoiceMessagePresenterTest {
             duration = 10_000.milliseconds,
         )
         presenter.test {
+            // Preference read is asynchronous; unknown must not show an unread dot.
+            assertThat(awaitItem().hasBeenPlayed).isNull()
             val initialState = awaitItem().also {
                 assertThat(it.buttonType).isEqualTo(VoiceMessageState.ButtonType.Play)
                 assertThat(it.progress).isEqualTo(0f)
@@ -182,6 +194,8 @@ class VoiceMessagePresenterTest {
             duration = 10_000.milliseconds,
         )
         presenter.test {
+            // Preference read is asynchronous; unknown must not show an unread dot.
+            assertThat(awaitItem().hasBeenPlayed).isNull()
             val initialState = awaitItem().also {
                 assertThat(it.buttonType).isEqualTo(VoiceMessageState.ButtonType.Play)
                 assertThat(it.progress).isEqualTo(0f)
@@ -190,9 +204,7 @@ class VoiceMessagePresenterTest {
 
             initialState.eventSink(VoiceMessageEvent.PlayPause)
 
-            skipItems(2) // skip downloading states
-
-            awaitItem().also {
+            consumeItemsUntilPredicate { it.buttonType == VoiceMessageState.ButtonType.Pause }.last().also {
                 assertThat(it.buttonType).isEqualTo(VoiceMessageState.ButtonType.Pause)
                 assertThat(it.progress).isEqualTo(0.1f)
                 assertThat(it.time).isEqualTo("0:01")
@@ -208,11 +220,24 @@ class VoiceMessagePresenterTest {
     }
 
     @Test
+    fun `legacy half speed preference falls back to normal speed`() = runTest {
+        val store = InMemoryVoicePlayerStore()
+        store.setPlayBackSpeedIndex(3)
+        createVoiceMessagePresenter(voicePlayerStore = store).test {
+            // Preference read is asynchronous; unknown must not show an unread dot.
+            assertThat(awaitItem().hasBeenPlayed).isNull()
+            assertThat(awaitItem().playbackSpeed).isEqualTo(1.0f)
+        }
+    }
+
+    @Test
     fun `changing playback speed cycles through available speeds`() = runTest {
         val presenter = createVoiceMessagePresenter(
             duration = 10_000.milliseconds,
         )
         presenter.test {
+            // Preference read is asynchronous; unknown must not show an unread dot.
+            assertThat(awaitItem().hasBeenPlayed).isNull()
             awaitItem().also {
                 assertThat(it.playbackSpeed).isEqualTo(1.0f)
                 it.eventSink(VoiceMessageEvent.ChangePlaybackSpeed)
@@ -223,10 +248,6 @@ class VoiceMessagePresenterTest {
             }
             awaitItem().also {
                 assertThat(it.playbackSpeed).isEqualTo(2.0f)
-                it.eventSink(VoiceMessageEvent.ChangePlaybackSpeed)
-            }
-            awaitItem().also {
-                assertThat(it.playbackSpeed).isEqualTo(0.5f)
                 it.eventSink(VoiceMessageEvent.ChangePlaybackSpeed)
             }
             awaitItem().also {
@@ -241,6 +262,10 @@ fun TestScope.createVoiceMessagePresenter(
     voiceMessageMediaRepo: VoiceMessageMediaRepo = FakeVoiceMessageMediaRepo(),
     analyticsService: AnalyticsService = FakeAnalyticsService(),
     voicePlayerStore: VoicePlayerStore = InMemoryVoicePlayerStore(),
+    sessionPreferencesStore: SessionPreferencesStore = mockk<SessionPreferencesStore> {
+        every { hasVoiceMessagePlayed(any()) } returns flowOf(false)
+        coEvery { markVoiceMessagePlayed(any()) } returns Unit
+    },
     eventId: EventId? = EventId("\$anEventId"),
     filename: String = "filename doesn't really matter for a voice message",
     duration: Duration = 61_000.milliseconds,
@@ -250,15 +275,16 @@ fun TestScope.createVoiceMessagePresenter(
 ) = VoiceMessagePresenter(
     analyticsService = analyticsService,
     sessionCoroutineScope = this,
-    player = DefaultVoiceMessagePlayer(
+    playerFactory = { DefaultVoiceMessagePlayer(
         mediaPlayer = mediaPlayer,
         voiceMessageMediaRepoFactory = { _, _, _ -> voiceMessageMediaRepo },
         eventId = eventId,
         mediaSource = mediaSource,
         mimeType = mimeType,
         filename = filename
-    ),
+    ) },
     voicePlayerStore = voicePlayerStore,
     eventId = eventId,
     duration = duration,
+    sessionPreferencesStore = sessionPreferencesStore,
 )

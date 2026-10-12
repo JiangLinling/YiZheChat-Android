@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_user_profile_private_details">设置备注和联系信息</string>
+    <string name="screen_user_profile_private_details_description">仅保存在当前账号和设备</string>
+    <string name="screen_user_profile_edit_private_details">备注和联系信息</string>
+    <string name="screen_user_profile_remark_name">备注名</string>
+    <string name="screen_user_profile_phone">电话</string>
+    <string name="screen_user_profile_tags">标签</string>
+    <string name="screen_user_profile_description">描述</string>
+    <string name="screen_user_profile_add_friend">添加好友</string>
+    <string name="screen_user_profile_calls">音视频通话</string>
+    <string name="screen_user_profile_voice_call">语音通话</string>
+    <string name="screen_user_profile_video_call">视频通话</string>
+    <string name="screen_user_profile_more">资料设置</string>
+    <string name="screen_user_profile_account_info">账号信息</string>
+    <string name="screen_user_profile_verify_identity">验证身份</string>
+    <string name="screen_user_profile_save_details_error">保存失败，已保留填写内容，请重试。</string>
+    <string name="screen_user_profile_remove_friend">解除好友</string>
+    <string name="screen_user_profile_removing_friend">正在更新好友关系…</string>
+    <string name="screen_user_profile_remove_friend_confirmation">确定解除与 %1$s 的好友关系？你将退出双方的私聊，原私聊会从你的聊天列表消失，对方仍保留历史记录。此操作不删除消息、媒体或草稿。如需再次聊天，请重新邀请并等待对方接受。</string>
+    <string name="screen_user_profile_remove_friend_error">未能完成解除好友，关系可能已部分更新。请检查网络后重试，已完成的步骤不会重复执行。</string>
+    <string name="screen_user_profile_remove_friend_done">本端解除好友已完成</string>
+    <string name="screen_user_profile_remove_friend_sync">对方设备同步后，通讯录和聊天权限会随之更新。如需再次聊天，请重新邀请并等待对方接受。</string>
+    <string name="screen_user_profile_remove_friend_diagnostic">诊断码：%1$s</string>
+</resources>

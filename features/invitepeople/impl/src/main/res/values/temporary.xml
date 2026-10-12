@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_invite_people_friends_only">Only accepted friends can be invited to a group chat.</string>
+</resources>

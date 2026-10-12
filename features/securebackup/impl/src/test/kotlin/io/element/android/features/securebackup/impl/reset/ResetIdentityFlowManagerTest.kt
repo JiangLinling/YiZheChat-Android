@@ -12,13 +12,15 @@ import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.matrix.api.encryption.BackupState
+import io.element.android.libraries.matrix.api.encryption.IdentityResetCompletionState
 import io.element.android.libraries.matrix.api.encryption.IdentityResetHandle
+import io.element.android.libraries.matrix.api.encryption.RecoveryState
 import io.element.android.libraries.matrix.test.encryption.FakeEncryptionService
 import io.element.android.libraries.matrix.test.encryption.FakeIdentityPasswordResetHandle
+import io.element.android.security.dataprotection.api.AccountIdentityResetLifecycleRecorder
 import io.element.android.tests.testutils.lambda.lambdaRecorder
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
@@ -101,44 +103,105 @@ class ResetIdentityFlowManagerTest {
         }
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `whenResetIsDone - will trigger the lambda when key backup is enabled`() = runTest {
+    fun `completeReset - returns when the SDK reset call succeeds`() = runTest {
         val encryptionService = FakeEncryptionService()
         val flowManager = createFlowManager(encryptionService = encryptionService)
-        var isDone = false
 
-        flowManager.whenResetIsDone {
-            isDone = true
+        val result = flowManager.completeReset { Result.success(Unit) }
+
+        assertThat(result.isSuccess).isTrue()
+    }
+
+    @Test
+    fun `completeReset - consumes the successful handle so a later reset starts a new attempt`() = runTest {
+        val startResetLambda = lambdaRecorder<Result<IdentityResetHandle?>> {
+            Result.success(FakeIdentityPasswordResetHandle())
+        }
+        val flowManager = createFlowManager(
+            encryptionService = FakeEncryptionService(startIdentityResetLambda = startResetLambda),
+        )
+        flowManager.getResetHandle().test {
+            assertThat(awaitItem().isLoading()).isTrue()
+            assertThat(awaitItem().isSuccess()).isTrue()
         }
 
-        assertThat(isDone).isFalse()
+        assertThat(flowManager.completeReset { Result.success(Unit) }.isSuccess).isTrue()
+        assertThat(flowManager.currentHandleFlow.value.isUninitialized()).isTrue()
 
-        encryptionService.emitBackupState(BackupState.UNKNOWN)
-        advanceUntilIdle()
-        assertThat(isDone).isFalse()
+        flowManager.getResetHandle().test {
+            assertThat(awaitItem().isLoading()).isTrue()
+            assertThat(awaitItem().isSuccess()).isTrue()
+        }
+        startResetLambda.assertions().isCalledExactly(2)
+    }
 
-        encryptionService.emitBackupState(BackupState.DISABLING)
-        advanceUntilIdle()
-        assertThat(isDone).isFalse()
+    @Test
+    fun `completeReset - fails closed when the reset lifecycle checkpoint cannot be persisted`() = runTest {
+        val encryptionService = FakeEncryptionService()
+        val flowManager = createFlowManager(
+            encryptionService = encryptionService,
+            lifecycleRecorder = object : AccountIdentityResetLifecycleRecorder {
+                override suspend fun recordExplicitReset(): Result<Unit> =
+                    Result.failure(IllegalStateException("checkpoint unavailable"))
+            },
+        )
 
-        encryptionService.emitBackupState(BackupState.WAITING_FOR_SYNC)
-        advanceUntilIdle()
-        assertThat(isDone).isFalse()
+        val result = flowManager.completeReset { Result.success(Unit) }
 
-        encryptionService.emitBackupState(BackupState.ENABLING)
-        advanceUntilIdle()
-        assertThat(isDone).isFalse()
+        assertThat(result.isFailure).isTrue()
+    }
 
-        encryptionService.emitBackupState(BackupState.ENABLED)
-        advanceUntilIdle()
-        assertThat(isDone).isTrue()
+    @Test
+    fun `completeReset - returns when an independently refreshed completion proof succeeds`() = runTest {
+        val encryptionService = FakeEncryptionService().apply {
+            givenIdentityResetCompletionStateResult(
+                Result.success(
+                    IdentityResetCompletionState(
+                        backupState = BackupState.ENABLED,
+                        recoveryState = RecoveryState.ENABLED,
+                        isCurrentSessionVerified = true,
+                        backupExistsOnServer = true,
+                    )
+                )
+            )
+        }
+        val flowManager = createFlowManager(encryptionService = encryptionService)
+
+        val result = flowManager.completeReset { awaitCancellation() }
+
+        assertThat(result.isSuccess).isTrue()
+    }
+
+    @Test
+    fun `completeReset - does not accept a server backup without local activation and device verification`() = runTest {
+        val encryptionService = FakeEncryptionService().apply {
+            givenIdentityResetCompletionStateResult(
+                Result.success(
+                    IdentityResetCompletionState(
+                        backupState = BackupState.UNKNOWN,
+                        recoveryState = RecoveryState.UNKNOWN,
+                        isCurrentSessionVerified = false,
+                        backupExistsOnServer = true,
+                    )
+                )
+            )
+        }
+        val flowManager = createFlowManager(encryptionService = encryptionService)
+
+        val result = flowManager.completeReset { awaitCancellation() }
+
+        assertThat(result.isFailure).isTrue()
     }
 
     private fun TestScope.createFlowManager(
         encryptionService: FakeEncryptionService = FakeEncryptionService(),
+        lifecycleRecorder: AccountIdentityResetLifecycleRecorder = object : AccountIdentityResetLifecycleRecorder {
+            override suspend fun recordExplicitReset(): Result<Unit> = Result.success(Unit)
+        },
     ) = ResetIdentityFlowManager(
         encryptionService = encryptionService,
+        identityResetLifecycleRecorder = lifecycleRecorder,
         sessionCoroutineScope = this,
     )
 }

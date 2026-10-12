@@ -10,6 +10,7 @@ package io.element.android.libraries.matrix.api
 
 import io.element.android.libraries.core.data.tryOrNull
 import io.element.android.libraries.matrix.api.analytics.SdkStoreSizes
+import io.element.android.libraries.matrix.api.auth.OpenIdToken
 import io.element.android.libraries.matrix.api.core.DeviceId
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.MatrixPatterns
@@ -51,6 +52,12 @@ import kotlinx.coroutines.flow.StateFlow
 import java.util.Optional
 
 interface MatrixClient {
+    /** Fresh local SDK facts, independent of optional RTC and room-list projections. */
+    suspend fun getCurrentRoomInfo(roomId: RoomId): Result<io.element.android.libraries.matrix.api.room.RoomInfo> = runCatching {
+        checkNotNull(getRoom(roomId)) { "Local SDK room is unavailable" }.use { it.info() }
+    }
+
+
     val sessionId: SessionId
     val deviceId: DeviceId
     val userProfile: StateFlow<MatrixUser>
@@ -73,6 +80,8 @@ interface MatrixClient {
     suspend fun getRoom(roomId: RoomId): BaseRoom?
     suspend fun findDM(userId: UserId): Result<RoomId?>
     suspend fun getJoinedRoomIds(): Result<Set<RoomId>>
+    /** Returns the rooms the homeserver currently considers this account joined to. */
+    suspend fun getRemoteJoinedRoomIds(): Result<Set<RoomId>>
     suspend fun ignoreUser(userId: UserId): Result<Unit>
     suspend fun unignoreUser(userId: UserId): Result<Unit>
     suspend fun createRoom(createRoomParams: CreateRoomParameters): Result<RoomId>
@@ -156,6 +165,21 @@ interface MatrixClient {
     suspend fun getUrl(url: String): Result<ByteArray>
 
     /**
+     * Requests a short-lived Matrix OpenID token for authenticating to a trusted
+     * application service without exposing the Matrix access token.
+     */
+    suspend fun requestOpenIdToken(): Result<OpenIdToken>
+
+    /**
+     * Transient LC-08 session proof for the trusted Control Plane. The implementation must
+     * validate the current SDK account, device and homeserver against its stored session.
+     * Never persist or log the returned credential, including in recovery intent records.
+     * Implementations without a live SDK session fail closed.
+     */
+    suspend fun recoverySessionAccessToken(): Result<String> =
+        Result.failure(SecurityException("RECOVERY_MATRIX_SESSION_UNAVAILABLE"))
+
+    /**
      * Get a room preview for a given room ID or alias. This is especially useful for rooms that the user is not a member of, or hasn't joined yet.
      */
     suspend fun getRoomPreview(roomIdOrAlias: RoomIdOrAlias, serverNames: List<String>): Result<NotJoinedRoom>
@@ -172,6 +196,15 @@ interface MatrixClient {
      * Check if the user can report a room.
      */
     suspend fun canReportRoom(): Boolean
+
+    /**
+     * Ensures the homeserver versions and unstable-feature cache required by delayed Matrix events is available.
+     *
+     * MatrixRTC publishes delayed membership events before joining media. Callers must fail closed when this
+     * discovery cannot complete; otherwise the widget can open while the SDK rejects its first membership event
+     * locally without issuing a Matrix request.
+     */
+    suspend fun ensureServerVersionsReady(): Result<Unit>
 
     /**
      * Return true if Livekit Rtc is supported, i.e. if Element Call is available.

@@ -8,6 +8,7 @@
 
 package io.element.android.features.location.impl.share
 
+import io.element.android.features.location.api.live.PausedLiveLocationShare
 import io.element.android.features.location.impl.common.ui.LocationConstraintsDialogState
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.architecture.AsyncData
@@ -15,6 +16,8 @@ import io.element.android.libraries.matrix.api.user.MatrixUser
 import kotlinx.collections.immutable.ImmutableList
 
 data class ShareLocationState(
+    val mapProvider: io.element.android.security.dataprotection.api.MapProviderConfiguration = io.element.android.security.dataprotection.api.MapProviderConfiguration(),
+    val mapProviderLoading: Boolean = false,
     val customMapStyleUrl: AsyncData<String?>,
     val currentUser: MatrixUser,
     val dialogState: Dialog,
@@ -22,6 +25,8 @@ data class ShareLocationState(
     val hasLocationPermission: Boolean,
     val appName: String,
     val canShareLiveLocation: Boolean,
+    val pausedLiveLocationShare: PausedLiveLocationShare? = null,
+    val shareStaticLocationAction: AsyncAction<Unit>,
     val startLiveLocationAction: AsyncAction<Unit>,
     val eventSink: (ShareLocationEvent) -> Unit,
 ) {

@@ -19,12 +19,14 @@ import androidx.core.text.inSpans
 import androidx.core.text.toSpannable
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.location.api.Location
+import io.element.android.features.messages.impl.R
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemAudioContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemEmoteContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemFileContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemImageContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemLocationContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemNoticeContent
+import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRelayContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemStickerContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemTextContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemVideoContent
@@ -55,6 +57,7 @@ import io.element.android.libraries.matrix.api.timeline.item.event.MessageFormat
 import io.element.android.libraries.matrix.api.timeline.item.event.MessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.NoticeMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.OtherMessageType
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedMessageStatus
 import io.element.android.libraries.matrix.api.timeline.item.event.StickerContent
 import io.element.android.libraries.matrix.api.timeline.item.event.TextMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.VideoMessageType
@@ -67,6 +70,7 @@ import io.element.android.libraries.matrix.test.timeline.aProfileDetails
 import io.element.android.libraries.matrix.test.timeline.aStickerContent
 import io.element.android.libraries.matrix.ui.components.A_BLUR_HASH
 import io.element.android.libraries.mediaviewer.test.util.FileExtensionExtractorWithoutValidation
+import io.element.android.services.toolbox.test.strings.FakeStringProvider
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.test.runTest
@@ -79,6 +83,104 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 
 @Suppress("LargeClass") @RunWith(RobolectricTestRunner::class) class TimelineItemContentMessageFactoryTest {
+    @Test
+    fun `authorized relay metadata retains multiline item identity author and revision`() = runTest {
+        val body = "接龙：Team\n1. First line\nSecond line"
+        val item = io.element.android.libraries.matrix.api.timeline.item.event.ProtectedRelayEntry(
+            "stable-item",A_USER_ID,"First line\nSecond line",3,
+        )
+        val content = createMessageContent(body=body,type=TextMessageType(body,null),isContentProtectionAuthorized=true)
+            .copy(protectedRelayEntries=persistentListOf(item))
+        val actual = createTimelineItemContentMessageFactory().create(content,A_USER_ID,aProfileDetails(),AN_EVENT_ID) as TimelineItemRelayContent
+        assertThat(actual.entries).containsExactly(item.text)
+        assertThat(actual.itemDetails).containsExactly(item)
+        val spoofed = createTimelineItemContentMessageFactory().create(content.copy(isContentProtectionAuthorized=false),
+            A_USER_ID,aProfileDetails(),AN_EVENT_ID)
+        assertThat(spoofed).isInstanceOf(TimelineItemTextContent::class.java)
+    }
+
+    @Test
+    fun `only authorized relay projection becomes interactive relay content`() = runTest {
+        val body = "接龙：草莓采摘\n回复本消息即可参与；发起人回复“结束接龙”可结束\n1. 哎哎"
+        val sut = createTimelineItemContentMessageFactory()
+
+        val authorized = sut.create(
+            content = createMessageContent(
+                body = body,
+                type = TextMessageType(body, null),
+                isContentProtectionAuthorized = true,
+            ),
+            senderId = A_USER_ID,
+            senderProfile = aProfileDetails(),
+            eventId = AN_EVENT_ID,
+        )
+        val spoofed = sut.create(
+            content = createMessageContent(body = body, type = TextMessageType(body, null)),
+            senderId = A_USER_ID,
+            senderProfile = aProfileDetails(),
+            eventId = AN_EVENT_ID,
+        )
+
+        assertThat(authorized).isInstanceOf(TimelineItemRelayContent::class.java)
+        assertThat(spoofed).isInstanceOf(TimelineItemTextContent::class.java)
+    }
+
+    @Test
+    fun `actionable protected failures render only localized security guidance`() = runTest {
+        val expectedResources = mapOf(
+            ProtectedMessageStatus.ATTACHMENT_DECRYPTING to R.string.screen_room_protected_attachment_decrypting,
+            ProtectedMessageStatus.LEGACY_BLOCKED to R.string.screen_room_protected_legacy_blocked,
+            ProtectedMessageStatus.TEMPORARILY_UNAVAILABLE to R.string.screen_room_protected_temporarily_unavailable,
+            ProtectedMessageStatus.SEND_BINDING_PENDING to io.element.android.features.messages.impl.R.string.screen_room_send_binding_pending,
+            ProtectedMessageStatus.LICENSE_AUTHORIZATION_FAILED to R.string.screen_room_protected_authorization_failed,
+            ProtectedMessageStatus.DEVICE_SECURITY_UNAVAILABLE to R.string.screen_room_protected_device_security_unavailable,
+            ProtectedMessageStatus.ACCESS_DENIED to R.string.screen_room_protected_access_denied,
+            ProtectedMessageStatus.INTEGRITY_REJECTED to R.string.screen_room_protected_integrity_rejected,
+        )
+
+        expectedResources.forEach { (status, expectedResource) ->
+            val stringProvider = FakeStringProvider(defaultResult = "safe status")
+            val sut = createTimelineItemContentMessageFactory(stringProvider = stringProvider)
+            val result = sut.create(
+                content = createMessageContent(
+                    body = "",
+                    type = TextMessageType("", null),
+                    protectedMessageStatus = status,
+                ),
+                senderId = A_USER_ID,
+                senderProfile = aProfileDetails(),
+                eventId = AN_EVENT_ID,
+            )
+
+            assertThat(stringProvider.lastResIdParam).isEqualTo(expectedResource)
+            assertThat((result as TimelineItemTextContent).body).isEqualTo("safe status")
+            assertThat(result.isBurnAfterRead).isFalse()
+            assertThat(result.isProtectedContentShell).isTrue()
+            assertThat(result.isTerminalProtectedContentShell).isFalse()
+        }
+    }
+
+    @Test
+    fun `expired and revoked protected statuses are marked as terminal security shells`() = runTest {
+        val sut = createTimelineItemContentMessageFactory(stringProvider = FakeStringProvider(defaultResult = "terminal"))
+
+        listOf(ProtectedMessageStatus.EXPIRED, ProtectedMessageStatus.REVOKED).forEach { status ->
+            val result = sut.create(
+                content = createMessageContent(
+                    body = "",
+                    type = TextMessageType("", null),
+                    protectedMessageStatus = status,
+                ),
+                senderId = A_USER_ID,
+                senderProfile = aProfileDetails(),
+                eventId = AN_EVENT_ID,
+            )
+
+            assertThat(result.isProtectedContentShell).isTrue()
+            assertThat(result.isTerminalProtectedContentShell).isTrue()
+        }
+    }
+
     @Test
     fun `test create OtherMessageType`() = runTest {
         val sut = createTimelineItemContentMessageFactory()
@@ -115,6 +217,22 @@ import kotlin.time.Duration.Companion.minutes
             senderProfile = aProfileDetails(),
         )
         assertThat(result).isEqualTo(expected)
+    }
+
+    @Test
+    fun `burn after read static location keeps its one-time-view policy`() = runTest {
+        val sut = createTimelineItemContentMessageFactory()
+        val result = sut.create(
+            content = createMessageContent(
+                type = LocationMessageType("body", "geo:1,2", "description", AssetType.PIN),
+                isBurnAfterRead = true,
+            ),
+            senderId = A_USER_ID,
+            senderProfile = aProfileDetails(),
+            eventId = AN_EVENT_ID,
+        )
+
+        assertThat((result as TimelineItemLocationContent).isBurnAfterRead).isTrue()
     }
 
     @Test
@@ -773,6 +891,9 @@ import kotlin.time.Duration.Companion.minutes
         isEdited: Boolean = false,
         threadInfo: EventThreadInfo? = null,
         type: MessageType,
+        protectedMessageStatus: ProtectedMessageStatus? = null,
+        isContentProtectionAuthorized: Boolean = false,
+        isBurnAfterRead: Boolean = false,
     ): MessageContent {
         return MessageContent(
             body = body,
@@ -780,6 +901,9 @@ import kotlin.time.Duration.Companion.minutes
             isEdited = isEdited,
             threadInfo = threadInfo,
             type = type,
+            protectedMessageStatus = protectedMessageStatus,
+            isContentProtectionAuthorized = isContentProtectionAuthorized,
+            isBurnAfterRead = isBurnAfterRead,
         )
     }
 
@@ -787,12 +911,14 @@ import kotlin.time.Duration.Companion.minutes
         htmlConverterTransform: (String) -> CharSequence = { it },
         domConverterTransform: (Document) -> CharSequence = { it.body().html() },
         permalinkParser: FakePermalinkParser = FakePermalinkParser(),
+        stringProvider: FakeStringProvider = FakeStringProvider(),
     ) = TimelineItemContentMessageFactory(
         fileSizeFormatter = FakeFileSizeFormatter(),
         fileExtensionExtractor = FileExtensionExtractorWithoutValidation(),
         htmlConverterProvider = FakeHtmlConverterProvider(htmlConverterTransform, domConverterTransform),
         permalinkParser = permalinkParser,
         textPillificationHelper = FakeTextPillificationHelper(),
+        stringProvider = stringProvider,
     )
 
     private fun createStickerContent(

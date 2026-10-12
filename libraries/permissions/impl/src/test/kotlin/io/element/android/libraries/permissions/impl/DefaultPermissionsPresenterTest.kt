@@ -6,10 +6,11 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
-@file:OptIn(ExperimentalPermissionsApi::class)
+@file:OptIn(ExperimentalPermissionsApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 
 package io.element.android.libraries.permissions.impl
 
+import androidx.lifecycle.Lifecycle
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.PermissionStatus
 import com.google.common.truth.Truth.assertThat
@@ -18,10 +19,16 @@ import io.element.android.libraries.permissions.api.PermissionsStore
 import io.element.android.libraries.permissions.impl.action.FakePermissionActions
 import io.element.android.libraries.permissions.impl.action.PermissionActions
 import io.element.android.libraries.permissions.test.InMemoryPermissionsStore
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
+import io.element.android.tests.testutils.FakeLifecycleOwner
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import io.element.android.tests.testutils.lambda.value
-import io.element.android.tests.testutils.test
+import io.element.android.tests.testutils.testWithLifecycleOwner
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
@@ -35,7 +42,7 @@ class DefaultPermissionsPresenterTest {
     @Test
     fun `present - initial state`() = runTest {
         val presenter = createPresenter()
-        presenter.test {
+        presenter.testWithLifecycleOwner {
             val initialState = awaitItem()
             assertThat(initialState.permission).isEqualTo(A_PERMISSION)
             assertThat(initialState.permissionGranted).isTrue()
@@ -61,7 +68,7 @@ class DefaultPermissionsPresenterTest {
             permissionsStore = permissionsStore,
             permissionStateProvider = permissionStateProvider,
         )
-        presenter.test {
+        presenter.testWithLifecycleOwner {
             skipItems(1)
             val initialState = awaitItem()
             initialState.eventSink.invoke(PermissionsEvent.RequestPermissions)
@@ -92,7 +99,7 @@ class DefaultPermissionsPresenterTest {
             permissionStateProvider = permissionStateProvider,
             permissionActions = permissionActions,
         )
-        presenter.test {
+        presenter.testWithLifecycleOwner {
             skipItems(1)
             val initialState = awaitItem()
             initialState.eventSink.invoke(PermissionsEvent.RequestPermissions)
@@ -102,6 +109,7 @@ class DefaultPermissionsPresenterTest {
             withDialogState.eventSink.invoke(PermissionsEvent.OpenSystemSettingAndCloseDialog)
             assertThat(awaitItem().showDialog).isFalse()
             openSettingsAction.assertions().isCalledOnce().with(value(A_PERMISSION))
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
@@ -116,7 +124,7 @@ class DefaultPermissionsPresenterTest {
         val presenter = createPresenter(
             permissionStateProvider = permissionStateProvider,
         )
-        presenter.test {
+        presenter.testWithLifecycleOwner {
             val initialState = awaitItem()
             assertThat(initialState.showDialog).isFalse()
             initialState.eventSink.invoke(PermissionsEvent.RequestPermissions)
@@ -143,14 +151,14 @@ class DefaultPermissionsPresenterTest {
         val presenter = createPresenter(
             permissionStateProvider = permissionStateProvider,
         )
-        presenter.test {
+        presenter.testWithLifecycleOwner {
             val initialState = awaitItem()
             assertThat(initialState.showDialog).isFalse()
             initialState.eventSink.invoke(PermissionsEvent.RequestPermissions)
             assertThat(permissionState.launchPermissionRequestCalled).isTrue()
             // User does not grant permission
             permissionStateProvider.userGiveAnswer(answer = false, firstTime = false)
-            skipItems(2)
+            skipItems(1)
             val state = awaitItem()
             assertThat(state.permissionGranted).isFalse()
             assertThat(state.showDialog).isFalse()
@@ -175,7 +183,7 @@ class DefaultPermissionsPresenterTest {
             permissionsStore = permissionsStore,
             permissionStateProvider = permissionStateProvider,
         )
-        presenter.test {
+        presenter.testWithLifecycleOwner {
             skipItems(1)
             val initialState = awaitItem()
             initialState.eventSink.invoke(PermissionsEvent.RequestPermissions)
@@ -198,7 +206,7 @@ class DefaultPermissionsPresenterTest {
         val presenter = createPresenter(
             permissionStateProvider = permissionStateProvider,
         )
-        presenter.test {
+        presenter.testWithLifecycleOwner {
             val initialState = awaitItem()
             assertThat(initialState.showDialog).isFalse()
             initialState.eventSink.invoke(PermissionsEvent.RequestPermissions)
@@ -213,6 +221,138 @@ class DefaultPermissionsPresenterTest {
             assertThat(state.permissionAlreadyAsked).isTrue()
         }
     }
+
+    @Test
+    fun `settings receipt waits for actual background and return`() = verifySettingsReturn(backgroundBeforeObserver = false)
+
+    @Test
+    fun `settings cannot open before lifecycle identity is persisted and duplicate clicks are ignored`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        var opened = 0
+        val presenter = createPresenter(
+            permissionActions = FakePermissionActions(openSettingsAction = {
+                assertThat(coordinator.startedRequests).hasSize(1)
+                opened++
+            }),
+            appOperationalStateCoordinator = coordinator,
+            appCoroutineScope = this,
+        )
+        presenter.testWithLifecycleOwner {
+            val state = awaitItem()
+            state.eventSink(PermissionsEvent.OpenSystemSettingAndCloseDialog)
+            assertThat(opened).isEqualTo(0)
+            state.eventSink(PermissionsEvent.OpenSystemSettingAndCloseDialog)
+            advanceUntilIdle()
+            assertThat(opened).isEqualTo(1)
+            assertThat(coordinator.startedRequests).hasSize(1)
+            assertThat(coordinator.clientReceipts).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `failed lifecycle persistence does not open OS settings or fabricate return receipt`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator(startFailure = { IllegalStateException("intent persistence failed") })
+        var opened = 0
+        val presenter = createPresenter(
+            permissionActions = FakePermissionActions(openSettingsAction = { opened++ }),
+            appOperationalStateCoordinator = coordinator,
+            appCoroutineScope = this,
+        )
+        presenter.testWithLifecycleOwner {
+            awaitItem().eventSink(PermissionsEvent.OpenSystemSettingAndCloseDialog)
+            advanceUntilIdle()
+            assertThat(opened).isEqualTo(0)
+            assertThat(coordinator.startedRequests).hasSize(1)
+            assertThat(coordinator.clientReceipts).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `settings receipt handles departure before observer registration`() = verifySettingsReturn(backgroundBeforeObserver = true)
+
+    @Test
+    fun `activity settings launcher uses original lifecycle and waits for real return`() =
+        verifySettingsReturn(backgroundBeforeObserver = true, usingActivityLauncher = true)
+
+    private fun verifySettingsReturn(backgroundBeforeObserver: Boolean, usingActivityLauncher: Boolean = false) = runTest {
+        val owner = FakeLifecycleOwner(Lifecycle.State.RESUMED)
+        val coordinator = FakeAppOperationalStateCoordinator()
+        var activityLaunches = 0
+        val presenter = createPresenter(
+            permissionStateProvider = FakeComposablePermissionStateProvider(
+                permissionState = aFakePermissionState(initialStatus = PermissionStatus.Denied(shouldShowRationale = true)),
+            ),
+            permissionActions = FakePermissionActions(openSettingsAction = {
+                if (backgroundBeforeObserver) owner.givenState(Lifecycle.State.STARTED)
+            }),
+            appOperationalStateCoordinator = coordinator,
+            appCoroutineScope = this,
+        )
+        presenter.testWithLifecycleOwner(owner) {
+            val event = if (usingActivityLauncher) {
+                PermissionsEvent.OpenSystemSettingsUsingActivity {
+                    assertThat(coordinator.startedRequests).hasSize(1)
+                    activityLaunches++
+                    owner.givenState(Lifecycle.State.STARTED)
+                }
+            } else {
+                PermissionsEvent.OpenSystemSettingAndCloseDialog
+            }
+            awaitItem().eventSink(event)
+            advanceUntilIdle()
+            assertThat(activityLaunches).isEqualTo(if (usingActivityLauncher) 1 else 0)
+            assertThat(coordinator.startedRequests).hasSize(1)
+            val original = coordinator.startedRequests.single()
+            assertThat(original.trigger).isEqualTo("settings_return")
+            assertThat(coordinator.clientReceipts).isEmpty()
+
+            if (!backgroundBeforeObserver) owner.givenState(Lifecycle.State.STARTED)
+            advanceUntilIdle()
+            assertThat(coordinator.clientReceipts).isEmpty()
+            owner.givenState(Lifecycle.State.RESUMED)
+            advanceUntilIdle()
+            assertThat(coordinator.startedRequests).hasSize(2)
+            assertThat(coordinator.startedRequests.map { it.operationId }.distinct()).containsExactly(original.operationId)
+            assertThat(coordinator.clientReceipts).hasSize(2)
+
+            owner.givenState(Lifecycle.State.STARTED)
+            owner.givenState(Lifecycle.State.RESUMED)
+            advanceUntilIdle()
+            assertThat(coordinator.clientReceipts).hasSize(2)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `permission receipt survives presenter composition disposal`() = runTest {
+        val permissionStateProvider = FakeComposablePermissionStateProvider(
+            permissionState = aFakePermissionState(
+                initialStatus = PermissionStatus.Denied(shouldShowRationale = false)
+            ),
+        )
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val presenter = createPresenter(
+            permissionStateProvider = permissionStateProvider,
+            appOperationalStateCoordinator = coordinator,
+            appCoroutineScope = this,
+        )
+
+        presenter.testWithLifecycleOwner {
+            val initialState = awaitItem()
+            initialState.eventSink.invoke(PermissionsEvent.RequestPermissions)
+            permissionStateProvider.userGiveAnswer(answer = true, firstTime = true)
+            cancelAndIgnoreRemainingEvents()
+        }
+        advanceUntilIdle()
+
+        assertThat(coordinator.startedRequests.map { it.lifecycleId })
+            .containsExactly(FullAppLifecycleId.LC_03, FullAppLifecycleId.LC_03)
+        assertThat(coordinator.startedRequests.map { it.operationId }.distinct()).hasSize(1)
+        assertThat(coordinator.clientReceipts.map { it.operationId }.distinct()).hasSize(1)
+        assertThat(coordinator.clientReceipts).hasSize(2)
+    }
 }
 
 private fun createPresenter(
@@ -222,11 +362,15 @@ private fun createPresenter(
         permissionState = aFakePermissionState(),
     ),
     permissionActions: PermissionActions = FakePermissionActions(),
+    appOperationalStateCoordinator: FakeAppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
+    appCoroutineScope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined),
 ) = DefaultPermissionsPresenter(
     permission = permission,
     permissionsStore = permissionsStore,
     composablePermissionStateProvider = permissionStateProvider,
     permissionActions = permissionActions,
+    appOperationalStateCoordinator = appOperationalStateCoordinator,
+    appCoroutineScope = appCoroutineScope,
 )
 
 private fun aFakePermissionState(

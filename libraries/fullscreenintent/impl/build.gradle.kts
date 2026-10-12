@@ -26,6 +26,7 @@ dependencies {
     implementation(projects.libraries.permissions.api)
     implementation(projects.libraries.permissions.noop)
     implementation(projects.libraries.preferences.api)
+    implementation(projects.libraries.push.api)
     implementation(projects.services.toolbox.api)
     implementation(libs.androidx.datastore.preferences)
 

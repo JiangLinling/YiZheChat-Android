@@ -13,15 +13,19 @@ package io.element.android.features.messages.impl.pinned.list
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.AndroidComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.v2.runAndroidComposeUiTest
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.common.truth.Truth.assertThat
 import io.element.android.features.messages.impl.actionlist.ActionListEvent
 import io.element.android.features.messages.impl.actionlist.anActionListState
+import io.element.android.features.messages.impl.timeline.aTimelineItemEvent
 import io.element.android.features.messages.impl.timeline.aTimelineItemList
 import io.element.android.features.messages.impl.timeline.model.TimelineItem
 import io.element.android.features.messages.impl.timeline.model.event.aTimelineItemFileContent
@@ -34,6 +38,7 @@ import io.element.android.tests.testutils.ensureCalledOnceWithParam
 import io.element.android.tests.testutils.pressBack
 import io.element.android.tests.testutils.setSafeContent
 import io.element.android.wysiwyg.link.Link
+import kotlinx.collections.immutable.persistentListOf
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -71,6 +76,21 @@ class PinnedMessagesListViewTest {
             )
             onAllNodesWithText(content.filename).onFirst().performClick()
         }
+    }
+
+    @Test
+    fun `single pinned event is laid out in the upper half of the content`() = runAndroidComposeUiTest {
+        val content = aTimelineItemFileContent()
+        val state = aLoadedPinnedMessagesListState(
+            timelineItems = persistentListOf(aTimelineItemEvent(content = content)),
+        )
+
+        setPinnedMessagesListView(state = state)
+
+        val messageTop = onAllNodesWithText(content.filename).onFirst().getUnclippedBoundsInRoot().top.value
+        val rootBounds = onRoot().getUnclippedBoundsInRoot()
+        val rootMidpoint = (rootBounds.top.value + rootBounds.bottom.value) / 2
+        assertThat(messageTop).isLessThan(rootMidpoint)
     }
 
     @Test

@@ -21,11 +21,13 @@ import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
+import io.element.android.features.logout.api.LogoutEntryPoint
 import io.element.android.features.logout.impl.tools.isBackingUp
 import io.element.android.features.logout.impl.ui.LogoutActionDialog
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.designsystem.atomic.pages.FlowStepPage
 import io.element.android.libraries.designsystem.components.BigIcon
+import io.element.android.libraries.designsystem.components.dialogs.ConfirmationDialog
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.designsystem.theme.components.Button
@@ -36,7 +38,6 @@ import io.element.android.libraries.designsystem.theme.progressIndicatorTrackCol
 import io.element.android.libraries.matrix.api.encryption.BackupState
 import io.element.android.libraries.matrix.api.encryption.BackupUploadState
 import io.element.android.libraries.matrix.api.encryption.RecoveryState
-import io.element.android.libraries.matrix.api.encryption.SteadyStateException
 import io.element.android.libraries.testtags.TestTags
 import io.element.android.libraries.testtags.testTag
 import io.element.android.libraries.ui.strings.CommonStrings
@@ -44,7 +45,7 @@ import io.element.android.libraries.ui.strings.CommonStrings
 @Composable
 fun LogoutView(
     state: LogoutState,
-    onChangeRecoveryKeyClick: () -> Unit,
+    onRecoveryActionClick: (LogoutEntryPoint.RecoveryDestination) -> Unit,
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -59,7 +60,7 @@ fun LogoutView(
         buttons = {
             Buttons(
                 state = state,
-                onChangeRecoveryKeyClick = onChangeRecoveryKeyClick,
+                onRecoveryActionClick = onRecoveryActionClick,
                 onLogoutClick = {
                     eventSink(LogoutEvents.Logout(ignoreSdkError = false))
                 }
@@ -81,6 +82,17 @@ fun LogoutView(
             eventSink(LogoutEvents.CloseDialogs)
         },
     )
+    if (state.showUnbackedKeysWarning) {
+        ConfirmationDialog(
+            title = stringResource(R.string.screen_signout_unbacked_keys_title),
+            content = stringResource(R.string.screen_signout_unbacked_keys_content),
+            submitText = stringResource(R.string.screen_signout_unbacked_keys_submit),
+            cancelText = stringResource(R.string.screen_signout_unbacked_keys_wait),
+            destructiveSubmit = true,
+            onSubmitClick = { eventSink(LogoutEvents.ConfirmLogoutWithoutBackup) },
+            onDismiss = { eventSink(LogoutEvents.CloseDialogs) },
+        )
+    }
 }
 
 @Composable
@@ -103,8 +115,14 @@ private fun title(state: LogoutState): String {
 @Composable
 private fun subtitle(state: LogoutState): String? {
     return when {
-        (state.backupUploadState as? BackupUploadState.SteadyException)?.exception is SteadyStateException.Connection ->
-            stringResource(id = R.string.screen_signout_key_backup_offline_subtitle)
+        state.backupUploadState.problemOrNull() == BackupUploadProblem.CONNECTION ->
+            stringResource(R.string.screen_signout_key_backup_offline_subtitle)
+        state.backupUploadState.problemOrNull() == BackupUploadProblem.BACKUP_DISABLED ->
+            stringResource(R.string.screen_signout_key_backup_disabled_state_subtitle)
+        state.backupUploadState.problemOrNull() == BackupUploadProblem.STATUS_LAGGED ->
+            stringResource(R.string.screen_signout_key_backup_lagged_subtitle)
+        state.backupUploadState.problemOrNull() == BackupUploadProblem.UPLOAD_FAILED ->
+            stringResource(R.string.screen_signout_key_backup_failed_subtitle)
         state.backupUploadState.isBackingUp() -> stringResource(id = R.string.screen_signout_key_backup_ongoing_subtitle)
         state.isLastDevice -> stringResource(id = R.string.screen_signout_key_backup_disabled_subtitle)
         else -> null
@@ -115,30 +133,66 @@ private fun subtitle(state: LogoutState): String? {
 private fun ColumnScope.Buttons(
     state: LogoutState,
     onLogoutClick: () -> Unit,
-    onChangeRecoveryKeyClick: () -> Unit,
+    onRecoveryActionClick: (LogoutEntryPoint.RecoveryDestination) -> Unit,
 ) {
     val logoutAction = state.logoutAction
-    if (state.isLastDevice) {
-        OutlinedButton(
-            text = stringResource(id = CommonStrings.common_settings),
-            modifier = Modifier.fillMaxWidth(),
-            onClick = onChangeRecoveryKeyClick,
-        )
+    val recoveryDestination = state.recoveryDestination()
+    if (recoveryDestination != null) {
+        val recoveryActionText = when (recoveryDestination) {
+            LogoutEntryPoint.RecoveryDestination.SET_UP -> R.string.screen_signout_prepare_recovery_key_action
+            LogoutEntryPoint.RecoveryDestination.CONFIRM -> R.string.screen_signout_confirm_recovery_key_action
+            LogoutEntryPoint.RecoveryDestination.CHANGE -> R.string.screen_signout_change_recovery_key_action
+        }
+        val onRecoveryClick = { onRecoveryActionClick(recoveryDestination) }
+        if (recoveryDestination == LogoutEntryPoint.RecoveryDestination.CHANGE) {
+            OutlinedButton(
+                text = stringResource(recoveryActionText),
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onRecoveryClick,
+            )
+        } else {
+            Button(
+                text = stringResource(recoveryActionText),
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onRecoveryClick,
+            )
+        }
     }
+    val recoveryNeedsAttention = state.recoveryState != RecoveryState.ENABLED
     val signOutSubmitRes = when {
         logoutAction is AsyncAction.Loading -> R.string.screen_signout_in_progress_dialog_content
-        state.backupUploadState.isBackingUp() -> CommonStrings.action_signout_anyway
+        state.backupUploadState.isBackingUp() || recoveryNeedsAttention -> CommonStrings.action_signout_anyway
         else -> CommonStrings.action_signout
     }
-    Button(
-        text = stringResource(id = signOutSubmitRes),
-        showProgress = logoutAction is AsyncAction.Loading,
-        destructive = true,
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(TestTags.signOut),
-        onClick = onLogoutClick,
-    )
+    if (recoveryNeedsAttention) {
+        OutlinedButton(
+            text = stringResource(id = signOutSubmitRes),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(TestTags.signOut),
+            showProgress = logoutAction is AsyncAction.Loading,
+            destructive = true,
+            onClick = onLogoutClick,
+        )
+    } else {
+        Button(
+            text = stringResource(id = signOutSubmitRes),
+            showProgress = logoutAction is AsyncAction.Loading,
+            destructive = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(TestTags.signOut),
+            onClick = onLogoutClick,
+        )
+    }
+}
+
+private fun LogoutState.recoveryDestination(): LogoutEntryPoint.RecoveryDestination? = when (recoveryState) {
+    RecoveryState.DISABLED -> LogoutEntryPoint.RecoveryDestination.SET_UP
+    RecoveryState.INCOMPLETE -> LogoutEntryPoint.RecoveryDestination.CONFIRM
+    RecoveryState.ENABLED -> LogoutEntryPoint.RecoveryDestination.CHANGE
+    RecoveryState.UNKNOWN,
+    RecoveryState.WAITING_FOR_SYNC -> null
 }
 
 @Composable
@@ -152,6 +206,18 @@ private fun Content(
             .padding(top = 60.dp, start = 20.dp, end = 20.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        Text(
+            text = stringResource(R.string.screen_signout_recovery_readiness_title),
+            style = ElementTheme.typography.fontBodyMdMedium,
+        )
+        Text(
+            text = recoveryReadinessSummary(state),
+            style = ElementTheme.typography.fontBodySmRegular,
+        )
+        Text(
+            text = stringResource(R.string.screen_signout_non_recoverable_notice),
+            style = ElementTheme.typography.fontBodySmRegular,
+        )
         when (state.backupUploadState) {
             is BackupUploadState.Uploading -> {
                 LinearProgressIndicator(
@@ -183,6 +249,34 @@ private fun Content(
     }
 }
 
+@Composable
+private fun recoveryReadinessSummary(state: LogoutState): String {
+    val recovery = when (state.recoveryState) {
+        RecoveryState.ENABLED -> stringResource(R.string.screen_signout_readiness_ready)
+        RecoveryState.UNKNOWN,
+        RecoveryState.WAITING_FOR_SYNC -> stringResource(R.string.screen_signout_readiness_checking)
+        RecoveryState.DISABLED,
+        RecoveryState.INCOMPLETE -> stringResource(R.string.screen_signout_readiness_attention)
+    }
+    val backupConfigured = state.backupState == BackupState.ENABLED || state.doesBackupExistOnServer
+    val backup = if (backupConfigured && state.backupUploadState.isCompleteForDeviceRemoval()) {
+        stringResource(R.string.screen_signout_readiness_ready)
+    } else {
+        stringResource(R.string.screen_signout_readiness_attention)
+    }
+    val oldDevice = if (state.isLastDevice) {
+        stringResource(R.string.screen_signout_readiness_unavailable)
+    } else {
+        stringResource(R.string.screen_signout_readiness_available)
+    }
+    return stringResource(
+        R.string.screen_signout_recovery_readiness_summary,
+        recovery,
+        backup,
+        oldDevice,
+    )
+}
+
 @PreviewsDayNight
 @Composable
 internal fun LogoutViewPreview(
@@ -190,7 +284,7 @@ internal fun LogoutViewPreview(
 ) = ElementPreview {
     LogoutView(
         state,
-        onChangeRecoveryKeyClick = {},
+        onRecoveryActionClick = {},
         onBackClick = {},
     )
 }

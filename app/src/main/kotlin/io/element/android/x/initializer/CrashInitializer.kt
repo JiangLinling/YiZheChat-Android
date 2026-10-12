@@ -13,11 +13,18 @@ import androidx.startup.Initializer
 import io.element.android.features.rageshake.impl.crash.VectorUncaughtExceptionHandler
 import io.element.android.features.rageshake.impl.di.RageshakeBindings
 import io.element.android.libraries.architecture.bindings
+import io.element.android.x.BuildConfig
+import kotlinx.coroutines.runBlocking
 
 class CrashInitializer : Initializer<Unit> {
     override fun create(context: Context) {
+        val crashDataStore = context.bindings<RageshakeBindings>().preferencesCrashDataStore()
+        if (!BuildConfig.DEBUG) {
+            runBlocking { crashDataStore.reset() }
+        }
         VectorUncaughtExceptionHandler(
-            context.bindings<RageshakeBindings>().preferencesCrashDataStore(),
+            crashDataStore,
+            persistCrashDetails = BuildConfig.DEBUG,
         ).activate()
     }
 

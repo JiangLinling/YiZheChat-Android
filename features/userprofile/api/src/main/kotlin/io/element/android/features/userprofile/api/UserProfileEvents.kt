@@ -11,10 +11,14 @@ package io.element.android.features.userprofile.api
 sealed interface UserProfileEvents {
     data object StartDM : UserProfileEvents
     data object ClearStartDMState : UserProfileEvents
+    data class RemoveFriend(val needsConfirmation: Boolean = true) : UserProfileEvents
+    data object ClearRemoveFriendState : UserProfileEvents
     data class BlockUser(val needsConfirmation: Boolean = false) : UserProfileEvents
     data class UnblockUser(val needsConfirmation: Boolean = false) : UserProfileEvents
     data object ClearBlockUserError : UserProfileEvents
     data object ClearConfirmationDialog : UserProfileEvents
     data object WithdrawVerification : UserProfileEvents
     data class CopyToClipboard(val text: String) : UserProfileEvents
+    data class SavePrivateProfile(val profile: FriendPrivateProfile) : UserProfileEvents
+    data object ClearSavePrivateProfileState : UserProfileEvents
 }

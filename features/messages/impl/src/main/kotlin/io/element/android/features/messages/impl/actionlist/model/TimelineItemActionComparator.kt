@@ -14,24 +14,32 @@ class TimelineItemActionComparator : Comparator<TimelineItemAction> {
     // See order in https://www.figma.com/design/ux3tYoZV9WghC7hHT9Fhk0/Compound-iOS-Components?node-id=2946-2392
     @VisibleForTesting
     val orderedList = listOf(
+        TimelineItemAction.Retry,
         TimelineItemAction.EndPoll,
         TimelineItemAction.ViewInTimeline,
+        TimelineItemAction.CopyText,
+        TimelineItemAction.CopyUnavailable,
+        TimelineItemAction.CopyCaption,
+        TimelineItemAction.Forward,
+        TimelineItemAction.Favourite,
+        TimelineItemAction.Unfavourite,
+        TimelineItemAction.AddToCommon,
+        TimelineItemAction.Withdraw,
+        TimelineItemAction.Redact,
+        TimelineItemAction.MultiSelect,
         TimelineItemAction.Reply,
         TimelineItemAction.ReplyInThread,
-        TimelineItemAction.Forward,
         TimelineItemAction.Edit,
         TimelineItemAction.EditPoll,
+        TimelineItemAction.DeleteLocal,
         TimelineItemAction.AddCaption,
         TimelineItemAction.EditCaption,
-        TimelineItemAction.CopyLink,
         TimelineItemAction.Pin,
         TimelineItemAction.Unpin,
-        TimelineItemAction.CopyText,
-        TimelineItemAction.CopyCaption,
         TimelineItemAction.RemoveCaption,
-        TimelineItemAction.ViewSource,
         TimelineItemAction.ReportContent,
-        TimelineItemAction.Redact,
+        TimelineItemAction.CopyLink,
+        TimelineItemAction.ViewSource,
     )
 
     override fun compare(o1: TimelineItemAction, o2: TimelineItemAction): Int {

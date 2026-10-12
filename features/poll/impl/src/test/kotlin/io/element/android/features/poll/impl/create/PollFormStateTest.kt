@@ -16,6 +16,30 @@ import org.junit.Test
 
 class PollFormStateTest {
     @Test
+    fun `editing rows retains identities when an earlier option is removed`() {
+        val initial = PollFormState.Empty.copy(
+            question = "Question",
+            answers = listOf("A", "B", "C").toImmutableList(),
+            answerIds = listOf("id-a", "id-b", "id-c").toImmutableList(),
+        )
+        val edited = initial.withAnswerRemoved(0).withAnswerChanged(0, "Edited B")
+        assertThat(edited.answers).containsExactly("Edited B", "C").inOrder()
+        assertThat(edited.answerIds).containsExactly("id-b", "id-c").inOrder()
+        assertThat(edited.isValid).isTrue()
+    }
+
+    @Test
+    fun `new edited option has a stable distinct identity through text changes`() {
+        val initial = PollFormState.Empty.copy(answerIds = listOf("id-a", "id-b").toImmutableList())
+        val added = initial.withNewAnswer()
+        val edited = added.withAnswerChanged(2, "New option")
+        assertThat(added.answerIds!!.take(2)).containsExactly("id-a", "id-b").inOrder()
+        assertThat(added.answerIds!!.last()).isNotEmpty()
+        assertThat(edited.answerIds).isEqualTo(added.answerIds)
+        assertThat(edited.answerIds!!.distinct()).hasSize(3)
+    }
+
+    @Test
     fun `with new answer`() {
         val state = PollFormState.Empty
         val newState = state.withNewAnswer()

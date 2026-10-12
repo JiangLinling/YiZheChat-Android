@@ -22,6 +22,8 @@ open class MessageComposerStateProvider : PreviewParameterProvider<MessageCompos
     override val values: Sequence<MessageComposerState>
         get() = sequenceOf(
             aMessageComposerState(),
+            aMessageComposerState(showCameraPermissionRationaleDialog = true),
+            aMessageComposerState(isBurnAfterReadEnabled = true, isFlashReadPreparing = true),
         )
 }
 
@@ -31,7 +33,13 @@ fun aMessageComposerState(
     mode: MessageComposerMode = MessageComposerMode.Normal,
     showTextFormatting: Boolean = false,
     showAttachmentSourcePicker: Boolean = false,
+    showRelayDialog: Boolean = false,
+    showCameraPermissionRationaleDialog: Boolean = false,
     canShareLocation: Boolean = true,
+    canPasteFromInAppClipboard: Boolean = false,
+    isBurnAfterReadEnabled: Boolean = false,
+    isFlashReadPreparing: Boolean = false,
+    containsVolatileWithdrawnText: Boolean = false,
     suggestions: ImmutableList<ResolvedSuggestion> = persistentListOf(),
     slashCommandAction: AsyncAction<Unit> = AsyncAction.Uninitialized,
     eventSink: (MessageComposerEvent) -> Unit = {},
@@ -41,7 +49,13 @@ fun aMessageComposerState(
     mode = mode,
     showTextFormatting = showTextFormatting,
     showAttachmentSourcePicker = showAttachmentSourcePicker,
+    showRelayDialog = showRelayDialog,
+    showCameraPermissionRationaleDialog = showCameraPermissionRationaleDialog,
     canShareLocation = canShareLocation,
+    canPasteFromInAppClipboard = canPasteFromInAppClipboard,
+    isBurnAfterReadEnabled = isBurnAfterReadEnabled,
+    isFlashReadPreparing = isFlashReadPreparing,
+    containsVolatileWithdrawnText = containsVolatileWithdrawnText,
     suggestions = suggestions,
     resolveMentionDisplay = { _, _ -> TextDisplay.Plain },
     resolveAtRoomMentionDisplay = { TextDisplay.Plain },

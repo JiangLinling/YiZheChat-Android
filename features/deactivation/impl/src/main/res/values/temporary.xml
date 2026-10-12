@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_deactivate_account_service_upgrading">Account deletion is temporarily unavailable while the service is being upgraded. This request has not frozen or deleted your account. Try again later.</string>
+    <string name="screen_deactivate_account_invalid_password">The password is incorrect. Your account is frozen for permanent deletion but has not been deleted. Check the password and retry to continue the same deletion request.</string>
+</resources>

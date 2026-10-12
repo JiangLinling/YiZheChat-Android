@@ -17,12 +17,14 @@ import io.element.android.libraries.matrix.ui.components.aMatrixUserList
 import io.element.android.libraries.usersearch.api.UserSearchResult
 import io.element.android.libraries.usersearch.api.UserSearchResultState
 import io.element.android.libraries.usersearch.test.FakeUserRepository
+import io.element.android.security.dataprotection.test.FakeDeletedIdentityProjection
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.test
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
+import java.security.MessageDigest
 
 class DefaultUserListPresenterTest {
     @get:Rule
@@ -38,6 +40,7 @@ class DefaultUserListPresenterTest {
                 userRepository,
                 UserListDataStore(),
                 FakeMatrixClient(),
+                FakeDeletedIdentityProjection(),
             )
         presenter.test {
             skipItems(1)
@@ -58,6 +61,7 @@ class DefaultUserListPresenterTest {
                 userRepository,
                 UserListDataStore(),
                 FakeMatrixClient(),
+                FakeDeletedIdentityProjection(),
             )
         presenter.test {
             skipItems(1)
@@ -78,6 +82,7 @@ class DefaultUserListPresenterTest {
                 userRepository,
                 UserListDataStore(),
                 FakeMatrixClient(),
+                FakeDeletedIdentityProjection(),
             )
         presenter.test {
             skipItems(1)
@@ -113,6 +118,7 @@ class DefaultUserListPresenterTest {
                 userRepository,
                 UserListDataStore(),
                 FakeMatrixClient(),
+                FakeDeletedIdentityProjection(),
             )
         presenter.test {
             skipItems(1)
@@ -155,6 +161,36 @@ class DefaultUserListPresenterTest {
     }
 
     @Test
+    fun `present - deleted identity is removed from search while unrelated result remains`() = runTest {
+        val deleted = aMatrixUser("@deleted:domain", "Deleted")
+        val retained = aMatrixUser("@retained:domain", "Retained")
+        val projection = FakeDeletedIdentityProjection(setOf(hash(deleted.userId.value)))
+        val presenter = DefaultUserListPresenter(
+            UserListPresenterArgs(selectionMode = SelectionMode.Single),
+            userRepository,
+            UserListDataStore(),
+            FakeMatrixClient(),
+            projection,
+        )
+
+        presenter.test {
+            skipItems(1)
+            val initialState = awaitItem()
+            initialState.searchQuery.setTextAndPlaceCursorAtEnd("user")
+            skipItems(2)
+            userRepository.emitState(
+                UserSearchResultState(
+                    results = listOf(UserSearchResult(deleted), UserSearchResult(retained)),
+                    isSearching = false,
+                )
+            )
+
+            val results = (awaitItem().searchResults as SearchBarResultState.Results).results
+            assertThat(results.map { it.matrixUser }).containsExactly(retained)
+        }
+    }
+
+    @Test
     fun `present - presents search results when not found`() = runTest {
         val presenter =
             DefaultUserListPresenter(
@@ -164,6 +200,7 @@ class DefaultUserListPresenterTest {
                 userRepository,
                 UserListDataStore(),
                 FakeMatrixClient(),
+                FakeDeletedIdentityProjection(),
             )
         presenter.test {
             skipItems(1)
@@ -188,6 +225,7 @@ class DefaultUserListPresenterTest {
                 userRepository,
                 UserListDataStore(),
                 FakeMatrixClient(),
+                FakeDeletedIdentityProjection(),
             )
         presenter.test {
             skipItems(1)
@@ -217,4 +255,8 @@ class DefaultUserListPresenterTest {
             assertThat(awaitItem().selectedUsers).isEmpty()
         }
     }
+
+    private fun hash(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.encodeToByteArray())
+        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 }

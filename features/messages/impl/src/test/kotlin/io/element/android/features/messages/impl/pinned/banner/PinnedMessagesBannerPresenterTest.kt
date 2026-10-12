@@ -148,6 +148,93 @@ class PinnedMessagesBannerPresenterTest {
     }
 
     @Test
+    fun `present - stale timeline item is not exposed as the current pinned message`() = runTest {
+        val staleTimeline = FakeTimeline(
+            timelineItems = flowOf(
+                listOf(
+                    MatrixTimelineItem.Event(
+                        uniqueId = A_UNIQUE_ID,
+                        event = anEventTimelineItem(
+                            eventId = AN_EVENT_ID,
+                            content = aMessageContent("Stale pinned message"),
+                        ),
+                    )
+                )
+            )
+        )
+        val room = FakeJoinedRoom(
+            createTimelineResult = { Result.success(staleTimeline) }
+        ).apply {
+            givenRoomInfo(aRoomInfo(pinnedEventIds = listOf(AN_EVENT_ID_2)))
+        }
+
+        val presenter = createPinnedMessagesBannerPresenter(room = room)
+        presenter.test {
+            skipItems(3)
+            assertThat(awaitItem()).isEqualTo(PinnedMessagesBannerState.Hidden)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - authoritative pin change recreates the pinned timeline`() = runTest {
+        val firstTimeline = FakeTimeline(
+            timelineItems = flowOf(
+                listOf(
+                    MatrixTimelineItem.Event(
+                        uniqueId = A_UNIQUE_ID,
+                        event = anEventTimelineItem(
+                            eventId = AN_EVENT_ID,
+                            content = aMessageContent("First pinned message"),
+                        ),
+                    )
+                )
+            )
+        )
+        val secondTimeline = FakeTimeline(
+            timelineItems = flowOf(
+                listOf(
+                    MatrixTimelineItem.Event(
+                        uniqueId = A_UNIQUE_ID_2,
+                        event = anEventTimelineItem(
+                            eventId = AN_EVENT_ID_2,
+                            content = aMessageContent("Second pinned message"),
+                        ),
+                    )
+                )
+            )
+        )
+        var createTimelineCalls = 0
+        val room = FakeJoinedRoom(
+            createTimelineResult = {
+                createTimelineCalls++
+                Result.success(if (createTimelineCalls == 1) firstTimeline else secondTimeline)
+            }
+        ).apply {
+            givenRoomInfo(aRoomInfo(pinnedEventIds = listOf(AN_EVENT_ID)))
+        }
+
+        val presenter = createPinnedMessagesBannerPresenter(room = room)
+        presenter.test {
+            skipItems(3)
+            val initialLoadedState = awaitItem() as PinnedMessagesBannerState.Loaded
+            assertThat(initialLoadedState.currentPinnedMessage.eventId).isEqualTo(AN_EVENT_ID)
+
+            room.givenRoomInfo(aRoomInfo(pinnedEventIds = listOf(AN_EVENT_ID_2)))
+
+            var refreshedState = awaitItem()
+            while (refreshedState !is PinnedMessagesBannerState.Loaded) {
+                refreshedState = awaitItem()
+            }
+            val refreshedLoadedState = refreshedState as PinnedMessagesBannerState.Loaded
+            assertThat(refreshedLoadedState.currentPinnedMessage.eventId).isEqualTo(AN_EVENT_ID_2)
+            assertThat(createTimelineCalls).isEqualTo(2)
+            assertThat(firstTimeline.closeCounter).isEqualTo(1)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `present - timeline failed`() = runTest {
         val room = FakeJoinedRoom(
             createTimelineResult = { Result.failure(Exception()) }

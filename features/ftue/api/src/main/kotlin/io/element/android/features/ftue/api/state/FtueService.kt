@@ -16,6 +16,16 @@ import kotlinx.coroutines.flow.StateFlow
 interface FtueService {
     /** The current state of the FTUE. */
     val state: StateFlow<FtueState>
+
+    /** Re-evaluate onboarding requirements after they were completed by the unified device setup workbench. */
+    fun refresh()
+
+    /**
+     * Clear the legacy FTUE acknowledgement gate after the unified setup workbench has completed
+     * the real session-verification flow. This does not mark an unverified session as verified;
+     * callers must only invoke it after observing [io.element.android.libraries.matrix.api.verification.SessionVerifiedStatus.Verified].
+     */
+    fun onUserCompletedSessionVerification()
 }
 
 /** The state of the FTUE. */

@@ -15,6 +15,7 @@ import io.element.android.features.rageshake.api.logs.createWriteToFilesConfigur
 import io.element.android.libraries.architecture.bindings
 import io.element.android.libraries.featureflag.api.FeatureFlags
 import io.element.android.libraries.matrix.api.tracing.TracingConfiguration
+import io.element.android.x.BuildConfig
 import io.element.android.x.di.AppBindings
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -33,8 +34,8 @@ class PlatformInitializer : Initializer<Unit> {
         val featureFlagService = appBindings.featureFlagService()
         val logLevel = runBlocking { preferencesStore.getTracingLogLevelFlow().first() }
         val tracingConfiguration = TracingConfiguration(
-            writesToLogcat = runBlocking { featureFlagService.isFeatureEnabled(FeatureFlags.PrintLogsToLogcat) },
-            writesToFilesConfiguration = bugReporter.createWriteToFilesConfiguration(),
+            writesToLogcat = BuildConfig.DEBUG && runBlocking { featureFlagService.isFeatureEnabled(FeatureFlags.PrintLogsToLogcat) },
+            writesToFilesConfiguration = bugReporter.createWriteToFilesConfiguration(allowPlaintextDebugLogs = BuildConfig.DEBUG),
             logLevel = logLevel,
             extraTargets = listOf(ELEMENT_X_TARGET),
             traceLogPacks = runBlocking { preferencesStore.getTracingLogPacksFlow().first() },
@@ -43,7 +44,7 @@ class PlatformInitializer : Initializer<Unit> {
         bugReporter.setCurrentTracingLogLevel(logLevel.name)
         platformService.init(tracingConfiguration)
         // Also set env variable for rust back trace
-        Os.setenv("RUST_BACKTRACE", "1", true)
+        Os.setenv("RUST_BACKTRACE", if (BuildConfig.DEBUG) "1" else "0", true)
     }
 
     override fun dependencies(): List<Class<out Initializer<*>>> = mutableListOf()

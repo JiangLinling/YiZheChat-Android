@@ -81,8 +81,62 @@ data class VideoMessageType(
     override val caption: String?,
     override val formattedCaption: FormattedBody?,
     val source: MediaSource,
-    val info: VideoInfo?
+    val info: VideoInfo?,
+    val segmentedVideo: SegmentedVideoCandidate? = null,
 ) : MessageTypeWithAttachment
+
+data class SegmentedVideoCandidate(
+    val schema: String,
+    val assetId: String,
+    val mediaVersion: Int,
+    val roomIdSha256Hex: String,
+    val contentContractId: String,
+    val contentPolicyVersion: Long,
+    val expiresAtEpochMillis: Long,
+    val container: String,
+    val codecs: List<String>,
+    val durationUs: Long,
+    val totalPlainBytes: Long,
+    val init: SegmentedVideoResource,
+    val segments: List<SegmentedVideoResource>,
+    val resourceCount: Int,
+)
+
+data class SegmentedVideoResource(
+    val resourceId: String,
+    val contentId: String,
+    val kind: String,
+    val protectedContentKind: String,
+    val index: Int,
+    val startUs: Long,
+    val durationUs: Long,
+    val plainLength: Long,
+    val immutableContextSha256Hex: String,
+    val locator: SegmentedVideoLocator,
+    val declaredIndependentRandomAccess: Boolean,
+)
+
+data class SegmentedVideoLocator(
+    val authority: String,
+    val mxcUri: String,
+    val outerCipherSha256Hex: String,
+    val outerCipherLength: Long,
+    val encryptedFile: SegmentedVideoEncryptedFile,
+)
+
+data class SegmentedVideoEncryptedFile(
+    val version: String,
+    val algorithm: String,
+    val keyType: String,
+    val keyOperations: Set<String>,
+    val extractable: Boolean,
+    val keyBase64Url: String,
+    val ivBase64: String,
+) {
+    override fun toString(): String =
+        "SegmentedVideoEncryptedFile(version=$version, algorithm=$algorithm, keyType=$keyType, " +
+            "keyOperations=$keyOperations, extractable=$extractable, keyBase64Url=<redacted>, ivBase64=<redacted>)"
+}
 
 data class FileMessageType(
     override val filename: String,

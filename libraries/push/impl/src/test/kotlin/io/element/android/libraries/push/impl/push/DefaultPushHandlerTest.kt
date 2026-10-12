@@ -110,6 +110,23 @@ class DefaultPushHandlerTest {
     }
 
     @Test
+    fun `Next incoming push always appends a wakeup even while earlier work is running`() = runTest {
+        org.junit.Assume.assumeTrue(io.element.android.appconfig.NextDeploymentConfig.isNextDeployment)
+        val submit = lambdaRecorder<WorkManagerRequestBuilder, Unit> {}
+        val handler = createDefaultPushHandler(
+            pushClientSecret = FakePushClientSecret(getUserIdFromSecretResult = { A_USER_ID }),
+            incrementPushCounterResult = {},
+            pushHistoryService = FakePushHistoryService(enqueuePushRequest = { Result.success(Unit) }),
+            workManagerScheduler = FakeWorkManagerScheduler(
+                submitLambda = submit, hasPendingWorkLambda = { _, _ -> true },
+            ),
+        )
+        handler.handle(PushData(eventId = AN_EVENT_ID, roomId = A_ROOM_ID, unread = 0, clientSecret = A_SECRET), A_PUSHER_INFO)
+        advanceTimeBy(300.milliseconds)
+        submit.assertions().isCalledOnce()
+    }
+
+    @Test
     fun `when classical PushData is received, but notifications are disabled, nothing happen`() =
         runTest {
             val incrementPushCounterResult = lambdaRecorder<Unit> {}

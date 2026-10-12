@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_login_brand_title">乙者</string>
+    <string name="screen_login_account_label">帳號</string>
+    <string name="screen_login_account_placeholder">請輸入帳號</string>
+    <string name="screen_login_password_label">密碼</string>
+    <string name="screen_login_password_placeholder">請輸入密碼</string>
+    <string name="screen_login_action">登入</string>
+    <string name="screen_login_security_connection">登入資訊透過安全連線傳輸</string>
+    <string name="screen_login_security_encryption">通訊內容採用加密保護</string>
+    <string name="screen_login_error_security_sync">裝置安全狀態同步失敗，請重試。錯誤碼：%1$s</string>
+</resources>

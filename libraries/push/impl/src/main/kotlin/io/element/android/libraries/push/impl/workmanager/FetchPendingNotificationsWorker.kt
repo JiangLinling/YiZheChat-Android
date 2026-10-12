@@ -17,6 +17,7 @@ import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.binding
+import io.element.android.appconfig.NextDeploymentConfig
 import io.element.android.features.networkmonitor.api.NetworkMonitor
 import io.element.android.features.networkmonitor.api.NetworkStatus
 import io.element.android.libraries.core.extensions.runCatchingExceptions
@@ -133,7 +134,16 @@ class FetchPendingNotificationsWorker(
         pushHistoryService.insertOrUpdatePushRequests(updatedRequests)
 
         analyticsService.recordTransaction("Opportunistic sync", "opportunistic_sync") {
-            performOpportunisticSyncIfNeeded(mapOf(sessionId to requests))
+            if (NextDeploymentConfig.isNextDeployment) {
+                runYieldingNotificationSync(
+                    pendingRequests = pushHistoryService.observePendingPushRequests(sessionId, fetchSince),
+                    processedEventIds = requests.map { it.eventId }.toSet(),
+                ) {
+                    performOpportunisticSyncIfNeeded(mapOf(sessionId to requests))
+                }
+            } else {
+                performOpportunisticSyncIfNeeded(mapOf(sessionId to requests))
+            }
         }
 
         return if (updatedRequests.any { it.status == PushRequestStatus.PENDING.value }) Result.retry() else Result.success()

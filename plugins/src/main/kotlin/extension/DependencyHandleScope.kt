@@ -128,16 +128,16 @@ fun DependencyHandlerScope.allLibrariesImpl() {
 
 fun DependencyHandlerScope.allServicesImpl() {
     implementation(project(":services:analytics:compose"))
-    when (ModulesConfig.analyticsConfig) {
+    when (val analyticsConfig = ModulesConfig.analyticsConfig) {
         AnalyticsConfig.Disabled -> {
             implementation(project(":services:analytics:noop"))
         }
         is AnalyticsConfig.Enabled -> {
             implementation(project(":services:analytics:impl"))
-            if (ModulesConfig.analyticsConfig.withPosthog) {
+            if (analyticsConfig.withPosthog) {
                 implementation(project(":services:analyticsproviders:posthog"))
             }
-            if (ModulesConfig.analyticsConfig.withSentry) {
+            if (analyticsConfig.withSentry) {
                 implementation(project(":services:analyticsproviders:sentry"))
             }
         }

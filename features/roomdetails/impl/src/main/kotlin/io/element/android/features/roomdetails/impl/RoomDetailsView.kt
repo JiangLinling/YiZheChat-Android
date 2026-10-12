@@ -8,46 +8,30 @@
 
 package io.element.android.features.roomdetails.impl
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import im.vector.app.features.analytics.plan.Interaction
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
-import io.element.android.features.roomcall.api.hasPermissionToJoin
-import io.element.android.features.userprofile.api.UserProfileState
 import io.element.android.features.userprofile.api.UserProfileVerificationState
-import io.element.android.features.userprofile.shared.blockuser.BlockUserDialogs
-import io.element.android.features.userprofile.shared.blockuser.BlockUserSection
-import io.element.android.libraries.androidutils.system.copyToClipboard
 import io.element.android.libraries.architecture.coverage.ExcludeFromCoverage
 import io.element.android.libraries.designsystem.atomic.atoms.MatrixBadgeAtom
 import io.element.android.libraries.designsystem.atomic.molecules.MatrixBadgeRowMolecule
@@ -57,36 +41,28 @@ import io.element.android.libraries.designsystem.components.avatar.AvatarData
 import io.element.android.libraries.designsystem.components.avatar.AvatarSize
 import io.element.android.libraries.designsystem.components.avatar.AvatarType
 import io.element.android.libraries.designsystem.components.button.BackButton
-import io.element.android.libraries.designsystem.components.button.MainActionButton
 import io.element.android.libraries.designsystem.components.list.ListItemContent
 import io.element.android.libraries.designsystem.components.preferences.PreferenceCategory
 import io.element.android.libraries.designsystem.components.preferences.PreferenceSwitch
-import io.element.android.libraries.designsystem.modifiers.niceClickable
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.ElementPreviewDark
 import io.element.android.libraries.designsystem.preview.ElementPreviewLight
 import io.element.android.libraries.designsystem.preview.PreviewWithExtraLargeHeight
 import io.element.android.libraries.designsystem.theme.components.CircularProgressIndicator
-import io.element.android.libraries.designsystem.theme.components.DropdownMenu
-import io.element.android.libraries.designsystem.theme.components.DropdownMenuItem
 import io.element.android.libraries.designsystem.theme.components.Icon
-import io.element.android.libraries.designsystem.theme.components.IconButton
 import io.element.android.libraries.designsystem.theme.components.IconSource
 import io.element.android.libraries.designsystem.theme.components.ListItem
 import io.element.android.libraries.designsystem.theme.components.ListItemStyle
+import io.element.android.libraries.designsystem.theme.components.ModalBottomSheet
 import io.element.android.libraries.designsystem.theme.components.Scaffold
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.designsystem.theme.components.TopAppBar
 import io.element.android.libraries.designsystem.utils.snackbar.SnackbarHost
 import io.element.android.libraries.designsystem.utils.snackbar.rememberSnackbarHostState
-import io.element.android.libraries.matrix.api.core.RoomAlias
-import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.notification.CallIntent
 import io.element.android.libraries.matrix.api.room.RoomMember
 import io.element.android.libraries.matrix.api.room.RoomNotificationMode
-import io.element.android.libraries.matrix.api.room.getBestName
-import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.ui.model.getAvatarData
 import io.element.android.libraries.testtags.TestTags
 import io.element.android.libraries.testtags.testTag
@@ -94,7 +70,6 @@ import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.services.analytics.compose.LocalAnalyticsService
 import io.element.android.services.analyticsproviders.api.trackers.captureInteraction
 import kotlinx.collections.immutable.ImmutableList
-import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 
 /**
@@ -112,6 +87,7 @@ fun RoomDetailsView(
     openAvatarPreview: (name: String, url: String) -> Unit,
     openPollHistory: () -> Unit,
     openMediaGallery: () -> Unit,
+    onFindChatContentClick: () -> Unit,
     openAdminSettings: () -> Unit,
     onJoinCallClick: (CallIntent) -> Unit,
     onPinnedMessagesClick: () -> Unit,
@@ -122,215 +98,207 @@ fun RoomDetailsView(
     modifier: Modifier = Modifier,
     leaveRoomView: @Composable () -> Unit,
 ) {
+    ChatSettings(
+        state = state,
+        otherMember = (state.roomType as? RoomDetailsType.Dm)?.otherMember,
+        goBack = goBack,
+        onProfileClick = onProfileClick,
+        onFindChatContentClick = onFindChatContentClick,
+        openMediaGallery = openMediaGallery,
+        onPinnedMessagesClick = onPinnedMessagesClick,
+        onActionClick = onActionClick,
+        openRoomMemberList = openRoomMemberList,
+        invitePeople = invitePeople,
+        openPollHistory = openPollHistory,
+        openAdminSettings = openAdminSettings,
+        onKnockRequestsClick = onKnockRequestsClick,
+        onSecurityAndPrivacyClick = onSecurityAndPrivacyClick,
+        onShareRoom = onShareRoom,
+        onReportRoomClick = onReportRoomClick,
+        leaveRoomView = leaveRoomView,
+        modifier = modifier,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatSettings(
+    state: RoomDetailsState,
+    otherMember: RoomMember?,
+    goBack: () -> Unit,
+    onProfileClick: (UserId) -> Unit,
+    onFindChatContentClick: () -> Unit,
+    openMediaGallery: () -> Unit,
+    onPinnedMessagesClick: () -> Unit,
+    onActionClick: (RoomDetailsAction) -> Unit,
+    openRoomMemberList: () -> Unit,
+    invitePeople: () -> Unit,
+    openPollHistory: () -> Unit,
+    openAdminSettings: () -> Unit,
+    onKnockRequestsClick: () -> Unit,
+    onSecurityAndPrivacyClick: () -> Unit,
+    onShareRoom: () -> Unit,
+    onReportRoomClick: () -> Unit,
+    leaveRoomView: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var showingSecurity by remember { mutableStateOf(false) }
     val snackbarHostState = rememberSnackbarHostState(snackbarMessage = state.snackbarMessage)
     Scaffold(
         modifier = modifier,
         topBar = {
-            RoomDetailsTopBar(
-                goBack = goBack,
-                showEdit = state.canEdit,
-                onActionClick = onActionClick
+            TopAppBar(
+                title = { Text(stringResource(
+                    if (state.isDirect) R.string.screen_room_details_chat_settings else R.string.screen_room_details_group_settings
+                )) },
+                navigationIcon = { BackButton(onClick = goBack) },
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Column(
-            modifier = Modifier
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .consumeWindowInsets(padding)
+            Modifier.padding(padding).consumeWindowInsets(padding).verticalScroll(rememberScrollState())
         ) {
             leaveRoomView()
-
-            when (state.roomType) {
-                RoomDetailsType.Room -> {
-                    RoomHeaderSection(
-                        avatarUrl = state.roomAvatarUrl,
-                        roomId = state.roomId,
-                        roomName = state.roomName,
-                        roomAlias = state.roomAlias,
-                        heroes = state.heroes,
-                        isTombstoned = state.isTombstoned,
-                        openAvatarPreview = { avatarUrl ->
-                            openAvatarPreview(state.roomName, avatarUrl)
-                        },
-                        onSubtitleClick = { subtitle ->
-                            state.eventSink(RoomDetailsEvent.CopyToClipboard(subtitle))
-                        }
-                    )
-                }
-                is RoomDetailsType.Dm -> {
-                    DmHeaderSection(
-                        otherMember = state.roomType.otherMember,
-                        roomName = state.roomName,
-                        isTombstoned = state.isTombstoned,
-                        openAvatarPreview = { name, avatarUrl ->
-                            openAvatarPreview(name, avatarUrl)
-                        },
-                        onSubtitleClick = { subtitle ->
-                            state.eventSink(RoomDetailsEvent.CopyToClipboard(subtitle))
-                        }
-                    )
-                }
-            }
-            BadgeList(
-                roomBadge = state.roomBadges,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            )
-            Spacer(Modifier.height(32.dp))
-            MainActionsSection(
-                state = state,
-                onShareRoom = onShareRoom,
-                onInvitePeople = invitePeople,
-                onCall = onJoinCallClick,
-            )
-            Spacer(Modifier.height(12.dp))
-
-            if (state.roomTopic !is RoomTopicState.Hidden) {
-                TopicSection(
-                    roomTopic = state.roomTopic,
-                    onActionClick = onActionClick,
-                )
-            }
-
-            PreferenceCategory {
-                if (state.hasNewContent) {
-                    ListItem(
-                        headlineContent = {
-                            Text(
-                                text = stringResource(id = R.string.screen_roomlist_mark_as_read),
-                                style = MaterialTheme.typography.bodyLarge,
-                            )
-                        },
-                        onClick = {
-                            state.eventSink(RoomDetailsEvent.MarkAsRead)
-                        },
-                        leadingContent = ListItemContent.Icon(
-                            iconSource = IconSource.Vector(CompoundIcons.MarkAsRead())
-                        ),
-                        trailingContent = ListItemContent.Custom {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(ElementTheme.colors.iconAccentPrimary)
-                            )
-                        },
-                    )
-                } else {
-                    ListItem(
-                        headlineContent = {
-                            Text(
-                                text = stringResource(id = R.string.screen_roomlist_mark_as_unread),
-                            )
-                        },
-                        onClick = {
-                            state.eventSink(RoomDetailsEvent.MarkAsUnread)
-                        },
-                        leadingContent = ListItemContent.Icon(
-                            iconSource = IconSource.Vector(CompoundIcons.MarkAsUnread())
-                        ),
-                    )
-                }
-            }
-            // Room content
-            PreferenceCategory {
-                MediaGalleryItem(
-                    onClick = openMediaGallery
-                )
-                PinnedMessagesItem(
-                    pinnedMessagesCount = state.pinnedMessagesCount,
-                    onPinnedMessagesClick = onPinnedMessagesClick
-                )
-                PollsItem(
-                    openPollHistory = openPollHistory
-                )
-            }
-            when (state.roomType) {
-                is RoomDetailsType.Room -> {
-                    PreferenceCategory {
-                        MembersItem(
-                            memberCount = state.memberCount,
-                            hasVerificationViolations = state.hasMemberVerificationViolations,
-                            openRoomMemberList = openRoomMemberList,
+            PreferenceCategory(showTopDivider = false) {
+                ListItem(
+                    headlineContent = { Text(state.roomName, style = ElementTheme.typography.fontBodyLgMedium) },
+                    supportingContent = {
+                        Text(stringResource(
+                            if (state.isDirect) R.string.screen_room_details_view_profile else R.string.screen_room_details_group_info
+                        ))
+                    },
+                    leadingContent = ListItemContent.Custom {
+                        Avatar(
+                            avatarData = AvatarData(
+                                otherMember?.userId?.value ?: state.roomId.value, state.roomName,
+                                otherMember?.avatarUrl ?: state.roomAvatarUrl, AvatarSize.DmCreationConfirmation,
+                            ),
+                            avatarType = if (state.isDirect) AvatarType.User else AvatarType.Room(
+                                heroes = state.heroes.map { it.getAvatarData(AvatarSize.TimelineRoom) }.toImmutableList(),
+                                isTombstoned = state.isTombstoned,
+                            ),
+                            modifier = Modifier.testTag(TestTags.roomDetailAvatar),
                         )
-                        if (state.canShowKnockRequests) {
-                            KnockRequestsItem(
-                                knockRequestsCount = state.knockRequestsCount,
-                                onKnockRequestsClick = onKnockRequestsClick
-                            )
-                        }
-                        if (state.displayRolesAndPermissionsSettings) {
-                            ListItem(
-                                headlineContent = { Text(stringResource(R.string.screen_room_details_roles_and_permissions)) },
-                                leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Admin())),
-                                onClick = openAdminSettings,
-                            )
-                        }
+                    },
+                    trailingContent = if ((state.isDirect && otherMember != null) || (!state.isDirect && state.canEdit)) {
+                        ListItemContent.Icon(IconSource.Vector(CompoundIcons.ChevronRight()))
+                    } else null,
+                    onClick = if (state.isDirect) {
+                        otherMember?.let { member -> { onProfileClick(member.userId) } }
+                    } else if (state.canEdit) {
+                        { onActionClick(RoomDetailsAction.Edit) }
+                    } else null,
+                )
+            }
+            if (!state.isDirect) {
+                PreferenceCategory {
+                    MembersItem(state.memberCount, state.hasMemberVerificationViolations, openRoomMemberList)
+                    if (state.canInvite) InviteItem(invitePeople)
+                    if (state.canShowKnockRequests) KnockRequestsItem(state.knockRequestsCount, onKnockRequestsClick)
+                    if (state.displayRolesAndPermissionsSettings) {
+                        ListItem(
+                            headlineContent = { Text(stringResource(R.string.screen_room_details_group_management)) },
+                            leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Admin())),
+                            onClick = openAdminSettings,
+                        )
                     }
                 }
-                is RoomDetailsType.Dm -> {
-                    if (state.canInvite) {
-                        // Note: for rooms the invite action is a Main action
-                        PreferenceCategory {
-                            InviteItem(onClick = invitePeople)
-                        }
-                    }
-                    state.dmOtherMemberDetailsState?.let { dmMemberDetails ->
-                        PreferenceCategory {
-                            ProfileItem(
-                                verificationState = dmMemberDetails.verificationState,
-                                onClick = { onProfileClick(dmMemberDetails.userId) }
-                            )
-                        }
-                    }
-                }
+                if (state.roomTopic !is RoomTopicState.Hidden) TopicSection(state.roomTopic, onActionClick)
             }
             PreferenceCategory {
-                if (state.roomNotificationSettings != null) {
-                    NotificationItem(
-                        isDefaultMode = state.roomNotificationSettings.isDefault,
-                        openRoomNotificationSettings = openRoomNotificationSettings
-                    )
-                }
-                FavoriteItem(
-                    isFavorite = state.isFavorite,
-                    onFavoriteChanges = {
-                        state.eventSink(RoomDetailsEvent.SetFavorite(it))
-                    }
+                FindChatContentItem(onClick = onFindChatContentClick)
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.screen_room_details_chat_media)) },
+                    leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Image())),
+                    onClick = openMediaGallery,
                 )
-                if (state.canShowSecurityAndPrivacy && state.roomType is RoomDetailsType.Room) {
-                    SecurityAndPrivacyItem(
-                        onClick = onSecurityAndPrivacyClick
+                PinnedMessagesItem(state.pinnedMessagesCount, onPinnedMessagesClick)
+                if (!state.isDirect) PollsItem(openPollHistory)
+            }
+            PreferenceCategory {
+                state.roomNotificationSettings?.let { settings ->
+                    PreferenceSwitch(
+                        icon = CompoundIcons.NotificationsOff(),
+                        title = stringResource(R.string.screen_room_details_do_not_disturb),
+                        isChecked = settings.mode == RoomNotificationMode.MUTE,
+                        onCheckedChange = { muted ->
+                            state.eventSink(if (muted) RoomDetailsEvent.MuteNotification else RoomDetailsEvent.UnmuteNotification)
+                        },
                     )
                 }
+                PreferenceSwitch(
+                    icon = CompoundIcons.Pin(),
+                    title = stringResource(R.string.screen_room_details_pin_chat),
+                    isChecked = state.isFavorite,
+                    onCheckedChange = { state.eventSink(RoomDetailsEvent.SetFavorite(it)) },
+                )
             }
-            if (state.isEncrypted) {
-                PreferenceCategory(
-                    title = stringResource(R.string.screen_room_details_security_title)
-                ) {
+            PreferenceCategory {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.screen_room_details_chat_security)) },
+                    leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Lock())),
+                    trailingContent = ListItemContent.Text(
+                        stringResource(
+                            if (state.isEncrypted) R.string.screen_room_details_badge_encrypted
+                            else R.string.screen_room_details_badge_not_encrypted
+                        )
+                    ),
+                    onClick = { showingSecurity = true },
+                )
+                if (!state.isDirect) {
                     ListItem(
-                        leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Lock())),
-                        headlineContent = {
-                            Text(stringResource(id = R.string.screen_room_details_encryption_enabled_title))
-                        },
-                        supportingContent = {
-                            Text(stringResource(id = R.string.screen_room_details_encryption_enabled_subtitle))
-                        },
+                        headlineContent = { Text(stringResource(R.string.screen_room_details_share_group)) },
+                        leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ShareAndroid())),
+                        onClick = onShareRoom,
                     )
                 }
             }
-            OtherActionsSection(
-                dmOtherMemberDetailsState = state.dmOtherMemberDetailsState,
-                canReportRoom = state.canReportRoom,
-                onReportRoomClick = onReportRoomClick,
-                onLeaveRoomClick = { state.eventSink(RoomDetailsEvent.LeaveRoom(needsConfirmation = true)) }
-            )
-            if (state.showDebugInfo) {
-                DebugInfoSection(
-                    roomId = state.roomId,
-                    roomVersion = state.roomVersion,
+            if (!state.isDirect) {
+                OtherActionsSection(
+                    canReportRoom = state.canReportRoom,
+                    showLeaveGroup = true,
+                    onReportRoomClick = onReportRoomClick,
+                    onLeaveRoomClick = { state.eventSink(RoomDetailsEvent.LeaveRoom(needsConfirmation = true)) },
                 )
+            }
+        }
+    }
+    if (showingSecurity) {
+        ModalBottomSheet(
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            onDismissRequest = { showingSecurity = false },
+            scrollable = false,
+        ) {
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.screen_room_details_chat_security)) },
+                supportingContent = {
+                    Text(stringResource(
+                        if (state.isEncrypted) R.string.screen_room_details_chat_encrypted_description
+                        else R.string.screen_room_details_chat_unencrypted_description
+                    ))
+                },
+                leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Lock())),
+            )
+            if (state.isDirect && otherMember != null) {
+                ProfileItem(
+                    verificationState = state.dmOtherMemberDetailsState?.verificationState ?: UserProfileVerificationState.UNKNOWN,
+                    onClick = {
+                        showingSecurity = false
+                        onProfileClick(otherMember.userId)
+                    },
+                )
+            } else if (!state.isDirect) {
+                BadgeList(
+                    roomBadge = state.roomBadges.filter { it.name.startsWith("SHARED_HISTORY") }.toImmutableList(),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+                if (state.canShowSecurityAndPrivacy) {
+                    SecurityAndPrivacyItem(onClick = {
+                        showingSecurity = false
+                        onSecurityAndPrivacyClick()
+                    })
+                }
             }
         }
     }
@@ -350,219 +318,13 @@ private fun KnockRequestsItem(knockRequestsCount: Int?, onKnockRequestsClick: ()
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RoomDetailsTopBar(
-    goBack: () -> Unit,
-    onActionClick: (RoomDetailsAction) -> Unit,
-    showEdit: Boolean,
-) {
-    var showMenu by remember { mutableStateOf(false) }
-
-    TopAppBar(
-        title = { },
-        navigationIcon = { BackButton(onClick = goBack) },
-        actions = {
-            if (showEdit) {
-                IconButton(onClick = { showMenu = !showMenu }) {
-                    Icon(CompoundIcons.OverflowVertical(), stringResource(id = CommonStrings.a11y_user_menu))
-                }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(id = CommonStrings.action_edit)) },
-                        onClick = {
-                            // Explicitly close the menu before handling the action, as otherwise it stays open during the
-                            // transition and renders really badly.
-                            showMenu = false
-                            onActionClick(RoomDetailsAction.Edit)
-                        },
-                    )
-                }
-            }
-        },
+private fun FindChatContentItem(onClick: () -> Unit) {
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.screen_room_details_find_chat)) },
+        leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Search())),
+        onClick = onClick,
     )
-}
-
-@Composable
-private fun MainActionsSection(
-    state: RoomDetailsState,
-    onShareRoom: () -> Unit,
-    onInvitePeople: () -> Unit,
-    onCall: (callIntent: CallIntent) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-    ) {
-        state.roomNotificationSettings?.let { roomNotificationSettings ->
-            if (roomNotificationSettings.mode == RoomNotificationMode.MUTE) {
-                MainActionButton(
-                    title = stringResource(CommonStrings.common_unmute),
-                    imageVector = CompoundIcons.NotificationsOff(),
-                    onClick = {
-                        state.eventSink(RoomDetailsEvent.UnmuteNotification)
-                    },
-                )
-            } else {
-                MainActionButton(
-                    title = stringResource(CommonStrings.common_mute),
-                    imageVector = CompoundIcons.Notifications(),
-                    onClick = {
-                        state.eventSink(RoomDetailsEvent.MuteNotification)
-                    },
-                )
-            }
-        }
-        if (state.roomCallState.hasPermissionToJoin()) {
-            // TODO Improve the view depending on all the cases here?
-            if (state.roomType is RoomDetailsType.Dm) {
-                // As per design, only show voice call in DM
-                MainActionButton(
-                    title = stringResource(CommonStrings.action_call),
-                    imageVector = CompoundIcons.VoiceCall(),
-                    onClick = { onCall(CallIntent.AUDIO) },
-                )
-            }
-
-            MainActionButton(
-                title = stringResource(CommonStrings.common_video),
-                imageVector = CompoundIcons.VideoCall(),
-                onClick = { onCall(CallIntent.VIDEO) },
-            )
-        }
-        if (state.canInvite && state.roomType !is RoomDetailsType.Dm) {
-            MainActionButton(
-                title = stringResource(CommonStrings.action_invite),
-                imageVector = CompoundIcons.UserAdd(),
-                onClick = onInvitePeople,
-            )
-        }
-        if (state.roomType is RoomDetailsType.Room) {
-            // Share CTA should be hidden for DMs
-            MainActionButton(
-                title = stringResource(CommonStrings.action_share),
-                imageVector = CompoundIcons.ShareAndroid(),
-                onClick = onShareRoom
-            )
-        }
-    }
-}
-
-@Composable
-private fun RoomHeaderSection(
-    avatarUrl: String?,
-    roomId: RoomId,
-    roomName: String,
-    roomAlias: RoomAlias?,
-    heroes: ImmutableList<MatrixUser>,
-    isTombstoned: Boolean,
-    openAvatarPreview: (url: String) -> Unit,
-    onSubtitleClick: (String) -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Avatar(
-            avatarData = AvatarData(roomId.value, roomName, avatarUrl, AvatarSize.RoomDetailsHeader),
-            avatarType = AvatarType.Room(
-                heroes = heroes.map { user ->
-                    user.getAvatarData(size = AvatarSize.RoomDetailsHeader)
-                }.toImmutableList(),
-                isTombstoned = isTombstoned,
-            ),
-            contentDescription = stringResource(CommonStrings.a11y_room_avatar),
-            modifier = Modifier
-                .clip(CircleShape)
-                .clickable(
-                    enabled = avatarUrl != null,
-                    onClickLabel = stringResource(CommonStrings.action_view),
-                ) {
-                    openAvatarPreview(avatarUrl!!)
-                }
-                .testTag(TestTags.roomDetailAvatar)
-        )
-        TitleAndSubtitle(
-            title = roomName,
-            subtitle = roomAlias?.value,
-            onSubtitleClick = onSubtitleClick,
-        )
-    }
-}
-
-@Composable
-private fun DmHeaderSection(
-    otherMember: RoomMember,
-    roomName: String,
-    isTombstoned: Boolean,
-    openAvatarPreview: (name: String, url: String) -> Unit,
-    onSubtitleClick: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Avatar(
-            avatarData = AvatarData(otherMember.userId.value, roomName, otherMember.avatarUrl, AvatarSize.RoomDetailsHeader),
-            avatarType = AvatarType.Room(
-                heroes = persistentListOf(
-                    otherMember.getAvatarData(size = AvatarSize.RoomDetailsHeader)
-                ),
-                isTombstoned = isTombstoned,
-            ),
-            contentDescription = stringResource(CommonStrings.a11y_room_avatar),
-            modifier = Modifier
-                .clip(CircleShape)
-                .clickable(
-                    enabled = otherMember.avatarUrl != null,
-                    onClickLabel = stringResource(CommonStrings.action_view),
-                ) {
-                    openAvatarPreview(otherMember.getBestName(), otherMember.avatarUrl!!)
-                }
-                .testTag(TestTags.roomDetailAvatar)
-        )
-        TitleAndSubtitle(
-            title = roomName,
-            subtitle = otherMember.userId.value,
-            onSubtitleClick = onSubtitleClick,
-        )
-    }
-}
-
-@Composable
-private fun TitleAndSubtitle(
-    title: String,
-    subtitle: String?,
-    onSubtitleClick: (String) -> Unit,
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = title,
-            style = ElementTheme.typography.fontHeadingLgBold,
-            textAlign = TextAlign.Center,
-        )
-        if (subtitle != null) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                modifier = Modifier.niceClickable { onSubtitleClick(subtitle) },
-                text = subtitle,
-                style = ElementTheme.typography.fontBodyLgRegular,
-                color = ElementTheme.colors.textSecondary,
-                textAlign = TextAlign.Center,
-            )
-        }
-    }
 }
 
 @Composable
@@ -635,7 +397,6 @@ private fun TopicSection(
     onActionClick: (RoomDetailsAction) -> Unit,
 ) {
     PreferenceCategory(
-        title = stringResource(CommonStrings.common_topic),
         showTopDivider = false,
     ) {
         if (roomTopic is RoomTopicState.CanAddTopic) {
@@ -661,23 +422,6 @@ private fun TopicSection(
     }
 }
 
-@Composable
-private fun NotificationItem(
-    isDefaultMode: Boolean,
-    openRoomNotificationSettings: () -> Unit,
-) {
-    val subtitle = if (isDefaultMode) {
-        stringResource(R.string.screen_room_details_notification_mode_default)
-    } else {
-        stringResource(R.string.screen_room_details_notification_mode_custom)
-    }
-    ListItem(
-        headlineContent = { Text(text = stringResource(R.string.screen_room_details_notification_title)) },
-        supportingContent = { Text(text = subtitle) },
-        leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Notifications())),
-        onClick = openRoomNotificationSettings,
-    )
-}
 
 @Composable
 private fun SecurityAndPrivacyItem(
@@ -692,23 +436,6 @@ private fun SecurityAndPrivacyItem(
     )
 }
 
-@Composable
-private fun FavoriteItem(
-    isFavorite: Boolean,
-    onFavoriteChanges: (Boolean) -> Unit,
-) {
-    val (textResId, icon) = if (isFavorite) {
-        CommonStrings.common_favourited to CompoundIcons.FavouriteSolid()
-    } else {
-        CommonStrings.common_favourite to CompoundIcons.Favourite()
-    }
-    PreferenceSwitch(
-        icon = icon,
-        title = stringResource(id = textResId),
-        isChecked = isFavorite,
-        onCheckedChange = onFavoriteChanges
-    )
-}
 
 @Composable
 private fun ProfileItem(
@@ -717,7 +444,7 @@ private fun ProfileItem(
 ) {
     ListItem(
         leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.UserProfile())),
-        headlineContent = { Text(stringResource(id = R.string.screen_room_details_profile_row_title)) },
+        headlineContent = { Text(stringResource(id = R.string.screen_room_details_friend_profile)) },
         trailingContent = when (verificationState) {
             UserProfileVerificationState.VERIFIED -> ListItemContent.Icon(
                 iconSource = IconSource.Vector(CompoundIcons.Verified()),
@@ -740,7 +467,7 @@ private fun MembersItem(
     openRoomMemberList: () -> Unit,
 ) {
     ListItem(
-        headlineContent = { Text(stringResource(CommonStrings.common_people)) },
+        headlineContent = { Text(stringResource(R.string.screen_room_details_group_members)) },
         leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.User())),
         trailingContent = if (hasVerificationViolations) {
             ListItemContent.Icon(
@@ -759,7 +486,7 @@ private fun InviteItem(
     onClick: () -> Unit,
 ) {
     ListItem(
-        headlineContent = { Text(stringResource(R.string.screen_room_details_invite_title)) },
+        headlineContent = { Text(stringResource(R.string.screen_room_details_add_members)) },
         leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.UserAdd())),
         onClick = onClick,
     )
@@ -772,7 +499,7 @@ private fun PinnedMessagesItem(
 ) {
     val analyticsService = LocalAnalyticsService.current
     ListItem(
-        headlineContent = { Text(stringResource(R.string.screen_room_details_pinned_events_row_title)) },
+        headlineContent = { Text(stringResource(R.string.screen_room_details_chat_pinned_messages)) },
         leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Pin())),
         trailingContent =
             if (pinnedMessagesCount == null) {
@@ -800,29 +527,15 @@ private fun PollsItem(
     )
 }
 
-@Composable
-private fun MediaGalleryItem(
-    onClick: () -> Unit,
-) {
-    ListItem(
-        headlineContent = { Text(stringResource(R.string.screen_room_details_media_gallery_title)) },
-        leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Image())),
-        onClick = onClick,
-    )
-}
 
 @Composable
 private fun OtherActionsSection(
     canReportRoom: Boolean,
+    showLeaveGroup: Boolean,
     onReportRoomClick: () -> Unit,
     onLeaveRoomClick: () -> Unit,
-    dmOtherMemberDetailsState: UserProfileState?,
 ) {
     PreferenceCategory {
-        if (dmOtherMemberDetailsState != null) {
-            BlockUserSection(dmOtherMemberDetailsState)
-            BlockUserDialogs(dmOtherMemberDetailsState)
-        }
         if (canReportRoom) {
             ListItem(
                 headlineContent = {
@@ -833,60 +546,17 @@ private fun OtherActionsSection(
                 onClick = onReportRoomClick,
             )
         }
-        ListItem(
-            headlineContent = {
-                Text(stringResource(CommonStrings.action_leave_room))
-            },
-            leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Leave())),
-            style = ListItemStyle.Destructive,
-            onClick = onLeaveRoomClick,
-        )
+        if (showLeaveGroup) {
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.screen_room_details_leave_group)) },
+                leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Leave())),
+                style = ListItemStyle.Destructive,
+                onClick = onLeaveRoomClick,
+            )
+        }
     }
 }
 
-@Composable
-private fun DebugInfoSection(
-    roomId: RoomId,
-    roomVersion: String?,
-) {
-    val context = LocalContext.current
-    PreferenceCategory {
-        val toastMessage = stringResource(CommonStrings.common_copied_to_clipboard)
-        ListItem(
-            headlineContent = {
-                Text("Internal room ID")
-            },
-            supportingContent = {
-                Text(
-                    text = roomId.value,
-                    style = ElementTheme.typography.fontBodySmRegular,
-                    color = ElementTheme.colors.textSecondary,
-                )
-            },
-            leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Code())),
-            trailingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Copy())),
-            onClick = {
-                context.copyToClipboard(
-                    text = roomId.value,
-                    toastMessage = toastMessage,
-                )
-            },
-        )
-        ListItem(
-            headlineContent = {
-                Text("Room version")
-            },
-            supportingContent = {
-                Text(
-                    text = roomVersion ?: "Unknown",
-                    style = ElementTheme.typography.fontBodySmRegular,
-                    color = ElementTheme.colors.textSecondary,
-                )
-            },
-            leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Info())),
-        )
-    }
-}
 
 @PreviewWithExtraLargeHeight
 @Composable
@@ -920,6 +590,7 @@ private fun ContentToPreview(state: RoomDetailsState) {
         openAvatarPreview = { _, _ -> },
         openPollHistory = {},
         openMediaGallery = {},
+        onFindChatContentClick = {},
         openAdminSettings = {},
         onJoinCallClick = {},
         onPinnedMessagesClick = {},

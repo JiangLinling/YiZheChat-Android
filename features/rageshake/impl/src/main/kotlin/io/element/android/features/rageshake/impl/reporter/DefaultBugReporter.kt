@@ -17,6 +17,7 @@ import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.SingleIn
 import io.element.android.appconfig.RageshakeConfig
 import io.element.android.features.rageshake.api.logs.createWriteToFilesConfiguration
+import io.element.android.features.rageshake.api.reporter.BugReportAttachment
 import io.element.android.features.rageshake.api.reporter.BugReporter
 import io.element.android.features.rageshake.api.reporter.BugReporterListener
 import io.element.android.features.rageshake.impl.crash.CrashDataStore
@@ -89,6 +90,7 @@ class DefaultBugReporter(
         // filenames
         private const val LOG_CAT_FILENAME = "logcat.log"
         private const val LOG_DIRECTORY_NAME = "logs"
+        private const val MULTIPART_SIZE_RESERVE_BYTES = 1024 * 1024L
     }
 
     private val logcatCommandDebug = arrayOf("logcat", "-d", "-v", "threadtime", "*:*")
@@ -110,7 +112,7 @@ class DefaultBugReporter(
                 .distinctUntilChanged()
                 .onEach { logSubfolder ->
                     setCurrentLogDirectory(logSubfolder)
-                    tracingService.updateWriteToFilesConfiguration(createWriteToFilesConfiguration())
+                    tracingService.updateWriteToFilesConfiguration(createWriteToFilesConfiguration(buildMeta.isDebuggable))
                 }
                 .launchIn(appCoroutineScope)
         }
@@ -123,7 +125,7 @@ class DefaultBugReporter(
         problemDescription: String,
         canContact: Boolean,
         sendPushRules: Boolean,
-        ghIssueNumber: Int?,
+        attachments: List<BugReportAttachment>,
         listener: BugReporterListener,
     ) {
         val url = bugReporterUrlProvider.provide().first()
@@ -143,20 +145,15 @@ class DefaultBugReporter(
             var serverError: String? = null
             withContext(coroutineDispatchers.io) {
                 val crashCallStack = crashDataStore.crashInfo().first()
-                val bugDescription = buildString {
-                    append(problemDescription)
-                    ghIssueNumber?.let {
-                        append("\n\nhttps://github.com/element-hq/element-x-android/issues/$it")
-                    }
-                    if (crashCallStack.isNotEmpty() && withCrashLogs) {
-                        append("\n\n\n\n--------------------------------- crash call stack ---------------------------------\n")
-                        append(crashCallStack)
-                    }
-                }
+                val bugDescription = buildBugDescription(
+                    problemDescription = problemDescription,
+                    crashCallStack = crashCallStack,
+                    includeCrashLogs = buildMeta.isDebuggable && withCrashLogs,
+                )
                 val gzippedFiles = mutableListOf<File>()
                 var filesTooBig = emptyList<String>()
 
-                if (withCrashLogs || withDevicesLogs) {
+                if (buildMeta.isDebuggable && (withCrashLogs || withDevicesLogs)) {
                     saveLogCat()
                         ?.takeIf { it.length() < RageshakeConfig.MAX_LOG_CONTENT_SIZE }
                         ?.takeIf { countLogLines(it) + totalLogLines < RageshakeConfig.MAX_LOG_LINES_SIZE }
@@ -202,7 +199,7 @@ class DefaultBugReporter(
                             builder.addFormDataPart("device_keys", "curve25519:$curveKey, ed25519:$edKey")
                         }
 
-                        if (sendPushRules) {
+                        if (buildMeta.isDebuggable && sendPushRules) {
                             client.notificationSettingsService.getRawPushRules().getOrNull()?.let { pushRules ->
                                 val logLines = pushRules.lineSequence().count()
 
@@ -220,7 +217,7 @@ class DefaultBugReporter(
                     }
                 }
 
-                if (withDevicesLogs) {
+                if (buildMeta.isDebuggable && withDevicesLogs) {
                     val files = getLogFiles().sortedByDescending { it.lastModified() }
                     val filesBySize = files.groupBy {
                         it.length() < RageshakeConfig.MAX_LOG_CONTENT_SIZE
@@ -255,7 +252,7 @@ class DefaultBugReporter(
                     builder.addFormDataPart("omitted_logs", filesTooBig.toString())
                 }
 
-                if (crashCallStack.isNotEmpty() && withCrashLogs) {
+                if (buildMeta.isDebuggable && crashCallStack.isNotEmpty() && withCrashLogs) {
                     builder.addFormDataPart("label", "crash")
                 }
                 currentTracingLogLevel?.let {
@@ -265,6 +262,9 @@ class DefaultBugReporter(
                     builder.addFormDataPart("label", "Enterprise")
                 }
                 // add the gzipped files, don't cancel the whole upload if only some file failed to upload
+                val attachmentBytes = attachments.sumOf { it.file.length() }
+                val maximumLogBytes = (RageshakeConfig.MAX_LOG_UPLOAD_SIZE - attachmentBytes - MULTIPART_SIZE_RESERVE_BYTES)
+                    .coerceAtLeast(0L)
                 var totalUploadedSize = 0L
                 var uploadedSomeLogs = false
                 for (file in gzippedFiles) {
@@ -272,7 +272,7 @@ class DefaultBugReporter(
                         val requestBody = file.asRequestBody(MimeTypes.OctetStream.toMediaTypeOrNull())
                         totalUploadedSize += requestBody.contentLength()
                         // If we are about to upload more than the max request size, stop here
-                        if (totalUploadedSize > RageshakeConfig.MAX_LOG_UPLOAD_SIZE) {
+                        if (totalUploadedSize > maximumLogBytes) {
                             Timber.e("Could not upload file ${file.name} because it would exceed the max request size")
                             break
                         }
@@ -304,6 +304,13 @@ class DefaultBugReporter(
                                 Timber.e(e, "## sendBugReport() : fail to write screenshot")
                             }
                         }
+                }
+                attachments.forEach { attachment ->
+                    builder.addFormDataPart(
+                        "file",
+                        attachment.fileName,
+                        attachment.file.asRequestBody(attachment.mimeType.toMediaTypeOrNull()),
+                    )
                 }
                 val requestBody = builder.build()
                 // add a progress listener
@@ -353,8 +360,7 @@ class DefaultBugReporter(
                                     it.readBytes().toString(Charsets.UTF_8)
                                 }
                                 try {
-                                    val responseJSON = JSONObject(serverErrorJson)
-                                    responseJSON.getString("error")
+                                    parseBugReportErrorMessage(serverErrorJson, responseCode)
                                 } catch (e: CancellationException) {
                                     throw e
                                 } catch (e: JSONException) {
@@ -452,6 +458,7 @@ class DefaultBugReporter(
      * @return the file if the operation succeeds
      */
     override fun saveLogCat(): File? {
+        if (!buildMeta.isDebuggable) return null
         val file = File(baseLogDirectory, LOG_CAT_FILENAME)
         if (file.exists()) {
             file.safeDelete()
@@ -494,3 +501,33 @@ class DefaultBugReporter(
         return file.reader().useLines { it.count() }
     }
 }
+
+internal fun parseBugReportErrorMessage(serverErrorJson: String, responseCode: Int?): String {
+    val responseJSON = JSONObject(serverErrorJson)
+    return when (val error = responseJSON.opt("error")) {
+        is JSONObject -> error.optString("message")
+            .takeIf { it.isNotBlank() }
+            ?: error.toString()
+        is String -> error
+        else -> "Failed with error $responseCode"
+    }
+}
+
+internal fun buildBugDescription(
+    problemDescription: String,
+    crashCallStack: String,
+    includeCrashLogs: Boolean,
+): String {
+    val userDescription = problemDescription.take(MAX_BUG_DESCRIPTION_CHARS)
+    if (!includeCrashLogs || crashCallStack.isEmpty() || userDescription.length >= MAX_BUG_DESCRIPTION_CHARS) {
+        return userDescription
+    }
+    val separator = "\n\n\n\n--------------------------------- crash call stack ---------------------------------\n"
+    return buildString(MAX_BUG_DESCRIPTION_CHARS) {
+        append(userDescription)
+        append(separator.take(MAX_BUG_DESCRIPTION_CHARS - length))
+        append(crashCallStack.take(MAX_BUG_DESCRIPTION_CHARS - length))
+    }
+}
+
+private const val MAX_BUG_DESCRIPTION_CHARS = 512_000

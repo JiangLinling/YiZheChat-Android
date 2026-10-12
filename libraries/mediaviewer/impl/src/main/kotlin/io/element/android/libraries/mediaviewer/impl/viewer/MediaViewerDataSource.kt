@@ -18,9 +18,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberUpdatedState
 import io.element.android.libraries.architecture.AsyncData
-import io.element.android.libraries.core.extensions.mapCatchingExceptions
+import io.element.android.libraries.core.coroutines.SessionOwnedResourceWork
+import io.element.android.libraries.core.extensions.runCatchingExceptions
+import io.element.android.libraries.localofficeviewer.api.FilePreviewLeaseReleaseReason
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.media.MatrixMediaLoader
+import io.element.android.security.contentprotection.api.KmsTransportPriority
+import io.element.android.security.contentprotection.api.KmsTransportSchedulingContext
 import io.element.android.libraries.matrix.api.media.MediaFile
 import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.matrix.api.timeline.Timeline
@@ -29,11 +33,21 @@ import io.element.android.libraries.mediaviewer.api.local.LocalMedia
 import io.element.android.libraries.mediaviewer.api.local.LocalMediaFactory
 import io.element.android.libraries.mediaviewer.impl.datasource.MediaGalleryDataSource
 import io.element.android.libraries.mediaviewer.impl.gallery.MediaGalleryMode
+import io.element.android.libraries.mediaviewer.impl.local.office.FilePreviewLeaseRegistry
+import io.element.android.libraries.mediaviewer.impl.local.office.filePreviewLeaseBinding
+import io.element.android.libraries.mediaviewer.impl.local.requiresFilePreviewLease
 import io.element.android.libraries.mediaviewer.impl.model.MediaItem
 import io.element.android.libraries.mediaviewer.impl.model.eventId
+import io.element.android.libraries.mediaviewer.impl.model.id
 import io.element.android.libraries.mediaviewer.impl.model.mediaInfo
 import io.element.android.libraries.mediaviewer.impl.model.mediaSource
 import io.element.android.libraries.mediaviewer.impl.model.thumbnailSource
+import io.element.android.libraries.mediaviewer.impl.segmented.product.SegmentedVideoPlaybackOwnerFactory
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
 import io.element.android.services.toolbox.api.systemclock.SystemClock
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -47,6 +61,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.EmptyCoroutineContext
+
+private fun String.mediaScopeHash(): String = java.security.MessageDigest.getInstance("SHA-256")
+    .digest(encodeToByteArray()).joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
 class MediaViewerDataSource(
     mode: MediaViewerMode,
@@ -57,9 +75,21 @@ class MediaViewerDataSource(
     private val localMediaFactory: LocalMediaFactory,
     private val systemClock: SystemClock,
     private val pagerKeysHandler: PagerKeysHandler,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
+    private val accountIdHash: String,
+    private val matrixDeviceIdHash: String,
+    private val allowReusableOriginalCache: Boolean = true,
+    private val segmentedVideoPlaybackOwnerFactory: SegmentedVideoPlaybackOwnerFactory? = null,
+    downloadScope: CoroutineScope = coroutineScope,
+    private val downloadDispatcher: CoroutineDispatcher = dispatcher,
+    private val roomId: String? = null,
 ) {
-    // List of media files that are currently being loaded
-    private val mediaFiles: ConcurrentHashMap<MediaSource, MediaFile> = ConcurrentHashMap()
+    private val downloadOwners = SessionOwnedResourceWork(downloadScope)
+    private val mediaLock = Any()
+    private val mediaFiles: ConcurrentHashMap<MediaLoadIdentity, MediaFile> = ConcurrentHashMap()
+    private val filePreviewLeaseTokens: ConcurrentHashMap<MediaLoadIdentity, String> = ConcurrentHashMap()
+    private val mediaGenerations: ConcurrentHashMap<MediaLoadIdentity, Long> = ConcurrentHashMap()
+    @Volatile private var disposed = false
 
     private val galleryMode = when (mode) {
         MediaViewerMode.SingleMedia,
@@ -67,19 +97,35 @@ class MediaViewerDataSource(
         is MediaViewerMode.TimelineFilesAndAudios -> MediaGalleryMode.Files
     }
 
-    // Map of sourceUrl to local media state
-    private val localMediaStates: MutableMap<String, MutableState<AsyncData<LocalMedia>>> =
-        mutableMapOf()
+    // Each event owns its media even if another event reuses an MXC. Segmented media additionally bind
+    // the authenticated candidate so a different version cannot reuse its owner.
+    private val localMediaStates: ConcurrentHashMap<MediaLoadIdentity, MutableState<AsyncData<LocalMedia>>> =
+        ConcurrentHashMap()
 
     fun setup(coroutineScope: CoroutineScope) {
         galleryDataSource.start(coroutineScope)
     }
 
     fun dispose() {
-        Timber.d("Disposing MediaViewerDataSource, closing ${mediaFiles.size} media files")
-        mediaFiles.values.forEach { it.close() }
-        mediaFiles.clear()
-        localMediaStates.clear()
+        val handlesToClose = synchronized(mediaLock) {
+            disposed = true
+            mediaGenerations.keys.forEach(::invalidate)
+            localMediaStates.values.forEach { it.value = AsyncData.Uninitialized }
+            OwnedHandles(
+                mediaFiles = mediaFiles.values.toList(),
+                filePreviewLeaseTokens = filePreviewLeaseTokens.values.toList(),
+            ).also {
+                mediaFiles.clear()
+                filePreviewLeaseTokens.clear()
+                localMediaStates.clear()
+            }
+        }
+        Timber.d(
+            "Disposing MediaViewerDataSource, closing files=%s filePreviewLeases=%s",
+            handlesToClose.mediaFiles.size,
+            handlesToClose.filePreviewLeaseTokens.size,
+        )
+        handlesToClose.close(FilePreviewLeaseReleaseReason.HOST_DISPOSED)
     }
 
     /**
@@ -155,18 +201,29 @@ class MediaViewerDataSource(
             when (mediaItem) {
                 is MediaItem.DateSeparator -> Unit
                 is MediaItem.Event -> {
-                    val sourceUrl = mediaItem.mediaSource().safeUrl
-                    val localMedia = localMediaStates.getOrPut(sourceUrl) {
+                    val mediaSource = mediaItem.mediaSource()
+                    val eventId = mediaItem.eventId()
+                    val mediaItemId = mediaItem.id()
+                    val segmentedVideo = (mediaItem as? MediaItem.Video)?.segmentedVideo
+                    val mediaLoadIdentity = mediaLoadIdentity(
+                        mediaSource = mediaSource,
+                        eventId = eventId,
+                        mediaItemId = mediaItemId,
+                        segmentedVideo = segmentedVideo,
+                    )
+                    val localMedia = localMediaStates.getOrPut(mediaLoadIdentity) {
                         mutableStateOf(AsyncData.Uninitialized)
                     }
                     add(
                         MediaViewerPageData.MediaViewerData(
-                            eventId = mediaItem.eventId(),
+                            eventId = eventId,
                             mediaInfo = mediaItem.mediaInfo(),
-                            mediaSource = mediaItem.mediaSource(),
+                            mediaSource = mediaSource,
                             thumbnailSource = mediaItem.thumbnailSource(),
                             downloadedMedia = localMedia,
                             pagerKey = pagerKeysHandler.getKey(mediaItem),
+                            segmentedVideo = segmentedVideo,
+                            mediaItemId = mediaItemId,
                         )
                     )
                 }
@@ -182,7 +239,7 @@ class MediaViewerDataSource(
     }.toImmutableList()
 
     fun clearLoadingError(data: MediaViewerPageData.MediaViewerData) {
-        localMediaStates[data.mediaSource.safeUrl]?.value = AsyncData.Uninitialized
+        localMediaStates[data.mediaLoadIdentity]?.value = AsyncData.Uninitialized
     }
 
     suspend fun loadMore(direction: Timeline.PaginationDirection) {
@@ -192,45 +249,205 @@ class MediaViewerDataSource(
     }
 
     suspend fun loadMedia(data: MediaViewerPageData.MediaViewerData) {
-        val currentState = localMediaStates[data.mediaSource.safeUrl]?.value
-        // If the media is already loading or has been loaded successfully, do nothing
-        if (currentState?.isLoading() == true || currentState?.isSuccess() == true) {
-            return
+        withContext(downloadDispatcher) { FilePreviewLeaseRegistry.retryPendingReleases() }
+        val localMediaState: MutableState<AsyncData<LocalMedia>>
+        val generation: Long
+        val mediaLoadIdentity = data.mediaLoadIdentity
+        synchronized(mediaLock) {
+            if (disposed) return
+            localMediaState = localMediaStates.getOrPut(mediaLoadIdentity) {
+                mutableStateOf(AsyncData.Uninitialized)
+            }
+            if (localMediaState.value.isLoading() || localMediaState.value.isSuccess()) return
+            localMediaState.value = AsyncData.Loading()
+            generation = mediaGenerations.getOrPut(mediaLoadIdentity) { 0L }
         }
 
         Timber.d("loadMedia for ${data.eventId}")
-        val localMediaState = localMediaStates.getOrPut(data.mediaSource.safeUrl) {
-            mutableStateOf(AsyncData.Uninitialized)
-        }
-        localMediaState.value = AsyncData.Loading()
-        mediaLoader
-            .downloadMediaFile(
-                source = data.mediaSource,
-                mimeType = data.mediaInfo.mimeType,
-                filename = data.mediaInfo.filename
-            )
-            .onSuccess { mediaFile ->
-                mediaFiles[data.mediaSource] = mediaFile
+        val origin = roomId?.let { io.element.android.libraries.matrix.api.media.MediaEventOrigin(it, data.eventId?.value) }
+            ?: data.mediaSource.eventOrigin
+        val request = lifecycleOperationRequest(
+            lifecycleId = FullAppLifecycleId.LC_16,
+            trigger = "download",
+            accountIdHash = accountIdHash,
+            matrixDeviceIdHash = matrixDeviceIdHash,
+            roomIdHash = origin?.roomId?.mediaScopeHash(),
+            eventIdHash = origin?.eventId?.mediaScopeHash(),
+        )
+        val parentOperation = currentLifecycleOperationContext()
+        runCatchingExceptions {
+            downloadOwners.execute<ViewerLoadResult>(
+                userInitiated = true,
+                context = (parentOperation ?: EmptyCoroutineContext) + downloadDispatcher + KmsTransportSchedulingContext(KmsTransportPriority.USER_MEDIA),
+                discard = { it.close(FilePreviewLeaseReleaseReason.CANCELLED) },
+                onCleanupFailure = { Timber.w("Viewer media cleanup remains pending for operationId=%s", request.operationId) },
+            ) { retainUntilReceipt ->
+                val result = ViewerLoadResult()
+                retainUntilReceipt(result)
+                appOperationalStateCoordinator.perform(request) { operationId ->
+                    val mediaFile = data.segmentedVideo?.let { candidate ->
+                        requireNotNull(segmentedVideoPlaybackOwnerFactory) {
+                            "Segmented video owner factory is unavailable."
+                        }.create(candidate, data.mediaInfo.filename)
+                    } ?: withContext(KmsTransportSchedulingContext(KmsTransportPriority.USER_MEDIA)) {
+                        val scopedSource = data.mediaSource.copy(eventOrigin = origin)
+                        val progressive = if (data.mediaInfo.mimeType.startsWith("video/")) {
+                            mediaLoader.openProgressiveVideo(scopedSource, data.mediaInfo.fileSize).getOrThrow()
+                        } else null
+                        progressive ?: mediaLoader.downloadMediaFile(
+                            source = scopedSource,
+                            mimeType = data.mediaInfo.mimeType,
+                            filename = data.mediaInfo.filename,
+                            useCache = allowReusableOriginalCache,
+                        ).getOrThrow()
+                    }
+                    result.mediaFile = mediaFile
+                    if (!isRequestActive(mediaLoadIdentity, generation, localMediaState)) {
+                        result.close(FilePreviewLeaseReleaseReason.CANCELLED)
+                        return@perform result
+                    }
+                    val localMedia = localMediaFactory.createFromMediaFile(
+                        mediaFile = mediaFile,
+                        mediaInfo = data.mediaInfo,
+                    ).copy(lifecycleOperationId = operationId)
+                    if (data.mediaInfo.requiresFilePreviewLease()) {
+                        val filePreviewLeaseToken = FilePreviewLeaseRegistry.register(
+                            localMedia.filePreviewLeaseBinding(),
+                            mediaFile,
+                        )
+                        result.filePreviewLeaseToken = filePreviewLeaseToken
+                        result.mediaFile = null
+                        result.loaded = LoadedMedia(
+                            mediaFile = null,
+                            localMedia = localMedia.copy(filePreviewLeaseToken = filePreviewLeaseToken),
+                            filePreviewLeaseToken = filePreviewLeaseToken,
+                        )
+                    } else {
+                        result.loaded = LoadedMedia(mediaFile, localMedia, filePreviewLeaseToken = null)
+                    }
+                    result
+                }
             }
-            .mapCatchingExceptions { mediaFile ->
-                localMediaFactory.createFromMediaFile(
-                    mediaFile = mediaFile,
-                    mediaInfo = data.mediaInfo
-                )
+        }.onSuccess { result ->
+                val loaded = result.loaded ?: return@onSuccess
+                val previousHandles = synchronized(mediaLock) {
+                    if (!isRequestActiveLocked(mediaLoadIdentity, generation, localMediaState)) {
+                        loaded.close(FilePreviewLeaseReleaseReason.CANCELLED)
+                        return@synchronized null
+                    }
+                    localMediaState.value = AsyncData.Success(loaded.localMedia)
+                    if (loaded.filePreviewLeaseToken == null) {
+                        OwnedHandles(
+                            mediaFiles = listOfNotNull(mediaFiles.put(mediaLoadIdentity, checkNotNull(loaded.mediaFile))),
+                            filePreviewLeaseTokens = listOfNotNull(filePreviewLeaseTokens.remove(mediaLoadIdentity)),
+                        )
+                    } else {
+                        OwnedHandles(
+                            mediaFiles = listOfNotNull(mediaFiles.remove(mediaLoadIdentity)),
+                            filePreviewLeaseTokens = listOfNotNull(
+                                filePreviewLeaseTokens.put(mediaLoadIdentity, loaded.filePreviewLeaseToken)
+                            ),
+                        )
+                    }
+                }
+                previousHandles?.close(FilePreviewLeaseReleaseReason.ATTACHMENT_SWITCHED)
             }
-            .onSuccess {
-                localMediaState.value = AsyncData.Success(it)
-            }
-            .onFailure {
-                localMediaState.value = AsyncData.Failure(it)
+            .onFailure { failure ->
+                synchronized(mediaLock) {
+                    if (isRequestActiveLocked(mediaLoadIdentity, generation, localMediaState)) {
+                        localMediaState.value = AsyncData.Failure(failure)
+                    }
+                }
             }
     }
 
     fun cancelLoadingMedia(data: MediaViewerPageData.MediaViewerData) {
-        if (localMediaStates[data.mediaSource.safeUrl]?.value?.isLoading() == true) {
-            Timber.d("cancelLoadingMedia for ${data.eventId}")
-            mediaFiles.remove(data.mediaSource)?.close()
-            localMediaStates[data.mediaSource.safeUrl]?.value = AsyncData.Uninitialized
+        releaseMedia(data)
+    }
+
+    fun releaseMedia(data: MediaViewerPageData.MediaViewerData) {
+        val mediaLoadIdentity = data.mediaLoadIdentity
+        val handlesToClose = synchronized(mediaLock) {
+            Timber.d("releaseMedia for ${data.eventId}")
+            invalidate(mediaLoadIdentity)
+            localMediaStates[mediaLoadIdentity]?.value = AsyncData.Uninitialized
+            OwnedHandles(
+                mediaFiles = listOfNotNull(mediaFiles.remove(mediaLoadIdentity)),
+                filePreviewLeaseTokens = listOfNotNull(filePreviewLeaseTokens.remove(mediaLoadIdentity)),
+            )
+        }
+        handlesToClose.close(FilePreviewLeaseReleaseReason.CANCELLED)
+    }
+
+    private fun invalidate(identity: MediaLoadIdentity) {
+        mediaGenerations[identity] = (mediaGenerations[identity] ?: 0L) + 1L
+    }
+
+    private fun isRequestActive(
+        identity: MediaLoadIdentity,
+        generation: Long,
+        state: MutableState<AsyncData<LocalMedia>>,
+    ): Boolean = synchronized(mediaLock) {
+        isRequestActiveLocked(identity, generation, state)
+    }
+
+    private fun isRequestActiveLocked(
+        identity: MediaLoadIdentity,
+        generation: Long,
+        state: MutableState<AsyncData<LocalMedia>>,
+    ): Boolean = !disposed &&
+        mediaGenerations[identity] == generation &&
+        state.value.isLoading()
+
+    private data class LoadedMedia(
+        val mediaFile: MediaFile?,
+        val localMedia: LocalMedia,
+        val filePreviewLeaseToken: String?,
+    ) {
+        fun close(reason: FilePreviewLeaseReleaseReason) {
+            closeEveryHandle(listOfNotNull(mediaFile), listOfNotNull(filePreviewLeaseToken), reason)
         }
     }
+
+    /** Retains the acquired handle across factory/registry/receipt failures until its actual release. */
+    private class ViewerLoadResult {
+        var mediaFile: MediaFile? = null
+        var filePreviewLeaseToken: String? = null
+        var loaded: LoadedMedia? = null
+        private var mediaClosed = false
+        private var previewReleased = false
+
+        fun close(reason: FilePreviewLeaseReleaseReason) {
+            var firstFailure: Throwable? = null
+            if (!mediaClosed) try { mediaFile?.close(); mediaClosed = true } catch (failure: Throwable) { firstFailure = failure }
+            if (!previewReleased) try {
+                filePreviewLeaseToken?.let { FilePreviewLeaseRegistry.release(it, reason) }
+                previewReleased = true
+            } catch (failure: Throwable) {
+                firstFailure?.let { if (it !== failure) it.addSuppressed(failure) } ?: run { firstFailure = failure }
+            }
+            firstFailure?.let { throw it }
+        }
+    }
+
+    private data class OwnedHandles(
+        val mediaFiles: List<MediaFile>,
+        val filePreviewLeaseTokens: List<String>,
+    ) {
+        fun close(reason: FilePreviewLeaseReleaseReason) {
+            closeEveryHandle(mediaFiles, filePreviewLeaseTokens, reason)
+        }
+    }
+}
+
+private fun closeEveryHandle(files: List<MediaFile>, previewTokens: List<String>, reason: FilePreviewLeaseReleaseReason) {
+    var firstFailure: Throwable? = null
+    fun attempt(close: () -> Unit) {
+        try { close() } catch (failure: Throwable) {
+            firstFailure?.let { if (it !== failure) it.addSuppressed(failure) } ?: run { firstFailure = failure }
+        }
+    }
+    files.forEach { file -> attempt(file::close) }
+    previewTokens.forEach { token -> attempt { FilePreviewLeaseRegistry.release(token, reason) } }
+    firstFailure?.let { throw it }
 }

@@ -7,17 +7,17 @@
   -->
 <resources xmlns:tools="http://schemas.android.com/tools">
     <style name="Theme.ElementX.Splash" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@color/splashscreen_bg_light</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/transparent</item>
+        <item name="windowSplashScreenBackground">@color/yizhe_splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo_safe</item>
         <item name="postSplashScreenTheme">@style/Theme.ElementX</item>
-        <item name="android:windowBackground">@color/splashscreen_bg_light</item>
-        <item name="android:statusBarColor">@color/splashscreen_bg_light</item>
-        <item name="android:navigationBarColor">@color/splashscreen_bg_light</item>
+        <item name="android:windowBackground">@color/yizhe_splash_background</item>
+        <item name="android:statusBarColor">@color/yizhe_splash_background</item>
+        <item name="android:navigationBarColor">@color/yizhe_splash_background</item>
     </style>
     <style name="Theme.ElementX" parent="Theme.Material3.Light.NoActionBar">
         <item name="android:forceDarkAllowed" tools:targetApi="q">false</item>
-        <item name="android:windowBackground">@color/splashscreen_bg_light</item>
-        <item name="android:statusBarColor">@color/splashscreen_bg_light</item>
-        <item name="android:navigationBarColor">@color/splashscreen_bg_light</item>
+        <item name="android:windowBackground">@color/yizhe_splash_background</item>
+        <item name="android:statusBarColor">@color/yizhe_splash_background</item>
+        <item name="android:navigationBarColor">@color/yizhe_splash_background</item>
     </style>
 </resources>

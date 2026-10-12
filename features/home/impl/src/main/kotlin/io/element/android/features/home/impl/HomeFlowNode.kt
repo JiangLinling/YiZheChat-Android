@@ -12,12 +12,11 @@ import android.app.Activity
 import android.os.Parcelable
 import androidx.activity.compose.LocalActivity
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.coroutineScope
 import com.bumble.appyx.core.lifecycle.subscribe
@@ -35,42 +34,40 @@ import io.element.android.annotations.ContributesNode
 import io.element.android.features.home.api.HomeEntryPoint
 import io.element.android.features.home.impl.components.RoomListMenuAction
 import io.element.android.features.home.impl.model.RoomListRoomSummary
+import io.element.android.features.home.impl.onboarding.OnboardingInvitePresenter
+import io.element.android.features.home.impl.onboarding.OnboardingInviteView
 import io.element.android.features.home.impl.roomlist.RoomListEvent
 import io.element.android.features.invite.api.InviteData
 import io.element.android.features.invite.api.acceptdecline.AcceptDeclineInviteView
 import io.element.android.features.invite.api.declineandblock.DeclineInviteAndBlockEntryPoint
 import io.element.android.features.leaveroom.api.LeaveRoomRenderer
 import io.element.android.features.logout.api.direct.DirectLogoutView
+import io.element.android.features.preferences.api.PreferencesRootRenderer
 import io.element.android.features.reportroom.api.ReportRoomEntryPoint
 import io.element.android.features.rolesandpermissions.api.ChangeRoomMemberRolesEntryPoint
 import io.element.android.features.rolesandpermissions.api.ChangeRoomMemberRolesListType
-import io.element.android.libraries.architecture.AsyncData
+import io.element.android.libraries.androidutils.startup.StartupTrace
 import io.element.android.libraries.architecture.BackstackView
 import io.element.android.libraries.architecture.BaseFlowNode
 import io.element.android.libraries.architecture.appyx.launchMolecule
 import io.element.android.libraries.architecture.callback
-import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.deeplink.api.usecase.InviteFriendsUseCase
-import io.element.android.libraries.designsystem.components.ProgressDialog
-import io.element.android.libraries.designsystem.utils.DelayedVisibility
 import io.element.android.libraries.di.SessionScope
 import io.element.android.libraries.di.annotations.SessionCoroutineScope
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.services.analytics.api.AnalyticsService
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.parcelize.Parcelize
-import timber.log.Timber
-import kotlin.coroutines.cancellation.CancellationException
-import kotlin.time.Duration.Companion.milliseconds
+
+internal fun homeInitialContentReady(state: HomeState): Boolean =
+    state.currentHomeNavigationBarItem != HomeNavigationBarItem.Chats ||
+        state.roomListState.contentState !is io.element.android.features.home.impl.roomlist.RoomListContentState.Skeleton
 
 @ContributesNode(SessionScope::class)
 @AssistedInject
@@ -87,6 +84,8 @@ class HomeFlowNode(
     private val declineInviteAndBlockUserEntryPoint: DeclineInviteAndBlockEntryPoint,
     private val changeRoomMemberRolesEntryPoint: ChangeRoomMemberRolesEntryPoint,
     private val leaveRoomRenderer: LeaveRoomRenderer,
+    private val preferencesRootRenderer: PreferencesRootRenderer,
+    private val onboardingInvitePresenter: OnboardingInvitePresenter,
     @SessionCoroutineScope private val sessionCoroutineScope: CoroutineScope,
 ) : BaseFlowNode<HomeFlowNode.NavTarget>(
     backstack = BackStack(
@@ -96,14 +95,23 @@ class HomeFlowNode(
     buildContext = buildContext,
     plugins = plugins
 ) {
+    init {
+        StartupTrace.mark("HomeNode.creation")
+    }
+
     private val callback: HomeEntryPoint.Callback = callback()
-    private val stateFlow = launchMolecule { presenter.present() }
+    private val initialContentReported = AtomicBoolean(false)
+    private val stateFlow = StartupTrace.measure("HomeNode.launchMolecule") {
+        launchMolecule { presenter.present() }
+    }
 
     override fun onBuilt() {
+        StartupTrace.mark("HomeNode.onBuilt.begin")
         super.onBuilt()
         lifecycle.subscribe(
             onResume = {
                 analyticsService.screen(MobileScreen(screenName = MobileScreen.ScreenName.Home))
+                sessionCoroutineScope.launch { presenter.onHomeVisible() }
             }
         )
         whenChildAttached {
@@ -120,6 +128,7 @@ class HomeFlowNode(
                 }
             }
         }
+        StartupTrace.mark("HomeNode.onBuilt.end")
     }
 
     sealed interface NavTarget : Parcelable {
@@ -134,6 +143,9 @@ class HomeFlowNode(
 
         @Parcelize
         data class SelectNewOwnersWhenLeavingRoom(val roomId: RoomId) : NavTarget
+
+        @Parcelize
+        data object OnboardingInvite : NavTarget
     }
 
     private fun navigateToReportRoom(roomId: RoomId) {
@@ -159,69 +171,49 @@ class HomeFlowNode(
         backstack.push(NavTarget.SelectNewOwnersWhenLeavingRoom(roomId))
     }
 
+    private fun onboardingInviteNode(buildContext: BuildContext): Node {
+        val inviteState = launchMolecule { onboardingInvitePresenter.present() }
+        return node(buildContext) { modifier ->
+            val state by inviteState.collectAsState()
+            OnboardingInviteView(
+                state = state,
+                onBack = { backstack.pop() },
+                modifier = modifier,
+            )
+        }
+    }
+
     private fun onNewOwnersSelected(roomId: RoomId) {
         stateFlow.value.roomListState.eventSink(RoomListEvent.LeaveRoom(roomId, needsConfirmation = false))
     }
 
     private fun rootNode(buildContext: BuildContext): Node {
+        StartupTrace.mark("HomeNode.rootNode.resolve")
         return node(buildContext) { modifier ->
+            val firstCompositionReported = remember {
+                StartupTrace.mark("HomeView.composition.begin")
+                AtomicBoolean(false)
+            }
             val state by stateFlow.collectAsState()
             val activity = requireNotNull(LocalActivity.current)
-
-            val loadingJoinedRoomJob = remember { mutableStateOf<AsyncData<Job>>(AsyncData.Uninitialized) }
-            if (loadingJoinedRoomJob.value.isLoading()) {
-                DelayedVisibility(duration = 400.milliseconds) {
-                    ProgressDialog(
-                        properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true),
-                        onDismissRequest = {
-                            loadingJoinedRoomJob.value.dataOrNull()?.cancel()
-                            loadingJoinedRoomJob.value = AsyncData.Uninitialized
-                        }
-                    )
-                }
-            }
 
             fun navigateToRoom(
                 roomId: RoomId,
             ) {
-                if (!loadingJoinedRoomJob.value.isUninitialized()) {
-                    Timber.w("Already loading a room, ignoring navigateToRoom for $roomId")
-                    return
-                }
-
-                val job = sessionCoroutineScope.launch {
-                    runCatchingExceptions {
-                        matrixClient.getJoinedRoom(roomId)
-                    }.fold(
-                        onSuccess = { joinedRoom ->
-                            if (isActive) {
-                                callback.navigateToRoom(roomId, joinedRoom)
-                                loadingJoinedRoomJob.value = AsyncData.Success(coroutineContext.job)
-                                // Wait a bit before resetting the state to avoid allowing to open several rooms
-                                delay(200.milliseconds)
-                                loadingJoinedRoomJob.value = AsyncData.Uninitialized
-                            }
-                        },
-                        onFailure = {
-                            // If the operation wasn't cancelled, navigate without the room, using the room id
-                            if (it !is CancellationException) {
-                                callback.navigateToRoom(roomId, null)
-                            }
-                            loadingJoinedRoomJob.value = AsyncData.Failure(error = it, prevData = coroutineContext.job)
-                            // Wait a bit before resetting the state to avoid allowing to open several rooms
-                            delay(200.milliseconds)
-                            loadingJoinedRoomJob.value = AsyncData.Uninitialized
-                        }
-                    )
-                }
-                loadingJoinedRoomJob.value = AsyncData.Loading(job)
+                // Enter the room shell immediately. The destination resolves the room and
+                // renders cached timeline content without making the home screen wait on Rust.
+                callback.navigateToRoom(roomId, null)
             }
 
             HomeView(
                 homeState = state,
                 onRoomClick = ::navigateToRoom,
-                onSettingsClick = callback::navigateToSettings,
-                onStartChatClick = callback::navigateToCreateRoom,
+                onAddFriendClick = callback::navigateToAddFriend,
+                onScanFriendClick = callback::navigateToFriendScanner,
+                onMyQrCodeClick = callback::navigateToMyQrCode,
+                onInviteNewUserClick = { backstack.push(NavTarget.OnboardingInvite) },
+                onFriendClick = callback::navigateToFriendProfile,
+                onCreateRoomClick = callback::navigateToCreateRoom,
                 onCreateSpaceClick = callback::navigateToCreateSpace,
                 onSetUpRecoveryClick = callback::navigateToSetUpRecovery,
                 onConfirmRecoveryKeyClick = callback::navigateToEnterRecoveryKey,
@@ -229,13 +221,20 @@ class HomeFlowNode(
                 onMenuActionClick = { onMenuActionClick(activity, it) },
                 onReportRoomClick = ::navigateToReportRoom,
                 onDeclineInviteAndBlockUser = ::navigateToDeclineInviteAndBlockUser,
+                onMoveToBackground = { activity.moveTaskToBack(true) },
                 modifier = modifier,
                 acceptDeclineInviteView = {
-                    acceptDeclineInviteView.Render(
+                    if (!state.roomListState.inviteActionsInPlace) acceptDeclineInviteView.Render(
                         state = state.roomListState.acceptDeclineInviteState,
-                        onAcceptInviteSuccess = ::navigateToRoom,
+                        onAcceptInviteSuccess = { },
                         onDeclineInviteSuccess = { },
                         modifier = Modifier
+                    )
+                },
+                settingsRootContent = { settingsModifier ->
+                    preferencesRootRenderer.Render(
+                        onNavigate = { destination -> callback.navigateToSettings(destination) },
+                        modifier = settingsModifier,
                     )
                 },
                 leaveRoomView = {
@@ -247,6 +246,15 @@ class HomeFlowNode(
                 }
             )
             directLogoutView.Render(state.directLogoutState)
+            SideEffect {
+                if (homeInitialContentReady(state) && initialContentReported.compareAndSet(false, true)) {
+                    StartupTrace.mark("HomeView.initialContent.ready")
+                    callback.onInitialContentReady()
+                }
+                if (firstCompositionReported.compareAndSet(false, true)) {
+                    StartupTrace.mark("HomeView.composition.end")
+                }
+            }
         }
     }
 
@@ -280,6 +288,7 @@ class HomeFlowNode(
                     listType = ChangeRoomMemberRolesListType.SelectNewOwnersWhenLeaving,
                 )
             }
+            NavTarget.OnboardingInvite -> onboardingInviteNode(buildContext)
             NavTarget.Root -> rootNode(buildContext)
         }
     }

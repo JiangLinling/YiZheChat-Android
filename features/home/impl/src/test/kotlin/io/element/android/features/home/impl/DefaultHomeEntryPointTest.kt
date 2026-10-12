@@ -12,12 +12,15 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.bumble.appyx.core.modality.BuildContext
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.home.api.HomeEntryPoint
+import io.element.android.features.preferences.api.PreferencesRootDestination
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.test.FakeMatrixClient
 import io.element.android.services.analytics.test.FakeAnalyticsService
 import io.element.android.tests.testutils.lambda.lambdaError
 import io.element.android.tests.testutils.node.TestParentNode
+import io.element.android.features.home.impl.onboarding.OnboardingInvitePresenter
+import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -41,14 +44,20 @@ class DefaultHomeEntryPointTest {
                 declineInviteAndBlockUserEntryPoint = { _, _, _ -> lambdaError() },
                 changeRoomMemberRolesEntryPoint = { _, _, _, _ -> lambdaError() },
                 leaveRoomRenderer = { _, _, _ -> lambdaError() },
+                preferencesRootRenderer = { _, _ -> lambdaError() },
+                onboardingInvitePresenter = mockk<OnboardingInvitePresenter>(relaxed = true),
                 sessionCoroutineScope = backgroundScope,
             )
         }
         val callback = object : HomeEntryPoint.Callback {
             override fun navigateToRoom(roomId: RoomId, joinedRoom: JoinedRoom?) = lambdaError()
+            override fun navigateToAddFriend() = lambdaError()
+            override fun navigateToFriendScanner() = lambdaError()
+            override fun navigateToMyQrCode() = lambdaError()
+            override fun navigateToFriendProfile(userId: io.element.android.libraries.matrix.api.core.UserId) = lambdaError()
             override fun navigateToCreateRoom() = lambdaError()
             override fun navigateToCreateSpace() = lambdaError()
-            override fun navigateToSettings() = lambdaError()
+            override fun navigateToSettings(destination: PreferencesRootDestination) = lambdaError()
             override fun navigateToSetUpRecovery() = lambdaError()
             override fun navigateToEnterRecoveryKey() = lambdaError()
             override fun navigateToRoomSettings(roomId: RoomId) = lambdaError()

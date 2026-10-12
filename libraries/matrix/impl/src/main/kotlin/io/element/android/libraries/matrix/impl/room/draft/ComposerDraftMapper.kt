@@ -45,5 +45,6 @@ private fun ComposerDraftType.into(): RustComposerDraftType {
         ComposerDraftType.NewMessage -> RustComposerDraftType.NewMessage
         is ComposerDraftType.Reply -> RustComposerDraftType.Reply(eventId.value)
         is ComposerDraftType.Edit -> RustComposerDraftType.Edit(eventId.value)
+        is ComposerDraftType.EditCaption -> error("Caption drafts must use the protected local draft store.")
     }
 }

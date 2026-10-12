@@ -17,18 +17,23 @@ sealed interface RoomListEvent {
     data object DismissBanner : RoomListEvent
     data object DismissNewNotificationSoundBanner : RoomListEvent
     data object ToggleSearchResults : RoomListEvent
-    data class ShowContextMenu(val roomSummary: RoomListRoomSummary) : RoomListEvent
+    data class ShowContextMenu(val roomSummary: RoomListRoomSummary, val displayName: String? = null) : RoomListEvent
 
     data class AcceptInvite(val roomSummary: RoomListRoomSummary) : RoomListEvent
     data class DeclineInvite(val roomSummary: RoomListRoomSummary, val blockUser: Boolean) : RoomListEvent
     data class ShowDeclineInviteMenu(val roomSummary: RoomListRoomSummary) : RoomListEvent
     data object HideDeclineInviteMenu : RoomListEvent
+    data class SetInviteActionsInPlace(val enabled: Boolean) : RoomListEvent
+    data object ResetInviteActions : RoomListEvent
+    data class MarkInvitesAsSeen(val roomIds: Set<RoomId>) : RoomListEvent
 
     sealed interface ContextMenuEvent : RoomListEvent
     data object HideContextMenu : ContextMenuEvent
+    /** Internal continuation used after selecting replacement owners; not exposed in the room-list menu. */
     data class LeaveRoom(val roomId: RoomId, val needsConfirmation: Boolean) : ContextMenuEvent
     data class MarkAsRead(val roomId: RoomId) : ContextMenuEvent
     data class MarkAsUnread(val roomId: RoomId) : ContextMenuEvent
     data class SetRoomIsFavorite(val roomId: RoomId, val isFavorite: Boolean) : ContextMenuEvent
-    data class ClearCacheOfRoom(val roomId: RoomId) : ContextMenuEvent
+    data class SetRoomMuted(val roomId: RoomId, val isMuted: Boolean) : ContextMenuEvent
+    data class DeleteConversation(val roomId: RoomId, val cutoffTimestamp: Long) : ContextMenuEvent
 }

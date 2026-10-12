@@ -16,6 +16,10 @@ import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.test.AN_EXCEPTION
 import io.element.android.libraries.matrix.test.FakeMatrixClient
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.PermanentAccountDeletionHandle
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
+import io.element.android.security.dataprotection.test.FakePermanentAccountDeletionCoordinator
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import io.element.android.tests.testutils.lambda.value
@@ -47,11 +51,7 @@ class AccountDeactivationPresenterTest {
         }.test {
             val initialState = awaitItem()
             assertThat(initialState.deactivateFormState).isEqualTo(DeactivateFormState.Default)
-            initialState.eventSink(AccountDeactivationEvents.SetEraseData(true))
-            val updatedState = awaitItem()
-            assertThat(updatedState.deactivateFormState).isEqualTo(DeactivateFormState.Default.copy(eraseData = true))
-            assertThat(updatedState.submitEnabled).isFalse()
-            updatedState.eventSink(AccountDeactivationEvents.SetPassword("password"))
+            initialState.eventSink(AccountDeactivationEvents.SetPassword("password"))
             val updatedState2 = awaitItem()
             assertThat(updatedState2.deactivateFormState).isEqualTo(DeactivateFormState(password = "password", eraseData = true))
             assertThat(updatedState2.submitEnabled).isTrue()
@@ -66,7 +66,11 @@ class AccountDeactivationPresenterTest {
         val matrixClient = FakeMatrixClient(
             deactivateAccountResult = recorder
         )
-        val presenter = createPresenter(matrixClient)
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val presenter = createPresenter(
+            matrixClient = matrixClient,
+            appOperationalStateCoordinator = coordinator,
+        )
         moleculeFlow(RecompositionMode.Immediate) {
             presenter.present()
         }.test {
@@ -81,7 +85,14 @@ class AccountDeactivationPresenterTest {
             assertThat(updatedState2.accountDeactivationAction).isEqualTo(AsyncAction.Loading)
             val finalState = awaitItem()
             assertThat(finalState.accountDeactivationAction).isEqualTo(AsyncAction.Success(Unit))
-            recorder.assertions().isCalledOnce().with(value("password"), value(false))
+            recorder.assertions().isCalledOnce().with(value("password"), value(true))
+            assertThat(coordinator.startedRequests).hasSize(1)
+            assertThat(coordinator.resumingRequests).isEmpty()
+            assertThat(coordinator.startedRequests.single().lifecycleId).isEqualTo(FullAppLifecycleId.LC_22)
+            assertThat(coordinator.startedRequests.single().trigger).isEqualTo("permanent_delete")
+            assertThat(coordinator.clientReceipts.map { it.operationId }.distinct()).containsExactly(
+                coordinator.startedRequests.single().operationId
+            )
         }
     }
 
@@ -100,7 +111,7 @@ class AccountDeactivationPresenterTest {
             val initialState = awaitItem()
             initialState.eventSink(AccountDeactivationEvents.SetPassword("password"))
             initialState.eventSink(AccountDeactivationEvents.SetEraseData(true))
-            skipItems(2)
+            skipItems(1)
             initialState.eventSink(AccountDeactivationEvents.DeactivateAccount(isRetry = false))
             val updatedState = awaitItem()
             assertThat(updatedState.accountDeactivationAction).isEqualTo(AsyncAction.ConfirmingNoParams)
@@ -108,14 +119,55 @@ class AccountDeactivationPresenterTest {
             val updatedState2 = awaitItem()
             assertThat(updatedState2.accountDeactivationAction).isEqualTo(AsyncAction.Loading)
             val finalState = awaitItem()
-            assertThat(finalState.accountDeactivationAction).isEqualTo(AsyncAction.Failure(AN_EXCEPTION))
             recorder.assertions().isCalledOnce().with(value("password"), value(true))
+            assertThat(finalState.accountDeactivationAction.errorOrNull()).isInstanceOf(AN_EXCEPTION::class.java)
+            assertThat(finalState.accountDeactivationAction.errorOrNull()?.message).isEqualTo(AN_EXCEPTION.message)
             // Retry
             finalState.eventSink(AccountDeactivationEvents.DeactivateAccount(isRetry = true))
             val finalState2 = awaitItem()
             assertThat(finalState2.accountDeactivationAction).isEqualTo(AsyncAction.Loading)
-            assertThat(awaitItem().accountDeactivationAction).isEqualTo(AsyncAction.Failure(AN_EXCEPTION))
+            val retryFailure = awaitItem().accountDeactivationAction.errorOrNull()
+            assertThat(retryFailure).isInstanceOf(AN_EXCEPTION::class.java)
+            assertThat(retryFailure?.message).isEqualTo(AN_EXCEPTION.message)
         }
+    }
+
+    @Test
+    fun `present - frozen account resumes the durable LC22 operation instead of creating another identity`() = runTest {
+        val handle = PermanentAccountDeletionHandle("operation-delete-resume-0001")
+        val permanentDeletion = FakePermanentAccountDeletionCoordinator().apply {
+            pendingHandle = handle
+        }
+        val coordinator = FakeAppOperationalStateCoordinator()
+        coordinator.start(
+            io.element.android.security.dataprotection.api.lifecycleOperationRequest(
+                lifecycleId = FullAppLifecycleId.LC_22,
+                trigger = "permanent_delete",
+                accountIdHash = "0".repeat(64),
+                matrixDeviceIdHash = "1".repeat(64),
+                operationId = handle.value,
+            )
+        )
+        val presenter = createPresenter(
+            matrixClient = FakeMatrixClient(
+                deactivateAccountResult = { _, _ -> Result.success(Unit) },
+            ),
+            appOperationalStateCoordinator = coordinator,
+            permanentAccountDeletionCoordinator = permanentDeletion,
+        )
+
+        moleculeFlow(RecompositionMode.Immediate) { presenter.present() }.test {
+            val initial = awaitItem()
+            initial.eventSink(AccountDeactivationEvents.SetPassword("password"))
+            skipItems(1)
+            initial.eventSink(AccountDeactivationEvents.DeactivateAccount(isRetry = false))
+            awaitItem().eventSink(AccountDeactivationEvents.DeactivateAccount(isRetry = false))
+            assertThat(awaitItem().accountDeactivationAction).isEqualTo(AsyncAction.Loading)
+            assertThat(awaitItem().accountDeactivationAction).isEqualTo(AsyncAction.Success(Unit))
+        }
+
+        assertThat(coordinator.startedRequests).hasSize(1)
+        assertThat(coordinator.clientReceipts.map { it.operationId }.distinct()).containsExactly(handle.value)
     }
 
     @Test
@@ -133,7 +185,7 @@ class AccountDeactivationPresenterTest {
             val initialState = awaitItem()
             initialState.eventSink(AccountDeactivationEvents.SetPassword("password"))
             initialState.eventSink(AccountDeactivationEvents.SetEraseData(true))
-            skipItems(2)
+            skipItems(1)
             initialState.eventSink(AccountDeactivationEvents.DeactivateAccount(isRetry = false))
             val updatedState = awaitItem()
             assertThat(updatedState.accountDeactivationAction).isEqualTo(AsyncAction.ConfirmingNoParams)
@@ -141,8 +193,9 @@ class AccountDeactivationPresenterTest {
             val updatedState2 = awaitItem()
             assertThat(updatedState2.accountDeactivationAction).isEqualTo(AsyncAction.Loading)
             val finalState = awaitItem()
-            assertThat(finalState.accountDeactivationAction).isEqualTo(AsyncAction.Failure(AN_EXCEPTION))
             recorder.assertions().isCalledOnce().with(value("password"), value(true))
+            assertThat(finalState.accountDeactivationAction.errorOrNull()).isInstanceOf(AN_EXCEPTION::class.java)
+            assertThat(finalState.accountDeactivationAction.errorOrNull()?.message).isEqualTo(AN_EXCEPTION.message)
             // Cancel
             finalState.eventSink(AccountDeactivationEvents.CloseDialogs)
             val finalState2 = awaitItem()
@@ -153,6 +206,10 @@ class AccountDeactivationPresenterTest {
 
 internal fun createPresenter(
     matrixClient: MatrixClient = FakeMatrixClient(),
+    appOperationalStateCoordinator: FakeAppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
+    permanentAccountDeletionCoordinator: FakePermanentAccountDeletionCoordinator = FakePermanentAccountDeletionCoordinator(),
 ) = AccountDeactivationPresenter(
     matrixClient = matrixClient,
+    appOperationalStateCoordinator = appOperationalStateCoordinator,
+    permanentAccountDeletionCoordinator = permanentAccountDeletionCoordinator,
 )

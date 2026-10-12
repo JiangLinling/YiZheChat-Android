@@ -14,6 +14,7 @@ import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.di.annotations.SessionCoroutineScope
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.media.MediaSource
+import io.element.android.libraries.preferences.api.store.SessionPreferencesStore
 import io.element.android.libraries.voiceplayer.api.VoiceMessagePresenterFactory
 import io.element.android.libraries.voiceplayer.api.VoiceMessageState
 import io.element.android.services.analytics.api.AnalyticsService
@@ -27,6 +28,7 @@ class DefaultVoiceMessagePresenterFactory(
     private val sessionCoroutineScope: CoroutineScope,
     private val voiceMessagePlayerFactory: VoiceMessagePlayer.Factory,
     private val voicePlayerStore: VoicePlayerStore,
+    private val sessionPreferencesStore: SessionPreferencesStore,
 ) : VoiceMessagePresenterFactory {
     override fun createVoiceMessagePresenter(
         eventId: EventId?,
@@ -35,20 +37,21 @@ class DefaultVoiceMessagePresenterFactory(
         filename: String?,
         duration: Duration,
     ): Presenter<VoiceMessageState> {
-        val player = voiceMessagePlayerFactory.create(
-            eventId = eventId,
-            mediaSource = mediaSource,
-            mimeType = mimeType,
-            filename = filename,
-        )
-
         return VoiceMessagePresenter(
             analyticsService = analyticsService,
             sessionCoroutineScope = sessionCoroutineScope,
             voicePlayerStore = voicePlayerStore,
-            player = player,
+            playerFactory = {
+                voiceMessagePlayerFactory.create(
+                    eventId = eventId,
+                    mediaSource = mediaSource,
+                    mimeType = mimeType,
+                    filename = filename,
+                )
+            },
             eventId = eventId,
             duration = duration,
+            sessionPreferencesStore = sessionPreferencesStore,
         )
     }
 }

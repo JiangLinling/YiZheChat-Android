@@ -18,5 +18,6 @@ class FakeShowLocationEntryPoint : ShowLocationEntryPoint {
         parentNode: Node,
         buildContext: BuildContext,
         inputs: ShowLocationEntryPoint.Inputs,
+        callback: ShowLocationEntryPoint.Callback,
     ): Node = lambdaError()
 }

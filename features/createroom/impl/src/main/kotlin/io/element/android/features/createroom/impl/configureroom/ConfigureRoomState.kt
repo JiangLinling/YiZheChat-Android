@@ -11,6 +11,8 @@ package io.element.android.features.createroom.impl.configureroom
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.spaces.SpaceRoom
+import io.element.android.libraries.matrix.api.user.MatrixUser
+import kotlinx.collections.immutable.persistentListOf
 import io.element.android.libraries.matrix.ui.media.AvatarAction
 import io.element.android.libraries.matrix.ui.room.address.RoomAddressValidity
 import io.element.android.libraries.permissions.api.PermissionsState
@@ -26,9 +28,12 @@ data class ConfigureRoomState(
     val homeserverName: String,
     val availableJoinRules: ImmutableList<JoinRuleItem>,
     val spaces: ImmutableList<SpaceRoom>,
-    val eventSink: (ConfigureRoomEvents) -> Unit
+    val eventSink: (ConfigureRoomEvents) -> Unit,
+    val contacts: ImmutableList<MatrixUser> = persistentListOf(),
+    val contactsLoading: Boolean = true,
+    val isConfigurationLocked: Boolean = false,
 ) {
-    val isValid: Boolean = config.roomName?.isNotEmpty() == true &&
+    val isValid: Boolean = (if (isSpace) !config.roomName.isNullOrBlank() else !config.effectiveRoomName.isNullOrBlank()) &&
         (config.visibilityState is RoomVisibilityState.Private || roomAddressValidity == RoomAddressValidity.Valid) &&
         config.visibilityState.joinRuleItem in availableJoinRules
 }

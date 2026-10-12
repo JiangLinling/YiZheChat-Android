@@ -53,6 +53,7 @@ import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.architecture.inputs
 import io.element.android.libraries.designsystem.utils.OnLifecycleEvent
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.matrix.api.analytics.toAnalyticsViewRoom
 import io.element.android.libraries.matrix.api.core.EventId
@@ -69,6 +70,8 @@ import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.api.timeline.item.TimelineItemDebugInfo
 import io.element.android.libraries.ui.utils.a11y.hasExternalKeyboard
 import io.element.android.libraries.ui.utils.a11y.isTalkbackActive
+import io.element.android.security.contentprotection.api.OfflineOutboxService
+import io.element.android.security.dataprotection.api.AccountHistoryAccessBoundaryProvider
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.appnavstate.api.AppNavigationStateService
 import kotlinx.collections.immutable.ImmutableList
@@ -82,6 +85,8 @@ class ThreadedMessagesNode(
     @Assisted plugins: List<Plugin>,
     private val room: JoinedRoom,
     private val analyticsService: AnalyticsService,
+    private val offlineOutboxService: OfflineOutboxService,
+    private val accountHistoryAccessBoundaryProvider: AccountHistoryAccessBoundaryProvider,
     private val messageComposerPresenterFactory: MessageComposerPresenter.Factory,
     private val timelinePresenterFactory: TimelinePresenter.Factory,
     private val presenterFactory: MessagesPresenter.Factory,
@@ -108,7 +113,13 @@ class ThreadedMessagesNode(
      */
     private suspend fun createPresenter(): Presenter<MessagesState> {
         val threadedTimeline = room.createTimeline(CreateTimelineParams.Threaded(threadRootEventId = inputs.threadRootEventId)).getOrThrow()
-        val timelineController = TimelineController(room, threadedTimeline)
+        val timelineController = TimelineController(
+            room = room,
+            liveTimeline = threadedTimeline,
+            requireContentProtection = true,
+            offlineOutboxService = offlineOutboxService,
+            accountHistoryAccessBoundaryProvider = accountHistoryAccessBoundaryProvider,
+        )
         this.timelineController = timelineController
         return presenterFactory.create(
             navigator = this,
@@ -124,14 +135,21 @@ class ThreadedMessagesNode(
     }
 
     interface Callback : Plugin {
-        fun handleEventClick(timelineMode: Timeline.Mode, event: TimelineItem.Event, canUseOverlay: Boolean): Boolean
-        fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?)
+        fun handleEventClick(
+            timelineMode: Timeline.Mode,
+            event: TimelineItem.Event,
+            canUseOverlay: Boolean,
+            onOneTimeViewEnded: ((Timeline.BurnAfterReadEndReason) -> Unit)?,
+        ): Boolean
+        fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?, burnAfterRead: Boolean)
         fun navigateToRoomMemberDetails(userId: UserId)
         fun handlePermalinkClick(data: PermalinkData)
         fun navigateToEventDebugInfo(eventId: EventId?, debugInfo: TimelineItemDebugInfo)
         fun handleForwardEventClick(eventId: EventId)
+        val reportSnackbarMessage: SnackbarMessage?
+        fun dismissReportSnackbar(messageId: Long)
         fun navigateToReportMessage(eventId: EventId, senderId: UserId)
-        fun navigateToSendLocation()
+        fun navigateToSendLocation(burnAfterRead: Boolean)
         fun navigateToCreatePoll()
         fun navigateToEditPoll(eventId: EventId)
         fun navigateToCurrentLiveLocation()
@@ -223,8 +241,8 @@ class ThreadedMessagesNode(
         callback.navigateToEditPoll(eventId)
     }
 
-    override fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?) {
-        callback.navigateToPreviewAttachments(attachments, inReplyToEventId)
+    override fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?, burnAfterRead: Boolean) {
+        callback.navigateToPreviewAttachments(attachments, inReplyToEventId, burnAfterRead)
     }
 
     override fun navigateToRoom(roomId: RoomId, eventId: EventId?, serverNames: List<String>) {
@@ -249,6 +267,10 @@ class ThreadedMessagesNode(
         callback.navigateToCurrentLiveLocation()
     }
 
+    override fun navigateToRoomCall(roomId: RoomId, isAudioCall: Boolean) {
+        callback.navigateToRoomCall(roomId, isAudioCall)
+    }
+
     override fun close() = navigateUp()
 
     @Composable
@@ -270,16 +292,30 @@ class ThreadedMessagesNode(
 
                 MessagesView(
                     state = state,
+                    roomActionSnackbarMessage = callback.reportSnackbarMessage,
+                    onRoomActionSnackbarDismissed = callback::dismissReportSnackbar,
                     onBackClick = this::navigateUp,
                     onRoomDetailsClick = {},
                     onEventContentClick = { isLive, event ->
+                        val onOneTimeViewEnded = if (event.content.isBurnAfterRead) {
+                            { reason: Timeline.BurnAfterReadEndReason ->
+                                state.timelineState.eventSink(TimelineEvent.EndBurnAfterRead(reason))
+                            }
+                        } else {
+                            null
+                        }
                         timelineController?.let { controller ->
                             if (isLive) {
-                                callback.handleEventClick(controller.mainTimelineMode(), event, canUseOverlay)
+                                callback.handleEventClick(
+                                    controller.mainTimelineMode(),
+                                    event,
+                                    canUseOverlay,
+                                    onOneTimeViewEnded,
+                                )
                             } else {
                                 val detachedTimelineMode = controller.detachedTimelineMode()
                                 if (detachedTimelineMode != null) {
-                                    callback.handleEventClick(detachedTimelineMode, event, canUseOverlay)
+                                    callback.handleEventClick(detachedTimelineMode, event, canUseOverlay, onOneTimeViewEnded)
                                 } else {
                                     false
                                 }
@@ -296,7 +332,9 @@ class ThreadedMessagesNode(
                             customTab = customTab,
                         )
                     },
-                    onSendLocationClick = callback::navigateToSendLocation,
+                    onSendLocationClick = {
+                        callback.navigateToSendLocation(state.composerState.isBurnAfterReadEnabled)
+                    },
                     onCreatePollClick = callback::navigateToCreatePoll,
                     onJoinCallClick = { isAudioCall ->
                         callback.navigateToRoomCall(room.roomId, isAudioCall)

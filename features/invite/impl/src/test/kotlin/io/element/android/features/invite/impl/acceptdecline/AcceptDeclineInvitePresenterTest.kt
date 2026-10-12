@@ -194,6 +194,25 @@ class AcceptDeclineInvitePresenterTest {
             .with(value(A_ROOM_ID))
     }
 
+    @Test
+    fun `same tick duplicate accept and conflicting decline call service once`() = runTest {
+        val call = lambdaRecorder<RoomId, Result<RoomId>> { roomId -> Result.success(roomId) }
+        val decline = lambdaRecorder<RoomId, Boolean, Boolean, String?, Result<RoomId>> { roomId, _, _, _ -> Result.success(roomId) }
+        val presenter = createAcceptDeclineInvitePresenter(FakeAcceptInvite(lambda = call), FakeDeclineInvite(lambda = decline))
+        presenter.test {
+            val state = awaitItem()
+            val invite = anInviteData()
+            state.eventSink(AcceptDeclineInviteEvents.AcceptInvite(invite))
+            state.eventSink(AcceptDeclineInviteEvents.AcceptInvite(invite))
+            state.eventSink(AcceptDeclineInviteEvents.DeclineInvite(invite, false, false))
+            assertThat(awaitItem().actionRoomId).isEqualTo(A_ROOM_ID)
+            assertThat(awaitItem().acceptAction).isInstanceOf(AsyncAction.Success::class.java)
+            cancelAndConsumeRemainingEvents()
+        }
+        call.assertions().isCalledOnce().with(value(A_ROOM_ID))
+        decline.assertions().isNeverCalled()
+    }
+
     private fun anInviteData(
         roomId: RoomId = A_ROOM_ID,
         name: String = A_ROOM_NAME,

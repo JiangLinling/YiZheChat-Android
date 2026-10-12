@@ -12,5 +12,19 @@ import androidx.compose.runtime.Composable
 
 interface LocalMediaRenderer {
     @Composable
-    fun Render(localMedia: LocalMedia)
+    fun Render(
+        localMedia: LocalMedia,
+        accountId: String? = null,
+        deviceId: String? = null,
+        renderMode: LocalMediaRenderMode = LocalMediaRenderMode.STANDALONE,
+    )
+}
+
+/** Controls whether the renderer owns its surrounding viewer chrome. */
+enum class LocalMediaRenderMode {
+    /** The full-screen media viewer supplies overlay controls, so Office content reserves their height. */
+    STANDALONE,
+
+    /** A parent screen already supplies a top app bar and its content insets. */
+    EMBEDDED,
 }

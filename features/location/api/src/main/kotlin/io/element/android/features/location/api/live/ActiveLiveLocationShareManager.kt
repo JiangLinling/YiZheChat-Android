@@ -9,12 +9,20 @@ package io.element.android.features.location.api.live
 
 import io.element.android.libraries.core.coroutine.mapState
 import io.element.android.libraries.matrix.api.core.RoomId
+import io.element.android.libraries.matrix.api.room.location.BeaconId
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.time.Duration
 
 interface ActiveLiveLocationShareManager {
     /** All rooms currently sharing live location on this device. */
     val sharingRoomIds: StateFlow<Set<RoomId>>
+
+    /** Shares restored after process death. They stay paused until the user explicitly resumes. */
+    val pausedShares: StateFlow<Map<RoomId, PausedLiveLocationShare>>
+
+    /** Local pause projection for this exact original beacon; observing it never resumes capture. */
+    fun pausedShare(roomId: RoomId, beaconId: BeaconId): Flow<PausedLiveLocationShare?>
 
     /**
      * Initializes the manager.
@@ -30,12 +38,21 @@ interface ActiveLiveLocationShareManager {
      */
     suspend fun startShare(roomId: RoomId, duration: Duration): Result<Unit>
 
+    /** Resumes local GPS delivery for the original remote share and original deadline. */
+    suspend fun resumeShare(roomId: RoomId): Result<Unit>
+
     /**
      * Stops live location sharing in the given room.
      * Calls room.stopLiveLocationShare() on the SDK, removes the share,
      * and stops the foreground service if no shares remain.
      */
-    suspend fun stopShare(roomId: RoomId): Result<Unit>
+    suspend fun stopShare(roomId: RoomId, protectedAggregateId: String? = null): Result<Unit>
+}
+
+enum class PausedLiveLocationShare {
+    CHECKING,
+    RECOVERABLE,
+    UNRECOVERABLE,
 }
 
 fun ActiveLiveLocationShareManager.isCurrentlySharing(roomId: RoomId): StateFlow<Boolean> {

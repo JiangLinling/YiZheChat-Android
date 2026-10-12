@@ -13,17 +13,24 @@ class FakePushGatewayApiFactory(
 ) : PushGatewayApiFactory {
     var baseUrlParameter: String? = null
         private set
+    var notifyUrlParameter: String? = null
+        private set
 
     override fun create(baseUrl: String): PushGatewayAPI {
         baseUrlParameter = baseUrl
-        return FakePushGatewayAPI(notifyResponse)
+        return FakePushGatewayAPI(
+            notifyResponse = notifyResponse,
+            onNotify = { notifyUrlParameter = it },
+        )
     }
 }
 
 class FakePushGatewayAPI(
-    private val notifyResponse: () -> PushGatewayNotifyResponse
+    private val notifyResponse: () -> PushGatewayNotifyResponse,
+    private val onNotify: (String) -> Unit,
 ) : PushGatewayAPI {
-    override suspend fun notify(body: PushGatewayNotifyBody): PushGatewayNotifyResponse {
+    override suspend fun notify(url: String, body: PushGatewayNotifyBody): PushGatewayNotifyResponse {
+        onNotify(url)
         return notifyResponse()
     }
 }

@@ -14,4 +14,5 @@ sealed interface ComposerDraftType {
     data object NewMessage : ComposerDraftType
     data class Reply(val eventId: EventId) : ComposerDraftType
     data class Edit(val eventId: EventId) : ComposerDraftType
+    data class EditCaption(val eventId: EventId) : ComposerDraftType
 }

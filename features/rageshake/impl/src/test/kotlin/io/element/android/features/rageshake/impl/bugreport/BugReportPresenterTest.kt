@@ -8,6 +8,7 @@
 
 package io.element.android.features.rageshake.impl.bugreport
 
+import android.net.Uri
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.rageshake.api.reporter.BugReporter
 import io.element.android.features.rageshake.impl.crash.A_CRASH_DATA
@@ -17,9 +18,11 @@ import io.element.android.features.rageshake.impl.screenshot.A_SCREENSHOT_URI
 import io.element.android.features.rageshake.impl.screenshot.FakeScreenshotHolder
 import io.element.android.features.rageshake.impl.screenshot.ScreenshotHolder
 import io.element.android.libraries.architecture.AsyncAction
+import io.element.android.libraries.mediapickers.api.PickedMedia
 import io.element.android.libraries.matrix.test.A_FAILURE_REASON
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.test
+import io.mockk.mockk
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
@@ -59,14 +62,36 @@ class BugReportPresenterTest {
     }
 
     @Test
+    fun `present - attachment is compressed and released when leaving`() = runTest {
+        val attachmentProcessor = FakeBugReportAttachmentProcessor()
+        val presenter = createPresenter(attachmentProcessor = attachmentProcessor)
+        presenter.test {
+            val initialState = awaitItem()
+            initialState.eventSink(
+                BugReportEvents.AddAttachments(
+                    listOf(PickedMedia(mockk<Uri>(relaxed = true), "image/jpeg"))
+                )
+            )
+
+            assertThat(awaitItem().attachments.single().status).isEqualTo(BugReportAttachmentStatus.Compressing)
+            val readyState = awaitItem()
+            assertThat(readyState.attachments.single().status).isEqualTo(BugReportAttachmentStatus.Ready)
+
+            readyState.eventSink(BugReportEvents.DiscardAttachments)
+            assertThat(awaitItem().attachments).isEmpty()
+            assertThat(attachmentProcessor.released).containsExactly(attachmentProcessor.result.getOrThrow())
+        }
+    }
+
+    @Test
     fun `present - can contact`() = runTest {
         val presenter = createPresenter()
         presenter.test {
             val initialState = awaitItem()
-            initialState.eventSink.invoke(BugReportEvents.SetCanContact(true))
-            assertThat(awaitItem().formState).isEqualTo(BugReportFormState.Default.copy(canContact = true))
             initialState.eventSink.invoke(BugReportEvents.SetCanContact(false))
             assertThat(awaitItem().formState).isEqualTo(BugReportFormState.Default.copy(canContact = false))
+            initialState.eventSink.invoke(BugReportEvents.SetCanContact(true))
+            assertThat(awaitItem().formState).isEqualTo(BugReportFormState.Default.copy(canContact = true))
         }
     }
 
@@ -88,10 +113,10 @@ class BugReportPresenterTest {
         val presenter = createPresenter()
         presenter.test {
             val initialState = awaitItem()
-            initialState.eventSink.invoke(BugReportEvents.SetSendScreenshot(true))
-            assertThat(awaitItem().formState).isEqualTo(BugReportFormState.Default.copy(sendScreenshot = true))
             initialState.eventSink.invoke(BugReportEvents.SetSendScreenshot(false))
             assertThat(awaitItem().formState).isEqualTo(BugReportFormState.Default.copy(sendScreenshot = false))
+            initialState.eventSink.invoke(BugReportEvents.SetSendScreenshot(true))
+            assertThat(awaitItem().formState).isEqualTo(BugReportFormState.Default.copy(sendScreenshot = true))
         }
     }
 
@@ -100,22 +125,10 @@ class BugReportPresenterTest {
         val presenter = createPresenter()
         presenter.test {
             val initialState = awaitItem()
-            initialState.eventSink.invoke(BugReportEvents.SetSendPushRules(true))
-            assertThat(awaitItem().formState).isEqualTo(BugReportFormState.Default.copy(sendPushRules = true))
             initialState.eventSink.invoke(BugReportEvents.SetSendPushRules(false))
             assertThat(awaitItem().formState).isEqualTo(BugReportFormState.Default.copy(sendPushRules = false))
-        }
-    }
-
-    @Test
-    fun `present - set GitHub issue number`() = runTest {
-        val presenter = createPresenter()
-        presenter.test {
-            val initialState = awaitItem()
-            initialState.eventSink.invoke(BugReportEvents.SetGhIssueNumber(1))
-            assertThat(awaitItem().formState).isEqualTo(BugReportFormState.Default.copy(ghIssueNumber = 1))
-            initialState.eventSink.invoke(BugReportEvents.SetGhIssueNumber(null))
-            assertThat(awaitItem().formState).isEqualTo(BugReportFormState.Default.copy(ghIssueNumber = null))
+            initialState.eventSink.invoke(BugReportEvents.SetSendPushRules(true))
+            assertThat(awaitItem().formState).isEqualTo(BugReportFormState.Default.copy(sendPushRules = true))
         }
     }
 
@@ -207,6 +220,20 @@ class BugReportPresenterTest {
     }
 
     @Test
+    fun `present - whitespace-only description is rejected before upload`() = runTest {
+        val bugReporter = FakeBugReporter()
+        val presenter = createPresenter(bugReporter = bugReporter)
+        presenter.test {
+            val initialState = awaitItem()
+            initialState.eventSink.invoke(BugReportEvents.SetDescription("          "))
+            skipItems(1)
+            initialState.eventSink.invoke(BugReportEvents.SendBugReport)
+            val errorState = awaitItem()
+            assertThat(errorState.sending).isEqualTo(AsyncAction.Failure(BugReportFormError.DescriptionTooShort))
+        }
+    }
+
+    @Test
     fun `present - send cancel`() = runTest {
         val presenter = createPresenter(
             FakeBugReporter(mode = FakeBugReporter.Mode.Cancel),
@@ -234,9 +261,11 @@ internal fun TestScope.createPresenter(
     bugReporter: BugReporter = FakeBugReporter(),
     crashDataStore: CrashDataStore = FakeCrashDataStore(),
     screenshotHolder: ScreenshotHolder = FakeScreenshotHolder(),
+    attachmentProcessor: BugReportAttachmentProcessor = FakeBugReportAttachmentProcessor(),
 ) = BugReportPresenter(
     bugReporter = bugReporter,
     crashDataStore = crashDataStore,
     screenshotHolder = screenshotHolder,
+    attachmentProcessor = attachmentProcessor,
     appCoroutineScope = this,
 )

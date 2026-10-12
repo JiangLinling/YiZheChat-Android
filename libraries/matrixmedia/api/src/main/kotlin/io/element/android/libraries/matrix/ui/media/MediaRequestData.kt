@@ -23,7 +23,9 @@ import io.element.android.libraries.matrix.api.media.MediaSource
  */
 data class MediaRequestData(
     val source: MediaSource?,
-    val kind: Kind
+    val kind: Kind,
+    /** False for one-time content which must never enter Coil's reusable decoded-image cache. */
+    val cacheable: Boolean = true,
 ) {
     sealed interface Kind {
         data object Content : Kind

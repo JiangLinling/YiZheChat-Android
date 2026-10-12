@@ -51,7 +51,9 @@ import io.element.android.tests.testutils.lambda.lambdaRecorder
 import io.element.android.tests.testutils.lambda.value
 import io.element.android.tests.testutils.test
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
@@ -347,6 +349,52 @@ class LoggedInPresenterTest {
         return awaitItem()
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `push registration retries transient failure without user confirmation`() = runTest {
+        var attempts = 0
+        createLoggedInPresenter(
+            sessionVerificationService = FakeSessionVerificationService(initialSessionVerifiedStatus = SessionVerifiedStatus.Verified),
+            pushService = createFakePushService(ensurePusherIsRegisteredResult = {
+                attempts += 1
+                if (attempts == 1) Result.failure(AN_EXCEPTION) else Result.success(Unit)
+            }),
+        ).test {
+            consumeItemsUntilPredicate { it.pusherRegistrationState.isFailure() }
+            assertThat(attempts).isEqualTo(1)
+            advanceTimeBy(1_000)
+            runCurrent()
+            consumeItemsUntilPredicate { it.pusherRegistrationState.isSuccess() }
+            assertThat(attempts).isEqualTo(2)
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `push retry cancels after verification loss and resumes only when verified`() = runTest {
+        var attempts = 0
+        val verification = FakeSessionVerificationService(initialSessionVerifiedStatus = SessionVerifiedStatus.Verified)
+        createLoggedInPresenter(
+            sessionVerificationService = verification,
+            pushService = createFakePushService(ensurePusherIsRegisteredResult = {
+                attempts += 1
+                Result.failure(AN_EXCEPTION)
+            }),
+        ).test {
+            consumeItemsUntilPredicate { it.pusherRegistrationState.isFailure() }
+            verification.emitVerifiedStatus(SessionVerifiedStatus.NotVerified)
+            runCurrent()
+            consumeItemsUntilPredicate { it.pusherRegistrationState.errorOrNull() is PusherRegistrationFailure.AccountNotVerified }
+            advanceTimeBy(60_000)
+            runCurrent()
+            assertThat(attempts).isEqualTo(1)
+            verification.emitVerifiedStatus(SessionVerifiedStatus.Verified)
+            runCurrent()
+            consumeItemsUntilPredicate { it.pusherRegistrationState.errorOrNull() === AN_EXCEPTION }
+            assertThat(attempts).isEqualTo(2)
+        }
+    }
+
     private fun createLoggedInPresenter(
         syncState: SyncState = SyncState.Running,
         analyticsService: AnalyticsService = FakeAnalyticsService(),
@@ -369,5 +417,32 @@ class LoggedInPresenterTest {
             buildMeta = buildMeta,
             networkMonitor = networkMonitor,
         )
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `push retry waits offline and retries immediately on network return`() = runTest {
+        var attempts = 0
+        val network = FakeNetworkMonitor()
+        createLoggedInPresenter(
+            networkMonitor = network,
+            sessionVerificationService = FakeSessionVerificationService(initialSessionVerifiedStatus = SessionVerifiedStatus.Verified),
+            pushService = createFakePushService(ensurePusherIsRegisteredResult = {
+                attempts += 1
+                if (attempts == 1) Result.failure(AN_EXCEPTION) else Result.success(Unit)
+            }),
+        ).test {
+            consumeItemsUntilPredicate { it.pusherRegistrationState.isFailure() }
+            network.connectivity.value = NetworkStatus.Disconnected
+            runCurrent()
+            advanceTimeBy(60_000)
+            runCurrent()
+            assertThat(attempts).isEqualTo(1)
+            network.connectivity.value = NetworkStatus.Connected
+            runCurrent()
+            consumeItemsUntilPredicate { it.pusherRegistrationState.isSuccess() }
+            assertThat(attempts).isEqualTo(2)
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 }

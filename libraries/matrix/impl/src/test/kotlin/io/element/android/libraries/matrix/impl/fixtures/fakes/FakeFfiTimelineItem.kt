@@ -16,9 +16,10 @@ import org.matrix.rustcomponents.sdk.VirtualTimelineItem
 
 class FakeFfiTimelineItem(
     private val asEventResult: EventTimelineItem? = null,
+    private val uniqueId: String = "uniqueId",
 ) : TimelineItem(NoHandle) {
     override fun asEvent(): EventTimelineItem? = asEventResult
     override fun asVirtual(): VirtualTimelineItem? = null
     override fun fmtDebug(): String = "fmtDebug"
-    override fun uniqueId(): TimelineUniqueId = TimelineUniqueId("uniqueId")
+    override fun uniqueId(): TimelineUniqueId = TimelineUniqueId(uniqueId)
 }

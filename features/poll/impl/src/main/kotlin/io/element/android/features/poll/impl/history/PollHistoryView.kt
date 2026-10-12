@@ -115,6 +115,8 @@ fun PollHistoryView(
                     hasMoreToLoad = state.hasMoreToLoad,
                     isLoading = state.isLoading,
                     onSelectAnswer = ::onSelectAnswer,
+                    onSubmitAnswer = { id, answer, complete -> state.eventSink(PollHistoryEvents.SelectPollAnswer(id, answer, complete)) },
+                    onSubmitEnd = { id, complete -> state.eventSink(PollHistoryEvents.EndPoll(id, complete)) },
                     onEditPoll = onEditPoll,
                     onEndPoll = ::onEndPoll,
                     onLoadMore = ::onLoadMore,
@@ -152,6 +154,8 @@ private fun PollHistoryList(
     hasMoreToLoad: Boolean,
     isLoading: Boolean,
     onSelectAnswer: (pollStartId: EventId, answerId: String) -> Unit,
+    onSubmitAnswer: (EventId, String, (Result<Unit>) -> Unit) -> Unit,
+    onSubmitEnd: (EventId, (Result<Unit>) -> Unit) -> Unit,
     onEditPoll: (pollStartId: EventId) -> Unit,
     onEndPoll: (pollStartId: EventId) -> Unit,
     onLoadMore: () -> Unit,
@@ -167,6 +171,8 @@ private fun PollHistoryList(
             PollHistoryItemRow(
                 pollHistoryItem = pollHistoryItem,
                 onSelectAnswer = onSelectAnswer,
+                onSubmitAnswer = onSubmitAnswer,
+                onSubmitEnd = onSubmitEnd,
                 onEditPoll = onEditPoll,
                 onEndPoll = onEndPoll,
                 modifier = Modifier.padding(vertical = 8.dp, horizontal = 16.dp)
@@ -223,6 +229,8 @@ private fun LoadMoreButton(isLoading: Boolean, onClick: () -> Unit) {
 private fun PollHistoryItemRow(
     pollHistoryItem: PollHistoryItem,
     onSelectAnswer: (pollStartId: EventId, answerId: String) -> Unit,
+    onSubmitAnswer: (EventId, String, (Result<Unit>) -> Unit) -> Unit,
+    onSubmitEnd: (EventId, (Result<Unit>) -> Unit) -> Unit,
     onEditPoll: (pollStartId: EventId) -> Unit,
     onEndPoll: (pollStartId: EventId) -> Unit,
     modifier: Modifier = Modifier,
@@ -245,6 +253,8 @@ private fun PollHistoryItemRow(
             PollContentView(
                 state = pollHistoryItem.state,
                 onSelectAnswer = onSelectAnswer,
+                onSubmitAnswer = onSubmitAnswer,
+                onSubmitEnd = onSubmitEnd,
                 onEditPoll = onEditPoll,
                 onEndPoll = onEndPoll,
             )

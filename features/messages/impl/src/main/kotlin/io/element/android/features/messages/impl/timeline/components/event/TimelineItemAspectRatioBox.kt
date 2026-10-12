@@ -18,7 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 const val MIN_HEIGHT_IN_DP = 100
-const val MAX_HEIGHT_IN_DP = 360
+const val MAX_HEIGHT_IN_DP = 260
+internal const val MEDIA_PORTRAIT_WIDTH_DP = 120
+internal const val MEDIA_PORTRAIT_ASPECT_RATIO = 0.75f
 const val DEFAULT_ASPECT_RATIO = 1.33f
 const val MIN_ASPECT_RATIO = 0.001f
 const val MAX_ASPECT_RATIO = 10f

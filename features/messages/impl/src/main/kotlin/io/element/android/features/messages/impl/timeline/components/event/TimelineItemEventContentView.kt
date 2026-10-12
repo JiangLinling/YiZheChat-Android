@@ -23,6 +23,7 @@ import io.element.android.features.messages.impl.timeline.model.event.TimelineIt
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemLocationContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemPollContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRedactedContent
+import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRelayContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRtcNotificationContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemStateContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemStickerContent
@@ -30,9 +31,10 @@ import io.element.android.features.messages.impl.timeline.model.event.TimelineIt
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemUnknownContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemVideoContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemVoiceContent
-import io.element.android.features.messages.impl.timeline.model.event.ensureActiveLiveLocation
 import io.element.android.libraries.architecture.Presenter
+import io.element.android.libraries.matrix.api.timeline.item.event.LocalEventSendState
 import io.element.android.libraries.voiceplayer.api.VoiceMessageState
+import io.element.android.security.contentprotection.api.TrustedRedactionReason
 import io.element.android.wysiwyg.link.Link
 
 @Composable
@@ -47,18 +49,28 @@ fun TimelineItemEventContentView(
     eventSink: (TimelineEvent.TimelineItemEvent) -> Unit,
     modifier: Modifier = Modifier,
     onContentLayoutChange: (ContentAvoidingLayoutData) -> Unit = {},
+    isMine: Boolean = false,
+    localSendState: LocalEventSendState? = null,
+    trustedRedactionReason: TrustedRedactionReason? = null,
 ) {
     val presenterFactories = LocalTimelineItemPresenterFactories.current
     when (content) {
         is TimelineItemEncryptedContent -> TimelineItemEncryptedView(
             content = content,
             onContentLayoutChange = onContentLayoutChange,
-            modifier = modifier
+            modifier = modifier,
         )
         is TimelineItemRedactedContent -> TimelineItemRedactedView(
             content = content,
+            isMine = isMine,
+            trustedReason = trustedRedactionReason,
             onContentLayoutChange = onContentLayoutChange,
             modifier = modifier
+        )
+        is TimelineItemRelayContent -> TimelineItemRelayView(
+            content = content,
+            onParticipate = onContentClick,
+            modifier = modifier,
         )
         is TimelineItemTextBasedContent -> TimelineItemTextView(
             content = content,
@@ -74,8 +86,12 @@ fun TimelineItemEventContentView(
         )
         is TimelineItemLocationContent -> {
             TimelineItemLocationView(
-                content = content.ensureActiveLiveLocation(),
-                onStopLiveLocationClick = { eventSink(TimelineEvent.StopLiveLocationShare) },
+                content = presenterFactories.rememberPresenter<TimelineItemLocationContent, TimelineItemLocationContent>(content).present(),
+                onContentClick = onContentClick,
+                onStopLiveLocationClick = {
+                    val aggregateId = (content.mode as? TimelineItemLocationContent.Mode.Live)?.protectedAggregateId
+                    eventSink(TimelineEvent.StopLiveLocationShare(aggregateId))
+                },
                 modifier = modifier
             )
         }
@@ -112,7 +128,9 @@ fun TimelineItemEventContentView(
         is TimelineItemFileContent -> TimelineItemFileView(
             content = content,
             onContentLayoutChange = onContentLayoutChange,
-            modifier = modifier
+            modifier = modifier,
+            isMine = isMine,
+            localSendState = localSendState,
         )
         is TimelineItemAudioContent -> TimelineItemAudioView(
             content = content,
@@ -135,7 +153,9 @@ fun TimelineItemEventContentView(
                 state = presenter.present(),
                 content = content,
                 onContentLayoutChange = onContentLayoutChange,
-                modifier = modifier
+                modifier = modifier,
+                isMine = isMine,
+                onLongClick = onLongClick,
             )
         }
         is TimelineItemRtcNotificationContent -> error("This shouldn't be rendered as the content of a bubble")

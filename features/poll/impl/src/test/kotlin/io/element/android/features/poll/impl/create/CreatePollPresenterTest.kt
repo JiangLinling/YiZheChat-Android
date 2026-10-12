@@ -30,6 +30,8 @@ import io.element.android.libraries.matrix.test.AN_EVENT_ID
 import io.element.android.libraries.matrix.test.room.FakeJoinedRoom
 import io.element.android.libraries.matrix.test.timeline.FakeTimeline
 import io.element.android.libraries.matrix.test.timeline.LiveTimelineProvider
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.services.analytics.test.FakeAnalyticsService
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.lambda.any
@@ -58,6 +60,7 @@ class CreatePollPresenterTest {
     )
     private val fakeAnalyticsService = FakeAnalyticsService()
     private val fakeMessageComposerContext = FakeMessageComposerContext()
+    private val appOperationalStateCoordinator = FakeAppOperationalStateCoordinator()
 
     @Test
     fun `default state has proper default values`() = runTest {
@@ -139,6 +142,7 @@ class CreatePollPresenterTest {
             skipItems(3)
             initial.eventSink(CreatePollEvent.Save)
             delay(1) // Wait for the coroutine to finish
+            skipItems(1)
             createPollResult.assertions().isCalledOnce()
                 .with(
                     value("A question?"),
@@ -162,6 +166,10 @@ class CreatePollPresenterTest {
                     numberOfAnswers = 2,
                 )
             )
+            assertThat(appOperationalStateCoordinator.startedRequests).hasSize(1)
+            assertThat(appOperationalStateCoordinator.startedRequests.single().lifecycleId).isEqualTo(FullAppLifecycleId.LC_15)
+            assertThat(appOperationalStateCoordinator.startedRequests.single().trigger).isEqualTo("poll")
+            assertThat(appOperationalStateCoordinator.startedRequests.single().roomIdHash).hasLength(64)
         }
     }
 
@@ -187,6 +195,12 @@ class CreatePollPresenterTest {
             awaitItem().eventSink(CreatePollEvent.SetAnswer(1, "Answer 2"))
             awaitItem().eventSink(CreatePollEvent.Save)
             delay(1) // Wait for the coroutine to finish
+            skipItems(1)
+            val failed = awaitItem()
+            assertThat(failed.saveAction).isInstanceOf(io.element.android.libraries.architecture.AsyncAction.Failure::class.java)
+            assertThat(failed.question).isEqualTo("A question?")
+            assertThat(failed.answers.map { it.text }).containsExactly("Answer 1", "Answer 2")
+            assertThat(navUpInvocationsCount).isEqualTo(0)
             createPollResult.assertions().isCalledOnce()
             assertThat(fakeAnalyticsService.capturedEvents).isEmpty()
             assertThat(fakeAnalyticsService.trackedErrors).hasSize(1)
@@ -226,6 +240,7 @@ class CreatePollPresenterTest {
                 eventSink(CreatePollEvent.Save)
             }
             advanceUntilIdle() // Wait for the coroutine to finish
+            skipItems(1)
 
             assert(editPollLambda)
                 .isCalledOnce()
@@ -278,6 +293,10 @@ class CreatePollPresenterTest {
             awaitPollLoaded().eventSink(CreatePollEvent.SetAnswer(0, "A"))
             awaitPollLoaded(newAnswer1 = "A").eventSink(CreatePollEvent.Save)
             advanceUntilIdle() // Wait for the coroutine to finish
+            skipItems(1)
+            val failed = awaitItem()
+            assertThat(failed.saveAction).isInstanceOf(io.element.android.libraries.architecture.AsyncAction.Failure::class.java)
+            assertThat(navUpInvocationsCount).isEqualTo(0)
             editPollLambda.assertions().isCalledOnce()
             assertThat(fakeAnalyticsService.capturedEvents).isEmpty()
             assertThat(fakeAnalyticsService.trackedErrors).hasSize(1)
@@ -562,6 +581,8 @@ class CreatePollPresenterTest {
         },
         analyticsService = fakeAnalyticsService,
         messageComposerContext = fakeMessageComposerContext,
+        room = room,
+        appOperationalStateCoordinator = appOperationalStateCoordinator,
         navigateUp = { navUpInvocationsCount++ },
         mode = mode,
         timelineMode = timelineMode,

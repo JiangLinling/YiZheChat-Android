@@ -45,7 +45,7 @@ private const val versionMonth = 6
  * Release number in the month. Value must be in [0,99].
  * Do not update this value. it is updated by the release script.
  */
-private const val versionReleaseNumber = 2
+private const val versionReleaseNumber = 62
 
 object Versions {
     /**
@@ -88,7 +88,9 @@ object Versions {
     /**
      * minSdkVersion that will be set in the Android Manifest.
      */
-    val minSdk = if (isEnterpriseBuild) MIN_SDK_ENTERPRISE else MIN_SDK_FOSS
+    // Keep version metadata self-contained so incremental plugin compilation does not
+    // depend on the separate Enterprise.kt top-level property being present in its classpath.
+    val minSdk = if (java.io.File("enterprise/README.md").exists()) MIN_SDK_ENTERPRISE else MIN_SDK_FOSS
 
     /**
      * Java version used for compilation.

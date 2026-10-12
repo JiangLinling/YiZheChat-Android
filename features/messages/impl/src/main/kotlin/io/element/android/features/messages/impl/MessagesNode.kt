@@ -10,6 +10,7 @@ package io.element.android.features.messages.impl
 
 import android.app.Activity
 import android.content.Context
+import android.os.Process
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.runtime.Composable
@@ -17,9 +18,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.lifecycle.Lifecycle
 import com.bumble.appyx.core.lifecycle.subscribe
 import com.bumble.appyx.core.modality.BuildContext
@@ -45,15 +50,18 @@ import io.element.android.features.roommembermoderation.api.ModerationAction
 import io.element.android.features.roommembermoderation.api.RoomMemberModerationEvents
 import io.element.android.features.roommembermoderation.api.RoomMemberModerationRenderer
 import io.element.android.libraries.androidutils.browser.openUrlInChromeCustomTab
+import io.element.android.libraries.androidutils.metadata.isInDebug
 import io.element.android.libraries.androidutils.system.openUrlInExternalApp
 import io.element.android.libraries.androidutils.system.toast
 import io.element.android.libraries.architecture.NodeInputs
 import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.architecture.inputs
 import io.element.android.libraries.designsystem.utils.OnLifecycleEvent
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.di.annotations.ApplicationContext
 import io.element.android.libraries.di.annotations.SessionCoroutineScope
+import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.analytics.toAnalyticsViewRoom
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
@@ -86,6 +94,8 @@ class MessagesNode(
     @ApplicationContext private val context: Context,
     @SessionCoroutineScope private val sessionCoroutineScope: CoroutineScope,
     private val room: JoinedRoom,
+    private val matrixClient: MatrixClient,
+    private val timelineController: TimelineController,
     private val analyticsService: AnalyticsService,
     messageComposerPresenterFactory: MessageComposerPresenter.Factory,
     timelinePresenterFactory: TimelinePresenter.Factory,
@@ -104,7 +114,6 @@ class MessagesNode(
     private val inputs = inputs<Inputs>()
     private val callback: Callback = callback()
 
-    private val timelineController = TimelineController(room, room.liveTimeline)
     private val presenter = presenterFactory.create(
         navigator = this,
         composerPresenter = messageComposerPresenterFactory.create(timelineController, this, isInThread = false),
@@ -117,14 +126,22 @@ class MessagesNode(
     )
 
     interface Callback : Plugin {
-        fun handleEventClick(timelineMode: Timeline.Mode, event: TimelineItem.Event, canUseOverlay: Boolean): Boolean
-        fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?)
+        fun handleEventClick(
+            timelineMode: Timeline.Mode,
+            event: TimelineItem.Event,
+            canUseOverlay: Boolean,
+            onOneTimeViewEnded: ((Timeline.BurnAfterReadEndReason) -> Unit)?,
+        ): Boolean
+        fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?, burnAfterRead: Boolean)
         fun navigateToRoomMemberDetails(userId: UserId)
         fun handlePermalinkClick(data: PermalinkData)
         fun navigateToEventDebugInfo(eventId: EventId?, debugInfo: TimelineItemDebugInfo)
         fun forwardEvent(eventId: EventId)
+        fun forwardEvents(eventIds: List<EventId>)
+        val reportSnackbarMessage: SnackbarMessage?
+        fun dismissReportSnackbar(messageId: Long)
         fun navigateToReportMessage(eventId: EventId, senderId: UserId)
-        fun navigateToSendLocation()
+        fun navigateToSendLocation(burnAfterRead: Boolean)
         fun navigateToCreatePoll()
         fun navigateToEditPoll(eventId: EventId)
         fun navigateToCurrentLiveLocation()
@@ -134,6 +151,7 @@ class MessagesNode(
         fun navigateToPinnedMessagesList()
         fun navigateToKnockRequestsList()
         fun navigateToDeveloperSettings()
+        fun navigateToChatSecurity()
 
         fun navigateToThreadsList()
     }
@@ -207,6 +225,10 @@ class MessagesNode(
         callback.forwardEvent(eventId)
     }
 
+    override fun forwardEvents(eventIds: List<EventId>) {
+        callback.forwardEvents(eventIds)
+    }
+
     override fun navigateToReportMessage(eventId: EventId, senderId: UserId) {
         callback.navigateToReportMessage(eventId, senderId)
     }
@@ -215,8 +237,8 @@ class MessagesNode(
         callback.navigateToEditPoll(eventId)
     }
 
-    override fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?) {
-        callback.navigateToPreviewAttachments(attachments, inReplyToEventId)
+    override fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?, burnAfterRead: Boolean) {
+        callback.navigateToPreviewAttachments(attachments, inReplyToEventId, burnAfterRead)
     }
 
     override fun navigateToRoom(roomId: RoomId, eventId: EventId?, serverNames: List<String>) {
@@ -240,8 +262,16 @@ class MessagesNode(
         callback.navigateToDeveloperSettings()
     }
 
+    override fun navigateToChatSecurity() {
+        callback.navigateToChatSecurity()
+    }
+
     override fun navigateToCurrentLiveLocation() {
         callback.navigateToCurrentLiveLocation()
+    }
+
+    override fun navigateToRoomCall(roomId: RoomId, isAudioCall: Boolean) {
+        callback.navigateToRoomCall(roomId, isAudioCall)
     }
 
     private fun displaySameRoomToast() {
@@ -259,6 +289,19 @@ class MessagesNode(
             LocalTimelineItemPresenterFactories provides timelineItemPresenterFactories,
         ) {
             val state = presenter.present()
+            val visibleRoomContextTag = remember(room.sessionId, room.roomId, matrixClient.sessionId, matrixClient.deviceId) {
+                debugVisibleRoomContextTag(
+                    debug = isInDebug,
+                    sessionId = room.sessionId.value,
+                    clientSessionId = matrixClient.sessionId.value,
+                    deviceId = matrixClient.deviceId.value,
+                    roomId = room.roomId.value,
+                    processId = Process.myPid(),
+                )
+            }
+            val visibleRoomModifier = visibleRoomContextTag?.let { tag ->
+                modifier.semantics { testTagsAsResourceId = true }.testTag(tag)
+            } ?: modifier
 
             BackHandler {
                 state.eventSink(MessagesEvent.MarkAsFullyReadAndExit)
@@ -272,15 +315,29 @@ class MessagesNode(
             }
             MessagesView(
                 state = state,
+                roomActionSnackbarMessage = callback.reportSnackbarMessage,
+                onRoomActionSnackbarDismissed = callback::dismissReportSnackbar,
                 onBackClick = { state.eventSink(MessagesEvent.MarkAsFullyReadAndExit) },
                 onRoomDetailsClick = callback::navigateToRoomDetails,
                 onEventContentClick = { isLive, event ->
+                    val onOneTimeViewEnded = if (event.content.isBurnAfterRead) {
+                        { reason: Timeline.BurnAfterReadEndReason ->
+                            state.timelineState.eventSink(TimelineEvent.EndBurnAfterRead(reason))
+                        }
+                    } else {
+                        null
+                    }
                     if (isLive) {
-                        callback.handleEventClick(timelineController.mainTimelineMode(), event, canUseOverlay)
+                        callback.handleEventClick(
+                            timelineController.mainTimelineMode(),
+                            event,
+                            canUseOverlay,
+                            onOneTimeViewEnded,
+                        )
                     } else {
                         val detachedTimelineMode = timelineController.detachedTimelineMode()
                         if (detachedTimelineMode != null) {
-                            callback.handleEventClick(detachedTimelineMode, event, canUseOverlay)
+                            callback.handleEventClick(detachedTimelineMode, event, canUseOverlay, onOneTimeViewEnded)
                         } else {
                             false
                         }
@@ -296,13 +353,15 @@ class MessagesNode(
                         customTab = customTab,
                     )
                 },
-                onSendLocationClick = callback::navigateToSendLocation,
+                onSendLocationClick = {
+                    callback.navigateToSendLocation(state.composerState.isBurnAfterReadEnabled)
+                },
                 onCreatePollClick = callback::navigateToCreatePoll,
                 onJoinCallClick = { isAudioCall ->
                     callback.navigateToRoomCall(room.roomId, isAudioCall)
                 },
                 onViewAllPinnedMessagesClick = callback::navigateToPinnedMessagesList,
-                modifier = modifier,
+                modifier = visibleRoomModifier,
                 knockRequestsBannerView = {
                     knockRequestsBannerRenderer.View(
                         modifier = Modifier,

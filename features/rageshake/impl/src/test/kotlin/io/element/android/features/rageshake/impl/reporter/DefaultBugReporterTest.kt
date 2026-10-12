@@ -393,7 +393,7 @@ class DefaultBugReporterTest {
                 initialList = listOf(aSessionData(sessionId = "@alice:domain.com"))
             )
         )
-        assertThat(sut.logDirectory().absolutePath).endsWith("/cache/logs/domain.com")
+        assertThat(sut.logDirectory().absolutePath.replace('\\', '/')).endsWith("/cache/logs/domain.com")
     }
 
     @Test
@@ -403,7 +403,7 @@ class DefaultBugReporterTest {
                 initialList = listOf(aSessionData(sessionId = "@alice:domain.com"))
             )
         )
-        assertThat(sut.logDirectory().absolutePath).endsWith("/cache/logs")
+        assertThat(sut.logDirectory().absolutePath.replace('\\', '/')).endsWith("/cache/logs")
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -426,9 +426,9 @@ class DefaultBugReporterTest {
         updateWriteToFilesConfigurationResult.assertions().isCalledOnce()
         assertThat(param).isNotNull()
         assertThat(param).isInstanceOf(WriteToFilesConfiguration.Enabled::class.java)
-        assertThat((param as WriteToFilesConfiguration.Enabled).directory).endsWith("/cache/logs/server.org")
+        assertThat((param as WriteToFilesConfiguration.Enabled).directory.replace('\\', '/')).endsWith("/cache/logs/server.org")
         assertThat((param as WriteToFilesConfiguration.Enabled).filenamePrefix).isEqualTo("logs")
-        assertThat((param as WriteToFilesConfiguration.Enabled).numberOfFiles).isEqualTo(168)
+        assertThat((param as WriteToFilesConfiguration.Enabled).numberOfFiles).isEqualTo(24)
         assertThat((param as WriteToFilesConfiguration.Enabled).filenameSuffix).isEqualTo(".log")
     }
 
@@ -488,9 +488,9 @@ class DefaultBugReporterTest {
         updateWriteToFilesConfigurationResult.assertions().isCalledOnce()
         assertThat(param).isNotNull()
         assertThat(param).isInstanceOf(WriteToFilesConfiguration.Enabled::class.java)
-        assertThat((param as WriteToFilesConfiguration.Enabled).directory).endsWith("/cache/logs")
+        assertThat((param as WriteToFilesConfiguration.Enabled).directory.replace('\\', '/')).endsWith("/cache/logs")
         assertThat((param as WriteToFilesConfiguration.Enabled).filenamePrefix).isEqualTo("logs")
-        assertThat((param as WriteToFilesConfiguration.Enabled).numberOfFiles).isEqualTo(168)
+        assertThat((param as WriteToFilesConfiguration.Enabled).numberOfFiles).isEqualTo(24)
         assertThat((param as WriteToFilesConfiguration.Enabled).filenameSuffix).isEqualTo(".log")
     }
 

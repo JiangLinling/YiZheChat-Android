@@ -8,9 +8,11 @@
 
 package io.element.android.libraries.matrix.impl.auth
 
+import android.util.Log
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.SingleIn
+import io.element.android.appconfig.NextDeploymentConfig
 import io.element.android.features.enterprise.api.EnterpriseService
 import io.element.android.libraries.androidutils.crypto.ClientSecret
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
@@ -42,6 +44,7 @@ import io.element.android.libraries.matrix.impl.paths.SessionPaths
 import io.element.android.libraries.matrix.impl.paths.SessionPathsFactory
 import io.element.android.libraries.matrix.impl.toSession
 import io.element.android.libraries.sessionstorage.api.LoginType
+import io.element.android.libraries.sessionstorage.api.SessionData
 import io.element.android.libraries.sessionstorage.api.SessionStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
@@ -57,6 +60,9 @@ import org.matrix.rustcomponents.sdk.QrLoginProgressListener
 import org.matrix.rustcomponents.sdk.SecretsBundleWithUserId
 import timber.log.Timber
 import uniffi.matrix_sdk.OAuthAuthorizationData
+import java.net.URI
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.seconds
 
 @ContributesBinding(AppScope::class)
@@ -81,6 +87,7 @@ class RustMatrixAuthenticationService(
     // Ideally it would be possible to get the sessionPath from the Client to avoid doing this.
     private var sessionPaths: SessionPaths? = null
     private var currentClient: Client? = null
+    private val failedSessionRestorations = ConcurrentHashMap.newKeySet<String>()
 
     private val newMatrixClientObservers = mutableListOf<(MatrixClient) -> Unit>()
     override fun listenToNewMatrixClients(lambda: (MatrixClient) -> Unit) {
@@ -94,22 +101,34 @@ class RustMatrixAuthenticationService(
     }
 
     override suspend fun restoreSession(sessionId: SessionId): Result<MatrixClient> = withContext(coroutineDispatchers.io) {
+        var attemptedRestorableSession = false
         runCatchingExceptions {
             val sessionData = sessionStore.getSession(sessionId.value)
             if (sessionData != null) {
                 if (sessionData.isTokenValid) {
-                    // Use the sessionData.passphrase, which can be null for a previously created session
-                    if (sessionData.passphrase == null) {
-                        Timber.w("Restoring a session without a passphrase")
-                    } else {
-                        Timber.w("Restoring a session with a passphrase")
+                    requireConfiguredNextHomeserver(sessionData.homeserverUrl)
+                    // A null key makes the Rust SDK SQLite state store (including room drafts)
+                    // plaintext. There is no safe in-place migration API, so fail closed and
+                    // require a new login that creates a fresh encrypted store.
+                    if (sessionData.passphrase.isNullOrBlank()) {
+                        sessionStore.updateData(sessionData.copy(isTokenValid = false))
+                        throw IllegalStateException(
+                            "This legacy session has no Matrix database key and cannot be opened in high-security mode."
+                        )
                     }
+                    attemptedRestorableSession = true
                     rustMatrixClientFactory.create(sessionData)
                 } else {
                     throw SessionRestorationException.InvalidToken()
                 }
             } else {
                 throw SessionRestorationException.MissingSession(sessionId)
+            }
+        }.onSuccess {
+            failedSessionRestorations.remove(sessionId.value)
+        }.onFailure {
+            if (attemptedRestorableSession) {
+                failedSessionRestorations.add(sessionId.value)
             }
         }.mapFailure { failure ->
             failure.mapClientException()
@@ -125,12 +144,15 @@ class RustMatrixAuthenticationService(
         withContext(coroutineDispatchers.io) {
             val emptySessionPath = rotateSessionPath()
             runCatchingExceptions {
+                val configuredHomeserver = requireConfiguredNextHomeserver(homeserver)
                 val client = makeClient(sessionPaths = emptySessionPath) {
-                    serverNameOrHomeserverUrl(homeserver)
+                    serverNameOrHomeserverUrl(configuredHomeserver)
                 }
 
                 currentClient = client
-                client.homeserverLoginDetails().map()
+                client.homeserverLoginDetails().map().also {
+                    requireConfiguredNextHomeserver(it.url)
+                }
             }.onFailure {
                 clear()
             }.mapFailure { failure ->
@@ -144,14 +166,18 @@ class RustMatrixAuthenticationService(
             runCatchingExceptions {
                 val client = currentClient ?: error("You need to call `setHomeserver()` first")
                 val currentSessionPaths = sessionPaths ?: error("You need to call `setHomeserver()` first")
+                // The Rust SDK can invoke saveSessionInKeychain during login. Snapshot the
+                // pre-login state so that callback cannot turn an invalid legacy row back
+                // into an apparent duplicate before we decide whether to replace it.
+                val sessionsBeforeLogin = sessionStore.getAllSessions()
                 client.login(
                     username = username,
                     password = password,
-                    initialDeviceName = "Element X Android",
+                    initialDeviceName = YIZHE_ANDROID_DEVICE_NAME,
                     deviceId = null,
                 )
                 // Ensure that the user is not already logged in with the same account
-                ensureNotAlreadyLoggedIn(client)
+                val replaceInvalidSession = ensureNotAlreadyLoggedIn(client, sessionsBeforeLogin)
                 tryToImportSecretForElementClassicSession(client)
                 val sessionData = client.session()
                     .toSessionData(
@@ -160,9 +186,16 @@ class RustMatrixAuthenticationService(
                         passphrase = pendingKey.formattedAsString(),
                         sessionPaths = currentSessionPaths,
                     )
-                val matrixClient = rustMatrixClientFactory.create(client)
-                newMatrixClientObservers.forEach { it.invoke(matrixClient) }
-                sessionStore.addSession(sessionData)
+                requireConfiguredNextHomeserver(sessionData.homeserverUrl)
+                val matrixClient = loginFinalizationStage("client-create") {
+                    rustMatrixClientFactory.create(client)
+                }
+                loginFinalizationStage("observer-notification") {
+                    newMatrixClientObservers.forEach { it.invoke(matrixClient) }
+                }
+                loginFinalizationStage("session-persistence") {
+                    persistAuthenticatedSession(sessionData, replaceInvalidSession)
+                }
 
                 // Clean up the strong reference held here since it's no longer necessary
                 currentClient = null
@@ -232,6 +265,7 @@ class RustMatrixAuthenticationService(
                     passphrase = pendingKey.formattedAsString(),
                     sessionPaths = currentSessionPaths,
                 )
+                requireConfiguredNextHomeserver(sessionData.homeserverUrl)
 
                 // We restore the client using the just retrieved session data
                 client.restoreSession(sessionData.toSession())
@@ -242,7 +276,7 @@ class RustMatrixAuthenticationService(
 
                 // And once it's ready we share it and save the actual session data
                 newMatrixClientObservers.forEach { it.invoke(matrixClient) }
-                sessionStore.addSession(sessionData)
+                sessionStore.addSession(rustMatrixClientFactory.protectSessionDataForStorage(sessionData))
 
                 // Clean up the strong reference held here since it's no longer necessary
                 currentClient = null
@@ -310,6 +344,7 @@ class RustMatrixAuthenticationService(
             runCatchingExceptions {
                 val client = currentClient ?: error("You need to call `setHomeserver()` first")
                 val currentSessionPaths = sessionPaths ?: error("You need to call `setHomeserver()` first")
+                val sessionsBeforeLogin = sessionStore.getAllSessions()
                 client.loginWithOauthCallback(
                     callbackUrl = callbackUrl,
                 )
@@ -317,7 +352,7 @@ class RustMatrixAuthenticationService(
                 pendingOAuthAuthorizationData?.close()
                 pendingOAuthAuthorizationData = null
                 // Ensure that the user is not already logged in with the same account
-                ensureNotAlreadyLoggedIn(client)
+                val replaceInvalidSession = ensureNotAlreadyLoggedIn(client, sessionsBeforeLogin)
                 tryToImportSecretForElementClassicSession(client)
                 val sessionData = client.session().toSessionData(
                     isTokenValid = true,
@@ -325,11 +360,12 @@ class RustMatrixAuthenticationService(
                     passphrase = pendingKey.formattedAsString(),
                     sessionPaths = currentSessionPaths,
                 )
+                requireConfiguredNextHomeserver(sessionData.homeserverUrl)
                 val matrixClient = rustMatrixClientFactory.create(client)
                 matrixClient.waitForKnownVerificationState()
 
                 newMatrixClientObservers.forEach { it.invoke(matrixClient) }
-                sessionStore.addSession(sessionData)
+                persistAuthenticatedSession(sessionData, replaceInvalidSession)
 
                 // Clean up the strong reference held here since it's no longer necessary
                 currentClient = null
@@ -343,18 +379,44 @@ class RustMatrixAuthenticationService(
     }
 
     @Throws(AuthenticationException.AccountAlreadyLoggedIn::class)
-    private suspend fun ensureNotAlreadyLoggedIn(client: Client) {
+    private suspend fun ensureNotAlreadyLoggedIn(client: Client, sessionsBeforeLogin: List<SessionData>): Boolean {
         val newUserId = client.userId()
-        val accountAlreadyLoggedIn = sessionStore.getAllSessions().any {
-            it.userId == newUserId
-        }
-        if (accountAlreadyLoggedIn) {
+        val existingSession = sessionsBeforeLogin.firstOrNull { it.userId == newUserId }
+        val existingSessionCanBeRestored = existingSession?.isTokenValid == true &&
+            !existingSession.passphrase.isNullOrBlank() &&
+            existingSession.userId !in failedSessionRestorations
+        if (existingSessionCanBeRestored) {
             // Sign out the client, ignoring any error
             runCatchingExceptions {
                 client.logout()
             }
             throw AuthenticationException.AccountAlreadyLoggedIn(newUserId)
         }
+        // A soft-logged-out account must be re-authenticated in place. Rejecting
+        // it as a duplicate leaves the user trapped on the login screen while
+        // the unusable local row remains present.
+        return existingSession != null
+    }
+
+    private suspend fun persistAuthenticatedSession(sessionData: SessionData, replaceInvalidSession: Boolean) {
+        val protectedSession = rustMatrixClientFactory.protectSessionDataForStorage(sessionData)
+        if (replaceInvalidSession) {
+            sessionStore.updateData(protectedSession)
+        } else {
+            sessionStore.addSession(protectedSession)
+        }
+        failedSessionRestorations.remove(sessionData.userId)
+    }
+
+    /**
+     * Emits a deliberately redacted Release diagnostic for failures that happen after the
+     * homeserver has accepted the credentials. Never include account or session material here.
+     */
+    private suspend fun <T> loginFinalizationStage(stage: String, block: suspend () -> T): T = try {
+        block()
+    } catch (failure: Throwable) {
+        Log.e(LOGIN_DIAGNOSTIC_TAG, "Login finalization failed at $stage: ${failure.javaClass.name}")
+        throw failure
     }
 
     override suspend fun loginWithQrCode(qrCodeData: MatrixQrCodeLoginData, progress: (QrCodeLoginStep) -> Unit) =
@@ -373,6 +435,7 @@ class RustMatrixAuthenticationService(
                     sessionPaths = emptySessionPaths,
                     qrCodeData = sdkQrCodeLoginData,
                 )
+                val sessionsBeforeLogin = sessionStore.getAllSessions()
                 client.newLoginWithQrCodeHandler(
                     oauthConfiguration = oAuthConfiguration,
                 ).use {
@@ -382,7 +445,7 @@ class RustMatrixAuthenticationService(
                     )
                 }
                 // Ensure that the user is not already logged in with the same account
-                ensureNotAlreadyLoggedIn(client)
+                val replaceInvalidSession = ensureNotAlreadyLoggedIn(client, sessionsBeforeLogin)
                 val sessionData = client.session()
                     .toSessionData(
                         isTokenValid = true,
@@ -390,9 +453,10 @@ class RustMatrixAuthenticationService(
                         passphrase = pendingKey.formattedAsString(),
                         sessionPaths = emptySessionPaths,
                     )
+                requireConfiguredNextHomeserver(sessionData.homeserverUrl)
                 val matrixClient = rustMatrixClientFactory.create(client)
                 newMatrixClientObservers.forEach { it.invoke(matrixClient) }
-                sessionStore.addSession(sessionData)
+                persistAuthenticatedSession(sessionData, replaceInvalidSession)
 
                 // Clean up the strong reference held here since it's no longer necessary
                 currentClient = null
@@ -418,13 +482,12 @@ class RustMatrixAuthenticationService(
     ): Client {
         Timber.d("Creating client with simplified sliding sync")
         return rustMatrixClientFactory
-            .getBaseClientBuilder(
+            .buildClient(
                 sessionPaths = sessionPaths,
                 clientSecret = pendingKey,
                 slidingSyncType = ClientBuilderSlidingSync.Discovered,
+                config = config,
             )
-            .config()
-            .build()
     }
 
     private suspend fun makeQrCodeLoginClient(
@@ -449,19 +512,39 @@ class RustMatrixAuthenticationService(
             throw HumanQrLoginException.Unknown()
         }
 
+        val configuredHomeserver = requireConfiguredNextHomeserver(
+            candidate = baseUrlOrServerName,
+            allowServerName = qrCodeData.baseUrl() == null,
+        )
+
         return rustMatrixClientFactory
-            .getBaseClientBuilder(
+            .buildClient(
                 sessionPaths = sessionPaths,
                 clientSecret = pendingKey,
                 slidingSyncType = ClientBuilderSlidingSync.Discovered,
-            )
-            .serverNameOrHomeserverUrl(baseUrlOrServerName)
-            .build()
+            ) {
+                serverNameOrHomeserverUrl(configuredHomeserver)
+            }
     }
 
+    private fun requireConfiguredNextHomeserver(candidate: String, allowServerName: Boolean = false): String =
+        enforceNextHomeserverRoute(
+            candidate = candidate,
+            configuredHomeserver = NextDeploymentConfig.matrixHomeserverUrl,
+            isNextDeployment = NextDeploymentConfig.isNextDeployment,
+            allowServerName = allowServerName,
+        )
+
     private fun clear() {
-        currentClient?.close()
+        currentClient?.let {
+            rustMatrixClientFactory.discardPendingClient(it)
+            it.close()
+        }
         currentClient = null
+    }
+
+    private companion object {
+        const val LOGIN_DIAGNOSTIC_TAG = "YiZheAuth"
     }
 
     private suspend fun MatrixClient.waitForKnownVerificationState() {
@@ -472,3 +555,66 @@ class RustMatrixAuthenticationService(
         } ?: Timber.w("Timed out waiting for a known verification status")
     }
 }
+
+internal const val YIZHE_ANDROID_DEVICE_NAME = "乙者 Android"
+
+/**
+ * Locks every Next authentication and restoration route to the build-time homeserver.
+ * Returning the configured URL also prevents a differently-spelled accepted input from being
+ * passed to discovery. Stable builds preserve their existing user-selectable behavior.
+ */
+internal fun enforceNextHomeserverRoute(
+    candidate: String,
+    configuredHomeserver: String,
+    isNextDeployment: Boolean,
+    allowServerName: Boolean = false,
+): String {
+    if (!isNextDeployment) return candidate
+
+    val configured = parseLockedHomeserver(configuredHomeserver)
+    val candidateUri = runCatching { URI(candidate) }.getOrNull()
+    val candidateIsServerName = candidateUri?.scheme == null
+    val candidateRoute = if (candidateIsServerName && allowServerName) {
+        val serverName = runCatching { URI("matrix://$candidate") }.getOrNull()
+        check(
+            configured.path == "/" &&
+                serverName?.host != null &&
+                serverName.userInfo == null && serverName.path.isEmpty() &&
+                serverName.query == null && serverName.fragment == null
+        ) { NEXT_HOMESERVER_REJECTION }
+        LockedHomeserver(
+            host = requireNotNull(serverName.host).lowercase(Locale.US),
+            port = normalizedHttpsPort(serverName.port),
+            path = "/",
+        )
+    } else {
+        parseLockedHomeserver(candidate)
+    }
+    check(candidateRoute == configured) { NEXT_HOMESERVER_REJECTION }
+    return configuredHomeserver.trimEnd('/')
+}
+
+private data class LockedHomeserver(
+    val host: String,
+    val port: Int,
+    val path: String,
+)
+
+private fun parseLockedHomeserver(value: String): LockedHomeserver {
+    val uri = runCatching { URI(value) }.getOrNull()
+    check(
+        uri?.scheme?.lowercase(Locale.US) == "https" && uri.host != null &&
+            uri.userInfo == null && uri.query == null && uri.fragment == null
+    ) { NEXT_HOMESERVER_REJECTION }
+    val normalizedPath = requireNotNull(uri).normalize().rawPath.orEmpty().trimEnd('/').ifEmpty { "/" }
+    check(uri.rawPath.orEmpty().trimEnd('/').ifEmpty { "/" } == normalizedPath) { NEXT_HOMESERVER_REJECTION }
+    return LockedHomeserver(
+        host = requireNotNull(uri.host).lowercase(Locale.US),
+        port = normalizedHttpsPort(uri.port),
+        path = normalizedPath,
+    )
+}
+
+private fun normalizedHttpsPort(port: Int): Int = if (port == -1) 443 else port
+
+private const val NEXT_HOMESERVER_REJECTION = "Homeserver is outside the configured Next deployment."

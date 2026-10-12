@@ -10,13 +10,17 @@ package io.element.android.libraries.permissions.impl
 
 import android.annotation.SuppressLint
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.PermissionState
 import com.google.accompanist.permissions.PermissionStatus
@@ -28,13 +32,21 @@ import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
 import dev.zacsweers.metro.ContributesBinding
 import io.element.android.libraries.core.log.logger.LoggerTag
+import io.element.android.libraries.di.annotations.AppCoroutineScope
 import io.element.android.libraries.permissions.api.PermissionsEvent
 import io.element.android.libraries.permissions.api.PermissionsPresenter
 import io.element.android.libraries.permissions.api.PermissionsState
 import io.element.android.libraries.permissions.api.PermissionsStore
 import io.element.android.libraries.permissions.impl.action.PermissionActions
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import java.util.concurrent.atomic.AtomicReference
 
 private val loggerTag = LoggerTag("DefaultPermissionsPresenter")
 
@@ -44,6 +56,8 @@ class DefaultPermissionsPresenter(
     private val permissionsStore: PermissionsStore,
     private val composablePermissionStateProvider: ComposablePermissionStateProvider,
     private val permissionActions: PermissionActions,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
+    @AppCoroutineScope private val appCoroutineScope: CoroutineScope,
 ) : PermissionsPresenter {
     @AssistedFactory
     @ContributesBinding(AppScope::class)
@@ -55,7 +69,10 @@ class DefaultPermissionsPresenter(
     @SuppressLint("InlinedApi")
     @Composable
     override fun present(): PermissionsState {
-        val localCoroutineScope = rememberCoroutineScope()
+        val lifecycleOwner = LocalLifecycleOwner.current
+        var settingsOperationId by rememberSaveable { mutableStateOf<String?>(null) }
+        var settingsWasBackgrounded by rememberSaveable { mutableStateOf(false) }
+        val permissionRequestOperationId = remember { AtomicReference<String?>(null) }
 
         // To reset the store: ResetStore()
 
@@ -71,19 +88,69 @@ class DefaultPermissionsPresenter(
 
         fun onPermissionResult(result: Boolean) {
             Timber.tag(loggerTag.value).d("onPermissionResult: $result")
-            localCoroutineScope.launch {
-                permissionsStore.setPermissionAsked(permission, true)
-            }
-
-            if (!result) {
-                // Should show rational true -> denied.
-                if (permissionState?.status?.shouldShowRationale == true) {
-                    Timber.tag(loggerTag.value).d("onPermissionResult: setPermissionDenied to true")
-                    localCoroutineScope.launch {
-                        permissionsStore.setPermissionDenied(permission, true)
+            appCoroutineScope.launch {
+                val operationId = permissionRequestOperationId.getAndSet(null)
+                var persisted = false
+                try {
+                    appOperationalStateCoordinator.perform(
+                        lifecycleOperationRequest(
+                            lifecycleId = FullAppLifecycleId.LC_03,
+                            trigger = if (operationId == null) "permission_result" else "feature_requires_permission",
+                            operationId = operationId ?: java.util.UUID.randomUUID().toString(),
+                        )
+                    ) {
+                        permissionsStore.setPermissionAsked(permission, true)
+                        if (!result && permissionState?.status?.shouldShowRationale == true) {
+                            Timber.tag(loggerTag.value).d("onPermissionResult: setPermissionDenied to true")
+                            permissionsStore.setPermissionDenied(permission, true)
+                        }
+                        persisted = true
+                    }
+                } catch (failure: Exception) {
+                    if (failure is CancellationException) throw failure
+                    Timber.tag(loggerTag.value).w(failure, "Unable to bind permission result lifecycle")
+                    if (!persisted) {
+                        permissionsStore.setPermissionAsked(permission, true)
+                        if (!result && permissionState?.status?.shouldShowRationale == true) {
+                            Timber.tag(loggerTag.value).d("onPermissionResult: setPermissionDenied to true")
+                            permissionsStore.setPermissionDenied(permission, true)
+                        }
                     }
                 }
             }
+        }
+
+        DisposableEffect(lifecycleOwner, settingsOperationId) {
+            // Observer registration synchronizes to the current state, including ON_RESUME.
+            // Only a real departure followed by return completes the settings operation.
+            if (settingsOperationId != null && !lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                settingsWasBackgrounded = true
+            }
+            val observer = LifecycleEventObserver { _, event ->
+                val operationId = settingsOperationId
+                if (operationId != null && (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP)) {
+                    settingsWasBackgrounded = true
+                }
+                if (event == Lifecycle.Event.ON_RESUME && operationId != null && settingsWasBackgrounded) {
+                    settingsOperationId = null
+                    settingsWasBackgrounded = false
+                    appCoroutineScope.launch {
+                        runCatching {
+                            appOperationalStateCoordinator.perform(
+                                lifecycleOperationRequest(
+                                    lifecycleId = FullAppLifecycleId.LC_03,
+                                    trigger = "settings_return",
+                                    operationId = operationId,
+                                )
+                            ) { Unit }
+                        }.onFailure { failure ->
+                            Timber.tag(loggerTag.value).w(failure, "Unable to complete settings return lifecycle")
+                        }
+                    }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
         }
 
         permissionState = composablePermissionStateProvider.provide(
@@ -109,12 +176,36 @@ class DefaultPermissionsPresenter(
                     if (permissionState.status !is PermissionStatus.Granted && isAlreadyDenied) {
                         showDialog.value = true
                     } else {
+                        val request = lifecycleOperationRequest(FullAppLifecycleId.LC_03, "feature_requires_permission")
+                        permissionRequestOperationId.set(request.operationId)
+                        appCoroutineScope.launch {
+                            runCatching { appOperationalStateCoordinator.start(request) }
+                                .onFailure { Timber.tag(loggerTag.value).w(it, "Unable to start permission lifecycle") }
+                        }
                         permissionState.launchPermissionRequest()
                     }
                 }
-                PermissionsEvent.OpenSystemSettingAndCloseDialog -> {
-                    permissionActions.openSettings(permission)
+                PermissionsEvent.OpenSystemSettingAndCloseDialog, is PermissionsEvent.OpenSystemSettingsUsingActivity -> {
                     showDialog.value = false
+                    if (settingsOperationId != null) return
+                    val request = lifecycleOperationRequest(FullAppLifecycleId.LC_03, "settings_return")
+                    settingsWasBackgrounded = false
+                    settingsOperationId = request.operationId
+                    appCoroutineScope.launch {
+                        try {
+                            appOperationalStateCoordinator.start(request)
+                            if (event is PermissionsEvent.OpenSystemSettingsUsingActivity) {
+                                event.launchSettings()
+                            } else {
+                                permissionActions.openSettings(permission)
+                            }
+                        } catch (failure: Exception) {
+                            settingsOperationId = null
+                            settingsWasBackgrounded = false
+                            if (failure is CancellationException) throw failure
+                            Timber.tag(loggerTag.value).w(failure, "Unable to open permission settings with lifecycle identity")
+                        }
+                    }
                 }
             }
         }

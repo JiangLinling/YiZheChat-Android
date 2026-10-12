@@ -9,6 +9,7 @@ package io.element.android.libraries.eventformatter.impl
 
 import dev.zacsweers.metro.Inject
 import io.element.android.libraries.matrix.api.MatrixClient
+import io.element.android.libraries.matrix.api.timeline.item.event.CallLifecycleState
 import io.element.android.libraries.matrix.api.timeline.item.event.CallNotifyContent
 import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.services.toolbox.api.strings.StringProvider
@@ -23,8 +24,17 @@ class RtcNotificationContentFormatter(
         isDm: Boolean,
     ): CharSequence {
         return if (isDm) {
-            val isDeclined = content.declinedBy.isNotEmpty()
-            val isDeclinedByMe = content.declinedBy.any { matrixClient.isMe(it) }
+            when (content.lifecycleState) {
+                CallLifecycleState.CONNECTED -> return sp.getString(CommonStrings.common_call_connected)
+                CallLifecycleState.CANCELLED -> return sp.getString(CommonStrings.common_call_cancelled)
+                CallLifecycleState.MISSED -> return sp.getString(CommonStrings.common_call_missed)
+                CallLifecycleState.ENDED -> return sp.getString(CommonStrings.common_call_ended)
+                CallLifecycleState.DECLINED,
+                null -> Unit
+            }
+            val isDeclined = content.lifecycleState == CallLifecycleState.DECLINED || content.declinedBy.isNotEmpty()
+            val isDeclinedByMe = content.lifecycleActor?.let(matrixClient::isMe)
+                ?: content.declinedBy.any { matrixClient.isMe(it) }
             if (isDeclinedByMe) {
                 sp.getString(CommonStrings.common_call_you_declined)
             } else if (isDeclined) {

@@ -22,6 +22,7 @@ import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.analytics.api.recordTransaction
 import io.element.android.services.analyticsproviders.api.AnalyticsUserData
 import io.element.android.services.appnavstate.api.AppForegroundStateService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.combine
@@ -30,6 +31,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.milliseconds
@@ -57,6 +61,7 @@ class SyncOrchestrator(
     private val coroutineScope = sessionCoroutineScope.childScope(dispatchers.io, tag)
 
     private val started = AtomicBoolean(false)
+    private val syncActions = Mutex()
 
     /**
      * Starting observing the app state and network state to start/stop the sync service.
@@ -65,7 +70,9 @@ class SyncOrchestrator(
      */
     fun start() {
         if (!started.compareAndSet(false, true)) {
-            Timber.tag(tag).d("already started, exiting early")
+            // An Activity retry reuses this session-scoped orchestrator. Observing once must
+            // not mean that a failed, still-idle initial sync can never be started again.
+            coroutineScope.launch { restartIdleSyncIfEligible() }
             return
         }
 
@@ -73,15 +80,51 @@ class SyncOrchestrator(
             // Perform an initial sync if the sync service is not running, to check whether the homeserver is accessible
             // Otherwise, if the device is offline the sync service will never start and the SyncState will be Idle, not Offline
             Timber.tag(tag).d("performing initial sync attempt")
-            analyticsService.recordTransaction("First sync", "syncService.startSync()") { transaction ->
-                syncService.startSync()
-
-                // Wait until the sync service is not idle, either it will be running or in error/offline state
-                val firstState = syncService.syncState.first { it != SyncState.Idle }
-                transaction.putIndexableData(AnalyticsUserData.FIRST_SYNC_STATE, firstState.name)
+            try {
+                analyticsService.recordTransaction("First sync", "syncService.startSync()") { transaction ->
+                    val firstState = syncActions.withLock { startSyncAndAwaitState() }
+                    firstState?.let { transaction.putIndexableData(AnalyticsUserData.FIRST_SYNC_STATE, it.name) }
+                }
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                Timber.tag(tag).w("initial sync attempt failed type=%s", failure.javaClass.simpleName)
             }
-
+            // A failed Result or a successful start that never emits a state must not strand
+            // foreground/network recovery behind an unbounded first { non-Idle } wait.
             observeStates()
+        }
+    }
+
+    private suspend fun startSyncAndAwaitState(): SyncState? {
+        val result = try {
+            syncService.startSync()
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Exception) {
+            Result.failure(failure)
+        }
+        if (result.isFailure) {
+            Timber.tag(tag).w("sync start failed type=%s", result.exceptionOrNull()?.javaClass?.simpleName)
+            return null
+        }
+        return withTimeoutOrNull(5.seconds) {
+            syncService.syncState.first { it != SyncState.Idle }
+        }.also { state ->
+            if (state == null) Timber.tag(tag).w("sync start did not publish a state within the bounded wait")
+        }
+    }
+
+    private fun isAppActive(): Boolean = appForegroundStateService.run {
+        isInForeground.value || isInCall.value || isSyncingNotificationEvent.value ||
+            hasRingingCall.value || isSharingLiveLocation.value
+    }
+
+    private suspend fun restartIdleSyncIfEligible() = syncActions.withLock {
+        if (syncService.syncState.value == SyncState.Idle &&
+            networkMonitor.connectivity.value == NetworkStatus.Connected && isAppActive()
+        ) {
+            startSyncAndAwaitState()
         }
     }
 
@@ -125,10 +168,10 @@ class SyncOrchestrator(
             .collect { action ->
                 when (action) {
                     SyncStateAction.StartSync -> {
-                        syncService.startSync()
+                        restartIdleSyncIfEligible()
                     }
                     SyncStateAction.StopSync -> {
-                        syncService.stopSync()
+                        syncActions.withLock { syncService.stopSync() }
                     }
                     SyncStateAction.NoOp -> Unit
                 }

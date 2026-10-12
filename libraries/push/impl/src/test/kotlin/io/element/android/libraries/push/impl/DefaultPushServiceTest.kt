@@ -34,6 +34,7 @@ import io.element.android.libraries.push.test.FakeGetCurrentPushProvider
 import io.element.android.libraries.pushproviders.api.Config
 import io.element.android.libraries.pushproviders.api.Distributor
 import io.element.android.libraries.pushproviders.api.PushProvider
+import io.element.android.libraries.pushproviders.api.VendorPushProvider
 import io.element.android.libraries.pushproviders.test.FakePushProvider
 import io.element.android.libraries.pushproviders.test.aSessionPushConfig
 import io.element.android.libraries.pushstore.api.UserPushStoreFactory
@@ -101,6 +102,38 @@ class DefaultPushServiceTest {
         )
         val result = defaultPushService.getCurrentPushProvider(A_SESSION_ID)
         assertThat(result).isEqualTo(aPushProvider)
+    }
+
+    @Test
+    fun `getCurrentPushProvider migrates an unavailable legacy provider when only one provider remains`() = runTest {
+        val userPushStore = FakeUserPushStore(pushProviderName = "Firebase")
+        val userPushStoreFactory = FakeUserPushStoreFactory { userPushStore }
+        val unifiedPushProvider = FakePushProvider(name = "UnifiedPush")
+        val defaultPushService = createDefaultPushService(
+            userPushStoreFactory = userPushStoreFactory,
+            pushProviders = setOf(unifiedPushProvider),
+            getCurrentPushProvider = DefaultGetCurrentPushProvider(userPushStoreFactory),
+        )
+
+        assertThat(defaultPushService.getCurrentPushProvider(A_SESSION_ID)).isSameInstanceAs(unifiedPushProvider)
+        assertThat(userPushStore.getPushProviderName()).isEqualTo("UnifiedPush")
+    }
+
+    @Test
+    fun `getCurrentPushProvider does not guess a replacement when several providers remain`() = runTest {
+        val userPushStore = FakeUserPushStore(pushProviderName = "Unavailable")
+        val userPushStoreFactory = FakeUserPushStoreFactory { userPushStore }
+        val defaultPushService = createDefaultPushService(
+            userPushStoreFactory = userPushStoreFactory,
+            pushProviders = setOf(
+                FakePushProvider(name = "Provider A"),
+                FakePushProvider(name = "Provider B"),
+            ),
+            getCurrentPushProvider = DefaultGetCurrentPushProvider(userPushStoreFactory),
+        )
+
+        assertThat(defaultPushService.getCurrentPushProvider(A_SESSION_ID)).isNull()
+        assertThat(userPushStore.getPushProviderName()).isEqualTo("Unavailable")
     }
 
     @Test
@@ -459,6 +492,35 @@ class DefaultPushServiceTest {
     }
 
     @Test
+    fun `ensurePusher - vendor fallback keeps universal pusher registered`() = runTest {
+        val registerResult = lambdaRecorder<MatrixClient, Distributor, Result<Unit>> { _, _ -> Result.success(Unit) }
+        val universalProvider = FakePushProvider(
+            distributors = listOf(Distributor("universal", "Universal")),
+            registerWithResult = registerResult,
+        )
+        val vendorProvider = object : VendorPushProvider {
+            override val id = "vendor"
+            override val priority = 100
+            override fun isAvailable() = true
+            override fun start() = Unit
+        }
+        val pushService = createDefaultPushService(
+            pushProviders = setOf(universalProvider),
+            vendorPushProviders = setOf(vendorProvider),
+        )
+        val sessionVerificationService = FakeSessionVerificationService(
+            initialSessionVerifiedStatus = SessionVerifiedStatus.Verified,
+        )
+
+        val result = pushService.ensurePusherIsRegistered(
+            FakeMatrixClient(sessionVerificationService = sessionVerificationService),
+        )
+
+        assertThat(result.isSuccess).isTrue()
+        registerResult.assertions().isCalledOnce()
+    }
+
+    @Test
     fun `ensurePusher - ensure default pusher is registered with default provider - fail to register`() = runTest {
         val lambda = lambdaRecorder<MatrixClient, Distributor, Result<Unit>> { _, _ ->
             Result.failure(AN_EXCEPTION)
@@ -628,6 +690,7 @@ class DefaultPushServiceTest {
         pushDataStore: PushDataStore = InMemoryPushDataStore(),
         mutableBatteryOptimizationStore: MutableBatteryOptimizationStore = FakeMutableBatteryOptimizationStore(),
         serviceUnregisteredHandler: ServiceUnregisteredHandler = FakeServiceUnregisteredHandler(),
+        vendorPushProviders: Set<@JvmSuppressWildcards VendorPushProvider> = emptySet(),
     ): DefaultPushService {
         return DefaultPushService(
             testPush = testPush,
@@ -639,6 +702,7 @@ class DefaultPushServiceTest {
             pushDataStore = pushDataStore,
             mutableBatteryOptimizationStore = mutableBatteryOptimizationStore,
             serviceUnregisteredHandler = serviceUnregisteredHandler,
+            vendorPushProviders = vendorPushProviders,
         )
     }
 }

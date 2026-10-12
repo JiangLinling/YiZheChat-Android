@@ -18,7 +18,8 @@ import io.element.android.libraries.mediaplayer.api.MediaPlayer
 import io.element.android.libraries.mediaplayer.test.FakeAudioFocus
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import io.element.android.tests.testutils.lambda.value
-import kotlinx.coroutines.TimeoutCancellationException
+import io.element.android.libraries.mediaplayer.api.MediaPreparationTimeoutException
+import io.element.android.tests.testutils.consumeItemsUntilPredicate
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertThrows
@@ -114,7 +115,7 @@ class DefaultMediaPlayerTest {
                     duration = 123,
                 )
             )
-            player.pause()
+            sut.pause()
             pauseLambda.assertions().isCalledOnce()
             player.simulateIsPlayingChanged(false)
             releaseAudioFocusResult.assertions().isCalledOnce()
@@ -237,17 +238,18 @@ class DefaultMediaPlayerTest {
     }
 
     @Test
-    fun `seekTo invokes release on the embedded player`() = runTest {
+    fun `seekTo publishes requested position before the embedded player catches up`() = runTest {
         val seekToLambda = lambdaRecorder<Long, Unit> { }
         val player = FakeSimplePlayer(
             seekToLambda = seekToLambda,
-        )
+        ).apply {
+            durationResult = 100L
+        }
         val sut = createDefaultMediaPlayer(
             simplePlayer = player,
         )
         sut.state.test {
             awaitItem()
-            player.currentPositionResult = 33L
             sut.seekTo(33L)
             seekToLambda.assertions().isCalledOnce().with(value(33L))
             val finalState = awaitItem()
@@ -261,6 +263,49 @@ class DefaultMediaPlayerTest {
                     duration = null,
                 )
             )
+        }
+    }
+
+    @Test
+    fun `position discontinuity reconciles an asynchronous seek`() = runTest {
+        val player = FakeSimplePlayer(
+            seekToLambda = {},
+        ).apply {
+            durationResult = 100L
+        }
+        val sut = createDefaultMediaPlayer(simplePlayer = player)
+        sut.state.test {
+            awaitItem()
+            sut.seekTo(33L)
+            assertThat(awaitItem().currentPosition).isEqualTo(33L)
+
+            player.currentPositionResult = 31L
+            player.simulatePositionDiscontinuity()
+
+            assertThat(awaitItem().currentPosition).isEqualTo(31L)
+        }
+    }
+
+    @Test
+    fun `non seek position discontinuity does not reset a requested seek`() = runTest {
+        val player = FakeSimplePlayer(
+            seekToLambda = {},
+        ).apply {
+            durationResult = 100L
+        }
+        val sut = createDefaultMediaPlayer(simplePlayer = player)
+        sut.state.test {
+            awaitItem()
+            sut.seekTo(33L)
+            assertThat(awaitItem().currentPosition).isEqualTo(33L)
+
+            player.simulatePositionDiscontinuity(
+                positionMs = 0L,
+                reason = Player.DISCONTINUITY_REASON_INTERNAL,
+            )
+
+            expectNoEvents()
+            assertThat(sut.state.value.currentPosition).isEqualTo(33L)
         }
     }
 
@@ -342,17 +387,18 @@ class DefaultMediaPlayerTest {
             val result = runCatching {
                 sut.setMedia("uri", "mediaId", "mimeType", 12)
             }
-            pauseLambda.assertions().isCalledOnce()
-            clearMediaItemsLambda.assertions().isCalledOnce()
+            pauseLambda.assertions().isCalledExactly(2)
+            clearMediaItemsLambda.assertions().isCalledExactly(2)
             setMediaItemLambda.assertions().isCalledOnce().with(
                 value(MediaItem.Builder().setUri("uri").setMediaId("mediaId").setMimeType("mimeType").build()),
                 value(12L),
             )
             prepareLambda.assertions().isCalledOnce()
             assertThat(result.isFailure).isTrue()
-            assertThrows(TimeoutCancellationException::class.java) {
+            assertThrows(MediaPreparationTimeoutException::class.java) {
                 result.getOrThrow()
             }
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
@@ -404,17 +450,7 @@ class DefaultMediaPlayerTest {
                 currentPosition = 0,
                 duration = 0,
             )
-            assertThat(awaitItem()).isEqualTo(
-                MediaPlayer.State(
-                    isReady = true,
-                    isPlaying = false,
-                    isEnded = false,
-                    mediaId = null,
-                    currentPosition = 0,
-                    duration = 0,
-                )
-            )
-            assertThat(awaitItem()).isEqualTo(finalState)
+            assertThat(consumeItemsUntilPredicate { it.isReady && it.mediaId == "mediaId" }.last()).isEqualTo(finalState)
             assertThat(state).isEqualTo(finalState)
         }
     }

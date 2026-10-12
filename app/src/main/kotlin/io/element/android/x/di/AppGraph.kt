@@ -16,16 +16,19 @@ import dev.zacsweers.metro.Multibinds
 import dev.zacsweers.metro.Provides
 import io.element.android.libraries.architecture.NodeFactoriesBindings
 import io.element.android.libraries.di.annotations.ApplicationContext
+import io.element.android.libraries.pushproviders.api.VendorPushProvider
 import io.element.android.libraries.workmanager.api.di.MetroWorkerFactory
 import kotlin.reflect.KClass
 
 @DependencyGraph(AppScope::class)
 interface AppGraph : NodeFactoriesBindings {
     val sessionGraphFactory: SessionGraph.Factory
-
     @Multibinds
     val workerProviders:
         Map<KClass<out ListenableWorker>, MetroWorkerFactory.WorkerInstanceFactory<*>>
+
+    @Multibinds(allowEmpty = true)
+    val vendorPushProviders: Set<@JvmSuppressWildcards VendorPushProvider>
 
     @DependencyGraph.Factory
     interface Factory {

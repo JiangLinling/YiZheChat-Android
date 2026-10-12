@@ -40,6 +40,7 @@ import io.element.android.features.roomdetails.impl.members.RoomMemberListNode
 import io.element.android.features.roomdetails.impl.members.details.RoomMemberDetailsNode
 import io.element.android.features.roomdetails.impl.notificationsettings.RoomNotificationSettingsNode
 import io.element.android.features.roomdetailsedit.api.RoomDetailsEditEntryPoint
+import io.element.android.features.userprofile.api.FriendProfileRepository
 import io.element.android.features.securityandprivacy.api.SecurityAndPrivacyEntryPoint
 import io.element.android.features.userprofile.shared.UserProfileNodeHelper
 import io.element.android.features.verifysession.api.OutgoingVerificationEntryPoint
@@ -87,6 +88,7 @@ class RoomDetailsFlowNode(
     private val rolesAndPermissionsEntryPoint: RolesAndPermissionsEntryPoint,
     private val securityAndPrivacyEntryPoint: SecurityAndPrivacyEntryPoint,
     private val roomDetailsEditEntryPoint: RoomDetailsEditEntryPoint,
+    private val friendProfileRepository: FriendProfileRepository,
 ) : BaseFlowNode<RoomDetailsFlowNode.NavTarget>(
     backstack = BackStack(
         initialElement = plugins.filterIsInstance<RoomDetailsEntryPoint.Params>().first().initialElement.toNavTarget(),
@@ -128,6 +130,12 @@ class RoomDetailsFlowNode(
 
         @Parcelize
         data object MediaGallery : NavTarget
+
+        @Parcelize
+        data object FindChatContent : NavTarget
+
+        @Parcelize
+        data class ChatSearchResult(val eventId: EventId) : NavTarget
 
         @Parcelize
         data object AdminSettings : NavTarget
@@ -206,6 +214,10 @@ class RoomDetailsFlowNode(
 
                     override fun navigateToMediaGallery() {
                         backstack.push(NavTarget.MediaGallery)
+                    }
+
+                    override fun navigateToFindChatContent() {
+                        backstack.push(NavTarget.FindChatContent)
                     }
 
                     override fun navigateToAdminSettings() {
@@ -371,6 +383,39 @@ class RoomDetailsFlowNode(
                     buildContext = buildContext,
                     callback = callback,
                 )
+            }
+            NavTarget.FindChatContent -> RoomHistorySearchNode(
+                buildContext = buildContext,
+                room = room,
+                friendProfileRepository = friendProfileRepository,
+                onBack = { backstack.pop() },
+                onResult = { backstack.push(NavTarget.ChatSearchResult(it)) },
+            )
+            is NavTarget.ChatSearchResult -> {
+                val params = MessagesEntryPoint.Params(
+                    MessagesEntryPoint.InitialTarget.Messages(navTarget.eventId)
+                )
+                val messagesCallback = object : MessagesEntryPoint.Callback {
+                    override fun navigateToRoomDetails() = Unit
+                    override fun navigateToRoomMemberDetails(userId: UserId) = Unit
+                    override fun handlePermalinkClick(data: PermalinkData, pushToBackstack: Boolean) {
+                        callback.handlePermalinkClick(data, pushToBackstack)
+                    }
+                    override fun forwardEvent(eventId: EventId, fromPinnedEvents: Boolean) {
+                        callback.startForwardEventFlow(eventId, fromPinnedEvents)
+                    }
+                    override fun navigateToRoom(roomId: RoomId) {
+                        if (roomId == room.roomId) {
+                            callback.onDone()
+                        } else {
+                            callback.navigateToRoom(roomId, emptyList())
+                        }
+                    }
+                    override fun navigateToDeveloperSettings() {
+                        callback.navigateToDeveloperSettings()
+                    }
+                }
+                messagesEntryPoint.createNode(this, buildContext, params, messagesCallback)
             }
 
             is NavTarget.AdminSettings -> {

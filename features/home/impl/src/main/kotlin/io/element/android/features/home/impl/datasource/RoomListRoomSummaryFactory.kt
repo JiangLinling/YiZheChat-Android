@@ -21,18 +21,24 @@ import io.element.android.libraries.matrix.api.room.CallIntentConsensus
 import io.element.android.libraries.matrix.api.room.CurrentUserMembership
 import io.element.android.libraries.matrix.api.roomlist.LatestEventValue
 import io.element.android.libraries.matrix.api.roomlist.RoomSummary
+import io.element.android.libraries.matrix.api.timeline.item.event.isAuthorizedForUserDisplay
 import io.element.android.libraries.matrix.ui.model.getAvatarData
 import io.element.android.libraries.matrix.ui.model.toInviteSender
+import io.element.android.security.dataprotection.api.DataProtectionPolicyProvider
+import io.element.android.security.dataprotection.api.ProtectedPreviewAuthorizationGate
 import kotlinx.collections.immutable.toImmutableList
 
 @Inject
 class RoomListRoomSummaryFactory(
     private val dateFormatter: DateFormatter,
     private val roomLatestEventFormatter: RoomLatestEventFormatter,
+    private val dataProtectionPolicyProvider: DataProtectionPolicyProvider,
+    private val protectedPreviewAuthorizationGate: ProtectedPreviewAuthorizationGate,
 ) {
     fun create(roomSummary: RoomSummary): RoomListRoomSummary {
         val roomInfo = roomSummary.info
         val avatarData = roomInfo.getAvatarData(size = AvatarSize.RoomListItem)
+        val latestEventAuthorized = roomSummary.latestEvent.isAuthorizedForRoomSummary()
         return RoomListRoomSummary(
             id = roomSummary.roomId.value,
             roomId = roomSummary.roomId,
@@ -46,7 +52,12 @@ class RoomListRoomSummaryFactory(
                 mode = DateFormatterMode.TimeOrDate,
                 useRelative = true,
             ),
-            latestEvent = computeLatestEvent(roomSummary.latestEvent, roomInfo.isDm),
+            latestEventTimestamp = roomSummary.latestEventTimestamp ?: 0L,
+            latestEvent = if (latestEventAuthorized) {
+                computeLatestEvent(roomSummary.latestEvent, roomInfo.isDm)
+            } else {
+                LatestEvent.Protected
+            },
             avatarData = avatarData,
             userDefinedNotificationMode = roomInfo.userDefinedNotificationMode,
             hasRoomCall = roomInfo.hasRoomCall,
@@ -59,6 +70,9 @@ class RoomListRoomSummaryFactory(
             isFavorite = roomInfo.isFavorite,
             inviteSender = roomInfo.inviter?.toInviteSender(),
             isDm = roomInfo.isDm,
+            activeMembersCount = roomInfo.activeMembersCount,
+            invitedMembersCount = roomInfo.invitedMembersCount,
+            joinedMembersCount = roomInfo.joinedMembersCount,
             canonicalAlias = roomInfo.canonicalAlias,
             displayType = when (roomInfo.currentUserMembership) {
                 CurrentUserMembership.INVITED -> {
@@ -76,7 +90,31 @@ class RoomListRoomSummaryFactory(
             }.toImmutableList(),
             isTombstoned = roomInfo.successorRoom != null,
             isSpace = roomInfo.isSpace,
+            isEncrypted = roomInfo.isEncrypted,
+            historyVisibility = roomInfo.historyVisibility,
         )
+    }
+
+    private fun LatestEventValue.isAuthorizedForRoomSummary(): Boolean = when (this) {
+        is LatestEventValue.Local -> content.isAuthorizedForRoomPreview()
+        is LatestEventValue.Remote -> content.isAuthorizedForRoomPreview()
+        LatestEventValue.None,
+        is LatestEventValue.RoomInvite -> true
+    }
+
+    private fun io.element.android.libraries.matrix.api.timeline.item.event.EventContent.isAuthorizedForRoomPreview(): Boolean {
+        val requiresProtection = dataProtectionPolicyProvider.current().policy.requireContentEnvelope
+        if (!isAuthorizedForUserDisplay(requireContentProtection = requiresProtection)) return false
+        if (!requiresProtection) return true
+        return when (this) {
+            is io.element.android.libraries.matrix.api.timeline.item.event.MessageContent ->
+                protectedPreviewAuthorizationGate.canDisplayAuthorizedContent(isContentProtectionAuthorized)
+            // Call-state and other non-message events do not carry a protected message body, so
+            // they cannot have a content-envelope authorization marker. They still require the
+            // same unlocked, trusted in-process preview boundary, but must not be mislabeled as a
+            // protected message merely because the marker is structurally inapplicable.
+            else -> protectedPreviewAuthorizationGate.canAttemptPreview()
+        }
     }
 
     private fun computeLatestEvent(latestEvent: LatestEventValue, dm: Boolean): LatestEvent {

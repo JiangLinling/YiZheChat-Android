@@ -15,6 +15,19 @@ import org.junit.Test
 
 class LocationConstraintsCheckTest {
     @Test
+    fun `resume fails closed when location permission is not granted`() {
+        val result = checkLiveLocationResumeConstraints(
+            permissionsState = aPermissionsState(
+                permissions = PermissionsState.Permissions.NoneGranted,
+                shouldShowRationale = false,
+            ),
+            locationActions = FakeLocationActions(isLocationEnabled = true),
+            sendLiveLocationPermissions = SendLiveLocationPermissions.GRANTED,
+        )
+
+        assertThat(result).isNotEqualTo(LocationConstraintsCheck.Success)
+    }
+    @Test
     fun `checkLocationConstraints returns Success when permissions granted and location enabled`() {
         val permissionsState = aPermissionsState(
             permissions = PermissionsState.Permissions.AllGranted,

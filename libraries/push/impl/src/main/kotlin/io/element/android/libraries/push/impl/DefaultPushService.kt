@@ -27,12 +27,15 @@ import io.element.android.libraries.push.impl.unregistration.ServiceUnregistered
 import io.element.android.libraries.pushproviders.api.Distributor
 import io.element.android.libraries.pushproviders.api.PushProvider
 import io.element.android.libraries.pushproviders.api.RegistrationFailure
+import io.element.android.libraries.pushproviders.api.VendorPushProvider
 import io.element.android.libraries.pushstore.api.UserPushStoreFactory
 import io.element.android.libraries.pushstore.api.clientsecret.PushClientSecretStore
 import io.element.android.libraries.sessionstorage.api.observer.SessionListener
 import io.element.android.libraries.sessionstorage.api.observer.SessionObserver
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
 
 @ContributesBinding(AppScope::class, binding = binding<PushService>())
@@ -47,14 +50,27 @@ class DefaultPushService(
     private val pushDataStore: PushDataStore,
     private val mutableBatteryOptimizationStore: MutableBatteryOptimizationStore,
     private val serviceUnregisteredHandler: ServiceUnregisteredHandler,
+    private val vendorPushProviders: Set<@JvmSuppressWildcards VendorPushProvider> = emptySet(),
 ) : PushService, SessionListener {
+    private val registrationMutex = Mutex()
     init {
         observeSessions()
     }
 
     override suspend fun getCurrentPushProvider(sessionId: SessionId): PushProvider? {
-        val currentPushProvider = getCurrentPushProvider.getCurrentPushProvider(sessionId)
-        return pushProviders.find { it.name == currentPushProvider }
+        val currentPushProviderName = getCurrentPushProvider.getCurrentPushProvider(sessionId)
+        val currentPushProvider = pushProviders.find { it.name == currentPushProviderName }
+        if (currentPushProvider != null || currentPushProviderName == null) {
+            return currentPushProvider
+        }
+
+        // YiZheChat previously shipped builds which could persist Firebase as the
+        // selected provider. When an upgrade leaves exactly one supported provider,
+        // migrate that stale selection instead of remaining permanently unregistered.
+        val replacement = pushProviders.singleOrNull() ?: return null
+        Timber.i("Migrating unavailable push provider $currentPushProviderName to ${replacement.name}")
+        userPushStoreFactory.getOrCreate(sessionId).setPushProviderName(replacement.name)
+        return replacement
     }
 
     override fun getAvailablePushProviders(): List<PushProvider> {
@@ -89,6 +105,19 @@ class DefaultPushService(
     }
 
     override suspend fun ensurePusherIsRegistered(matrixClient: MatrixClient): Result<Unit> {
+        return registrationMutex.withLock {
+            ensurePusherIsRegisteredLocked(matrixClient)
+        }
+    }
+
+    private suspend fun ensurePusherIsRegisteredLocked(matrixClient: MatrixClient): Result<Unit> {
+        if (vendorPushProviders.any { it.isAvailable() }) {
+            // A manufacturer channel is a fallback, not proof that a Matrix pusher exists.
+            // Keep registering the universal/coordinator pusher so foreground and live
+            // background delivery continue to use the app-owned channel. The server only
+            // invokes the vendor fallback when this client does not claim an event in time.
+            Timber.d("Manufacturer push fallback is available; keeping the universal pusher registered")
+        }
         val verificationStatus = matrixClient.sessionVerificationService.sessionVerifiedStatus.first()
         if (verificationStatus != SessionVerifiedStatus.Verified) {
             return Result.failure<Unit>(PusherRegistrationFailure.AccountNotVerified())
@@ -205,4 +234,5 @@ class DefaultPushService(
     override suspend fun onServiceUnregistered(userId: UserId) {
         serviceUnregisteredHandler.handle(userId)
     }
+
 }

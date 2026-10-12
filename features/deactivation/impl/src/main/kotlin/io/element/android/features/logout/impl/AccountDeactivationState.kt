@@ -28,6 +28,6 @@ data class DeactivateFormState(
     val password: String
 ) : Parcelable {
     companion object {
-        val Default = DeactivateFormState(false, "")
+        val Default = DeactivateFormState(true, "")
     }
 }

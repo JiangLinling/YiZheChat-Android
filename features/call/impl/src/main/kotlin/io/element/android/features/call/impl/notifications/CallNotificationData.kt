@@ -30,4 +30,5 @@ data class CallNotificationData(
     // Expiration timestamp in millis since epoch
     val expirationTimestamp: Long,
     val audioOnly: Boolean,
+    val isGroupCall: Boolean = false,
 ) : Parcelable

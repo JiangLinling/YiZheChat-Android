@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="huawei_push_app_id" translatable="false">118853923</string>
+    <string name="huawei_push_project_id" translatable="false">101653523864923015</string>
+</resources>

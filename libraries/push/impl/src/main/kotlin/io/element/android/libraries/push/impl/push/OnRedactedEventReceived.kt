@@ -9,12 +9,8 @@
 package io.element.android.libraries.push.impl.push
 
 import android.content.Context
-import android.graphics.Typeface
-import android.text.style.StyleSpan
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationCompat.MessagingStyle
-import androidx.core.text.buildSpannedString
-import androidx.core.text.inSpans
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import io.element.android.libraries.di.annotations.ApplicationContext
@@ -22,8 +18,6 @@ import io.element.android.libraries.push.impl.notifications.ActiveNotificationsP
 import io.element.android.libraries.push.impl.notifications.NotificationDisplayer
 import io.element.android.libraries.push.impl.notifications.factories.DefaultNotificationCreator
 import io.element.android.libraries.push.impl.notifications.model.ResolvedPushEvent
-import io.element.android.libraries.ui.strings.CommonStrings
-import io.element.android.services.toolbox.api.strings.StringProvider
 import timber.log.Timber
 
 interface OnRedactedEventReceived {
@@ -35,7 +29,6 @@ class DefaultOnRedactedEventReceived(
     private val activeNotificationsProvider: ActiveNotificationsProvider,
     private val notificationDisplayer: NotificationDisplayer,
     @ApplicationContext private val context: Context,
-    private val stringProvider: StringProvider,
 ) : OnRedactedEventReceived {
     override suspend fun onRedactedEventsReceived(redactions: List<ResolvedPushEvent.Redaction>) {
         val redactionsBySessionIdAndRoom = redactions.groupBy { redaction ->
@@ -55,32 +48,24 @@ class DefaultOnRedactedEventReceived(
                     Timber.w("Unable to retrieve messaging style from notification")
                     return@forEach
                 }
-                val messageToRedactIndex = messagingStyle.messages.indexOfFirst { message ->
+                val removed = messagingStyle.messages.removeAll { message ->
                     roomRedactions.any { it.redactedEventId.value == message.extras.getString(DefaultNotificationCreator.MESSAGE_EVENT_ID) }
                 }
-                if (messageToRedactIndex == -1) {
+                if (!removed) {
                     Timber.d("Unable to find the message to remove from notification")
                     return@forEach
                 }
-                val oldMessage = messagingStyle.messages[messageToRedactIndex]
-                val content = buildSpannedString {
-                    inSpans(StyleSpan(Typeface.ITALIC)) {
-                        append(stringProvider.getString(CommonStrings.common_message_removed))
-                    }
+                if (messagingStyle.messages.isEmpty()) {
+                    notificationDisplayer.cancelNotification(statusBarNotification.tag, statusBarNotification.id)
+                } else {
+                    notificationDisplayer.showNotification(
+                        statusBarNotification.tag,
+                        statusBarNotification.id,
+                        NotificationCompat.Builder(context, notification)
+                            .setStyle(messagingStyle)
+                            .build()
+                    )
                 }
-                val newMessage = MessagingStyle.Message(
-                    content,
-                    oldMessage.timestamp,
-                    oldMessage.person
-                )
-                messagingStyle.messages[messageToRedactIndex] = newMessage
-                notificationDisplayer.showNotification(
-                    statusBarNotification.tag,
-                    statusBarNotification.id,
-                    NotificationCompat.Builder(context, notification)
-                        .setStyle(messagingStyle)
-                        .build()
-                )
             }
         }
     }

@@ -40,6 +40,7 @@ fun UserListView(
     onDeselectUser: (MatrixUser) -> Unit,
     modifier: Modifier = Modifier,
     showBackButton: Boolean = true,
+    searchPlaceholder: String = stringResource(CommonStrings.common_search_for_someone),
 ) {
     Column(
         modifier = modifier,
@@ -53,6 +54,7 @@ fun UserListView(
             showLoader = state.showSearchLoader,
             isMultiSelectionEnable = state.isMultiSelectionEnabled,
             showBackButton = showBackButton,
+            placeHolderTitle = searchPlaceholder,
             onActiveChange = { state.eventSink(UserListEvents.OnSearchActiveChanged(it)) },
             onUserSelect = {
                 state.eventSink(UserListEvents.AddToSelection(it))

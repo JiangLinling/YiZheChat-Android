@@ -18,7 +18,9 @@ import io.element.android.libraries.core.coroutine.childScope
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.di.annotations.SessionCoroutineScope
 import io.element.android.libraries.voicerecorder.api.VoiceRecorder
+import io.element.android.libraries.voicerecorder.api.VoiceRecorderFailure
 import io.element.android.libraries.voicerecorder.api.VoiceRecorderState
+import io.element.android.libraries.voicerecorder.api.VoiceRecorderStopReason
 import io.element.android.libraries.voicerecorder.impl.audio.Audio
 import io.element.android.libraries.voicerecorder.impl.audio.AudioConfig
 import io.element.android.libraries.voicerecorder.impl.audio.AudioLevelCalculator
@@ -70,11 +72,51 @@ class DefaultVoiceRecorder(
     private val _state = MutableStateFlow<VoiceRecorderState>(VoiceRecorderState.Idle)
     override val state: StateFlow<VoiceRecorderState> = _state
 
+    private val cleanupRevision = MutableStateFlow(0L)
+    override val captureCleanupRevision: StateFlow<Long> = cleanupRevision
+
+    override fun prepareCapture(operationId: String) {
+        fileManager.createFile(operationId)
+    }
+
+    override fun discardPreparedCapture(operationId: String) {
+        fileManager.discardPreparedCapture(operationId)
+        cleanupRevision.value++
+    }
+
+    override fun pendingCaptureCleanups(): Set<String> = fileManager.pendingCaptureCleanups()
+
+    override fun captureCleanupResult(operationId: String): String = fileManager.captureCleanupResult(operationId)
+
+    override fun acknowledgeCaptureCleanup(operationId: String) = fileManager.acknowledgeCaptureCleanup(operationId)
+
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    override suspend fun startRecord() {
+    override suspend fun startRecord() = startRecording(null)
+
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
+    override suspend fun startRecord(operationId: String) = startRecording(operationId)
+
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
+    private suspend fun startRecording(operationId: String?) {
         Timber.i("Voice recorder started recording")
-        outputFile = fileManager.createFile()
-            .also(encoder::init)
+        if (outputFile != null) deleteRecording()
+        val createdFile = try {
+            (if (operationId == null) fileManager.createFile() else fileManager.createFile(operationId)).also {
+                outputFile = it
+                encoder.init(it)
+            }
+        } catch (failure: Exception) {
+            Timber.e(failure, "Voice recorder failed to create controlled scratch output")
+            outputFile?.let {
+                fileManager.markCaptureCleanup(it, "VOICE_CAPTURE_FAILED_AND_CLEANED")
+                fileManager.deleteFile(it)
+            }
+            outputFile = null
+            cleanupRevision.value++
+            _state.emit(VoiceRecorderState.Failed(VoiceRecorderFailure.STORAGE_UNAVAILABLE))
+            return
+        }
+        outputFile = createdFile
 
         lock.withLock {
             levels.clear()
@@ -91,7 +133,7 @@ class DefaultVoiceRecorder(
 
                 if (elapsedTime > VoiceMessageConfig.maxVoiceMessageDuration) {
                     Timber.w("Voice message time limit reached")
-                    stopRecord(false)
+                    stopRecord(VoiceRecorderStopReason.MAX_DURATION)
                     return@record
                 }
 
@@ -103,7 +145,13 @@ class DefaultVoiceRecorder(
                             levels.add(audioLevel)
                             _state.emit(VoiceRecorderState.Recording(elapsedTime, levels.toList()))
                         }
-                        encoder.encode(audio.buffer, audio.readSize)
+                        try {
+                            encoder.encode(audio.buffer, audio.readSize)
+                        } catch (failure: Exception) {
+                            Timber.e(failure, "Voice recorder encoder failed")
+                            stopAfterFailure(VoiceRecorderFailure.ENCODER_FAILURE)
+                            return@record
+                        }
                     }
                     is Audio.Error -> {
                         Timber.e("Voice message error: code=${audio.audioRecordErrorCode}")
@@ -119,9 +167,11 @@ class DefaultVoiceRecorder(
      *
      * Call [deleteRecording] to delete any recorded audio.
      */
-    override suspend fun stopRecord(
-        cancelled: Boolean
-    ) {
+    override suspend fun stopRecord(reason: VoiceRecorderStopReason) {
+        if (outputFile == null) {
+            _state.emit(VoiceRecorderState.Idle)
+            return
+        }
         recordingJob?.cancel()?.also {
             Timber.i("Voice recorder stopped recording")
         }
@@ -129,24 +179,45 @@ class DefaultVoiceRecorder(
 
         audioReader?.stop()
         audioReader = null
-        encoder.release()
+        val recording = state.value as? VoiceRecorderState.Recording
+        val duration = recording?.elapsedTime ?: 0.milliseconds
+        val currentLevels = lock.withLock { levels.toList() }
+
+        if (reason == VoiceRecorderStopReason.CANCELLED) {
+            runCatching { encoder.release() }
+            deleteRecording()
+            lock.withLock { levels.clear() }
+            return
+        }
+
+        _state.emit(VoiceRecorderState.Finalizing(duration, currentLevels, reason))
+        try {
+            encoder.release()
+        } catch (failure: Exception) {
+            Timber.e(failure, "Voice recorder encoder finalization failed")
+            stopAfterFailure(VoiceRecorderFailure.ENCODER_FAILURE)
+            return
+        }
 
         lock.withLock {
-            if (cancelled) {
+            if (duration < MINIMUM_RECORDING_DURATION) {
+                outputFile?.let { fileManager.markCaptureCleanup(it, "VOICE_CAPTURE_FAILED_AND_CLEANED") }
                 deleteRecording()
                 levels.clear()
+                _state.emit(VoiceRecorderState.Failed(VoiceRecorderFailure.TOO_SHORT))
+                return
             }
 
             _state.emit(
                 when (val file = outputFile) {
                     null -> VoiceRecorderState.Idle
                     else -> {
-                        val duration = (state.value as? VoiceRecorderState.Recording)?.elapsedTime
                         VoiceRecorderState.Finished(
                             file = file,
                             mimeType = fileConfig.mimeType,
                             waveform = levels.resample(100),
-                            duration = duration ?: 0.milliseconds
+                            duration = duration,
+                            stopReason = reason,
                         )
                     }
                 }
@@ -162,6 +233,48 @@ class DefaultVoiceRecorder(
             Timber.i("Voice recorder deleted recording")
         }
         outputFile = null
+        cleanupRevision.value++
         _state.emit(VoiceRecorderState.Idle)
+    }
+
+    override suspend fun deleteRecording(recording: VoiceRecorderState.Finished) {
+        val outcome = if (recording.stopReason == VoiceRecorderStopReason.INTERRUPTED || recording.stopReason == VoiceRecorderStopReason.CANCELLED) {
+            "VOICE_CAPTURE_CANCELLED_AND_CLEANED"
+        } else {
+            "VOICE_CAPTURE_RELEASED_AND_CLEANED"
+        }
+        fileManager.markCaptureCleanup(recording.file, outcome)
+        fileManager.deleteFile(recording.file)
+        val deletedCurrentOutput = outputFile?.sameFileAs(recording.file) == true
+        if (deletedCurrentOutput) {
+            outputFile = null
+            _state.emit(VoiceRecorderState.Idle)
+        }
+        cleanupRevision.value++
+        Timber.i("Voice recorder deleted exact finished recording")
+    }
+
+    private fun File.sameFileAs(other: File): Boolean = runCatching {
+        canonicalFile == other.canonicalFile
+    }.getOrDefault(absoluteFile == other.absoluteFile)
+
+    private suspend fun stopAfterFailure(reason: VoiceRecorderFailure) {
+        recordingJob?.cancel()
+        recordingJob = null
+        audioReader?.stop()
+        audioReader = null
+        runCatching { encoder.release() }
+        outputFile?.let {
+            fileManager.markCaptureCleanup(it, "VOICE_CAPTURE_FAILED_AND_CLEANED")
+            fileManager.deleteFile(it)
+        }
+        outputFile = null
+        lock.withLock { levels.clear() }
+        cleanupRevision.value++
+        _state.emit(VoiceRecorderState.Failed(reason))
+    }
+
+    private companion object {
+        val MINIMUM_RECORDING_DURATION = 500.milliseconds
     }
 }

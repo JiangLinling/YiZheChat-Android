@@ -19,6 +19,7 @@ import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.core.meta.BuildMeta
 import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.di.annotations.ApplicationContext
+import io.element.android.security.dataprotection.api.DataProtectionPolicyProvider
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
@@ -34,11 +35,13 @@ class DefaultFileShare(
     @ApplicationContext private val context: Context,
     private val dispatchers: CoroutineDispatchers,
     private val buildMeta: BuildMeta,
+    private val policyProvider: DataProtectionPolicyProvider,
 ) : FileShare {
     override suspend fun share(
         path: String,
     ) {
         runCatchingExceptions {
+            check(policyProvider.current().policy.allowExternalShare) { "External file sharing is disabled by policy." }
             val file = File(path)
             val shareableUri = file.toShareableUri()
             val shareMediaIntent = Intent(Intent.ACTION_SEND)

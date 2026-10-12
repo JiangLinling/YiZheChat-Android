@@ -31,11 +31,14 @@ import io.element.android.libraries.designsystem.theme.components.ButtonSize
 import io.element.android.libraries.designsystem.theme.components.Icon
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.ui.strings.CommonStrings
+import io.element.android.features.location.api.live.PausedLiveLocationShare
 
 @Composable
 fun LiveLocationSharingBanner(
-    onClick: () -> Unit,
+    onClick: (() -> Unit)?,
     onStopClick: () -> Unit,
+    pausedState: PausedLiveLocationShare? = null,
+    onResumeClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -43,12 +46,13 @@ fun LiveLocationSharingBanner(
             .fillMaxWidth()
             .background(ElementTheme.colors.bgCanvasDefault)
             .drawBannerBorder(ElementTheme.colors.separatorPrimary)
-            .clickable(onClick = onClick)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
+            modifier = Modifier.weight(1f),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -59,18 +63,35 @@ fun LiveLocationSharingBanner(
                 modifier = Modifier.size(24.dp),
             )
             Text(
-                text = stringResource(CommonStrings.screen_room_live_location_banner),
+                text = stringResource(
+                    pausedState?.messageResource() ?: CommonStrings.screen_room_live_location_banner
+                ),
                 style = ElementTheme.typography.fontBodyMdMedium,
                 color = ElementTheme.colors.textPrimary,
             )
         }
-        Button(
-            text = stringResource(CommonStrings.action_stop),
-            onClick = onStopClick,
-            destructive = true,
-            size = ButtonSize.Small,
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (pausedState == PausedLiveLocationShare.RECOVERABLE && onResumeClick != null) {
+                Button(
+                    text = stringResource(R.string.action_resume_live_location),
+                    onClick = onResumeClick,
+                    size = ButtonSize.Small,
+                )
+            }
+            Button(
+                text = stringResource(CommonStrings.action_stop),
+                onClick = onStopClick,
+                destructive = true,
+                size = ButtonSize.Small,
+            )
+        }
     }
+}
+
+fun PausedLiveLocationShare.messageResource(): Int = when (this) {
+    PausedLiveLocationShare.CHECKING -> R.string.screen_room_live_location_paused_checking
+    PausedLiveLocationShare.RECOVERABLE -> R.string.screen_room_live_location_paused
+    PausedLiveLocationShare.UNRECOVERABLE -> R.string.screen_room_live_location_unrecoverable
 }
 
 private fun Modifier.drawBannerBorder(borderColor: Color): Modifier = drawBehind {
@@ -97,4 +118,14 @@ internal fun LiveLocationSharingBannerPreview() = ElementPreview {
         onClick = {},
         onStopClick = {},
     )
+}
+
+@PreviewsDayNight
+@Composable
+internal fun LiveLocationPausedBannerPreview() = ElementPreview {
+    androidx.compose.foundation.layout.Column {
+        PausedLiveLocationShare.entries.forEach { state ->
+            LiveLocationSharingBanner(onClick = null, onStopClick = {}, pausedState = state)
+        }
+    }
 }

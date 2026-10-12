@@ -38,13 +38,14 @@ class DefaultCallWidgetSettingsProvider(
         isAudioCall: Boolean,
         hasActiveCall: Boolean
     ): MatrixWidgetSettings {
+        val encryptionSystem = matrixRtcEncryptionSystem(encrypted)
         val isAnalyticsEnabled = analyticsService.userConsentFlow.first()
         val properties = VirtualElementCallWidgetProperties(
             elementCallUrl = baseUrl,
             widgetId = widgetId,
             fontScale = null,
             font = null,
-            encryption = if (encrypted) EncryptionSystem.PerParticipantKeys else EncryptionSystem.Unencrypted,
+            encryption = encryptionSystem,
             posthogUserId = callAnalyticsCredentialsProvider.posthogUserId.takeIf { isAnalyticsEnabled },
             posthogApiHost = callAnalyticsCredentialsProvider.posthogApiHost.takeIf { isAnalyticsEnabled },
             posthogApiKey = callAnalyticsCredentialsProvider.posthogApiKey.takeIf { isAnalyticsEnabled },
@@ -77,4 +78,11 @@ class DefaultCallWidgetSettingsProvider(
         )
         return MatrixWidgetSettings.fromRustWidgetSettings(rustWidgetSettings)
     }
+}
+
+internal fun matrixRtcEncryptionSystem(encrypted: Boolean): EncryptionSystem {
+    if (!encrypted) {
+        throw SecurityException("Unencrypted MatrixRTC widget configuration is forbidden")
+    }
+    return EncryptionSystem.PerParticipantKeys
 }

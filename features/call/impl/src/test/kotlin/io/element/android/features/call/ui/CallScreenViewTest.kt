@@ -11,6 +11,7 @@ import android.view.KeyEvent
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.test.AndroidComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -88,9 +89,34 @@ class CallScreenViewTest {
         runOnIdle {
             RecordingShadowWebView.invokeJavascriptBackHandler()
         }
+        waitForIdle()
 
         pipEvents.assertSize(2)
         pipEvents.assertTrue(0) { it is PictureInPictureEvent.SetPipController }
+        pipEvents.assertTrue(1) { it is PictureInPictureEvent.EnterPictureInPicture }
+    }
+
+    @Config(shadows = [RecordingShadowWebView::class])
+    @Test
+    fun `javascript back uses connected state after initial preparation and returns on UI thread`() = runAndroidComposeUiTest<ComponentActivity> {
+        val pipEvents = EventsRecorder<PictureInPictureEvent>()
+        val callEvents = EventsRecorder<CallScreenEvent>()
+        val state = mutableStateOf(aCallScreenState(isCallActive = false, eventSink = callEvents))
+        setContent {
+            CompositionLocalProvider(LocalInspectionMode provides false) {
+                CallScreenView(state = state.value,
+                    pipState = aPictureInPictureState(supportPip = true, eventSink = pipEvents),
+                    onConsoleMessage = {}, requestPermissions = { _, _ -> })
+            }
+        }
+        runOnIdle { state.value = state.value.copy(isCallActive = true) }
+        waitForIdle()
+        // A real JavascriptInterface callback arrives on a background bridge thread.
+        Thread { RecordingShadowWebView.invokeJavascriptBackHandler() }.apply { start(); join() }
+        waitForIdle()
+        callEvents.assertSize(1)
+        callEvents.assertTrue(0) { it is CallScreenEvent.SetupMessageChannels }
+        pipEvents.assertSize(2)
         pipEvents.assertTrue(1) { it is PictureInPictureEvent.EnterPictureInPicture }
     }
 }

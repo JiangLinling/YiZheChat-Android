@@ -11,4 +11,5 @@ package io.element.android.libraries.fullscreenintent.api
 sealed interface FullScreenIntentPermissionsEvents {
     data object Dismiss : FullScreenIntentPermissionsEvents
     data object OpenSettings : FullScreenIntentPermissionsEvents
+    data object Refresh : FullScreenIntentPermissionsEvents
 }

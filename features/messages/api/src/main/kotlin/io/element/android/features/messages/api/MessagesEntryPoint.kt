@@ -39,6 +39,7 @@ interface MessagesEntryPoint : FeatureEntryPoint {
         fun forwardEvent(eventId: EventId, fromPinnedEvents: Boolean)
         fun navigateToRoom(roomId: RoomId)
         fun navigateToDeveloperSettings()
+        fun navigateToChatSecurity() = Unit
     }
 
     data class Params(val initialTarget: InitialTarget) : NodeInputs

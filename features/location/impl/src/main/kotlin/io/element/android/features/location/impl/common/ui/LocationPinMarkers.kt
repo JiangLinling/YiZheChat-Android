@@ -159,6 +159,7 @@ private fun LocationPinMarkerLayer(
             filter = !feature.has("point_count") and (feature[LOCATION_MARKER_ID].asString() eq const(marker.id)),
             iconImage = image(imageBitmap),
             iconAnchor = const(SymbolAnchor.Bottom),
+            iconRotate = const(marker.location.heading ?: 0f),
             iconAllowOverlap = const(true),
             onClick = { features ->
                 if (features.isNotEmpty() && onMarkerClick != null) {

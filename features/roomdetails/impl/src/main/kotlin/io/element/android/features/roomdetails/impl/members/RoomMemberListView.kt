@@ -43,6 +43,7 @@ import io.element.android.libraries.designsystem.components.button.BackButton
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.designsystem.theme.components.Icon
+import io.element.android.libraries.designsystem.theme.components.IconButton
 import io.element.android.libraries.designsystem.theme.components.LinearProgressIndicator
 import io.element.android.libraries.designsystem.theme.components.Scaffold
 import io.element.android.libraries.designsystem.theme.components.SearchField
@@ -66,7 +67,13 @@ fun RoomMemberListView(
     modifier: Modifier = Modifier,
 ) {
     fun onSelectUser(roomMember: RoomMember) {
-        state.eventSink(RoomMemberListEvent.RoomMemberSelected(roomMember))
+        navigator.openRoomMemberDetails(roomMember.userId)
+    }
+
+    val onManageUser: (RoomMember) -> (() -> Unit)? = { member ->
+        if (state.canManage(member)) {
+            { state.eventSink(RoomMemberListEvent.RoomMemberSelected(member)) }
+        } else null
     }
 
     Scaffold(
@@ -100,6 +107,7 @@ fun RoomMemberListView(
                 searchQuery = state.searchQuery.text.toString(),
                 onSelectedSectionChange = { state.eventSink(RoomMemberListEvent.ChangeSelectedSection(it)) },
                 onSelectUser = ::onSelectUser,
+                onManageUser = onManageUser,
             )
         }
     }
@@ -113,6 +121,7 @@ private fun RoomMemberList(
     searchQuery: String,
     onSelectedSectionChange: (SelectedSection) -> Unit,
     onSelectUser: (RoomMember) -> Unit,
+    onManageUser: (RoomMember) -> (() -> Unit)?,
 ) {
     LazyColumn(modifier = Modifier.fillMaxWidth(), state = rememberLazyListState()) {
         stickyHeader {
@@ -156,6 +165,7 @@ private fun RoomMemberList(
                         roomMembers = roomMembers,
                         selectedSection = selectedSection,
                         onSelectUser = onSelectUser,
+                        onManageUser = onManageUser,
                     )
                 }
             }
@@ -168,6 +178,7 @@ private fun LazyListScope.memberItems(
     roomMembers: RoomMembers,
     selectedSection: SelectedSection,
     onSelectUser: (RoomMember) -> Unit,
+    onManageUser: (RoomMember) -> (() -> Unit)?,
 ) {
     when (selectedSection) {
         SelectedSection.MEMBERS -> {
@@ -180,7 +191,8 @@ private fun LazyListScope.memberItems(
                 )
                 roomMemberListSectionItems(
                     members = roomMembers.invited,
-                    onMemberSelected = { onSelectUser(it) }
+                    onMemberSelected = onSelectUser,
+                    onManageUser = onManageUser,
                 )
             }
             if (roomMembers.joined.isNotEmpty()) {
@@ -192,7 +204,8 @@ private fun LazyListScope.memberItems(
                 )
                 roomMemberListSectionItems(
                     members = roomMembers.joined,
-                    onMemberSelected = { onSelectUser(it) }
+                    onMemberSelected = onSelectUser,
+                    onManageUser = onManageUser,
                 )
             }
         }
@@ -207,7 +220,8 @@ private fun LazyListScope.memberItems(
                 )
                 roomMemberListSectionItems(
                     members = roomMembers.banned,
-                    onMemberSelected = { onSelectUser(it) }
+                    onMemberSelected = onSelectUser,
+                    onManageUser = onManageUser,
                 )
             }
         }
@@ -245,12 +259,14 @@ private fun LazyListScope.roomMemberListSectionHeader(
 private fun LazyListScope.roomMemberListSectionItems(
     members: ImmutableList<RoomMemberWithIdentityState>?,
     onMemberSelected: (RoomMember) -> Unit,
+    onManageUser: (RoomMember) -> (() -> Unit)?,
 ) {
     items(members.orEmpty()) { matrixUser ->
         RoomMemberListItem(
             modifier = Modifier.fillMaxWidth(),
             roomMemberWithIdentity = matrixUser,
-            onClick = { onMemberSelected(matrixUser.roomMember) }
+            onClick = { onMemberSelected(matrixUser.roomMember) },
+            onManageClick = onManageUser(matrixUser.roomMember),
         )
     }
 }
@@ -275,6 +291,7 @@ private fun LazyListScope.emptySearchItem(searchQuery: String) {
 private fun RoomMemberListItem(
     roomMemberWithIdentity: RoomMemberWithIdentityState,
     onClick: () -> Unit,
+    onManageClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val member = roomMemberWithIdentity.roomMember
@@ -324,6 +341,14 @@ private fun RoomMemberListItem(
                         color = ElementTheme.colors.textSecondary,
                     )
                 }
+                onManageClick?.let { manage ->
+                    IconButton(onClick = manage) {
+                        Icon(
+                            imageVector = CompoundIcons.OverflowVertical(),
+                            contentDescription = stringResource(R.string.screen_room_details_manage_member),
+                        )
+                    }
+                }
             }
         }
     )
@@ -337,7 +362,7 @@ private fun RoomMemberListTopBar(
     onInviteClick: () -> Unit,
 ) {
     TopAppBar(
-        titleStr = stringResource(CommonStrings.common_people),
+        titleStr = stringResource(R.string.screen_room_details_group_members),
         navigationIcon = { BackButton(onClick = onBackClick) },
         actions = {
             if (canInvite) {

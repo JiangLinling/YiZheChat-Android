@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_login_brand_title">YiZheChat</string>
+    <string name="screen_login_account_label">Account</string>
+    <string name="screen_login_account_placeholder">Enter your account</string>
+    <string name="screen_login_password_label">Password</string>
+    <string name="screen_login_password_placeholder">Enter your password</string>
+    <string name="screen_login_action">Log in</string>
+    <string name="screen_login_security_connection">Login information is sent over a secure connection</string>
+    <string name="screen_login_security_encryption">Your communications are protected with encryption</string>
+    <string name="screen_login_use_invitation">Use an invitation code to register</string>
+    <string name="screen_login_return">Return to account login</string>
+    <string name="screen_login_invitation_code">6-digit invitation code</string>
+    <string name="screen_login_invitation_code_hint">Enter the code from your inviter</string>
+    <string name="screen_login_invitation_checking">Checking invitation…</string>
+    <string name="screen_login_invitation_invalid">This invitation is invalid, expired, or already used</string>
+    <string name="screen_login_inviter">Inviter: %1$s</string>
+    <string name="screen_login_invitation_expires">Valid until %1$s</string>
+    <string name="screen_login_display_name">Your name</string>
+    <string name="screen_login_display_name_hint">For example: Sanhe</string>
+    <string name="screen_login_generated_account">Login account</string>
+    <string name="screen_login_generated_account_waiting">Enter your name to generate an account</string>
+    <string name="screen_login_registration_password">Set password</string>
+    <string name="screen_login_registration_password_confirm">Confirm password</string>
+    <string name="screen_login_registration_password_requirements">Use 12–128 characters with an uppercase letter, a lowercase letter, and a number</string>
+    <string name="screen_login_registration_password_requirements_missing">Still needed: %1$s</string>
+    <string name="screen_login_registration_password_requirements_met">Password requirements met</string>
+    <string name="screen_login_registration_password_requirement_minimum_length">at least 12 characters</string>
+    <string name="screen_login_registration_password_requirement_maximum_length">no more than 128 characters</string>
+    <string name="screen_login_registration_password_requirement_uppercase">an uppercase letter</string>
+    <string name="screen_login_registration_password_requirement_lowercase">a lowercase letter</string>
+    <string name="screen_login_registration_password_requirement_digit">a number</string>
+    <string name="screen_login_registration_password_requirement_no_control_characters">no line breaks or control characters</string>
+    <string name="screen_login_registration_password_requirement_separator">", "</string>
+    <string name="screen_login_registration_password_mismatch">The passwords do not match</string>
+    <string name="screen_login_register_action">Register and log in</string>
+    <string name="screen_login_error_security_sync">Device security setup could not be synchronized. Please retry. Code: %1$s</string>
+</resources>

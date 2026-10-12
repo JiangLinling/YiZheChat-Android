@@ -10,6 +10,11 @@ package io.element.android.libraries.mediaviewer.impl.local
 
 import androidx.compose.runtime.Composable
 import io.element.android.libraries.mediaviewer.api.local.LocalMedia
+import io.element.android.security.securestorage.api.SecureMediaAuthenticatedReadRejection
+
+internal class ProtectedMediaReadUnavailableException(
+    val reason: SecureMediaAuthenticatedReadRejection = SecureMediaAuthenticatedReadRejection.AUTHORITY_UNAVAILABLE,
+) : IllegalStateException("Protected media authorization is unavailable: ${reason.name}.")
 
 interface LocalMediaActions {
     @Composable

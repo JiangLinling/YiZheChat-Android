@@ -18,11 +18,10 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -48,11 +47,8 @@ import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.DpSize
@@ -63,13 +59,11 @@ import coil3.compose.AsyncImagePainter
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.messages.impl.R
-import io.element.android.libraries.designsystem.components.button.BackButton
 import io.element.android.libraries.designsystem.preview.ElementPreviewDark
 import io.element.android.libraries.designsystem.text.toPx
 import io.element.android.libraries.designsystem.theme.components.Icon
 import io.element.android.libraries.designsystem.theme.components.IconButton
 import io.element.android.libraries.designsystem.theme.components.Scaffold
-import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.designsystem.theme.components.TextButton
 import io.element.android.libraries.designsystem.theme.components.TopAppBar
 import io.element.android.libraries.designsystem.utils.CommonDrawables
@@ -94,7 +88,14 @@ fun AttachmentImageEditorView(
     onCancelClick: () -> Unit,
     onDoneClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onAnnotation: (ImageAnnotation) -> Unit = {},
+    onReplaceAnnotations: (List<ImageAnnotation>) -> Unit = {},
+    onUndo: () -> Unit = {}, onRedo: () -> Unit = {},
 ) {
+    var tool by remember { mutableStateOf(ImageTool.PEN) }
+    var showToolSettings by remember { mutableStateOf(false) }
+    var annotationColor by remember { mutableStateOf(0xffff4444.toInt()) }
+    var annotationWidth by remember { mutableStateOf(.016f) }
     val rotateContentDescription = stringResource(R.string.screen_image_edition_a11y_rotate_to_the_left)
     val rotationStateDescription = pluralStringResource(
         R.plurals.screen_image_edition_a11y_rotation_state,
@@ -117,19 +118,14 @@ fun AttachmentImageEditorView(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = Color.Black),
                 navigationIcon = {
-                    BackButton(
-                        imageVector = CompoundIcons.Close(),
-                        onClick = onCancelClick,
-                    )
+                    TextButton(stringResource(R.string.media_cancel), onClick = onCancelClick)
                 },
-                title = {
-                    Text(
-                        modifier = Modifier.semantics {
-                            heading()
-                        },
-                        text = stringResource(R.string.screen_image_edition_title),
-                    )
+                title = {},
+                actions = {
+                    TextButton("↶", onClick = onUndo, modifier = Modifier.semantics { contentDescription = "Undo" })
+                    TextButton("↷", onClick = onRedo, modifier = Modifier.semantics { contentDescription = "Redo" })
                 },
             )
         }
@@ -137,92 +133,69 @@ fun AttachmentImageEditorView(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(ElementTheme.colors.bgCanvasDefault)
+                .background(Color.Black)
                 .padding(paddingValues)
         ) {
             Box(
                 modifier = Modifier.weight(1f),
                 contentAlignment = Alignment.Center,
             ) {
-                CropEditorCanvas(
-                    state = state,
-                    onCropRectChange = onCropRectChange,
-                )
-            }
-            Row(
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .widthIn(max = 360.dp)
-                    .navigationBarsPadding()
-                    .padding(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 18.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    TextButton(
-                        text = stringResource(CommonStrings.action_reset),
-                        destructive = true,
-                        onClick = onResetClick,
-                    )
-                }
-                Row(
-                    modifier = Modifier.weight(2f),
-                    // Center the content horizontally
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    IconButton(
-                        onClick = onFlipHorizontallyClick,
-                        modifier = Modifier
-                            .clearAndSetSemantics {
-                                contentDescription = flipHorizontalLabel
-                                stateDescription = flipHorizontalState
-                            }
-                    ) {
-                        Icon(
-                            imageVector = CompoundIcons.FlipHorizontal(),
-                            contentDescription = null,
-                        )
-                    }
-                    IconButton(
-                        onClick = onRotateClick,
-                        modifier = Modifier
-                            .clearAndSetSemantics {
-                                contentDescription = rotateContentDescription
-                                stateDescription = rotationStateDescription
-                            }
-                    ) {
-                        Icon(
-                            imageVector = CompoundIcons.RotateLeft(),
-                            contentDescription = null,
-                        )
-                    }
-                    IconButton(
-                        onClick = onFlipVerticallyClick,
-                        modifier = Modifier
-                            .clearAndSetSemantics {
-                                contentDescription = flipVerticalLabel
-                                stateDescription = flipVerticalState
-                            }
-                    ) {
-                        Icon(
-                            imageVector = CompoundIcons.FlipVertical(),
-                            contentDescription = null,
-                        )
-                    }
-                }
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.CenterEnd,
-                ) {
-                    TextButton(
-                        text = stringResource(CommonStrings.action_save),
-                        onClick = onDoneClick,
+                if (tool == ImageTool.CROP) {
+                    CropEditorCanvas(state = state, onCropRectChange = onCropRectChange)
+                } else {
+                    ImageAnnotationCanvas(
+                        state,
+                        tool,
+                        annotationColor,
+                        annotationWidth,
+                        onAnnotation,
+                        onReplaceAnnotations,
+                        Modifier.fillMaxSize()
                     )
                 }
             }
+
+            if (tool == ImageTool.CROP) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                TextButton(stringResource(CommonStrings.action_reset), onClick = onResetClick)
+                IconButton(onClick = onFlipHorizontallyClick) { Icon(CompoundIcons.FlipHorizontal(), flipHorizontalLabel) }
+                IconButton(onClick = onRotateClick) { Icon(CompoundIcons.RotateLeft(), rotateContentDescription) }
+                IconButton(onClick = onFlipVerticallyClick) { Icon(CompoundIcons.FlipVertical(), flipVerticalLabel) }
+            }
+            }
+            AnnotationToolbar(
+                tool,
+                annotationColor,
+                annotationWidth,
+                onTool = {
+                    tool = it
+                    showToolSettings = true
+                },
+                onColor = { candidate ->
+                    annotationColor = candidate
+                    if (tool == ImageTool.TEXT) {
+                        val index = state.edits.annotations.indexOfLast { it is ImageAnnotation.Label }
+                        if (index >= 0) {
+                            onReplaceAnnotations(state.edits.annotations.toMutableList().apply {
+                            set(index, (get(index) as ImageAnnotation.Label).copy(color = candidate))
+                        })
+                        }
+                    }
+                },
+                onDone = onDoneClick,
+                showSettings = showToolSettings,
+                onWidth = { candidate ->
+                    annotationWidth = candidate
+                    if (tool == ImageTool.TEXT) {
+                        val index = state.edits.annotations.indexOfLast { it is ImageAnnotation.Label }
+                        if (index >= 0) {
+                            onReplaceAnnotations(state.edits.annotations.toMutableList().apply {
+                            set(index, (get(index) as ImageAnnotation.Label).copy(size = maxOf(.025f, candidate * 3)))
+                        })
+                        }
+                    }
+                }
+            )
         }
     }
 }
@@ -369,6 +342,7 @@ private fun BoxScope.CropEditorCanvas(
                 },
             contentAlignment = Alignment.Center,
         ) {
+            if (state.edits.annotations.isNotEmpty()) AnnotationPreview(state, Modifier.fillMaxSize())
             CropOverlay(
                 imageSize = DpSize(displayedWidthDp, displayedHeightDp),
                 cropRect = state.edits.cropRect,

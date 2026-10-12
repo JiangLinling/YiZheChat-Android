@@ -9,6 +9,7 @@
 package io.element.android.features.rageshake.impl.bugreport
 
 import io.element.android.features.rageshake.api.reporter.BugReporter
+import io.element.android.features.rageshake.api.reporter.BugReportAttachment
 import io.element.android.features.rageshake.api.reporter.BugReporterListener
 import io.element.android.libraries.matrix.test.A_FAILURE_REASON
 import kotlinx.coroutines.delay
@@ -28,7 +29,7 @@ class FakeBugReporter(val mode: Mode = Mode.Success) : BugReporter {
         problemDescription: String,
         canContact: Boolean,
         sendPushRules: Boolean,
-        ghIssueNumber: Int?,
+        attachments: List<BugReportAttachment>,
         listener: BugReporterListener,
     ) {
         delay(100)

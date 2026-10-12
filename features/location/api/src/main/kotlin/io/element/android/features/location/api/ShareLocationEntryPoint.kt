@@ -23,5 +23,6 @@ interface ShareLocationEntryPoint : FeatureEntryPoint {
         parentNode: Node,
         buildContext: BuildContext,
         timelineMode: Timeline.Mode,
+        burnAfterRead: Boolean = false,
     ): Node
 }

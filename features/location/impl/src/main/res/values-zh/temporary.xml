@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_share_location_selected_current">当前位置</string>
+    <string name="screen_share_location_selected_pin">已选位置</string>
+    <string name="screen_share_location_drag_hint">拖动地图选择位置，确认后点发送</string>
+    <string name="location_current_point">地图选定的位置</string>
+    <string name="location_send_failed">位置发送失败，请点发送重试</string>
+    <string name="location_more">更多</string>
+    <string name="location_share_live">共享实时位置</string>
+    <string name="location_resume_live">继续共享实时位置</string>
+    <string name="location_send_point_title">发送位置</string>
+    <string name="location_recenter">回到我的位置</string>
+    <string name="location_search_places">搜索地点</string>
+    <string name="location_no_places">没有找到地点，请换个关键词或拖动地图</string>
+    <string name="location_query_failed">地图查询失败（%1$d），请重试</string>
+    <string name="location_amap_consent_title">使用高德地图</string>
+    <string name="location_amap_consent_body">地图与地点搜索由高德 SDK 提供，可能向高德（北京高德图强科技有限公司）发送选点经纬度、搜索词、设备及网络信息。只有你主动选择共享时才会启动实时位置。隐私政策：https://lbs.amap.com/pages/privacy/</string>
+    <string name="location_amap_privacy_policy">高德隐私政策</string>
+    <string name="screen_share_location_tab_location">位置</string>
+    <string name="screen_share_location_tab_live">实时位置</string>
+    <string name="screen_share_location_live_mode_hint">共享期间，会话成员可以看到你的实时位置。点击发送选择共享时长。</string>
+</resources>

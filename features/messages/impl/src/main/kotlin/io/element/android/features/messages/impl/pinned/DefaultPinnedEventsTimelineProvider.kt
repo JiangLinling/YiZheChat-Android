@@ -24,9 +24,12 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 @SingleIn(RoomScope::class)
@@ -38,6 +41,7 @@ class DefaultPinnedEventsTimelineProvider(
 ) : PinnedEventsTimelineProvider {
     private val _timelineStateFlow: MutableStateFlow<AsyncData<Timeline>> =
         MutableStateFlow(AsyncData.Uninitialized)
+    private val timelineMutationMutex = Mutex()
 
     override fun activeTimelineFlow(): StateFlow<Timeline?> {
         return _timelineStateFlow
@@ -65,31 +69,52 @@ class DefaultPinnedEventsTimelineProvider(
 
     private suspend fun onActive() = coroutineScope {
         syncService.syncState.onEach {
-            // do not use syncState here as data can be loaded from cache, it's just to trigger retry if needed
+            // Do not use the sync value here: cached data is sufficient. A new emission only
+            // provides a retry opportunity when creating the timeline previously failed.
             loadTimelineIfNeeded()
-        }
+        }.launchIn(this)
+
+        // A pinned-only timeline is created from the room state that exists at creation time. The
+        // SDK normally updates it afterwards, but pin state can race that listener and leave the
+        // timeline exposing old events. Recreate it whenever the authoritative pinned ids change.
+        room.roomInfoFlow
+            .map { it.pinnedEventIds }
+            .distinctUntilChanged()
+            .drop(1)
+            .onEach {
+                refreshTimeline()
+            }
             .launchIn(this)
     }
 
     private suspend fun onInactive() {
-        resetTimeline()
+        timelineMutationMutex.withLock {
+            resetTimelineLocked()
+        }
     }
 
-    private suspend fun resetTimeline() {
-        invokeOnTimeline {
-            close()
-        }
+    private suspend fun resetTimelineLocked() {
+        timelineStateFlow.value.dataOrNull()?.close()
         _timelineStateFlow.emit(AsyncData.Uninitialized)
     }
 
-    suspend fun invokeOnTimeline(action: suspend Timeline.() -> Unit) {
+    suspend fun <T> invokeOnTimeline(action: suspend Timeline.() -> T): T? = timelineMutationMutex.withLock {
         when (val asyncTimeline = timelineStateFlow.value) {
             is AsyncData.Success -> action(asyncTimeline.data)
-            else -> Unit
+            else -> null
         }
     }
 
-    private suspend fun loadTimelineIfNeeded() {
+    private suspend fun refreshTimeline() = timelineMutationMutex.withLock {
+        resetTimelineLocked()
+        loadTimelineIfNeededLocked()
+    }
+
+    private suspend fun loadTimelineIfNeeded() = timelineMutationMutex.withLock {
+        loadTimelineIfNeededLocked()
+    }
+
+    private suspend fun loadTimelineIfNeededLocked() {
         when (timelineStateFlow.value) {
             is AsyncData.Uninitialized, is AsyncData.Failure -> {
                 timelineStateFlow.emit(AsyncData.Loading())

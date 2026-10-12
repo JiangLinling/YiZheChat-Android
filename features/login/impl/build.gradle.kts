@@ -71,6 +71,7 @@ dependencies {
     implementation(projects.libraries.oauth.api)
     implementation(projects.libraries.uiUtils)
     implementation(projects.libraries.wellknown.api)
+    implementation(projects.security.dataProtection.api)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.webkit)
     implementation(libs.serialization.json)
@@ -85,6 +86,7 @@ dependencies {
     testImplementation(projects.libraries.permissions.test)
     testImplementation(projects.libraries.sessionStorage.test)
     testImplementation(projects.libraries.wellknown.test)
+    testImplementation(projects.security.dataProtection.test)
     testImplementation(libs.androidx.camera.camera2)
     testImplementation(libs.androidx.camera.lifecycle)
 }

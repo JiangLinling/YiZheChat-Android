@@ -101,7 +101,7 @@ class DefaultPinnedMessagesBannerFormatterTest {
     @Test
     @Config(qualifiers = "en")
     fun `Unable to decrypt content`() {
-        val expected = "Waiting for this message"
+        val expected = ""
         val senderName = "Someone"
         val message = createRoomEvent(
             sentByYou = false,

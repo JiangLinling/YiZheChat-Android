@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="attachment_title">Choose files</string>
+    <string name="attachment_back">Back</string>
+    <string name="attachment_cancel">Cancel</string>
+    <string name="attachment_preview">File preview</string>
+    <string name="attachment_back_list">Back to files</string>
+    <string name="attachment_select">Select file</string>
+    <string name="attachment_deselect">Deselect file</string>
+    <string name="attachment_search">Search file name</string>
+    <string name="attachment_latest">Recent</string>
+    <string name="attachment_folders">Folders</string>
+    <string name="attachment_refresh">Refresh</string>
+    <string name="attachment_sources_unavailable">Some folders are unavailable. Add them again or restore access.</string>
+    <string name="attachment_partial_index">Only part of this large folder is shown. Open a smaller folder to view its contents.</string>
+    <string name="attachment_authorized_folder">Authorized folder</string>
+    <string name="attachment_folder_help">Add a folder to see new files here. Android 11+ does not allow granting the entire Download folder.</string>
+    <string name="attachment_folder_back">All files · %1$s</string>
+    <string name="attachment_selected_count">Selected: %1$d</string>
+    <string name="attachment_file_count">%1$d files</string>
+    <string name="attachment_first_use">Add files or a folder to start browsing</string>
+    <string name="attachment_no_results">No matching files</string>
+    <string name="attachment_access_scope">Only added files and authorized folders are searched. Use Add files to find a file elsewhere.</string>
+    <string name="attachment_time_unknown">Time unavailable</string>
+    <string name="attachment_size_unknown">Size unavailable</string>
+    <string name="attachment_add_files">Add files</string>
+    <string name="attachment_add_folder">Add folder</string>
+    <string name="attachment_continue">Continue (%1$d)</string>
+    <string name="attachment_sort_hint">Newest modification first. Up to 9 files; tap a file to preview.</string>
+    <string name="attachment_access_error">Unable to access this location or file. Retry or add it again.</string>
+    <string name="attachment_all">All</string>
+    <string name="attachment_word">Word</string>
+    <string name="attachment_excel">XLS</string>
+    <string name="attachment_pdf">PDF</string>
+    <string name="attachment_ppt">PPT</string>
+    <string name="attachment_text">TXT</string>
+    <string name="attachment_archive">Archives</string>
+    <string name="attachment_other">Other</string>
+    <string name="attachment_added_file">Added file</string>
+
+<string name="gallery_title">Photos and videos</string>
+    
+<string name="gallery_close">Close</string>
+    
+<string name="gallery_back">Back</string>
+    
+<string name="gallery_select">Select</string>
+    
+<string name="gallery_deselect">Deselect</string>
+    
+<string name="gallery_partial">Only selected media is accessible · Choose more</string>
+    
+<string name="gallery_permission">Allow photo and video access to browse your library</string>
+    
+<string name="gallery_allow">Allow access</string>
+    
+<string name="gallery_system_picker">Use system picker</string>
+    
+<string name="gallery_empty">No photos or videos available</string>
+    
+<string name="gallery_original">Original photos</string>
+    
+<string name="gallery_preview">Preview (%1$d)</string>
+    
+<string name="gallery_send">Send (%1$d)</string>
+    
+<string name="gallery_limit">Select up to %1$d items</string>
+    
+    <string name="gallery_edit">Edit</string>
+    <string name="gallery_preview_empty">Preview</string>
+    <string name="gallery_send_empty">Send</string>
+    <string name="attachment_search_short">Search files</string>
+    <string name="attachment_shared_permission">Enable file access to browse the latest files on this phone</string>
+    <string name="attachment_shared_empty">No accessible files yet</string>
+    <string name="attachment_shared_scope">Files from shared phone storage</string>
+    <string name="attachment_enable">Enable</string>
+    <string name="attachment_create_folder">New folder</string>
+    <string name="attachment_create_file">New file</string>
+    <string name="attachment_my_folder">My folder</string>
+    <string name="attachment_folders_empty">Add common folders or create your own folder</string>
+    <string name="attachment_move_short">Move</string>
+    <string name="attachment_move_target">Move to my folder</string>
+    <string name="attachment_name">Name</string>
+    <string name="attachment_file_content">Text content</string>
+    <string name="attachment_save">Save</string>
+    <string name="attachment_create_folder_first">Create a folder first</string>
+    <string name="attachment_management_error">Unable to finish. Check file names and access. Existing files are not overwritten.</string>
+    <string name="attachment_management_pending">File organization is unfinished</string>
+    <string name="attachment_resume">Resume</string>
+    <string name="attachment_stop">Stop</string>
+    <string name="attachment_default_filename">new-file.txt</string>
+    <string name="attachment_search_folders">Search folders</string>
+    <string name="attachment_search_directory">Search this folder</string>
+    <string name="attachment_directory_empty">This folder is empty</string>
+    <string name="attachment_move_action">Move</string>
+    <string name="attachment_choose_move_folder">Move “%1$s” to…</string>
+    <string name="attachment_move_unavailable">Moving into this folder is unavailable</string>
+    <string name="attachment_moved">Moved into folder</string>
+    <string name="attachment_rename_collision">Choose another name</string>
+    <string name="attachment_collision_help">A file with this name already exists. Choose a different name; the existing file will be kept.</string>
+    <string name="attachment_move_here">Move here</string>
+    <string name="attachment_open_folder">Open folder</string>
+    <string name="attachment_preview_size_limit">This file exceeds the %1$s local preview limit. You can still select it from the list; sending follows the existing upload rules.</string>
+</resources>

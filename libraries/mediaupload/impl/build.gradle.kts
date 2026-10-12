@@ -33,6 +33,7 @@ dependencies {
     implementation(projects.libraries.di)
     implementation(projects.libraries.featureflag.api)
     implementation(projects.libraries.matrix.api)
+    implementation(projects.security.contentProtection.api)
     implementation(projects.services.toolbox.api)
     implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.media3.transformer)
@@ -46,4 +47,5 @@ dependencies {
     testImplementation(projects.libraries.matrix.test)
     testImplementation(projects.libraries.preferences.test)
     testImplementation(projects.libraries.mediaupload.test)
+    testImplementation(projects.libraries.featureflag.test)
 }

@@ -15,7 +15,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
-import io.element.android.compound.theme.ElementTheme
 import io.element.android.features.securebackup.impl.R
 import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.designsystem.components.async.AsyncActionView
@@ -24,7 +23,6 @@ import io.element.android.libraries.designsystem.components.list.ListItemContent
 import io.element.android.libraries.designsystem.components.preferences.PreferencePage
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
-import io.element.android.libraries.designsystem.text.buildAnnotatedStringWithStyledPart
 import io.element.android.libraries.designsystem.theme.components.CircularProgressIndicator
 import io.element.android.libraries.designsystem.theme.components.HorizontalDivider
 import io.element.android.libraries.designsystem.theme.components.ListItem
@@ -43,7 +41,6 @@ fun SecureBackupRootView(
     onChangeClick: () -> Unit,
     onDisableClick: () -> Unit,
     onConfirmRecoveryKeyClick: () -> Unit,
-    onLearnMoreClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val snackbarHostState = rememberSnackbarHostState(snackbarMessage = state.snackbarMessage)
@@ -54,26 +51,6 @@ fun SecureBackupRootView(
         title = stringResource(id = CommonStrings.common_encryption),
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) {
-        ListItem(
-            headlineContent = {
-                Text(
-                    text = stringResource(id = R.string.screen_chat_backup_key_backup_title),
-                )
-            },
-            supportingContent = {
-                Text(
-                    text = buildAnnotatedStringWithStyledPart(
-                        fullTextRes = R.string.screen_chat_backup_key_backup_description,
-                        coloredTextRes = CommonStrings.action_learn_more,
-                        color = ElementTheme.colors.textPrimary,
-                        underline = false,
-                        bold = true,
-                    ),
-                )
-            },
-            onClick = onLearnMoreClick,
-        )
-
         // Disable / Enable key storage
         ListItem(
             headlineContent = {
@@ -245,6 +222,5 @@ internal fun SecureBackupRootViewPreview(
         onChangeClick = {},
         onDisableClick = {},
         onConfirmRecoveryKeyClick = {},
-        onLearnMoreClick = {},
     )
 }

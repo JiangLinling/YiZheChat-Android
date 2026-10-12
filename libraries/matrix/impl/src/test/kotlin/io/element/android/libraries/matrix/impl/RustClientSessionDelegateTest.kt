@@ -9,13 +9,16 @@
 package io.element.android.libraries.matrix.impl
 
 import com.google.common.truth.Truth.assertThat
+import io.element.android.libraries.featureflag.test.FakeFeatureFlagService
 import io.element.android.libraries.matrix.impl.core.SdkBackgroundTaskError
 import io.element.android.libraries.matrix.impl.fixtures.factories.aRustSession
 import io.element.android.libraries.sessionstorage.api.SessionStore
 import io.element.android.libraries.sessionstorage.test.InMemorySessionStore
 import io.element.android.libraries.sessionstorage.test.aSessionData
+import io.element.android.security.securestorage.test.FakeVaultKeyService
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.analytics.test.FakeAnalyticsService
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -40,8 +43,8 @@ class RustClientSessionDelegateTest {
             )
         )
         val result = sessionStore.getLatestSession()
-        assertThat(result!!.accessToken).isEqualTo("at")
-        assertThat(result.refreshToken).isEqualTo("rt")
+        assertThat(result!!.accessToken).startsWith("yzvault1:")
+        assertThat(result.refreshToken).startsWith("yzvault1:")
     }
 
     @Test
@@ -71,8 +74,11 @@ class RustClientSessionDelegateTest {
 fun TestScope.aRustClientSessionDelegate(
     sessionStore: SessionStore = InMemorySessionStore(),
     analyticsService: AnalyticsService = FakeAnalyticsService(),
+    vaultKeyService: FakeVaultKeyService = FakeVaultKeyService(),
+    appCoroutineScope: CoroutineScope = this,
 ) = RustClientSessionDelegate(
     sessionStore = sessionStore,
-    appCoroutineScope = this,
+    appCoroutineScope = appCoroutineScope,
     analyticsService = analyticsService,
+    accountSessionSecretVault = AccountSessionSecretVault(vaultKeyService, FakeFeatureFlagService()),
 )

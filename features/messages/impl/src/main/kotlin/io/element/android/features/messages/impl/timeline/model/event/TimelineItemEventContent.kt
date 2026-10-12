@@ -15,6 +15,18 @@ import kotlin.time.Duration
 @Immutable
 sealed interface TimelineItemEventContent {
     val type: String
+    val isBurnAfterRead: Boolean
+        get() = false
+    val isBurnAfterReadUnopened: Boolean
+        get() = false
+
+    /** True only for a fail-closed protected-content status shell, never for decrypted content. */
+    val isProtectedContentShell: Boolean
+        get() = false
+
+    /** True when the protected-content shell itself proves an irreversible terminal outcome. */
+    val isTerminalProtectedContentShell: Boolean
+        get() = false
 }
 
 interface TimelineItemEventMutableContent {
@@ -43,7 +55,7 @@ sealed interface TimelineItemEventContentWithAttachment :
  * Only text based content can be copied.
  */
 fun TimelineItemEventContent.canBeCopied(): Boolean =
-    this is TimelineItemTextBasedContent
+    this is TimelineItemTextBasedContent && !isProtectedContentShell && !isBurnAfterRead
 
 /**
  * Returns true if the event content can be forwarded.

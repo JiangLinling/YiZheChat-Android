@@ -64,8 +64,9 @@ class DirectLogoutPresenter(
         }
 
         return DirectLogoutState(
-            canDoDirectSignOut = !isLastDevice &&
-                !backupUploadState.isBackingUp(),
+            // Account removal always goes through the full recovery-readiness page. The user can still
+            // continue after the warning, but a second device must not make the destructive path silent.
+            canDoDirectSignOut = false,
             logoutAction = logoutAction.value,
             eventSink = ::handleEvent,
         )

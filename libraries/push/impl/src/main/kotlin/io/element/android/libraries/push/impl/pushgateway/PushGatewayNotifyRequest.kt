@@ -30,10 +30,22 @@ class DefaultPushGatewayNotifyRequest(
     private val pushGatewayApiFactory: PushGatewayApiFactory,
 ) : PushGatewayNotifyRequest {
     override suspend fun execute(params: PushGatewayNotifyRequest.Params) {
-        val pushGatewayApi = pushGatewayApiFactory.create(
-            params.url.substringBefore(PushGatewayConfig.URI_PUSH_GATEWAY_PREFIX_PATH)
-        )
+        val notifyPath = PushGatewayConfig.URI_PUSH_GATEWAY_PREFIX_PATH + "notify"
+        val notifyPathIndex = params.url.indexOf(notifyPath)
+        val hasExactNotifyEndpoint = notifyPathIndex >= 0 &&
+            params.url.getOrNull(notifyPathIndex + notifyPath.length) in setOf(null, '?')
+        val gatewayBaseUrl: String
+        val notifyUrl: String
+        if (hasExactNotifyEndpoint) {
+            gatewayBaseUrl = params.url.substring(0, notifyPathIndex)
+            notifyUrl = params.url.substring(notifyPathIndex)
+        } else {
+            gatewayBaseUrl = params.url.substringBefore(PushGatewayConfig.URI_PUSH_GATEWAY_PREFIX_PATH)
+            notifyUrl = notifyPath
+        }
+        val pushGatewayApi = pushGatewayApiFactory.create(gatewayBaseUrl)
         val response = pushGatewayApi.notify(
+            notifyUrl,
             PushGatewayNotifyBody(
                 PushGatewayNotification(
                     eventId = params.eventId.value,

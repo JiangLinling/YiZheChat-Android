@@ -17,7 +17,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.core.net.toUri
 import dev.zacsweers.metro.Inject
+import io.element.android.features.rageshake.api.reporter.BugReportAttachment
 import io.element.android.features.rageshake.api.reporter.BugReporter
 import io.element.android.features.rageshake.api.reporter.BugReporterListener
 import io.element.android.features.rageshake.impl.crash.CrashDataStore
@@ -27,18 +29,20 @@ import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.di.annotations.AppCoroutineScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 @Inject
 class BugReportPresenter(
     private val bugReporter: BugReporter,
     private val crashDataStore: CrashDataStore,
     private val screenshotHolder: ScreenshotHolder,
+    private val attachmentProcessor: BugReportAttachmentProcessor,
     @AppCoroutineScope
     private val appCoroutineScope: CoroutineScope,
 ) : Presenter<BugReportState> {
     private class BugReporterUploadListener(
         private val sendingProgress: MutableFloatState,
-        private val sendingAction: MutableState<AsyncAction<Unit>>
+        private val sendingAction: MutableState<AsyncAction<Unit>>,
     ) : BugReporterListener {
         override fun onUploadCancelled() {
             sendingProgress.floatValue = 0f
@@ -81,19 +85,105 @@ class BugReportPresenter(
         val formState: MutableState<BugReportFormState> = rememberSaveable {
             mutableStateOf(BugReportFormState.Default)
         }
+        val attachments = remember { mutableStateOf<List<BugReportAttachmentState>>(emptyList()) }
+        val processedAttachments = remember { mutableMapOf<String, ProcessedBugReportAttachment>() }
+        val attachmentNotice = remember { mutableStateOf<BugReportAttachmentNotice?>(null) }
         val uploadListener = BugReporterUploadListener(sendingProgress, sendingAction)
+
+        fun removeAttachment(id: String) {
+            processedAttachments.remove(id)?.let(attachmentProcessor::release)
+            attachments.value = attachments.value.filterNot { it.id == id }
+        }
+
+        fun addAttachments(media: List<io.element.android.libraries.mediapickers.api.PickedMedia>) {
+            val availableSlots = (MAX_BUG_REPORT_MEDIA_COUNT - attachments.value.size).coerceAtLeast(0)
+            val selected = media.take(availableSlots)
+            attachmentNotice.value = BugReportAttachmentNotice.SelectionTrimmed.takeIf { media.size > selected.size }
+            if (selected.isEmpty()) return
+
+            val pending = selected.map { pickedMedia ->
+                BugReportAttachmentState(
+                    id = UUID.randomUUID().toString(),
+                    displayName = pickedMedia.uri.lastPathSegment ?: "附件",
+                    kind = if (pickedMedia.mimeType?.startsWith("video/") == true) {
+                        BugReportAttachmentKind.Video
+                    } else {
+                        BugReportAttachmentKind.Image
+                    },
+                    status = BugReportAttachmentStatus.Compressing,
+                )
+            }
+            attachments.value += pending
+            appCoroutineScope.launch {
+                selected.zip(pending).forEach { (pickedMedia, pendingItem) ->
+                    val result = attachmentProcessor.process(
+                        uri = pickedMedia.uri,
+                        mimeType = pickedMedia.mimeType,
+                    )
+                    val processed = result.getOrNull()
+                    val totalBytes = processedAttachments.values.sumOf { it.attachment.file.length() } +
+                        (processed?.attachment?.file?.length() ?: 0L)
+                    val updatedItem = when {
+                        processed != null && totalBytes <= MAX_BUG_REPORT_MEDIA_TOTAL_BYTES -> {
+                            processedAttachments[pendingItem.id] = processed
+                            pendingItem.copy(
+                                displayName = processed.displayName,
+                                kind = processed.kind,
+                                sizeBytes = processed.attachment.file.length(),
+                                previewUri = processed.attachment.file.absolutePath,
+                                status = BugReportAttachmentStatus.Ready,
+                            )
+                        }
+                        processed != null -> {
+                            attachmentProcessor.release(processed)
+                            pendingItem.copy(status = BugReportAttachmentStatus.Failed(BugReportAttachmentError.TotalTooLarge))
+                        }
+                        else -> pendingItem.copy(
+                            status = BugReportAttachmentStatus.Failed(result.exceptionOrNull().toAttachmentError())
+                        )
+                    }
+                    if (attachments.value.any { it.id == pendingItem.id }) {
+                        attachments.value = attachments.value.map { current ->
+                            if (current.id == pendingItem.id) updatedItem else current
+                        }
+                    } else {
+                        processedAttachments.remove(pendingItem.id)?.let(attachmentProcessor::release)
+                    }
+                }
+            }
+        }
 
         fun handleEvent(event: BugReportEvents) {
             when (event) {
                 BugReportEvents.SendBugReport -> {
-                    if (formState.value.description.length < 10) {
+                    val trimmedDescription = formState.value.description.trim()
+                    if (trimmedDescription.length < 10) {
                         sendingAction.value = AsyncAction.Failure(BugReportFormError.DescriptionTooShort)
                     } else {
                         sendingAction.value = AsyncAction.Loading
-                        appCoroutineScope.sendBugReport(formState.value, crashInfo.isNotEmpty(), uploadListener)
+                        appCoroutineScope.sendBugReport(
+                            formState = formState.value.copy(description = trimmedDescription),
+                            hasCrashLogs = crashInfo.isNotEmpty(),
+                            screenshotUri = screenshotUri.value,
+                            attachments = processedAttachments.values.map { it.attachment },
+                            listener = uploadListener,
+                        )
                     }
                 }
-                BugReportEvents.ResetAll -> appCoroutineScope.resetAll()
+                BugReportEvents.ResetAll -> {
+                    processedAttachments.values.forEach(attachmentProcessor::release)
+                    processedAttachments.clear()
+                    attachments.value = emptyList()
+                    appCoroutineScope.resetAll()
+                }
+                BugReportEvents.DiscardAttachments -> {
+                    processedAttachments.values.forEach(attachmentProcessor::release)
+                    processedAttachments.clear()
+                    attachments.value = emptyList()
+                }
+                is BugReportEvents.AddAttachments -> addAttachments(event.media)
+                is BugReportEvents.RemoveAttachment -> removeAttachment(event.id)
+                BugReportEvents.ClearAttachmentNotice -> attachmentNotice.value = null
                 is BugReportEvents.SetDescription -> updateFormState(formState) {
                     copy(description = event.description)
                 }
@@ -113,9 +203,6 @@ class BugReportPresenter(
                     sendingProgress.floatValue = 0f
                     sendingAction.value = AsyncAction.Uninitialized
                 }
-                is BugReportEvents.SetGhIssueNumber -> updateFormState(formState) {
-                    copy(ghIssueNumber = event.ghIssueNumber)
-                }
             }
         }
 
@@ -125,6 +212,8 @@ class BugReportPresenter(
             sending = sendingAction.value,
             formState = formState.value,
             screenshotUri = screenshotUri.value,
+            attachments = attachments.value,
+            attachmentNotice = attachmentNotice.value,
             eventSink = ::handleEvent,
         )
     }
@@ -136,22 +225,52 @@ class BugReportPresenter(
     private fun CoroutineScope.sendBugReport(
         formState: BugReportFormState,
         hasCrashLogs: Boolean,
+        screenshotUri: String?,
+        attachments: List<BugReportAttachment>,
         listener: BugReporterListener,
     ) = launch {
-        bugReporter.sendBugReport(
-            withDevicesLogs = formState.sendLogs,
-            withCrashLogs = hasCrashLogs && formState.sendLogs,
-            withScreenshot = formState.sendScreenshot,
-            problemDescription = formState.description,
-            canContact = formState.canContact,
-            sendPushRules = formState.sendPushRules,
-            ghIssueNumber = formState.ghIssueNumber,
-            listener = listener,
-        )
+        var compressedScreenshot: ProcessedBugReportAttachment? = null
+        try {
+            val finalAttachments = attachments.toMutableList()
+            if (formState.sendScreenshot && screenshotUri != null) {
+                val screenshotAttachment = attachmentProcessor.process(
+                    uri = screenshotUri.toUri(),
+                    mimeType = "image/png",
+                    fallbackName = "screenshot.png",
+                ).getOrElse {
+                    listener.onUploadFailed("截图压缩失败，请关闭“当前截图”后重试。")
+                    return@launch
+                }
+                compressedScreenshot = screenshotAttachment
+                if (finalAttachments.sumOf { it.file.length() } + screenshotAttachment.attachment.file.length() > MAX_BUG_REPORT_MEDIA_TOTAL_BYTES) {
+                    listener.onUploadFailed("压缩后的附件总计超过 20 MB，请删除部分附件后重试。")
+                    return@launch
+                }
+                finalAttachments += screenshotAttachment.attachment
+            }
+            bugReporter.sendBugReport(
+                withDevicesLogs = formState.sendLogs,
+                withCrashLogs = hasCrashLogs && formState.sendLogs,
+                withScreenshot = false,
+                problemDescription = formState.description,
+                canContact = formState.canContact,
+                sendPushRules = formState.sendPushRules,
+                attachments = finalAttachments,
+                listener = listener,
+            )
+        } finally {
+            compressedScreenshot?.let(attachmentProcessor::release)
+        }
     }
 
     private fun CoroutineScope.resetAll() = launch {
         screenshotHolder.reset()
         crashDataStore.reset()
+    }
+
+    private fun Throwable?.toAttachmentError(): BugReportAttachmentError = when (this) {
+        BugReportAttachmentFailure.UnsupportedFormat -> BugReportAttachmentError.UnsupportedFormat
+        BugReportAttachmentFailure.CompressedFileTooLarge -> BugReportAttachmentError.ItemTooLarge
+        else -> BugReportAttachmentError.CompressionFailed
     }
 }

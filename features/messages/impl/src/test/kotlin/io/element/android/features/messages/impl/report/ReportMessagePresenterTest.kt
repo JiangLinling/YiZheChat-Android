@@ -10,15 +10,17 @@ package io.element.android.features.messages.impl.report
 
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.architecture.AsyncAction
-import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
+import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.test.AN_EVENT_ID
 import io.element.android.libraries.matrix.test.A_USER_ID
+import io.element.android.libraries.matrix.test.FakeMatrixClient
 import io.element.android.libraries.matrix.test.room.FakeJoinedRoom
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.lambda.lambdaRecorder
+import io.element.android.tests.testutils.lambda.value
 import io.element.android.tests.testutils.test
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
@@ -29,110 +31,156 @@ class ReportMessagePresenterTest {
     val warmUpRule = WarmUpRule()
 
     @Test
-    fun `presenter - initial state`() = runTest {
-        val presenter = createReportMessagePresenter()
-        presenter.test {
-            val initialState = awaitItem()
-            assertThat(initialState.reason).isEmpty()
-            assertThat(initialState.blockUser).isFalse()
-            assertThat(initialState.result).isInstanceOf(AsyncAction.Uninitialized::class.java)
+    fun `initial state is not submitted`() = runTest {
+        createPresenter().test {
+            val state = awaitItem()
+            assertThat(state.reason).isEmpty()
+            assertThat(state.blockUser).isFalse()
+            assertThat(state.reportSubmitted).isFalse()
+            assertThat(state.result).isInstanceOf(AsyncAction.Uninitialized::class.java)
         }
     }
 
     @Test
-    fun `presenter - update reason`() = runTest {
-        val presenter = createReportMessagePresenter()
-        presenter.test {
-            val initialState = awaitItem()
-            val reason = "This user is making the chat very toxic."
-            initialState.eventSink(ReportMessageEvent.UpdateReason(reason))
-
-            assertThat(awaitItem().reason).isEqualTo(reason)
-        }
-    }
-
-    @Test
-    fun `presenter - toggle block user`() = runTest {
-        val presenter = createReportMessagePresenter()
-        presenter.test {
-            val initialState = awaitItem()
-            initialState.eventSink(ReportMessageEvent.ToggleBlockUser)
-
+    fun `reason and block choice update before submission`() = runTest {
+        createPresenter().test {
+            val initial = awaitItem()
+            initial.eventSink(ReportMessageEvent.UpdateReason("Spam"))
+            assertThat(awaitItem().reason).isEqualTo("Spam")
+            initial.eventSink(ReportMessageEvent.ToggleBlockUser)
             assertThat(awaitItem().blockUser).isTrue()
-
-            initialState.eventSink(ReportMessageEvent.ToggleBlockUser)
-
+            initial.eventSink(ReportMessageEvent.ToggleBlockUser)
             assertThat(awaitItem().blockUser).isFalse()
         }
     }
 
     @Test
-    fun `presenter - handle successful report and block user`() = runTest {
-        val reportContentResult = lambdaRecorder<EventId, String, UserId?, Result<Unit>> { _, _, _ ->
-            Result.success(Unit)
-        }
-        val room = FakeJoinedRoom(
-            reportContentResult = reportContentResult
-        )
-        val presenter = createReportMessagePresenter(joinedRoom = room)
-        presenter.test {
-            val initialState = awaitItem()
-            initialState.eventSink(ReportMessageEvent.ToggleBlockUser)
-            skipItems(1)
-            initialState.eventSink(ReportMessageEvent.Report)
+    fun `report passes no block user then ignores user separately`() = runTest {
+        val report = lambdaRecorder<EventId, String, UserId?, Result<Unit>> { _, _, _ -> Result.success(Unit) }
+        val ignore = lambdaRecorder<UserId, Result<Unit>> { Result.success(Unit) }
+        createPresenter(
+            room = FakeJoinedRoom(reportContentResult = report),
+            client = FakeMatrixClient(ignoreUserResult = ignore),
+        ).test {
+            val initial = awaitItem()
+            initial.eventSink(ReportMessageEvent.ToggleBlockUser)
+            val blockEnabled = awaitItem()
+            blockEnabled.eventSink(ReportMessageEvent.Report)
             assertThat(awaitItem().result).isInstanceOf(AsyncAction.Loading::class.java)
-            assertThat(awaitItem().result).isInstanceOf(AsyncAction.Success::class.java)
-            reportContentResult.assertions().isCalledOnce()
+            var submitted = awaitItem()
+            while (submitted.result is AsyncAction.Loading) {
+                assertThat(submitted.reportSubmitted).isTrue()
+                submitted = awaitItem()
+            }
+            assertThat(submitted.result).isInstanceOf(AsyncAction.Success::class.java)
         }
+        report.assertions().isCalledOnce().with(value(AN_EVENT_ID), value(""), value(null))
+        ignore.assertions().isCalledOnce().with(value(A_USER_ID))
     }
 
     @Test
-    fun `presenter - handle successful report`() = runTest {
-        val reportContentResult = lambdaRecorder<EventId, String, UserId?, Result<Unit>> { _, _, _ ->
-            Result.success(Unit)
-        }
-        val room = FakeJoinedRoom(
-            reportContentResult = reportContentResult
-        )
-        val presenter = createReportMessagePresenter(joinedRoom = room)
-        presenter.test {
-            val initialState = awaitItem()
-            initialState.eventSink(ReportMessageEvent.Report)
+    fun `report without block does not ignore user`() = runTest {
+        val report = lambdaRecorder<EventId, String, UserId?, Result<Unit>> { _, _, _ -> Result.success(Unit) }
+        val ignore = lambdaRecorder<UserId, Result<Unit>> { Result.success(Unit) }
+        createPresenter(
+            room = FakeJoinedRoom(reportContentResult = report),
+            client = FakeMatrixClient(ignoreUserResult = ignore),
+        ).test {
+            val initial = awaitItem()
+            initial.eventSink(ReportMessageEvent.Report)
             assertThat(awaitItem().result).isInstanceOf(AsyncAction.Loading::class.java)
-            assertThat(awaitItem().result).isInstanceOf(AsyncAction.Success::class.java)
-            reportContentResult.assertions().isCalledOnce()
+            var submitted = awaitItem()
+            while (submitted.result is AsyncAction.Loading) {
+                assertThat(submitted.reportSubmitted).isTrue()
+                submitted = awaitItem()
+            }
+            assertThat(submitted.reportSubmitted).isTrue()
+            assertThat(submitted.result).isInstanceOf(AsyncAction.Success::class.java)
         }
+        report.assertions().isCalledOnce()
+        ignore.assertions().isNeverCalled()
     }
 
     @Test
-    fun `presenter - handle failed report`() = runTest {
-        val reportContentResult = lambdaRecorder<EventId, String, UserId?, Result<Unit>> { _, _, _ ->
+    fun `failed report remains unsubmitted`() = runTest {
+        val report = lambdaRecorder<EventId, String, UserId?, Result<Unit>> { _, _, _ ->
             Result.failure(Exception("Failed to report content"))
         }
-        val room = FakeJoinedRoom(
-            reportContentResult = reportContentResult
-        )
-        val presenter = createReportMessagePresenter(joinedRoom = room)
-        presenter.test {
-            val initialState = awaitItem()
-            initialState.eventSink(ReportMessageEvent.Report)
+        createPresenter(room = FakeJoinedRoom(reportContentResult = report)).test {
+            val initial = awaitItem()
+            initial.eventSink(ReportMessageEvent.Report)
             assertThat(awaitItem().result).isInstanceOf(AsyncAction.Loading::class.java)
-            val resultState = awaitItem()
-            assertThat(resultState.result).isInstanceOf(AsyncAction.Failure::class.java)
-            reportContentResult.assertions().isCalledOnce()
-
-            resultState.eventSink(ReportMessageEvent.ClearError)
+            val failed = awaitItem()
+            assertThat(failed.reportSubmitted).isFalse()
+            assertThat(failed.result).isInstanceOf(AsyncAction.Failure::class.java)
+            failed.eventSink(ReportMessageEvent.ClearError)
             assertThat(awaitItem().result).isInstanceOf(AsyncAction.Uninitialized::class.java)
         }
     }
 
-    private fun createReportMessagePresenter(
-        inputs: ReportMessagePresenter.Inputs = ReportMessagePresenter.Inputs(AN_EVENT_ID, A_USER_ID),
-        joinedRoom: JoinedRoom = FakeJoinedRoom(),
-        snackbarDispatcher: SnackbarDispatcher = SnackbarDispatcher(),
+    @Test
+    fun `block retry does not submit report again`() = runTest {
+        val report = lambdaRecorder<EventId, String, UserId?, Result<Unit>> { _, _, _ -> Result.success(Unit) }
+        var attempt = 0
+        val ignore = lambdaRecorder<UserId, Result<Unit>> {
+            attempt += 1
+            if (attempt == 1) Result.failure(Exception("Failed to block user")) else Result.success(Unit)
+        }
+        createPresenter(
+            room = FakeJoinedRoom(reportContentResult = report),
+            client = FakeMatrixClient(ignoreUserResult = ignore),
+        ).test {
+            val initial = awaitItem()
+            initial.eventSink(ReportMessageEvent.ToggleBlockUser)
+            val blockEnabled = awaitItem()
+            blockEnabled.eventSink(ReportMessageEvent.Report)
+            assertThat(awaitItem().result).isInstanceOf(AsyncAction.Loading::class.java)
+            var failedBlock = awaitItem()
+            while (failedBlock.result is AsyncAction.Loading) {
+                assertThat(failedBlock.reportSubmitted).isTrue()
+                failedBlock = awaitItem()
+            }
+            assertThat(failedBlock.reportSubmitted).isTrue()
+            assertThat(failedBlock.result).isInstanceOf(AsyncAction.Failure::class.java)
+            failedBlock.eventSink(ReportMessageEvent.UpdateReason("different payload"))
+            failedBlock.eventSink(ReportMessageEvent.ToggleBlockUser)
+            failedBlock.eventSink(ReportMessageEvent.ClearError)
+            val retry = awaitItem()
+            assertThat(retry.reason).isEmpty()
+            assertThat(retry.blockUser).isTrue()
+            retry.eventSink(ReportMessageEvent.Report)
+            assertThat(awaitItem().result).isInstanceOf(AsyncAction.Loading::class.java)
+            assertThat(awaitItem().result).isInstanceOf(AsyncAction.Success::class.java)
+        }
+        report.assertions().isCalledOnce()
+        ignore.assertions().isCalledExactly(2)
+    }
+
+    @Test
+    fun `repeated taps while submitting call report once`() = runTest {
+        val report = lambdaRecorder<EventId, String, UserId?, Result<Unit>> { _, _, _ -> Result.success(Unit) }
+        createPresenter(room = FakeJoinedRoom(reportContentResult = report)).test {
+            val initial = awaitItem()
+            initial.eventSink(ReportMessageEvent.Report)
+            initial.eventSink(ReportMessageEvent.Report)
+            assertThat(awaitItem().result).isInstanceOf(AsyncAction.Loading::class.java)
+            var submitted = awaitItem()
+            while (submitted.result is AsyncAction.Loading) {
+                assertThat(submitted.reportSubmitted).isTrue()
+                submitted = awaitItem()
+            }
+            assertThat(submitted.reportSubmitted).isTrue()
+            assertThat(submitted.result).isInstanceOf(AsyncAction.Success::class.java)
+        }
+        report.assertions().isCalledOnce()
+    }
+
+    private fun createPresenter(
+        room: JoinedRoom = FakeJoinedRoom(),
+        client: MatrixClient = FakeMatrixClient(),
     ) = ReportMessagePresenter(
-        inputs = inputs,
-        room = joinedRoom,
-        snackbarDispatcher = snackbarDispatcher,
+        inputs = ReportMessagePresenter.Inputs(AN_EVENT_ID, A_USER_ID),
+        room = room,
+        matrixClient = client,
     )
 }

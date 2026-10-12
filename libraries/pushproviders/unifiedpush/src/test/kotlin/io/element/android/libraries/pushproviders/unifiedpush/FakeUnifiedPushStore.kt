@@ -18,6 +18,7 @@ class FakeUnifiedPushStore(
     private val storePushGatewayResult: (String, String?) -> Unit = { _, _ -> lambdaError() },
     private val getDistributorValueResult: (UserId) -> String? = { lambdaError() },
     private val setDistributorValueResult: (UserId, String) -> Unit = { _, _ -> lambdaError() },
+    private val clearDistributorValueResult: (UserId) -> Unit = { lambdaError() },
 ) : UnifiedPushStore {
     override fun getEndpoint(clientSecret: String): String? {
         return getEndpointResult(clientSecret)
@@ -41,5 +42,9 @@ class FakeUnifiedPushStore(
 
     override fun setDistributorValue(userId: UserId, value: String) {
         setDistributorValueResult(userId, value)
+    }
+
+    override fun clearDistributorValue(userId: UserId) {
+        clearDistributorValueResult(userId)
     }
 }

@@ -38,6 +38,13 @@ fun checkLocationConstraints(
     }
 }
 
+/** Recovery uses the same OS permission, location-service and room power-level gates as a new share. */
+fun checkLiveLocationResumeConstraints(
+    permissionsState: PermissionsState,
+    locationActions: LocationActions,
+    sendLiveLocationPermissions: SendLiveLocationPermissions,
+): LocationConstraintsCheck = checkLocationConstraints(permissionsState, locationActions, sendLiveLocationPermissions)
+
 fun LocationConstraintsCheck.toDialogState(): LocationConstraintsDialogState {
     return when (this) {
         LocationConstraintsCheck.Success -> LocationConstraintsDialogState.None

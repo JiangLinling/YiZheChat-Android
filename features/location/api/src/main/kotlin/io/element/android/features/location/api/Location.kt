@@ -12,7 +12,7 @@ import android.annotation.SuppressLint
 import android.os.Parcelable
 import kotlinx.parcelize.Parcelize
 
-private const val GEO_URI_REGEX = """geo:(?<latitude>-?\d+(?:\.\d+)?),(?<longitude>-?\d+(?:\.\d+)?)(?:;u=(?<uncertainty>\d+(?:\.\d+)?))?"""
+private const val GEO_URI_REGEX = """geo:(?<latitude>-?\d+(?:\.\d+)?),(?<longitude>-?\d+(?:\.\d+)?)(?:;u=(?<uncertainty>\d+(?:\.\d+)?))?(?:;h=(?<heading>\d+(?:\.\d+)?))?"""
 
 @SuppressLint("NewApi")
 @Parcelize
@@ -20,6 +20,7 @@ data class Location(
     val lat: Double,
     val lon: Double,
     val accuracy: Float? = null,
+    val heading: Float? = null,
 ) : Parcelable {
     companion object {
         fun fromGeoUri(geoUri: String): Location? {
@@ -28,6 +29,7 @@ data class Location(
                 lat = result.groups["latitude"]?.value?.toDoubleOrNull() ?: return null,
                 lon = result.groups["longitude"]?.value?.toDoubleOrNull() ?: return null,
                 accuracy = result.groups["uncertainty"]?.value?.toFloatOrNull(),
+                heading = result.groups["heading"]?.value?.toFloatOrNull(),
             )
         }
     }
@@ -36,6 +38,9 @@ data class Location(
         append("geo:$lat,$lon")
         if (accuracy != null) {
             append(";u=$accuracy")
+        }
+        if (heading != null) {
+            append(";h=${((heading % 360f) + 360f) % 360f}")
         }
     }
 }

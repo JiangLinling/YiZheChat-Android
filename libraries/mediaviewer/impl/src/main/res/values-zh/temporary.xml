@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="local_pdf_jump_to_page">跳转到页</string>
+    <string name="local_pdf_page_number">页码（1–%1$d）</string>
+    <string name="local_pdf_jump">跳转</string>
+    <string name="local_pdf_cancel">取消</string>
+    <string name="error_content_export_disabled_by_policy">管理端签名策略已禁止保存或使用其他应用打开此附件</string>
+    <string name="error_external_share_disabled_by_policy">管理端签名策略已禁止将此附件分享到 YiZheChat 外部</string>
+    <string name="error_protected_media_read_unavailable">附件读取授权不可用，请重新打开附件后重试</string>
+    <string name="screen_media_file_preview_unsupported">暂不支持应用内预览此文件格式，请使用其他应用打开。</string>
+    <string name="screen_media_office_loading">正在加载文档…</string>
+    <string name="screen_media_office_more_actions">更多文档操作</string>
+    <string name="screen_media_office_online_error">文档打开失败，可以重试或使用其他应用打开。</string>
+    <string name="screen_media_office_online_too_large">应用内查看支持最大 20 MB 的 Office 文件，请使用其他应用打开此文件。</string>
+    <string name="screen_media_office_online_unsupported">此 Office 格式暂不支持应用内查看。</string>
+    <string name="screen_media_office_online_source_unavailable">已下载的附件不可用，请返回聊天后重试。</string>
+    <string name="screen_media_office_online_unavailable">此 Office 文件当前无法在应用内查看，可以使用其他应用打开。</string>
+    <string name="local_pdf_input_size_limit">这个PDF超过256MB本地预览上限，请返回文件列表继续操作。</string>
+    <string name="local_pdf_page_count_limit">这个PDF超过1万页本地预览上限，或页数信息异常。</string>
+    <string name="local_pdf_page_geometry_invalid">这个PDF页面尺寸异常，无法显示。</string>
+    <string name="local_pdf_memory_unavailable">手机当前内存不足，无法显示这个PDF页面，请退出预览后重试。</string>
+    <string name="local_pdf_source_unavailable">预览已结束或文件不可用，请返回列表重新打开。</string>
+    <string name="local_pdf_render_failed">无法读取这个PDF，它可能已损坏、设有密码或格式不受支持。</string>
+    <string name="error_historical_media_key_unavailable">历史文件密钥已不可用，无法打开此文件。</string>
+</resources>

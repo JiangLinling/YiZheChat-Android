@@ -59,6 +59,7 @@ class PollRepository(
         answers: List<String>,
         pollKind: PollKind,
         maxSelections: Int,
+        answerIds: List<String>? = null,
     ): Result<Unit> = when (existingPollId) {
         null -> getTimelineProvider().flatMap { timelineProvider ->
             timelineProvider
@@ -74,6 +75,7 @@ class PollRepository(
             timelineProvider.getActiveTimeline()
                 .editPoll(
                     pollStartId = existingPollId,
+                    answerIds = answerIds,
                     question = question,
                     answers = answers,
                     maxSelections = maxSelections,

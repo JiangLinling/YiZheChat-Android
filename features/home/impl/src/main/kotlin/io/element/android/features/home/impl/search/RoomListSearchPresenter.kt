@@ -20,12 +20,24 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import dev.zacsweers.metro.Inject
 import io.element.android.libraries.architecture.Presenter
+import io.element.android.features.userprofile.api.FriendProfileRepository
+import io.element.android.libraries.matrix.api.MatrixClient
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.launch
+import timber.log.Timber
+import java.security.MessageDigest
 
 @Inject
 class RoomListSearchPresenter(
     private val dataSourceFactory: RoomListSearchDataSource.Factory,
+    private val friendProfileRepository: FriendProfileRepository,
+    private val client: MatrixClient,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
 ) : Presenter<RoomListSearchState> {
     @Composable
     override fun present(): RoomListSearchState {
@@ -39,7 +51,25 @@ class RoomListSearchPresenter(
         val dataSource = remember { dataSourceFactory.create(coroutineScope) }
 
         LaunchedEffect(searchQuery.text) {
-            dataSource.setSearchQuery(searchQuery.text.toString())
+            val query = searchQuery.text.toString()
+            if (query.isBlank()) {
+                dataSource.setSearchQuery(query)
+            } else {
+                runCatching {
+                    appOperationalStateCoordinator.perform(
+                        lifecycleOperationRequest(
+                            lifecycleId = FullAppLifecycleId.LC_11,
+                            trigger = "search",
+                            accountIdHash = client.sessionId.value.sha256Hex(),
+                            matrixDeviceIdHash = client.deviceId.value.sha256Hex(),
+                        )
+                    ) {
+                        dataSource.setSearchQuery(query)
+                    }
+                }.onFailure { failure ->
+                    Timber.w(failure, "Unable to bind room search lifecycle")
+                }
+            }
         }
 
         fun handleEvent(event: RoomListSearchEvent) {
@@ -58,12 +88,35 @@ class RoomListSearchPresenter(
         }
 
         val searchResults by dataSource.roomSummaries.collectAsState(initial = persistentListOf())
+        val friendProfiles by friendProfileRepository.profiles.collectAsState()
+        val contactResults = remember(searchQuery.text, friendProfiles) {
+            val query = searchQuery.text.toString().trim()
+            if (query.isEmpty()) {
+                persistentListOf()
+            } else {
+                friendProfiles.values
+                    .filter { profile ->
+                        profile.remarkName.contains(query, ignoreCase = true) ||
+                            profile.phone.contains(query, ignoreCase = true) ||
+                            profile.tags.contains(query, ignoreCase = true) ||
+                            profile.description.contains(query, ignoreCase = true) ||
+                            profile.userId.value.contains(query, ignoreCase = true)
+                    }
+                    .sortedBy { it.displayName(null) }
+                    .toImmutableList()
+            }
+        }
 
         return RoomListSearchState(
             isSearchActive = isSearchActive,
             query = searchQuery,
             results = searchResults,
+            contactResults = contactResults,
             eventSink = ::handleEvent,
         )
     }
+
+    private fun String.sha256Hex(): String = MessageDigest.getInstance("SHA-256")
+        .digest(encodeToByteArray())
+        .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 }

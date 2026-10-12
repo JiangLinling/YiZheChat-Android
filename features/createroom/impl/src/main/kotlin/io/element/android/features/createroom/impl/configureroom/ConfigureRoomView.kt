@@ -68,6 +68,7 @@ import io.element.android.libraries.matrix.ui.components.AvatarPickerView
 import io.element.android.libraries.matrix.ui.room.address.RoomAddressField
 import io.element.android.libraries.permissions.api.PermissionsView
 import io.element.android.libraries.ui.strings.CommonStrings
+import io.element.android.security.contentprotection.api.RoomLifecycleProfileKind
 import kotlinx.collections.immutable.ImmutableList
 import kotlin.jvm.optionals.getOrNull
 
@@ -78,6 +79,10 @@ fun ConfigureRoomView(
     onCreateRoomSuccess: (RoomId) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (!state.isSpace) {
+        GroupCreationView(state, onBackClick, onCreateRoomSuccess, modifier)
+        return
+    }
     val isSpace = state.isSpace
     val focusManager = LocalFocusManager.current
     val isAvatarActionsSheetVisible = remember { mutableStateOf(false) }
@@ -130,6 +135,12 @@ fun ConfigureRoomView(
                     onSelectSpace = { state.eventSink(ConfigureRoomEvents.SetParentSpace(it)) },
                 )
             }
+            if (!state.isSpace) {
+                RoomLifecycleOptions(
+                    selected = state.config.lifecycleProfileKind,
+                    onOptionClick = { state.eventSink(ConfigureRoomEvents.LifecycleProfileChanged(it)) },
+                )
+            }
             RoomJoinRuleOptions(
                 options = state.availableJoinRules,
                 selected = state.config.visibilityState.joinRuleItem,
@@ -179,6 +190,48 @@ fun ConfigureRoomView(
     )
 }
 
+@Composable
+internal fun RoomLifecycleOptions(
+    selected: RoomLifecycleProfileKind,
+    onOptionClick: (RoomLifecycleProfileKind) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    ConfigureRoomOptions(
+        title = stringResource(R.string.screen_create_room_message_retention_title),
+        modifier = modifier,
+    ) {
+        RoomLifecycleProfileKind.entries.forEach { profile ->
+            val isSelected = profile == selected
+            ListItem(
+                headlineContent = {
+                    Text(
+                        stringResource(
+                            if (profile == RoomLifecycleProfileKind.STANDARD) {
+                                R.string.screen_create_room_message_retention_standard_title
+                            } else {
+                                R.string.screen_create_room_message_retention_confidential_title
+                            }
+                        )
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        stringResource(
+                            if (profile == RoomLifecycleProfileKind.STANDARD) {
+                                R.string.screen_create_room_message_retention_standard_description
+                            } else {
+                                R.string.screen_create_room_message_retention_confidential_description
+                            }
+                        )
+                    )
+                },
+                trailingContent = ListItemContent.RadioButton(selected = isSelected),
+                onClick = { onOptionClick(profile) },
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConfigureRoomToolbar(
@@ -201,7 +254,7 @@ private fun ConfigureRoomToolbar(
 }
 
 @Composable
-private fun RoomNameWithAvatar(
+internal fun RoomNameWithAvatar(
     isSpace: Boolean,
     avatarUri: String?,
     roomName: String,
@@ -250,7 +303,7 @@ private fun RoomNameWithAvatar(
 }
 
 @Composable
-private fun RoomTopic(
+internal fun RoomTopic(
     topic: String,
     onTopicChange: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -284,7 +337,7 @@ internal fun ConfigureRoomOptions(
 }
 
 @Composable
-private fun RoomJoinRuleOptions(
+internal fun RoomJoinRuleOptions(
     options: ImmutableList<JoinRuleItem>,
     selected: JoinRuleItem,
     onOptionClick: (JoinRuleItem) -> Unit,

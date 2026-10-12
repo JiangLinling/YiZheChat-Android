@@ -134,4 +134,6 @@ If you proceed, some of your settings may change."</string>
   <string name="troubleshoot_notifications_entry_point_push_history_title">"Push history"</string>
   <string name="troubleshoot_notifications_entry_point_section">"Troubleshoot"</string>
   <string name="troubleshoot_notifications_entry_point_title">"Troubleshoot notifications"</string>
+  <string name="screen_preferences_problem_feedback">"Problem feedback"</string>
+  <string name="screen_preferences_problem_feedback_summary">"Send a description, images, or a screen recording"</string>
 </resources>

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="reply_message_unavailable">消息已不可用</string>
+</resources>

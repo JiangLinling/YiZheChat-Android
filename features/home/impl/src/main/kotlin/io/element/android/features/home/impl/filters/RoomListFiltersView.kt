@@ -100,23 +100,19 @@ fun RoomListFiltersView(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        item("clear_filters") {
-            if (state.hasAnyFilterSelected) {
-                RoomListClearFiltersButton(
-                    modifier = Modifier
-                        .padding(start = 8.dp)
-                        .testTag(TestTags.homeScreenClearFilters),
-                    onClick = {
-                        previousFilters.value = state.selectedFilters()
-                        onClearFiltersClick()
-                        // When clearing filter, we want to ensure that the list
-                        // of filters is scrolled to the start.
-                        scrollToStart++
-                    }
-                )
-            }
+        item("all_chats") {
+            RoomListAllFilterView(
+                selected = !state.hasAnyFilterSelected,
+                onClick = {
+                    previousFilters.value = state.selectedFilters()
+                    onClearFiltersClick()
+                    scrollToStart++
+                },
+                modifier = Modifier.testTag(TestTags.homeScreenClearFilters),
+            )
         }
-        state.filterSelectionStates.forEachIndexed { i, filterWithSelection ->
+        val visibleFilters = setOf(RoomListFilter.Unread, RoomListFilter.Mentions, RoomListFilter.Rooms)
+        state.filterSelectionStates.filter { it.filter in visibleFilters }.forEachIndexed { i, filterWithSelection ->
             item(filterWithSelection.filter) {
                 val zIndex = (if (previousFilters.value.contains(filterWithSelection.filter)) state.filterSelectionStates.size else 0) - i.toFloat()
                 RoomListFilterView(
@@ -137,6 +133,32 @@ fun RoomListFiltersView(
             }
         }
     }
+}
+
+@Composable
+private fun RoomListAllFilterView(
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        modifier = modifier.height(32.dp),
+        shape = CircleShape,
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = ElementTheme.colors.bgCanvasDefault,
+            selectedContainerColor = ElementTheme.colors.bgActionPrimaryRest,
+            labelColor = ElementTheme.colors.textPrimary,
+            selectedLabelColor = ElementTheme.colors.textOnSolidPrimary,
+        ),
+        label = {
+            Text(
+                text = stringResource(R.string.screen_roomlist_filter_all),
+                style = ElementTheme.typography.fontBodyMdRegular,
+            )
+        },
+    )
 }
 
 @Composable

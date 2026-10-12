@@ -8,7 +8,7 @@
 package io.element.encrypteddb.utils
 
 import androidx.sqlite.db.SupportSQLiteDatabase
-import io.element.encrypteddb.passphrase.RandomDatabaseSecretProvider
+import io.element.encrypteddb.passphrase.DatabaseSecretProvider
 import timber.log.Timber
 
 /**
@@ -18,7 +18,7 @@ import timber.log.Timber
  * @param databaseSecretProvider The provider for generating new secrets.
  */
 class ReplaceDatabaseKey(
-    private val databaseSecretProvider: RandomDatabaseSecretProvider
+    private val databaseSecretProvider: DatabaseSecretProvider
 ) {
     fun replaceKey(name: String, database: SupportSQLiteDatabase) {
         Timber.d("Re-keying database $name")

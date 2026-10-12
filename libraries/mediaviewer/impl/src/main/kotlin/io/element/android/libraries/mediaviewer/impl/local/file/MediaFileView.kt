@@ -92,6 +92,21 @@ fun MediaFileView(
                     overflow = TextOverflow.Ellipsis,
                     color = ElementTheme.colors.textPrimary
                 )
+                if (!isApk) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = stringResource(
+                            if (info.isOfficeDocument()) {
+                                R.string.screen_media_office_online_unavailable
+                            } else {
+                                R.string.screen_media_file_preview_unsupported
+                            }
+                        ),
+                        style = ElementTheme.typography.fontBodyMdRegular,
+                        textAlign = TextAlign.Center,
+                        color = ElementTheme.colors.textSecondary,
+                    )
+                }
                 if (onOpenWith != null) {
                     val (icon, textResId) = if (isApk) {
                         IconSource.Resource(R.drawable.ic_apk_install) to CommonStrings.common_install_apk_android
@@ -109,6 +124,17 @@ fun MediaFileView(
             }
         }
     }
+}
+
+private fun MediaInfo.isOfficeDocument(): Boolean {
+    return fileExtension.lowercase() in setOf("doc", "docx", "xls", "xlsx", "ppt", "pptx") || mimeType in setOf(
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
 }
 
 @PreviewsDayNight

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_deactivate_account_service_upgrading">永久删除服务正在升级，暂时无法提交。本次请求尚未冻结或删除账号，请稍后重试。</string>
+    <string name="screen_deactivate_account_invalid_password">密码不正确。账号已进入永久删除冻结状态，但尚未删除；请确认密码后重试，系统会继续同一删除请求。</string>
+</resources>

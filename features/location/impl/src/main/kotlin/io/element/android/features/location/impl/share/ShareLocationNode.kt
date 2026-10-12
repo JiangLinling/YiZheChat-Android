@@ -34,9 +34,11 @@ class ShareLocationNode(
 ) : Node(buildContext, plugins = plugins) {
     data class Inputs(
         val timelineMode: Timeline.Mode,
+        val burnAfterRead: Boolean,
     ) : NodeInputs
 
-    private val presenter = presenterFactory.create(inputs<Inputs>().timelineMode)
+    private val inputs = inputs<Inputs>()
+    private val presenter = presenterFactory.create(inputs.timelineMode, inputs.burnAfterRead)
 
     init {
         lifecycle.subscribe(

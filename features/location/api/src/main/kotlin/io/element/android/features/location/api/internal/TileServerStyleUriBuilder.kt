@@ -11,6 +11,7 @@ package io.element.android.features.location.api.internal
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import io.element.android.compound.theme.ElementTheme
+import io.element.android.features.location.api.BuildConfig
 
 /**
  * Builds a style URI for a MapLibre compatible tile server.
@@ -35,9 +36,17 @@ fun rememberTileStyleUrl(
 ): String {
     val darkMode = !ElementTheme.isLightTheme
     return remember(darkMode, customMapStyleUrl) {
-        MapTilerTileServerStyleUriBuilder().build(
+        defaultTileServerStyleUriBuilder().build(
             customMapStyleUrl = customMapStyleUrl,
             darkMode = darkMode,
         )
+    }
+}
+
+internal fun defaultTileServerStyleUriBuilder(): TileServerStyleUriBuilder {
+    return if (BuildConfig.MAPTILER_API_KEY.isNotBlank()) {
+        MapTilerTileServerStyleUriBuilder()
+    } else {
+        OpenFreeMapTileServerStyleUriBuilder()
     }
 }

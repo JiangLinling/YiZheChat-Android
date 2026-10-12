@@ -14,6 +14,8 @@ import java.util.UUID
 
 class FakeMatrixWidgetDriver(
     override val id: String = UUID.randomUUID().toString(),
+    private val closeFailure: Throwable? = null,
+    private val departure: suspend () -> Unit = {},
 ) : MatrixWidgetDriver {
     private val _sentMessages = mutableListOf<String>()
     val sentMessages: List<String> = _sentMessages
@@ -23,6 +25,7 @@ class FakeMatrixWidgetDriver(
     var closeCalledCount = 0
         private set
 
+    override val outgoingCallInvitation = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     override val incomingMessages = MutableSharedFlow<String>(extraBufferCapacity = 1)
 
     override suspend fun run() {
@@ -35,7 +38,10 @@ class FakeMatrixWidgetDriver(
 
     override fun close() {
         closeCalledCount++
+        closeFailure?.let { throw it }
     }
+
+    override suspend fun stopCallMembership() = departure()
 
     fun givenIncomingMessage(message: String) {
         incomingMessages.tryEmit(message)

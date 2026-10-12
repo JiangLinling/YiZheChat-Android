@@ -30,6 +30,7 @@ interface MediaPlayer : AutoCloseable {
         mediaId: String,
         mimeType: String,
         startPositionMs: Long = 0,
+        sourceOwnerId: String? = null,
     ): State
 
     /**
@@ -41,6 +42,9 @@ interface MediaPlayer : AutoCloseable {
      * Pauses the current media.
      */
     fun pause()
+
+    /** Stops playback and releases the currently bound media source without closing the player. */
+    fun clear()
 
     /**
      * Seeks the current media to the given position.
@@ -86,5 +90,10 @@ interface MediaPlayer : AutoCloseable {
          * The duration of the current content, if available.
          */
         val duration: Long?,
+        /** Process-local source ownership; does not replace the Matrix event or lifecycle operation identity. */
+        val sourceOwnerId: String? = null,
     )
 }
+
+/** A bounded decoder/source preparation failure, distinct from cancellation of the caller. */
+class MediaPreparationTimeoutException : IllegalStateException("Media preparation timed out")

@@ -17,6 +17,9 @@ SELECT * FROM PushRequest WHERE status = 0 AND sessionId = ? AND pushDate > ? OR
 insertPushRequest:
 INSERT OR REPLACE INTO PushRequest VALUES ?;
 
+enqueuePushRequest:
+INSERT OR IGNORE INTO PushRequest VALUES ?;
+
 removeAll:
 DELETE FROM PushRequest;
 

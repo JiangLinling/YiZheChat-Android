@@ -48,16 +48,21 @@ import io.element.android.libraries.matrix.test.FakeMatrixClientProvider
 import io.element.android.libraries.matrix.test.notification.FakeNotificationService
 import io.element.android.libraries.matrix.test.notification.aNotificationData
 import io.element.android.libraries.matrix.test.permalink.FakePermalinkParser
+import io.element.android.libraries.push.impl.R
 import io.element.android.libraries.push.impl.db.PushRequest
 import io.element.android.libraries.push.impl.notifications.fake.FakeNotificationMediaRepo
 import io.element.android.libraries.push.impl.notifications.fixtures.aNotifiableMessageEvent
 import io.element.android.libraries.push.impl.notifications.fixtures.aPushRequest
-import io.element.android.libraries.push.impl.notifications.model.FallbackNotifiableEvent
 import io.element.android.libraries.push.impl.notifications.model.InviteNotifiableEvent
 import io.element.android.libraries.push.impl.notifications.model.NotifiableMessageEvent
 import io.element.android.libraries.push.impl.notifications.model.ResolvedPushEvent
+import io.element.android.libraries.push.impl.notifications.model.SimpleNotifiableEvent
+import io.element.android.security.contentprotection.api.RoomLifecycleProfileKind
+import io.element.android.security.contentprotection.test.FakeContentProtectionService
+import io.element.android.security.dataprotection.api.NotificationExposure
+import io.element.android.security.dataprotection.test.FakeDataProtectionPolicyProvider
+import io.element.android.security.dataprotection.test.FakeProtectedPreviewAuthorizationGate
 import io.element.android.services.toolbox.impl.strings.AndroidStringProvider
-import io.element.android.services.toolbox.test.systemclock.A_FAKE_TIMESTAMP
 import io.element.android.services.toolbox.test.systemclock.FakeSystemClock
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -69,6 +74,23 @@ import org.robolectric.annotation.Config
 @Suppress("LargeClass")
 @RunWith(RobolectricTestRunner::class)
 class DefaultNotifiableEventResolverTest {
+    @Test
+    fun `only UnifiedPush deliveries receive foreground ntfy marker`() = runTest {
+        val sut = createDefaultNotifiableEventResolver(
+            notificationResult = Result.success(mapOf(AN_EVENT_ID to Result.success(aNotificationData(
+                content = NotificationContent.MessageLike.RoomMessage(
+                    senderId = A_USER_ID_2,
+                    messageType = TextMessageType(body = "Hello", formatted = null),
+                ),
+            )))),
+        )
+        for (provider in listOf("UnifiedPush - built-in ntfy", "UnifiedPush - external distributor", "Huawei", "firebase")) {
+            val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, provider)
+            val event = sut.resolveEvents(A_SESSION_ID, listOf(request)).getEvent(request)!!.getOrThrow() as ResolvedPushEvent.Event
+            assertThat((event.notifiableEvent as NotifiableMessageEvent).isNtfyDelivery).isEqualTo(provider.startsWith("UnifiedPush - "))
+        }
+    }
+
     @Test
     fun `resolve event no session`() = runTest {
         val sut = createDefaultNotifiableEventResolver(notificationService = null)
@@ -657,21 +679,207 @@ class DefaultNotifiableEventResolverTest {
         )
         val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, "firebase")
         val result = sut.resolveEvents(A_SESSION_ID, listOf(request))
-        val expectedResult = ResolvedPushEvent.Event(
-            FallbackNotifiableEvent(
-                sessionId = A_SESSION_ID,
-                roomId = A_ROOM_ID,
-                eventId = AN_EVENT_ID,
-                editedEventId = null,
-                description = "",
-                canBeReplaced = true,
-                isRedacted = false,
-                isUpdated = false,
-                timestamp = A_FAKE_TIMESTAMP,
-                cause = "Unable to decrypt event content",
+        val event = result.getEvent(request)?.getOrNull() as ResolvedPushEvent.Event
+        val notification = event.notifiableEvent as SimpleNotifiableEvent
+        assertThat(notification.title).isEqualTo(genericNotificationBody())
+        assertThat(notification.description).isEqualTo(genericNotificationBody())
+    }
+
+    @Test
+    fun `resolve protected text transport as generic notification`() = runTest {
+        val sut = createDefaultNotifiableEventResolver(
+            notificationResult = Result.success(
+                mapOf(
+                    AN_EVENT_ID to Result.success(
+                        aNotificationData(
+                            content = NotificationContent.MessageLike.RoomMessage(
+                                senderId = A_USER_ID_2,
+                                messageType = TextMessageType("yizhe-secure-v1:ciphertext", formatted = null),
+                            )
+                        )
+                    )
+                )
             )
         )
-        assertThat(result.getEvent(request)).isEqualTo(Result.success(expectedResult))
+        val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, "firebase")
+
+        val result = sut.resolveEvents(A_SESSION_ID, listOf(request))
+
+        assertGenericMessageNotification(result.getEvent(request)?.getOrNull())
+    }
+
+    @Test
+    fun `resolve protected media transport as generic notification`() = runTest {
+        val sut = createDefaultNotifiableEventResolver(
+            notificationResult = Result.success(
+                mapOf(
+                    AN_EVENT_ID to Result.success(
+                        aNotificationData(
+                            content = NotificationContent.MessageLike.RoomMessage(
+                                senderId = A_USER_ID_2,
+                                messageType = FileMessageType(
+                                    ".yizhe-1234567890.yzm",
+                                    null,
+                                    null,
+                                    MediaSource("mxc://server/id"),
+                                    null,
+                                ),
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, "firebase")
+
+        val result = sut.resolveEvents(A_SESSION_ID, listOf(request))
+
+        assertGenericMessageNotification(result.getEvent(request)?.getOrNull())
+    }
+
+    @Test
+    fun `strict content policy shows a generic notification without exposing message data`() = runTest {
+        val sut = createDefaultNotifiableEventResolver(
+            notificationResult = Result.success(
+                mapOf(
+                    AN_EVENT_ID to Result.success(
+                        aNotificationData(
+                            content = NotificationContent.MessageLike.RoomMessage(
+                                senderId = A_USER_ID_2,
+                                messageType = TextMessageType("plaintext", formatted = null),
+                            )
+                        )
+                    )
+                )
+            ),
+            requireContentEnvelope = true,
+        )
+        val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, "firebase")
+
+        val result = sut.resolveEvents(A_SESSION_ID, listOf(request))
+
+        assertGenericMessageNotification(result.getEvent(request)?.getOrNull())
+    }
+
+    @Test
+    fun `strict content policy shows generic message notification while preview gate is locked`() = runTest {
+        val sut = createDefaultNotifiableEventResolver(
+            notificationResult = Result.success(
+                mapOf(
+                    AN_EVENT_ID to Result.success(
+                        aNotificationData(
+                            content = NotificationContent.MessageLike.RoomMessage(
+                                senderId = A_USER_ID_2,
+                                messageType = TextMessageType("plaintext", formatted = null),
+                                isContentProtectionAuthorized = true,
+                            )
+                        )
+                    )
+                )
+            ),
+            requireContentEnvelope = true,
+            protectedPreviewAllowed = false,
+        )
+        val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, "firebase")
+
+        val result = sut.resolveEvents(A_SESSION_ID, listOf(request))
+
+        val event = result.getEvent(request)?.getOrNull() as ResolvedPushEvent.Event
+        val notification = event.notifiableEvent as NotifiableMessageEvent
+        assertThat(notification.body).isEqualTo(contextString(R.string.notification_confidential_content))
+        assertThat(notification.body).doesNotContain("plaintext")
+        assertThat(notification.senderDisambiguatedDisplayName).isNull()
+        assertThat(notification.roomName).isNull()
+    }
+
+    @Test
+    fun `confidential room never exposes authorized notification content`() = runTest {
+        val sut = createDefaultNotifiableEventResolver(
+            notificationResult = Result.success(
+                mapOf(
+                    AN_EVENT_ID to Result.success(
+                        aNotificationData(
+                            content = NotificationContent.MessageLike.RoomMessage(
+                                senderId = A_USER_ID_2,
+                                messageType = TextMessageType("confidential plaintext", formatted = null),
+                                isContentProtectionAuthorized = true,
+                            )
+                        )
+                    )
+                )
+            ),
+            requireContentEnvelope = true,
+            roomLifecycleProfileKind = RoomLifecycleProfileKind.CONFIDENTIAL,
+        )
+        val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, "firebase")
+
+        val result = sut.resolveEvents(A_SESSION_ID, listOf(request))
+
+        val event = result.getEvent(request)?.getOrNull() as ResolvedPushEvent.Event
+        val notification = event.notifiableEvent as NotifiableMessageEvent
+        assertThat(notification.body).isEqualTo(contextString(R.string.notification_confidential_content))
+        assertThat(notification.body).doesNotContain("confidential plaintext")
+        assertThat(notification.senderDisambiguatedDisplayName).isNull()
+        assertThat(notification.roomName).isNull()
+    }
+
+    @Test
+    fun `burn after read notification never exposes authorized content`() = runTest {
+        val sut = createDefaultNotifiableEventResolver(
+            notificationResult = Result.success(
+                mapOf(
+                    AN_EVENT_ID to Result.success(
+                        aNotificationData(
+                            content = NotificationContent.MessageLike.RoomMessage(
+                                senderId = A_USER_ID_2,
+                                messageType = TextMessageType("one time plaintext", formatted = null),
+                                isContentProtectionAuthorized = true,
+                                isBurnAfterRead = true,
+                            )
+                        )
+                    )
+                )
+            ),
+            requireContentEnvelope = true,
+        )
+        val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, "firebase")
+
+        val result = sut.resolveEvents(A_SESSION_ID, listOf(request))
+
+        val event = result.getEvent(request)?.getOrNull() as ResolvedPushEvent.Event
+        val notification = event.notifiableEvent as NotifiableMessageEvent
+        assertThat(notification.body).isEqualTo(contextString(R.string.notification_burn_after_read_content))
+        assertThat(notification.body).doesNotContain("one time plaintext")
+        assertThat(notification.senderDisambiguatedDisplayName).isNull()
+        assertThat(notification.roomName).isNull()
+    }
+
+    @Test
+    fun `strict content policy displays only an authorized preview while gate is unlocked`() = runTest {
+        val sut = createDefaultNotifiableEventResolver(
+            notificationResult = Result.success(
+                mapOf(
+                    AN_EVENT_ID to Result.success(
+                        aNotificationData(
+                            content = NotificationContent.MessageLike.RoomMessage(
+                                senderId = A_USER_ID_2,
+                                messageType = TextMessageType("authorized plaintext", formatted = null),
+                                isContentProtectionAuthorized = true,
+                            )
+                        )
+                    )
+                )
+            ),
+            requireContentEnvelope = true,
+        )
+        val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, "firebase")
+
+        val result = sut.resolveEvents(A_SESSION_ID, listOf(request))
+        val event = result.getEvent(request)?.getOrNull() as ResolvedPushEvent.Event
+        val notification = event.notifiableEvent as NotifiableMessageEvent
+
+        assertThat(notification.body).contains("authorized plaintext")
+        assertThat(notification.senderDisambiguatedDisplayName).isEqualTo(A_USER_NAME_2)
     }
 
     @Test
@@ -869,10 +1077,30 @@ class DefaultNotifiableEventResolverTest {
         return getOrNull()?.get(request)
     }
 
+    private fun assertGenericMessageNotification(resolvedPushEvent: ResolvedPushEvent?) {
+        val event = resolvedPushEvent as ResolvedPushEvent.Event
+        val notification = event.notifiableEvent as NotifiableMessageEvent
+        assertThat(notification.body).isEqualTo(genericNotificationBody())
+        assertThat(notification.senderDisambiguatedDisplayName).isNull()
+        assertThat(notification.roomName).isNull()
+        assertThat(notification.imageUri).isNull()
+        assertThat(notification.roomAvatarPath).isNull()
+        assertThat(notification.senderAvatarPath).isNull()
+    }
+
+    private fun genericNotificationBody(): String =
+        (RuntimeEnvironment.getApplication() as Context).getString(R.string.notification_fallback_content)
+
+    private fun contextString(resourceId: Int): String =
+        (RuntimeEnvironment.getApplication() as Context).getString(resourceId)
+
     private fun createDefaultNotifiableEventResolver(
         notificationService: FakeNotificationService? = FakeNotificationService(),
         notificationResult: Result<Map<EventId, Result<NotificationData>>> = Result.success(emptyMap()),
         callNotificationEventResolver: FakeCallNotificationEventResolver = FakeCallNotificationEventResolver(),
+        requireContentEnvelope: Boolean = false,
+        protectedPreviewAllowed: Boolean = true,
+        roomLifecycleProfileKind: RoomLifecycleProfileKind = RoomLifecycleProfileKind.STANDARD,
     ): DefaultNotifiableEventResolver {
         val context = RuntimeEnvironment.getApplication() as Context
         notificationService?.givenGetNotificationsResult(notificationResult)
@@ -897,6 +1125,15 @@ class DefaultNotifiableEventResolverTest {
                 clock = FakeSystemClock(),
             ),
             featureFlagService = FakeFeatureFlagService(),
+            notificationPrivacySanitizer = NotificationPrivacySanitizer(
+                policyProvider = FakeDataProtectionPolicyProvider(
+                    notificationExposure = NotificationExposure.CONTENT_ALLOWED,
+                    requireContentEnvelope = requireContentEnvelope,
+                ),
+                stringProvider = AndroidStringProvider(context.resources),
+            ),
+            protectedPreviewAuthorizationGate = FakeProtectedPreviewAuthorizationGate(protectedPreviewAllowed),
+            contentProtectionService = FakeContentProtectionService(roomLifecycleProfileKind),
         )
     }
 }

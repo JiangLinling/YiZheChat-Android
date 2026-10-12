@@ -12,9 +12,12 @@ import android.content.Context
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.content.getSystemService
+import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.coroutines.mapToList
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import io.element.android.libraries.core.extensions.runCatchingExceptions
+import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.di.annotations.ApplicationContext
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
@@ -27,22 +30,28 @@ import kotlin.time.Instant
 
 @ContributesBinding(AppScope::class)
 class DefaultPushHistoryService(
-    private val pushDatabase: PushDatabase,
+    pushDatabase: Lazy<PushDatabase>,
     private val systemClock: SystemClock,
+    private val dispatchers: CoroutineDispatchers,
     @ApplicationContext context: Context,
 ) : PushHistoryService {
+    private val database by pushDatabase
     private val powerManager = context.getSystemService<PowerManager>()
     private val packageName = context.packageName
 
+    override suspend fun enqueuePushRequest(pushRequest: PushRequest): Result<Unit> {
+        return runCatchingExceptions { database.pushRequestQueries.enqueuePushRequest(pushRequest).await() }
+    }
+
     override suspend fun insertOrUpdatePushRequest(pushRequest: PushRequest): Result<Unit> {
-        return runCatchingExceptions { pushDatabase.pushRequestQueries.insertPushRequest(pushRequest).await() }
+        return runCatchingExceptions { database.pushRequestQueries.insertPushRequest(pushRequest).await() }
     }
 
     override suspend fun insertOrUpdatePushRequests(pushRequests: List<PushRequest>): Result<Unit> {
         return runCatchingExceptions {
-            pushDatabase.transaction {
+            database.transaction {
                 for (request in pushRequests) {
-                    pushDatabase.pushRequestQueries.insertPushRequest(request)
+                    database.pushRequestQueries.insertPushRequest(request)
                 }
             }
         }
@@ -50,17 +59,21 @@ class DefaultPushHistoryService(
 
     override suspend fun getPendingPushRequests(sessionId: SessionId, since: Instant?): Result<List<PushRequest>> {
         return runCatchingExceptions {
-            pushDatabase.transactionWithResult {
+            database.transactionWithResult {
                 val sinceTimeMillis = since?.toEpochMilliseconds() ?: 0
-                pushDatabase.pushRequestQueries.selectAllPendingForSession(sessionId.value, sinceTimeMillis).executeAsList()
+                database.pushRequestQueries.selectAllPendingForSession(sessionId.value, sinceTimeMillis).executeAsList()
             }
         }
     }
 
+    override fun observePendingPushRequests(sessionId: SessionId, since: Instant) =
+        database.pushRequestQueries.selectAllPendingForSession(sessionId.value, since.toEpochMilliseconds())
+            .asFlow().mapToList(dispatchers.io)
+
     override suspend fun removeOldPushRequests(sessionId: SessionId): Result<Unit> {
         return runCatchingExceptions {
             val keepAmount = 100L
-            pushDatabase.pushRequestQueries.removeOldest(keepAmount)
+            database.pushRequestQueries.removeOldest(keepAmount)
         }
     }
 
@@ -91,7 +104,7 @@ class DefaultPushHistoryService(
             }
         }.takeIf { it.isNotEmpty() }
 
-        pushDatabase.pushHistoryQueries.insertPushHistory(
+        database.pushHistoryQueries.insertPushHistory(
             PushHistory(
                 pushDate = systemClock.epochMillis(),
                 providerInfo = providerInfo,
@@ -104,6 +117,6 @@ class DefaultPushHistoryService(
         )
 
         // Keep only the last 1_000 events
-        pushDatabase.pushHistoryQueries.removeOldest(1_000)
+        database.pushHistoryQueries.removeOldest(1_000)
     }
 }

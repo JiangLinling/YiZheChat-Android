@@ -20,6 +20,7 @@ data class LogoutState(
     val recoveryState: RecoveryState,
     val backupUploadState: BackupUploadState,
     val waitingForALongTime: Boolean,
+    val showUnbackedKeysWarning: Boolean = false,
     val logoutAction: AsyncAction<Unit>,
     val eventSink: (LogoutEvents) -> Unit,
 )

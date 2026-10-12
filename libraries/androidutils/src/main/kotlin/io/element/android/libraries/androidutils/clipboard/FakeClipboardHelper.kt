@@ -10,8 +10,20 @@ package io.element.android.libraries.androidutils.clipboard
 
 class FakeClipboardHelper : ClipboardHelper {
     var clipboardContents: Any? = null
+    var allowCopy = true
+    var protectedSource: ProtectedClipboardSource? = null
 
-    override fun copyPlainText(text: String) {
+    override fun copyPlainText(text: String): Boolean {
+        if (!allowCopy) return false
         clipboardContents = text
+        protectedSource = null
+        return true
+    }
+
+    override fun copyProtectedPlainText(text: String, source: ProtectedClipboardSource): Boolean {
+        if (!allowCopy) return false
+        clipboardContents = text
+        protectedSource = source
+        return true
     }
 }

@@ -15,6 +15,8 @@ import io.element.android.libraries.matrix.api.permalink.PermalinkParser
 import io.element.android.libraries.matrix.api.timeline.item.event.EventContent
 import io.element.android.libraries.matrix.api.timeline.item.event.InReplyTo
 import io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedMessageStatus
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedOperationContent
 import io.element.android.libraries.matrix.api.timeline.item.event.ProfileDetails
 import io.element.android.libraries.matrix.api.timeline.item.event.StickerContent
 import io.element.android.libraries.matrix.api.timeline.item.event.TextMessageType
@@ -28,6 +30,8 @@ sealed interface InReplyToDetails {
         val senderProfile: ProfileDetails,
         val eventContent: EventContent?,
         val textContent: String?,
+        /** True only for a volatile summary copied from the current authorized timeline projection. */
+        val isTextContentAuthorizedProjection: Boolean = false,
     ) : InReplyToDetails
 
     data class Loading(val eventId: EventId) : InReplyToDetails
@@ -58,9 +62,21 @@ fun InReplyTo.map(
                 stickerContent.body
             }
             else -> null
-        }
+        },
+        isTextContentAuthorizedProjection = false,
     )
     is InReplyTo.Error -> InReplyToDetails.Error(eventId, message)
     is InReplyTo.NotLoaded -> InReplyToDetails.Loading(eventId)
     is InReplyTo.Pending -> InReplyToDetails.Loading(eventId)
+}
+
+/** Only a current authorized text projection can supply the summary; terminal content stays unavailable. */
+fun InReplyToDetails.Ready.supportsAuthorizedTextProjection(): Boolean = when (val content = eventContent) {
+    is ProtectedOperationContent -> true
+    is MessageContent -> content.protectedMessageStatus !in setOf(
+        ProtectedMessageStatus.EXPIRED,
+        ProtectedMessageStatus.REVOKED,
+        ProtectedMessageStatus.BURN_AFTER_READ_UNOPENED,
+    )
+    else -> false
 }

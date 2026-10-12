@@ -11,6 +11,7 @@ package io.element.android.features.userprofile.shared
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import io.element.android.features.startchat.api.ConfirmingStartDmWithMatrixUser
 import io.element.android.features.userprofile.api.UserProfileEvents
+import io.element.android.features.userprofile.api.FriendPrivateProfile
 import io.element.android.features.userprofile.api.UserProfileState
 import io.element.android.features.userprofile.api.UserProfileVerificationState
 import io.element.android.libraries.architecture.AsyncAction
@@ -24,6 +25,12 @@ open class UserProfileStateProvider : PreviewParameterProvider<UserProfileState>
     override val values: Sequence<UserProfileState>
         get() = sequenceOf(
             aUserProfileState(),
+            aUserProfileState().copy(canRemoveFriend = true),
+            aUserProfileState().copy(removeFriendAction = AsyncAction.ConfirmingNoParams),
+            aUserProfileState().copy(removeFriendAction = AsyncAction.Loading),
+            aUserProfileState().copy(removeFriendAction = AsyncAction.Failure(IllegalStateException("Offline")),
+                removeFriendDiagnostic = "LC12_PREPARE:HTTP_409_LC12_MEMBERSHIP_PROTOCOL_UNAVAILABLE"),
+            aUserProfileState().copy(removeFriendAction = AsyncAction.Success(Unit)),
             aUserProfileState(userName = null),
             aUserProfileState(isBlocked = AsyncData.Success(true), verificationState = UserProfileVerificationState.VERIFIED),
             aUserProfileState(displayConfirmationDialog = UserProfileState.ConfirmationDialog.Block),
@@ -47,6 +54,8 @@ fun aUserProfileState(
     isCurrentUser: Boolean = false,
     dmRoomId: RoomId? = null,
     canCall: Boolean = false,
+    privateProfile: FriendPrivateProfile = FriendPrivateProfile(userId),
+    savePrivateProfileAction: AsyncAction<Unit> = AsyncAction.Uninitialized,
     snackbarMessage: SnackbarMessage? = null,
     eventSink: (UserProfileEvents) -> Unit = {},
 ) = UserProfileState(
@@ -60,6 +69,8 @@ fun aUserProfileState(
     isCurrentUser = isCurrentUser,
     dmRoomId = dmRoomId,
     canCall = canCall,
+    privateProfile = privateProfile,
+    savePrivateProfileAction = savePrivateProfileAction,
     snackbarMessage = snackbarMessage,
     eventSink = eventSink,
 )

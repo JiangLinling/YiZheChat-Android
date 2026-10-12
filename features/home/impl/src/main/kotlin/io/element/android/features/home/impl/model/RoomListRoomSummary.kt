@@ -14,7 +14,10 @@ import io.element.android.libraries.designsystem.components.avatar.AvatarData
 import io.element.android.libraries.matrix.api.core.RoomAlias
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.notification.CallIntent
+import io.element.android.libraries.matrix.api.room.CurrentUserMembership
+import io.element.android.libraries.matrix.api.room.DirectRoomRelationState
 import io.element.android.libraries.matrix.api.room.RoomNotificationMode
+import io.element.android.libraries.matrix.api.room.directRoomRelationState
 import io.element.android.libraries.matrix.ui.model.InviteSender
 import kotlinx.collections.immutable.ImmutableList
 
@@ -30,6 +33,7 @@ data class RoomListRoomSummary(
     val numberOfUnreadNotifications: Long,
     val isMarkedUnread: Boolean,
     val timestamp: String?,
+    val latestEventTimestamp: Long = 0L,
     val latestEvent: LatestEvent,
     val avatarData: AvatarData,
     val userDefinedNotificationMode: RoomNotificationMode?,
@@ -37,11 +41,17 @@ data class RoomListRoomSummary(
     val activeCallIntent: CallIntent?,
     val isDirect: Boolean,
     val isDm: Boolean,
+    val activeMembersCount: Long = if (isDm) 2L else 0L,
+    val invitedMembersCount: Long = 0L,
+    val joinedMembersCount: Long = if (isDm) 2L else 0L,
     val isFavorite: Boolean,
     val inviteSender: InviteSender?,
     val isTombstoned: Boolean,
     val heroes: ImmutableList<AvatarData>,
     val isSpace: Boolean,
+    val draftPreview: String? = null,
+    val isEncrypted: Boolean? = null,
+    val historyVisibility: io.element.android.libraries.matrix.api.room.history.RoomHistoryVisibility? = null,
 ) {
     val isHighlighted = userDefinedNotificationMode != RoomNotificationMode.MUTE &&
         (numberOfUnreadNotifications > 0 || numberOfUnreadMentions > 0) ||
@@ -56,5 +66,19 @@ data class RoomListRoomSummary(
         roomId = roomId,
         roomName = name ?: roomId.value,
         isDm = isDm,
+    )
+
+    fun directRoomRelationState(): DirectRoomRelationState = directRoomRelationState(
+        isDm = isDm,
+        isSpace = isSpace,
+        currentUserMembership = when (displayType) {
+            RoomSummaryDisplayType.INVITE -> CurrentUserMembership.INVITED
+            RoomSummaryDisplayType.KNOCKED -> CurrentUserMembership.KNOCKED
+            RoomSummaryDisplayType.PLACEHOLDER -> CurrentUserMembership.LEFT
+            RoomSummaryDisplayType.ROOM -> CurrentUserMembership.JOINED
+        },
+        activeMembersCount = activeMembersCount,
+        invitedMembersCount = invitedMembersCount,
+        joinedMembersCount = joinedMembersCount,
     )
 }

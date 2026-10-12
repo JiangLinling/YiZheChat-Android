@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_login_brand_title">乙者</string>
+    <string name="screen_login_account_label">账号</string>
+    <string name="screen_login_account_placeholder">请输入账号</string>
+    <string name="screen_login_password_label">密码</string>
+    <string name="screen_login_password_placeholder">请输入密码</string>
+    <string name="screen_login_action">登录</string>
+    <string name="screen_login_security_connection">登录信息通过安全连接传输</string>
+    <string name="screen_login_security_encryption">通信内容采用加密保护</string>
+    <string name="screen_login_use_invitation">使用邀请码注册</string>
+    <string name="screen_login_return">返回账号登录</string>
+    <string name="screen_login_invitation_code">6 位邀请码</string>
+    <string name="screen_login_invitation_code_hint">请输入推荐人提供的邀请码</string>
+    <string name="screen_login_invitation_checking">正在验证邀请…</string>
+    <string name="screen_login_invitation_invalid">邀请码无效、已过期或已被使用</string>
+    <string name="screen_login_inviter">推荐人：%1$s</string>
+    <string name="screen_login_invitation_expires">有效至 %1$s</string>
+    <string name="screen_login_display_name">你的名称</string>
+    <string name="screen_login_display_name_hint">例如：三合</string>
+    <string name="screen_login_generated_account">登录账号</string>
+    <string name="screen_login_generated_account_waiting">输入名称后自动生成账号</string>
+    <string name="screen_login_registration_password">设置密码</string>
+    <string name="screen_login_registration_password_confirm">再次输入密码</string>
+    <string name="screen_login_registration_password_requirements">密码需为 12～128 位，并包含大写字母、小写字母和数字</string>
+    <string name="screen_login_registration_password_requirements_missing">还需要：%1$s</string>
+    <string name="screen_login_registration_password_requirements_met">密码要求已满足</string>
+    <string name="screen_login_registration_password_requirement_minimum_length">至少 12 位</string>
+    <string name="screen_login_registration_password_requirement_maximum_length">不超过 128 位</string>
+    <string name="screen_login_registration_password_requirement_uppercase">一个大写英文字母</string>
+    <string name="screen_login_registration_password_requirement_lowercase">一个小写英文字母</string>
+    <string name="screen_login_registration_password_requirement_digit">一个数字</string>
+    <string name="screen_login_registration_password_requirement_no_control_characters">不能包含换行或控制字符</string>
+    <string name="screen_login_registration_password_requirement_separator">、</string>
+    <string name="screen_login_registration_password_mismatch">两次输入的密码不一致</string>
+    <string name="screen_login_register_action">注册并登录</string>
+    <string name="screen_login_error_security_sync">设备安全状态同步失败，请重试。错误码：%1$s</string>
+</resources>

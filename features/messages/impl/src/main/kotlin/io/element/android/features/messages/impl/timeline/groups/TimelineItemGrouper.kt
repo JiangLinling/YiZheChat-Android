@@ -11,7 +11,10 @@ package io.element.android.features.messages.impl.timeline.groups
 import androidx.annotation.VisibleForTesting
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import io.element.android.features.messages.impl.timeline.model.GroupedEventsKind
 import io.element.android.features.messages.impl.timeline.model.TimelineItem
+import io.element.android.features.messages.impl.timeline.model.event.TimelineItemImageContent
+import io.element.android.features.messages.impl.timeline.model.event.TimelineItemVideoContent
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.matrix.api.core.UniqueId
 import kotlinx.collections.immutable.toImmutableList
@@ -30,25 +33,81 @@ class TimelineItemGrouper {
      */
     fun group(from: List<TimelineItem>): List<TimelineItem> {
         val result = mutableListOf<TimelineItem>()
-        val currentGroup = mutableListOf<TimelineItem.Event>()
-        from.forEach { timelineItem ->
-            if (timelineItem is TimelineItem.Event && timelineItem.canBeGrouped()) {
-                currentGroup.add(0, timelineItem)
-            } else {
-                // timelineItem cannot be grouped
-                if (currentGroup.isNotEmpty()) {
-                    // There is a pending group, create a TimelineItem.GroupedEvents if there is more than 1 Event in the pending group.
-                    result.addGroup(groupIds, currentGroup)
-                    currentGroup.clear()
-                }
-                result.add(timelineItem)
+        val currentRoomChanges = mutableListOf<TimelineItem.Event>()
+        val currentMediaAlbum = mutableListOf<TimelineItem.Event>()
+
+        fun flushRoomChanges() {
+            if (currentRoomChanges.isNotEmpty()) {
+                result.addGroup(groupIds, currentRoomChanges)
+                currentRoomChanges.clear()
             }
         }
-        if (currentGroup.isNotEmpty()) {
-            result.addGroup(groupIds, currentGroup)
+
+        fun flushMediaAlbum() {
+            if (currentMediaAlbum.isNotEmpty()) {
+                result.addMediaAlbum(currentMediaAlbum)
+                currentMediaAlbum.clear()
+            }
         }
+
+        from.forEach { timelineItem ->
+            val album = (timelineItem as? TimelineItem.Event)?.mediaAlbum()
+            when {
+                timelineItem is TimelineItem.Event && album != null -> {
+                    flushRoomChanges()
+                    val activeAlbum = currentMediaAlbum.firstOrNull()
+                        ?.mediaAlbum()
+                    val sameAlbum = activeAlbum?.id == album.id &&
+                        activeAlbum.count == album.count &&
+                        currentMediaAlbum.firstOrNull()?.senderId == timelineItem.senderId &&
+                        currentMediaAlbum.none { event ->
+                            event.mediaAlbum()?.index == album.index
+                        }
+                    if (!sameAlbum) {
+                        flushMediaAlbum()
+                    }
+                    currentMediaAlbum += timelineItem
+                }
+                timelineItem is TimelineItem.Event && timelineItem.canBeGrouped() -> {
+                    flushMediaAlbum()
+                    currentRoomChanges.add(0, timelineItem)
+                }
+                else -> {
+                    flushMediaAlbum()
+                    flushRoomChanges()
+                    result += timelineItem
+                }
+            }
+        }
+        flushMediaAlbum()
+        flushRoomChanges()
         return result
     }
+}
+
+private fun MutableList<TimelineItem>.addMediaAlbum(groupOfItems: MutableList<TimelineItem.Event>) {
+    if (groupOfItems.size == 1) {
+        add(groupOfItems.first())
+        return
+    }
+    val ordered = groupOfItems.sortedBy { event ->
+        event.mediaAlbum()?.index
+    }
+    val albumId = requireNotNull(ordered.first().mediaAlbum()).id
+    add(
+        TimelineItem.GroupedEvents(
+            id = UniqueId("media-album:$albumId"),
+            events = ordered.toImmutableList(),
+            aggregatedReadReceipts = ordered.flatMap { it.readReceiptState.receipts }.distinct().toImmutableList(),
+            kind = GroupedEventsKind.MEDIA_ALBUM,
+        )
+    )
+}
+
+private fun TimelineItem.Event.mediaAlbum() = when (val mediaContent = content) {
+    is TimelineItemImageContent -> mediaContent.mediaAlbum
+    is TimelineItemVideoContent -> mediaContent.mediaAlbum
+    else -> null
 }
 
 /**

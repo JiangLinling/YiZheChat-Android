@@ -18,6 +18,7 @@ import io.element.android.libraries.matrix.test.A_SESSION_ID
 import io.element.android.libraries.matrix.test.FakeMatrixClient
 import io.element.android.libraries.pushproviders.api.Distributor
 import io.element.android.libraries.pushproviders.test.aSessionPushConfig
+import io.element.android.libraries.pushproviders.unifiedpush.embedded.EmbeddedNtfyManager
 import io.element.android.libraries.pushproviders.unifiedpush.troubleshoot.FakeUnifiedPushDistributorProvider
 import io.element.android.libraries.pushproviders.unifiedpush.troubleshoot.FakeUnifiedPushSessionPushConfigProvider
 import io.element.android.libraries.pushstore.api.clientsecret.PushClientSecret
@@ -45,7 +46,10 @@ class UnifiedPushProviderTest {
             )
         )
         val result = unifiedPushProvider.getDistributors()
-        assertThat(result).containsExactly(Distributor("value", "Name"))
+        assertThat(result).containsExactly(
+            EmbeddedNtfyManager.DISTRIBUTOR,
+            Distributor("value", "Name"),
+        ).inOrder()
     }
 
     @Test
@@ -56,7 +60,7 @@ class UnifiedPushProviderTest {
             )
         )
         val result = unifiedPushProvider.getDistributors()
-        assertThat(result).isEmpty()
+        assertThat(result).containsExactly(EmbeddedNtfyManager.DISTRIBUTOR)
     }
 
     @Test
@@ -248,8 +252,11 @@ class UnifiedPushProviderTest {
         registerUnifiedPushUseCase: RegisterUnifiedPushUseCase = FakeRegisterUnifiedPushUseCase(),
         unRegisterUnifiedPushUseCase: UnregisterUnifiedPushUseCase = FakeUnregisterUnifiedPushUseCase(),
         pushClientSecret: PushClientSecret = FakePushClientSecret(),
-        unifiedPushStore: UnifiedPushStore = FakeUnifiedPushStore(),
+        unifiedPushStore: UnifiedPushStore = FakeUnifiedPushStore(
+            getDistributorValueResult = { "external.distributor" },
+        ),
         unifiedPushSessionPushConfigProvider: UnifiedPushSessionPushConfigProvider = FakeUnifiedPushSessionPushConfigProvider(),
+        embeddedNtfyManager: EmbeddedNtfyManager = NoopEmbeddedNtfyManager,
     ): UnifiedPushProvider {
         return UnifiedPushProvider(
             unifiedPushDistributorProvider = unifiedPushDistributorProvider,
@@ -258,6 +265,14 @@ class UnifiedPushProviderTest {
             pushClientSecret = pushClientSecret,
             unifiedPushStore = unifiedPushStore,
             unifiedPushSessionPushConfigProvider = unifiedPushSessionPushConfigProvider,
+            embeddedNtfyManager = embeddedNtfyManager,
         )
     }
+}
+
+private object NoopEmbeddedNtfyManager : EmbeddedNtfyManager {
+    override suspend fun register(matrixClient: MatrixClient, clientSecret: String): Result<Unit> = Result.success(Unit)
+    override suspend fun unregister(matrixClient: MatrixClient, clientSecret: String): Result<Unit> = Result.success(Unit)
+    override suspend fun unregisterAccount(matrixClient: MatrixClient, clientSecret: String): Result<Unit> = Result.success(Unit)
+    override suspend fun cleanup(clientSecret: String) = Unit
 }

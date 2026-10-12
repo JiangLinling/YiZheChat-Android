@@ -16,9 +16,12 @@ import org.matrix.rustcomponents.sdk.NoHandle
 import org.matrix.rustcomponents.sdk.RecoveryState
 import org.matrix.rustcomponents.sdk.RecoveryStateListener
 import org.matrix.rustcomponents.sdk.TaskHandle
+import org.matrix.rustcomponents.sdk.VerificationState
 import org.matrix.rustcomponents.sdk.VerificationStateListener
 
-class FakeFfiEncryption : Encryption(NoHandle) {
+class FakeFfiEncryption(
+    private val verificationState: VerificationState = VerificationState.VERIFIED,
+) : Encryption(NoHandle) {
     override fun verificationStateListener(listener: VerificationStateListener): TaskHandle {
         return FakeFfiTaskHandle()
     }
@@ -28,6 +31,8 @@ class FakeFfiEncryption : Encryption(NoHandle) {
     }
 
     override suspend fun waitForE2eeInitializationTasks() = simulateLongTask {}
+
+    override fun verificationState(): VerificationState = verificationState
 
     override suspend fun isLastDevice(): Boolean {
         return false

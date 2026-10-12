@@ -57,7 +57,7 @@ sealed interface MessageComposerMode {
 fun MessageComposerMode.showCaptionCompatibilityWarning(): Boolean {
     return when (this) {
         is MessageComposerMode.Attachment -> true
-        is MessageComposerMode.EditCaption -> content.isEmpty()
+        is MessageComposerMode.EditCaption -> true
         else -> false
     }
 }

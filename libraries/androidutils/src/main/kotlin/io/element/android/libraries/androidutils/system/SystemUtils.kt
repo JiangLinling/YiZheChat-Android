@@ -10,11 +10,15 @@ package io.element.android.libraries.androidutils.system
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.PersistableBundle
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
@@ -24,6 +28,7 @@ import androidx.core.net.toUri
 import io.element.android.libraries.androidutils.R
 import io.element.android.libraries.androidutils.compat.getApplicationInfoCompat
 import io.element.android.libraries.core.mimetype.MimeTypes
+import io.element.android.security.dataprotection.api.RuntimeDataProtectionPolicy
 
 /**
  * Return the application label of the provided package. If not found, the package is returned.
@@ -65,8 +70,27 @@ fun Context.copyToClipboard(
     text: CharSequence,
     toastMessage: String? = null
 ) {
-    CopyToClipboardUseCase(this).execute(text)
+    CopyToClipboardUseCase().execute(text)
     toastMessage?.let { toast(it) }
+}
+
+/**
+ * Copies text to Android's system clipboard so it can be pasted outside the app.
+ * Sensitive values are marked to prevent clipboard previews on supported Android versions.
+ */
+fun Context.copyToSystemClipboard(
+    text: CharSequence,
+    toastMessage: String? = null,
+    isSensitive: Boolean = false,
+) {
+    val clip = ClipData.newPlainText("", text)
+    if (isSensitive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        clip.description.extras = PersistableBundle().apply {
+            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
+    }
+    getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+    toastMessage?.let(::toast)
 }
 
 /**
@@ -103,12 +127,17 @@ fun Context.startNotificationSettingsIntent(
 
 fun Context.openAppSettingsPage(
     noActivityFoundMessage: String = getString(R.string.error_no_compatible_app_found),
+    resetToAppDetails: Boolean = false,
 ) {
     try {
         startActivity(
             Intent().apply {
                 action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (resetToAppDetails) {
+                    // An existing OEM settings task may otherwise resume an unrelated permission page.
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
                 data = Uri.fromParts("package", packageName, null)
             }
         )
@@ -139,6 +168,7 @@ fun Context.startSharePlainTextIntent(
     extraTitle: String? = null,
     noActivityFoundMessage: String = getString(R.string.error_no_compatible_app_found),
 ) {
+    if (!RuntimeDataProtectionPolicy.allowsExternalShare()) return
     val share = Intent(Intent.ACTION_SEND)
     share.type = MimeTypes.PlainText
     share.addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT)

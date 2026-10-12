@@ -20,11 +20,16 @@ android {
 setupDependencyInjection()
 
 dependencies {
+    implementation(projects.appconfig)
     implementation(projects.features.enterprise.api)
     implementation(projects.libraries.androidutils)
     implementation(projects.libraries.core)
+    implementation(projects.libraries.cryptography.api)
+    implementation(projects.libraries.designsystem)
     implementation(projects.libraries.matrix.api)
     implementation(projects.libraries.push.api)
+    implementation(projects.security.dataProtection.api)
+    implementation(projects.security.secureStorage.api)
     implementation(projects.libraries.uiStrings)
     api(projects.libraries.troubleshoot.api)
 
@@ -54,4 +59,5 @@ dependencies {
     testImplementation(projects.libraries.pushstore.test)
     testImplementation(projects.libraries.troubleshoot.test)
     testImplementation(projects.services.toolbox.test)
+    testImplementation(projects.security.dataProtection.test)
 }

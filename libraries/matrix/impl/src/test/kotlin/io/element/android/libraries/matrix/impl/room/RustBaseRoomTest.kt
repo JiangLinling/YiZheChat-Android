@@ -12,6 +12,7 @@ import app.cash.turbine.TurbineTestContext
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.matrix.api.room.CurrentUserMembership
+import io.element.android.libraries.matrix.api.room.RoomAlreadyRemovedException
 import io.element.android.libraries.matrix.api.room.RoomInfo
 import io.element.android.libraries.matrix.api.room.RoomMember
 import io.element.android.libraries.matrix.api.room.RoomMembershipObserver
@@ -119,6 +120,72 @@ class RustBaseRoomTest {
         leaveRoomAndObserveMembershipChange(roomMembershipObserver, rustBaseRoom) {
             // No emit
         }
+    }
+
+    @Test
+    fun `when LC22 already removed the user then leave forgets the ghost room locally`() = runTest {
+        var forgetCalled = false
+        val roomMembershipObserver = RoomMembershipObserver()
+        val rustBaseRoom = createRustBaseRoom(
+            initialRoomInfo = aRoomInfo(currentUserMembership = CurrentUserMembership.JOINED),
+            innerRoom = FakeFfiRoom(
+                leaveLambda = {
+                    error("[403 / M_FORBIDDEN] User is not in room and room previews are disabled")
+                },
+                forgetLambda = {
+                    forgetCalled = true
+                },
+            ),
+            roomMembershipObserver = roomMembershipObserver,
+        )
+
+        leaveRoomAndObserveMembershipChange(roomMembershipObserver, rustBaseRoom) {
+            val membershipUpdate = awaitItem()
+            assertThat(membershipUpdate.change).isEqualTo(MembershipChange.LEFT)
+        }
+        assertThat(forgetCalled).isTrue()
+    }
+
+    @Test
+    fun `when LC22 purged the room then leave forgets the ghost room locally`() = runTest {
+        var forgetCalled = false
+        val roomMembershipObserver = RoomMembershipObserver()
+        val rustBaseRoom = createRustBaseRoom(
+            initialRoomInfo = aRoomInfo(currentUserMembership = CurrentUserMembership.JOINED),
+            innerRoom = FakeFfiRoom(
+                leaveLambda = {
+                    error("Api error status_code: 404 Not a known room")
+                },
+                forgetLambda = {
+                    forgetCalled = true
+                },
+            ),
+            roomMembershipObserver = roomMembershipObserver,
+        )
+
+        leaveRoomAndObserveMembershipChange(roomMembershipObserver, rustBaseRoom) {
+            val membershipUpdate = awaitItem()
+            assertThat(membershipUpdate.change).isEqualTo(MembershipChange.LEFT)
+        }
+        assertThat(forgetCalled).isTrue()
+    }
+
+    @Test
+    fun `when a purged room is still joined locally then leave requests session cache recovery`() = runTest {
+        val rustBaseRoom = createRustBaseRoom(
+            initialRoomInfo = aRoomInfo(currentUserMembership = CurrentUserMembership.JOINED),
+            innerRoom = FakeFfiRoom(
+                leaveLambda = {
+                    error("Api error status_code: 404 Not a known room")
+                },
+                forgetLambda = {
+                    error("wrong room state expected Left or Banned got Joined")
+                },
+            ),
+        )
+
+        val failure = rustBaseRoom.leave().exceptionOrNull()
+        assertThat(failure).isInstanceOf(RoomAlreadyRemovedException::class.java)
     }
 
     @Test

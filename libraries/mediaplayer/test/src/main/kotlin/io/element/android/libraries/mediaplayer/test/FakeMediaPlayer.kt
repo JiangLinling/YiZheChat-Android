@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.update
 class FakeMediaPlayer(
     private val fakeTotalDurationMs: Long = 10_000L,
     private val fakePlayedDurationMs: Long = 1000L,
+    private val fakePrepareDelayMs: Long = 1L,
 ) : MediaPlayer {
     private val _state = MutableStateFlow(
         MediaPlayer.State(
@@ -40,6 +41,7 @@ class FakeMediaPlayer(
         mediaId: String,
         mimeType: String,
         startPositionMs: Long,
+        sourceOwnerId: String?,
     ): MediaPlayer.State {
         _state.update {
             it.copy(
@@ -47,11 +49,15 @@ class FakeMediaPlayer(
                 isPlaying = false,
                 isEnded = false,
                 mediaId = mediaId,
+                sourceOwnerId = sourceOwnerId,
                 currentPosition = startPositionMs,
                 duration = null,
             )
         }
-        delay(1) // fake delay to simulate prepare() call.
+        if (fakePrepareDelayMs > 0L) {
+            delay(fakePrepareDelayMs) // fake delay to simulate prepare() call.
+        }
+        check(_state.value.sourceOwnerId == sourceOwnerId) { "Media preparation was replaced" }
         _state.update {
             it.copy(
                 isReady = true,
@@ -86,6 +92,17 @@ class FakeMediaPlayer(
                 isPlaying = false,
             )
         }
+    }
+
+    override fun clear() {
+        _state.value = MediaPlayer.State(
+            isReady = false,
+            isPlaying = false,
+            isEnded = false,
+            mediaId = null,
+            currentPosition = 0L,
+            duration = null,
+        )
     }
 
     override fun seekTo(positionMs: Long) {

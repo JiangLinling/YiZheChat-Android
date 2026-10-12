@@ -28,9 +28,12 @@ import io.element.android.libraries.matrix.api.room.recent.RecentDirectRoom
 import io.element.android.libraries.matrix.api.room.recent.getRecentDirectRooms
 import io.element.android.libraries.usersearch.api.UserRepository
 import io.element.android.libraries.usersearch.api.UserSearchResult
+import io.element.android.security.dataprotection.api.DeletedIdentityProjection
+import io.element.android.security.dataprotection.api.isDeletedMatrixUserId
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
@@ -43,6 +46,7 @@ class DefaultUserListPresenter(
     @Assisted val userRepository: UserRepository,
     @Assisted val userListDataStore: UserListDataStore,
     private val matrixClient: MatrixClient,
+    private val deletedIdentityProjection: DeletedIdentityProjection,
 ) : UserListPresenter {
     @AssistedFactory
     @ContributesBinding(SessionScope::class)
@@ -56,10 +60,12 @@ class DefaultUserListPresenter(
 
     @Composable
     override fun present(): UserListState {
+        val deletedIdentityRevision by deletedIdentityProjection.revision.collectAsState()
         var recentDirectRooms by remember { mutableStateOf(emptyList<RecentDirectRoom>()) }
-        LaunchedEffect(Unit) {
+        LaunchedEffect(deletedIdentityRevision) {
             recentDirectRooms = matrixClient
                 .getRecentDirectRooms()
+                .filterNot { deletedIdentityProjection.isDeletedMatrixUserId(it.matrixUser.userId.value) }
                 .take(MAX_SUGGESTIONS_COUNT)
                 .toList()
         }
@@ -72,15 +78,17 @@ class DefaultUserListPresenter(
         var showSearchLoader by remember { mutableStateOf(false) }
 
         val searchQuery = queryState.text.toString()
-        LaunchedEffect(searchQuery) {
+        LaunchedEffect(searchQuery, deletedIdentityRevision) {
             searchResults = SearchBarResultState.Initial()
             showSearchLoader = false
             userRepository.search(searchQuery).onEach { state ->
                 showSearchLoader = state.isSearching
+                val visibleResults = state.results
+                    .filterNot { deletedIdentityProjection.isDeletedMatrixUserId(it.matrixUser.userId.value) }
                 searchResults = when {
-                    state.results.isEmpty() && state.isSearching -> SearchBarResultState.Initial()
-                    state.results.isEmpty() && !state.isSearching -> SearchBarResultState.NoResultsFound()
-                    else -> SearchBarResultState.Results(state.results.toImmutableList())
+                    visibleResults.isEmpty() && state.isSearching -> SearchBarResultState.Initial()
+                    visibleResults.isEmpty() && !state.isSearching -> SearchBarResultState.NoResultsFound()
+                    else -> SearchBarResultState.Results(visibleResults.toImmutableList())
                 }
             }.launchIn(this)
         }

@@ -17,8 +17,21 @@ import io.element.android.features.call.impl.DefaultElementCallEntryPoint
 import io.element.android.features.call.impl.ui.ElementCallActivity
 
 internal object IntentProvider {
+    fun forRoomEntry(requested: CallData, active: CallData?): CallData =
+        if (requested.notificationEventId == null && requested.attemptId == null &&
+            active?.sessionId == requested.sessionId && active.roomId == requested.roomId
+        ) active else requested
+
+    fun canOpenInvitation(requested: CallData, active: CallData?): Boolean = requested.notificationEventId == null ||
+        (requested.sessionId == active?.sessionId && requested.roomId == active.roomId &&
+            requested.notificationEventId == active.notificationEventId)
+
     fun createIntent(context: Context, callData: CallData): Intent = Intent(context, ElementCallActivity::class.java).apply {
-        putExtra(DefaultElementCallEntryPoint.EXTRA_CALL_TYPE, callData)
+        putExtra(DefaultElementCallEntryPoint.EXTRA_CALL_TYPE,
+            if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment && callData.attemptId == null)
+                callData.copy(attemptId = callData.notificationEventId ?: java.util.UUID.randomUUID().toString())
+            else callData,
+        )
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION)
     }
 
@@ -26,7 +39,9 @@ internal object IntentProvider {
         return PendingIntentCompat.getActivity(
             context,
             DefaultElementCallEntryPoint.REQUEST_CODE,
-            createIntent(context, callData),
+            createIntent(context, callData).apply {
+                data = android.net.Uri.parse("yizhe-call:invitation/" + android.net.Uri.encode(callData.notificationEventId ?: callData.roomId.value))
+            },
             PendingIntent.FLAG_CANCEL_CURRENT,
             false
         )!!

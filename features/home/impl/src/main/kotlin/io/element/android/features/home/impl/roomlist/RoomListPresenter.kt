@@ -28,9 +28,12 @@ import im.vector.app.features.analytics.plan.Interaction
 import io.element.android.features.announcement.api.Announcement
 import io.element.android.features.announcement.api.AnnouncementService
 import io.element.android.features.home.impl.datasource.RoomListDataSource
+import io.element.android.features.home.impl.datasource.contactsRoomSummaries
 import io.element.android.features.home.impl.filters.RoomListFilter.Rooms
 import io.element.android.features.home.impl.filters.RoomListFiltersState
 import io.element.android.features.home.impl.filters.into
+import io.element.android.features.home.impl.notifications.reconciledOutcome
+import io.element.android.features.home.impl.notifications.toNotification
 import io.element.android.features.home.impl.search.RoomListSearchEvent
 import io.element.android.features.home.impl.search.RoomListSearchState
 import io.element.android.features.home.impl.spacefilters.SpaceFiltersState
@@ -42,6 +45,8 @@ import io.element.android.features.invite.api.acceptdecline.AcceptDeclineInviteE
 import io.element.android.features.invite.api.acceptdecline.AcceptDeclineInviteState
 import io.element.android.features.leaveroom.api.LeaveRoomEvent
 import io.element.android.features.leaveroom.api.LeaveRoomState
+import io.element.android.features.messages.api.MessageReferenceStore
+import io.element.android.features.messages.api.draft.ComposerDraftPreviewService
 import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.featureflag.api.FeatureFlagService
@@ -50,8 +55,11 @@ import io.element.android.libraries.fullscreenintent.api.FullScreenIntentPermiss
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.encryption.RecoveryState
+import io.element.android.libraries.matrix.api.notificationsettings.NotificationSettingsService
+import io.element.android.libraries.matrix.api.room.RoomNotificationMode
 import io.element.android.libraries.matrix.api.roomlist.RoomList
 import io.element.android.libraries.matrix.api.roomlist.RoomListFilter
+import io.element.android.libraries.matrix.api.roomlist.RoomSummary
 import io.element.android.libraries.matrix.api.timeline.ReceiptType
 import io.element.android.libraries.matrix.ui.safety.rememberHideInvitesAvatar
 import io.element.android.libraries.preferences.api.store.AppPreferencesStore
@@ -93,6 +101,10 @@ class RoomListPresenter(
     private val coldStartWatcher: AnalyticsColdStartWatcher,
     private val spaceFiltersPresenter: Presenter<SpaceFiltersState>,
     private val featureFlagService: FeatureFlagService,
+    private val draftPreviewService: ComposerDraftPreviewService,
+    private val notificationSettingsService: NotificationSettingsService,
+    private val messageReferenceStore: MessageReferenceStore,
+    private val staleRoomReconciler: StaleRoomReconciler,
 ) : Presenter<RoomListState> {
     private val encryptionService = client.encryptionService
 
@@ -104,9 +116,50 @@ class RoomListPresenter(
         val searchState = searchPresenter.present()
         val spaceFiltersState = spaceFiltersPresenter.present()
         val acceptDeclineInviteState = acceptDeclineInvitePresenter.present()
+        val draftPreviews by draftPreviewService.previews.collectAsState()
+        val messageReferenceState by messageReferenceStore.state.collectAsState()
+        val allRooms = remember(client) { client.roomListService.allRooms }
+        val allRoomSummaries by produceState<List<RoomSummary>?>(initialValue = null, key1 = allRooms) {
+            allRooms.summaries.collect { value = it }
+        }
+        val allRoomsLoadingState by allRooms.loadingState.collectAsState()
+        val contactsSummaries = remember(allRoomSummaries, allRoomsLoadingState) {
+            contactsRoomSummaries(allRoomSummaries, allRoomsLoadingState)
+        }
+        val notificationRecords by remember { seenInvitesStore.notifications() }.collectAsState(emptyList())
+        var inviteActionsInPlace by remember { mutableStateOf(false) }
+        LaunchedEffect(contactsSummaries) {
+            val rooms = (contactsSummaries as? AsyncData.Success)?.data ?: return@LaunchedEffect
+            seenInvitesStore.observeNotifications(rooms.mapNotNull { it.toNotification() }, completeSnapshot = true)
+            seenInvitesStore.updateNotificationProfiles(rooms.associate { it.roomId to (it.name to it.avatarData.url) })
+        }
+        LaunchedEffect(contactsSummaries, allRoomSummaries, notificationRecords) {
+            val rooms = (contactsSummaries as? AsyncData.Success)?.data ?: return@LaunchedEffect
+            notificationRecords.forEach { record ->
+                val membership = allRoomSummaries?.firstOrNull { it.roomId == record.roomId }?.info?.currentUserMembership
+                val ended = membership == io.element.android.libraries.matrix.api.room.CurrentUserMembership.LEFT ||
+                    membership == io.element.android.libraries.matrix.api.room.CurrentUserMembership.BANNED
+                val outcome = if (record.outcome == io.element.android.features.invite.api.InviteNotification.Outcome.PENDING && ended) {
+                    io.element.android.features.invite.api.InviteNotification.Outcome.UNAVAILABLE
+                } else reconciledOutcome(record, rooms.firstOrNull { it.roomId == record.roomId })
+                outcome?.let {
+                    seenInvitesStore.recordOutcome(record.roomId, it, seen = false, expectedSequence = record.sequence)
+                }
+            }
+        }
+        val seenRoomInvites by remember { seenInvitesStore.seenRoomIds() }.collectAsState(emptySet())
+        val unreadSummary = remember(allRoomSummaries, seenRoomInvites) {
+            calculateHomeUnreadSummary(allRoomSummaries.orEmpty(), seenRoomInvites)
+        }
 
         LaunchedEffect(Unit) {
             roomListDataSource.launchIn(this)
+            messageReferenceStore.load()
+        }
+
+        LaunchedEffect(Unit) {
+            roomListDataSource.roomSummariesFlow.first { it.isNotEmpty() }
+            staleRoomReconciler()
         }
 
         var securityBannerDismissed by rememberSaveable { mutableStateOf(false) }
@@ -143,6 +196,7 @@ class RoomListPresenter(
                     leaveRoomState.eventSink(LeaveRoomEvent.LeaveRoom(event.roomId, needsConfirmation = event.needsConfirmation))
                 }
                 is RoomListEvent.SetRoomIsFavorite -> coroutineScope.setRoomIsFavorite(event.roomId, event.isFavorite)
+                is RoomListEvent.SetRoomMuted -> coroutineScope.setRoomMuted(event.roomId, event.isMuted)
                 is RoomListEvent.MarkAsRead -> coroutineScope.markAsRead(event.roomId)
                 is RoomListEvent.MarkAsUnread -> coroutineScope.markAsUnread(event.roomId)
                 is RoomListEvent.AcceptInvite -> {
@@ -157,7 +211,14 @@ class RoomListPresenter(
                 }
                 is RoomListEvent.ShowDeclineInviteMenu -> declineInviteMenu.value = RoomListState.DeclineInviteMenu.Shown(event.roomSummary)
                 RoomListEvent.HideDeclineInviteMenu -> declineInviteMenu.value = RoomListState.DeclineInviteMenu.Hidden
-                is RoomListEvent.ClearCacheOfRoom -> coroutineScope.clearCacheOfRoom(event.roomId)
+                is RoomListEvent.SetInviteActionsInPlace -> inviteActionsInPlace = event.enabled
+                RoomListEvent.ResetInviteActions -> acceptDeclineInviteState.eventSink(
+                    io.element.android.features.invite.api.acceptdecline.AcceptDeclineInviteEvents.ResetActions
+                )
+                is RoomListEvent.MarkInvitesAsSeen -> coroutineScope.launch {
+                    event.roomIds.forEach { seenInvitesStore.markNotificationSeen(it) }
+                }
+                is RoomListEvent.DeleteConversation -> coroutineScope.deleteConversation(event.roomId, event.cutoffTimestamp)
             }
         }
 
@@ -169,7 +230,7 @@ class RoomListPresenter(
         }
 
         val canReportRoom by produceState(false) { value = client.canReportRoom() }
-        val showUnreadCount by produceState(false) {
+        val showUnreadCount by produceState(true) {
             value = featureFlagService.isFeatureEnabled(FeatureFlags.UnreadIndicatorCount)
         }
 
@@ -177,6 +238,10 @@ class RoomListPresenter(
             securityBannerDismissed,
             showNewNotificationSoundBanner,
             showUnreadCount,
+            draftPreviews,
+            messageReferenceState.conversationCutoffs,
+            seenRoomInvites,
+            filterMentions = filtersState.selectedFilters().contains(io.element.android.features.home.impl.filters.RoomListFilter.Mentions),
         )
 
         return RoomListState(
@@ -187,6 +252,11 @@ class RoomListPresenter(
             searchState = searchState,
             spaceFiltersState = spaceFiltersState,
             contentState = contentState,
+            unreadSummary = unreadSummary,
+            notifications = notificationRecords.toImmutableList(),
+            inviteActionsInPlace = inviteActionsInPlace,
+            contactsSummaries = contactsSummaries,
+            seenRoomInvites = seenRoomInvites.toImmutableSet(),
             acceptDeclineInviteState = acceptDeclineInviteState,
             hideInvitesAvatars = hideInvitesAvatar,
             canReportRoom = canReportRoom,
@@ -234,9 +304,17 @@ class RoomListPresenter(
         securityBannerDismissed: Boolean,
         showNewNotificationSoundBanner: Boolean,
         showUnreadCount: Boolean,
+        draftPreviews: Map<RoomId, String>,
+        conversationCutoffs: Map<String, Long>,
+        seenRoomInvites: Set<RoomId>,
+        filterMentions: Boolean,
     ): RoomListContentState {
         val roomSummaries by produceState(initialValue = AsyncData.Loading()) {
             roomListDataSource.roomSummariesFlow.collect { value = AsyncData.Success(it) }
+        }
+        val roomIds = roomSummaries.dataOrNull().orEmpty().map { it.roomId }
+        LaunchedEffect(roomIds) {
+            draftPreviewService.refresh(roomIds)
         }
         val loadingState by roomListDataSource.loadingState.collectAsState()
         val showEmpty by remember {
@@ -249,7 +327,6 @@ class RoomListPresenter(
                 loadingState == RoomList.LoadingState.NotLoaded || roomSummaries is AsyncData.Loading
             }
         }
-        val seenRoomInvites by remember { seenInvitesStore.seenRoomIds() }.collectAsState(emptySet())
         val securityBannerState by rememberSecurityBannerState(securityBannerDismissed)
         return when {
             showEmpty -> RoomListContentState.Empty(
@@ -265,7 +342,17 @@ class RoomListPresenter(
                     showUnreadCount = showUnreadCount,
                     fullScreenIntentPermissionsState = fullScreenIntentPermissionsPresenter.present(),
                     batteryOptimizationState = batteryOptimizationPresenter.present(),
-                    summaries = roomSummaries.dataOrNull().orEmpty().toImmutableList(),
+                    summaries = roomSummaries.dataOrNull().orEmpty()
+                        .asSequence()
+                        .filter { !filterMentions || it.numberOfUnreadMentions > 0 }
+                        .filter { summary ->
+                            val cutoff = conversationCutoffs[summary.roomId.value]
+                            cutoff == null || summary.latestEventTimestamp > cutoff
+                        }
+                        .map { summary -> summary.copy(draftPreview = draftPreviews[summary.roomId]) }
+                        .sortedByDescending { it.isFavorite }
+                        .toList()
+                        .toImmutableList(),
                     seenRoomInvites = seenRoomInvites.toImmutableSet(),
                 )
             }
@@ -276,11 +363,12 @@ class RoomListPresenter(
     private fun CoroutineScope.showContextMenu(event: RoomListEvent.ShowContextMenu, contextMenuState: MutableState<RoomListState.ContextMenu>) = launch {
         val initialState = RoomListState.ContextMenu.Shown(
             roomId = event.roomSummary.roomId,
-            roomName = event.roomSummary.name,
+            roomName = event.displayName ?: event.roomSummary.name,
             isDm = event.roomSummary.isDm,
             isFavorite = event.roomSummary.isFavorite,
+            isMuted = event.roomSummary.userDefinedNotificationMode == RoomNotificationMode.MUTE,
             hasNewContent = event.roomSummary.hasNewContent,
-            displayClearRoomCacheAction = appPreferencesStore.isDeveloperModeEnabledFlow().first(),
+            latestEventTimestamp = event.roomSummary.latestEventTimestamp,
         )
         contextMenuState.value = initialState
 
@@ -289,13 +377,13 @@ class RoomListPresenter(
             val isShowingContextMenuFlow = snapshotFlow { contextMenuState.value is RoomListState.ContextMenu.Shown }
                 .distinctUntilChanged()
 
-            val isFavoriteFlow = room.roomInfoFlow
-                .map { it.isFavorite }
+            val roomControlsFlow = room.roomInfoFlow
+                .map { it.isFavorite to (it.userDefinedNotificationMode == RoomNotificationMode.MUTE) }
                 .distinctUntilChanged()
 
-            isFavoriteFlow
-                .onEach { isFavorite ->
-                    contextMenuState.value = initialState.copy(isFavorite = isFavorite)
+            roomControlsFlow
+                .onEach { (isFavorite, isMuted) ->
+                    contextMenuState.value = initialState.copy(isFavorite = isFavorite, isMuted = isMuted)
                 }
                 .flatMapLatest { isShowingContextMenuFlow }
                 .takeWhile { isShowingContextMenu -> isShowingContextMenu }
@@ -309,6 +397,14 @@ class RoomListPresenter(
                 .onSuccess {
                     analyticsService.captureInteraction(name = Interaction.Name.MobileRoomListRoomContextMenuFavouriteToggle)
                 }
+        }
+    }
+
+    private fun CoroutineScope.setRoomMuted(roomId: RoomId, isMuted: Boolean) = launch {
+        if (isMuted) {
+            notificationSettingsService.muteRoom(roomId)
+        } else {
+            notificationSettingsService.restoreDefaultRoomNotificationMode(roomId)
         }
     }
 
@@ -337,7 +433,8 @@ class RoomListPresenter(
         }
     }
 
-    private fun CoroutineScope.clearCacheOfRoom(roomId: RoomId) = launch {
+    private fun CoroutineScope.deleteConversation(roomId: RoomId, cutoffTimestamp: Long) = launch {
+        messageReferenceStore.deleteConversation(roomId, cutoffTimestamp)
         client.getRoom(roomId)?.use { room ->
             room.clearEventCacheStorage()
         }

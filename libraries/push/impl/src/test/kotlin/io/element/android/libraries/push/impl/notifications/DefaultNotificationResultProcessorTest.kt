@@ -33,6 +33,7 @@ import io.element.android.libraries.push.impl.notifications.model.ResolvedPushEv
 import io.element.android.libraries.push.impl.push.FakeMutableBatteryOptimizationStore
 import io.element.android.libraries.push.impl.push.FakeOnNotifiableEventReceived
 import io.element.android.libraries.push.impl.push.FakeOnRedactedEventReceived
+import io.element.android.libraries.push.test.notifications.FakeNotificationCleaner
 import io.element.android.libraries.pushstore.test.userpushstore.FakeUserPushStoreFactory
 import io.element.android.services.toolbox.test.systemclock.FakeSystemClock
 import io.element.android.tests.testutils.lambda.any
@@ -103,6 +104,7 @@ class DefaultNotificationResultProcessorTest {
 
     @Test
     fun `when ringing call PushData is received, the incoming call will be handled`() = runTest {
+        val clearMessagesForRoom = lambdaRecorder<SessionId, RoomId, Unit> { _, _ -> }
         val handleIncomingCallLambda = lambdaRecorder<
             CallData,
             EventId,
@@ -124,6 +126,7 @@ class DefaultNotificationResultProcessorTest {
             elementCallEntryPoint = elementCallEntryPoint,
             onNotifiableEventsReceived = onNotifiableEventsReceived,
             pushHistoryService = pushHistoryService,
+            notificationCleaner = FakeNotificationCleaner(clearMessagesForRoomLambda = clearMessagesForRoom),
         )
         runningProcessor(processor) {
             emit(mapOf(aPushRequest() to Result.success(ResolvedPushEvent.Event(aNotifiableCallEvent()))))
@@ -132,6 +135,7 @@ class DefaultNotificationResultProcessorTest {
         advanceTimeBy(300.milliseconds)
 
         handleIncomingCallLambda.assertions().isCalledOnce()
+        clearMessagesForRoom.assertions().isCalledOnce().with(value(A_SESSION_ID), value(A_ROOM_ID))
         onNotifiableEventsReceived.assertions().isNeverCalled()
         onPushReceivedResult.assertions().isCalledOnce()
     }
@@ -288,6 +292,7 @@ class DefaultNotificationResultProcessorTest {
         onRedactedEventReceived: (List<ResolvedPushEvent.Redaction>) -> Unit = {},
         onNotifiableEventsReceived: (List<NotifiableEvent>) -> Unit = {},
         elementCallEntryPoint: FakeElementCallEntryPoint = FakeElementCallEntryPoint(),
+        notificationCleaner: FakeNotificationCleaner = FakeNotificationCleaner(clearMessagesForRoomLambda = { _, _ -> }),
         notificationChannels: FakeNotificationChannels = FakeNotificationChannels(),
         coroutineScope: CoroutineScope = backgroundScope,
     ) = DefaultNotificationResultProcessor(
@@ -298,7 +303,13 @@ class DefaultNotificationResultProcessorTest {
         onRedactedEventReceived = FakeOnRedactedEventReceived(onRedactedEventReceived),
         onNotifiableEventReceived = FakeOnNotifiableEventReceived(onNotifiableEventsReceived),
         elementCallEntryPoint = elementCallEntryPoint,
+        notificationCleaner = notificationCleaner,
         notificationChannels = notificationChannels,
+        foregroundCallInvitations = ForegroundCallInvitationObserver(
+            io.element.android.services.appnavstate.test.FakeAppNavigationStateService(),
+            io.element.android.libraries.matrix.test.FakeMatrixClientProvider(),
+            FakeCallNotificationEventResolver(), systemClock,
+        ),
         coroutineScope = coroutineScope,
     )
 }

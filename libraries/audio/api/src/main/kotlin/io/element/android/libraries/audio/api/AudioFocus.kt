@@ -15,7 +15,53 @@ enum class AudioFocusRequester {
     MediaViewer,
 }
 
+/**
+ * The mutually exclusive app-level audio role owned by an operation.
+ *
+ * The priority is intentionally part of the shared contract so a future RTC implementation can
+ * use the same arbiter instead of adding a second microphone or playback lock.
+ */
+enum class AudioSessionRole(val priority: Int) {
+    MediaPlayback(priority = 10),
+    VoiceMessagePlayback(priority = 20),
+    VoiceMessageCapture(priority = 30),
+    RtcCall(priority = 40),
+}
+
+enum class AudioSessionLossReason {
+    PREEMPTED,
+    SYSTEM_FOCUS_LOST,
+    SYSTEM_FOCUS_LOST_TRANSIENT,
+}
+
+data class AudioSessionRequest(
+    val ownerId: String,
+    val role: AudioSessionRole,
+    val operationId: String,
+    val onOwnershipLost: (AudioSessionLossReason) -> Unit,
+)
+
+data class AudioSessionOwner(
+    val ownerId: String,
+    val role: AudioSessionRole,
+    val operationId: String,
+)
+
 interface AudioFocus {
+    /**
+     * Acquire the single app-level capture/playback owner.
+     *
+     * A higher-priority role preempts the current owner. Equal-priority explicit user actions
+     * replace the previous owner. Lower-priority requests fail closed and must not start audio.
+     */
+    fun acquire(request: AudioSessionRequest): Boolean
+
+    /** Releases ownership only when [ownerId] is still the current owner. */
+    fun release(ownerId: String)
+
+    /** A diagnostic projection; it is not an Android OS audio-focus receipt. */
+    fun currentOwner(): AudioSessionOwner?
+
     /**
      * Request audio focus for the given requester.
      * @param requester The mode for which to request audio focus.

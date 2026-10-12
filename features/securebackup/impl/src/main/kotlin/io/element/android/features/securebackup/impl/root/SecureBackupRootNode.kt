@@ -10,15 +10,12 @@ package io.element.android.features.securebackup.impl.root
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.platform.UriHandler
 import com.bumble.appyx.core.modality.BuildContext
 import com.bumble.appyx.core.node.Node
 import com.bumble.appyx.core.plugin.Plugin
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedInject
 import io.element.android.annotations.ContributesNode
-import io.element.android.appconfig.LearnMoreConfig
 import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.di.SessionScope
 
@@ -41,14 +38,9 @@ class SecureBackupRootNode(
 
     private val callback: Callback = callback()
 
-    private fun onLearnMoreClick(uriHandler: UriHandler) {
-        uriHandler.openUri(LearnMoreConfig.SECURE_BACKUP_URL)
-    }
-
     @Composable
     override fun View(modifier: Modifier) {
         val state = presenter.present()
-        val uriHandler = LocalUriHandler.current
         SecureBackupRootView(
             state = state,
             onBackClick = ::navigateUp,
@@ -56,7 +48,6 @@ class SecureBackupRootNode(
             onChangeClick = callback::navigateToChange,
             onDisableClick = callback::navigateToDisable,
             onConfirmRecoveryKeyClick = callback::navigateToEnterRecoveryKey,
-            onLearnMoreClick = { onLearnMoreClick(uriHandler) },
             modifier = modifier,
         )
     }

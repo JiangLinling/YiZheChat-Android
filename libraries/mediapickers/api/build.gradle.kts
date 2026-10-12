@@ -17,6 +17,7 @@ android {
 }
 
 dependencies {
+    api(projects.libraries.mediaviewer.api)
     implementation(projects.libraries.uiStrings)
     implementation(projects.libraries.core)
     implementation(projects.libraries.di)

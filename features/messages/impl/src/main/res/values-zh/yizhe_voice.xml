@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="yizhe_voice_change_speed">播放速度 %1$s×</string>
+    <string name="yizhe_voice_forward">快进 5 秒</string>
+    <string name="yizhe_voice_backward">后退 5 秒</string>
+</resources>

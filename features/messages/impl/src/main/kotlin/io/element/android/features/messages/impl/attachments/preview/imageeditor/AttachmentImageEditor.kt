@@ -11,24 +11,29 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
-import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
-import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import io.element.android.features.messages.impl.attachments.preview.resolvedImageMimeType
 import io.element.android.libraries.androidutils.bitmap.rotateToExifMetadataOrientation
-import io.element.android.libraries.androidutils.bitmap.writeBitmap
-import io.element.android.libraries.androidutils.file.createTmpFile
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.core.mimetype.MimeTypes.isMimeTypeAnimatedImage
 import io.element.android.libraries.core.mimetype.MimeTypes.isMimeTypeImage
+import io.element.android.libraries.di.SessionScope
 import io.element.android.libraries.di.annotations.ApplicationContext
+import io.element.android.libraries.di.annotations.SessionCoroutineScope
+import io.element.android.libraries.matrix.api.MatrixClient
+import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.mediaviewer.api.local.LocalMedia
+import io.element.android.security.securestorage.api.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 import kotlin.math.roundToInt
+import kotlin.time.Duration.Companion.hours
 
 private const val EDITED_MEDIA_DIR_NAME = "edited-media"
 
@@ -43,26 +48,36 @@ interface AttachmentImageEditor {
 
 data class EditedLocalMedia(
     val localMedia: LocalMedia,
-    val file: File,
-)
+    val file: File? = null,
+    val lease: SecureMediaLease? = null,
+    val reference: SecureObjectReference? = null,
+    val onClose: (() -> Unit)? = null,
+) : AutoCloseable {
+    override fun close() {
+        lease?.close()
+        file?.delete()
+        onClose?.invoke()
+    }
+}
 
-@ContributesBinding(AppScope::class)
+@ContributesBinding(SessionScope::class)
 class DefaultAttachmentImageEditor(
     @ApplicationContext private val context: Context,
     private val dispatchers: CoroutineDispatchers,
+    private val fileStore: SensitiveFileStore,
+    private val leaseManager: SecureMediaLeaseManager,
+    private val sessionId: SessionId,
+    private val matrixClient: MatrixClient,
+    @SessionCoroutineScope private val sessionScope: CoroutineScope,
 ) : AttachmentImageEditor {
     override suspend fun canEdit(localMedia: LocalMedia): Boolean = withContext(dispatchers.io) {
-        localMedia.info.resolvedImageMimeType()
-            ?.takeIf { it.isEditableStillImageMimeType() }
-            ?.let { return@withContext true }
-
-        val decodedMimeType = context.contentResolver.openInputStream(localMedia.uri)?.use { input ->
-            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeStream(input, null, options)
-            options.outMimeType
+        canEditStillImage(localMedia.info.resolvedImageMimeType() ?: localMedia.info.mimeType) {
+            context.contentResolver.openInputStream(localMedia.uri)?.use { input ->
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeStream(input, null, options)
+                options.outMimeType
+            }
         }
-
-        decodedMimeType.isEditableStillImageMimeType()
     }
 
     override suspend fun exportEdits(
@@ -72,6 +87,7 @@ class DefaultAttachmentImageEditor(
         runCatchingExceptions {
             val sourceMimeType = localMedia.info.resolvedImageMimeType() ?: localMedia.info.mimeType
             val exportedMimeType = exportedMimeTypeFor(sourceMimeType)
+            val outputName = localMedia.info.filename.substringBeforeLast('.').ifBlank { "photo" } + "-edited." + compressFileExtension(exportedMimeType)
             val exifOrientation = context.contentResolver.openInputStream(localMedia.uri)?.let { input ->
                 input.use {
                     ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_UNDEFINED)
@@ -80,7 +96,7 @@ class DefaultAttachmentImageEditor(
 
             val decodedBitmap = context.contentResolver.openInputStream(localMedia.uri)?.use { input ->
                 BitmapFactory.decodeStream(input)
-            } ?: error("Unable to decode image from ${localMedia.uri}")
+            } ?: error("Unable to decode the source image")
 
             val normalizedBitmap = decodedBitmap.rotateToExifMetadataOrientation(exifOrientation)
             if (normalizedBitmap !== decodedBitmap) {
@@ -92,42 +108,73 @@ class DefaultAttachmentImageEditor(
                 normalizedBitmap.recycle()
             }
 
-            val cropRect = edits.cropRect.toPixelRect(
-                imageWidth = transformedBitmap.width,
-                imageHeight = transformedBitmap.height,
-            )
-            val isCropUnchanged = cropRect.left == 0 && cropRect.top == 0 &&
-                cropRect.width() == transformedBitmap.width && cropRect.height() == transformedBitmap.height
-            val croppedBitmap = if (isCropUnchanged) {
+            val annotatedBitmap = if (edits.annotations.isEmpty()) {
                 transformedBitmap
             } else {
+                transformedBitmap.copy(Bitmap.Config.ARGB_8888, true).also { result ->
+                    renderAnnotations(android.graphics.Canvas(result), transformedBitmap, edits.annotations)
+                    transformedBitmap.recycle()
+                }
+            }
+
+            val cropRect = edits.cropRect.toPixelRect(
+                imageWidth = annotatedBitmap.width,
+                imageHeight = annotatedBitmap.height,
+            )
+            val isCropUnchanged = cropRect.left == 0 && cropRect.top == 0 &&
+                cropRect.width() == annotatedBitmap.width && cropRect.height() == annotatedBitmap.height
+            val croppedBitmap = if (isCropUnchanged) {
+                annotatedBitmap
+            } else {
                 Bitmap.createBitmap(
-                    transformedBitmap,
+                    annotatedBitmap,
                     cropRect.left,
                     cropRect.top,
                     cropRect.width(),
                     cropRect.height(),
                 )
             }
-            if (croppedBitmap !== transformedBitmap) {
-                transformedBitmap.recycle()
+            if (croppedBitmap !== annotatedBitmap) {
+                annotatedBitmap.recycle()
             }
 
-            val editedMediaDir = File(context.cacheDir, EDITED_MEDIA_DIR_NAME).apply { mkdirs() }
-            val outputFile = context.createTmpFile(baseDir = editedMediaDir, extension = compressFileExtension(exportedMimeType))
-            outputFile.writeBitmap(
-                bitmap = croppedBitmap,
-                format = compressFormat(exportedMimeType),
-                quality = 90,
-            )
-            croppedBitmap.recycle()
+            val reference = try {
+                fileStore.write(SecureObjectWriteRequest(
+                    objectId = SecureObjectId("media-edit-${UUID.randomUUID()}"),
+                    vaultId = deriveAccountVaultId(sessionId.value, matrixClient.deviceId.value),
+                    purpose = SecureObjectPurpose.EDITING_STAGING,
+                    associatedData = (localMedia.lifecycleOperationId + ":" + localMedia.lifecycleRoomIdHash).toByteArray(),
+                )) { output -> check(croppedBitmap.compress(compressFormat(exportedMimeType), 100, output)) }
+            } finally {
+                croppedBitmap.recycle()
+            }
+            val lease = try {
+                leaseManager.issue(SecureMediaLeaseRequest(
+                reference = reference,
+                    mimeType = exportedMimeType,
+                displayName = outputName,
+                    timeToLive = 1.hours,
+                revocationScope = "media-edit-${localMedia.lifecycleOperationId}",
+                deleteObjectOnRevoke = false,
+            ))
+            } catch (failure: Throwable) {
+                fileStore.delete(reference)
+                throw failure
+            }
 
             EditedLocalMedia(
                 localMedia = localMedia.copy(
-                    uri = Uri.fromFile(outputFile),
-                    info = localMedia.info.copy(mimeType = exportedMimeType),
+                    uri = lease.uri,
+                    info = localMedia.info.copy(
+                        mimeType = exportedMimeType,
+                        fileSize = reference.plaintextLength,
+                        filename = outputName,
+                        fileExtension = compressFileExtension(exportedMimeType)
+                    ),
                 ),
-                file = outputFile,
+                lease = lease,
+                reference = reference,
+                onClose = { sessionScope.launch { fileStore.delete(reference) } },
             )
         }
     }
@@ -141,7 +188,7 @@ internal fun exportedMimeTypeFor(sourceMimeType: String?): String {
     }
 }
 
-private fun Bitmap.applyEdits(edits: AttachmentImageEdits): Bitmap {
+internal fun Bitmap.applyEdits(edits: AttachmentImageEdits): Bitmap {
     val normalizedTurns = (edits.rotationQuarterTurns % 4 + 4) % 4
     if (normalizedTurns == 0 && !edits.isFlippedHorizontally && !edits.isFlippedVertically) {
         return this
@@ -192,6 +239,13 @@ private fun compressFormat(mimeType: String) = when (mimeType) {
 private fun compressFileExtension(mimeType: String) = when (mimeType) {
     MimeTypes.Png -> "png"
     else -> "jpeg"
+}
+
+internal suspend fun canEditStillImage(mimeType: String?, decodeMimeType: suspend () -> String?): Boolean {
+    if (mimeType.isEditableStillImageMimeType()) return true
+    // Videos never need a bitmap probe, including stale or revoked video URIs.
+    if (mimeType?.startsWith("video/") == true) return false
+    return runCatchingExceptions { decodeMimeType().isEditableStillImageMimeType() }.getOrDefault(false)
 }
 
 private fun String?.isEditableStillImageMimeType(): Boolean {

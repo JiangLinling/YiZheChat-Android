@@ -17,6 +17,7 @@ import io.element.android.features.roomcall.api.aStandByCallState
 import io.element.android.features.roomdetails.impl.members.aRoomMember
 import io.element.android.features.roomdetails.impl.members.details.RoomMemberDetailsPresenter
 import io.element.android.features.userprofile.shared.aUserProfileState
+import io.element.android.features.userprofile.test.FakeFriendProfileRepository
 import io.element.android.libraries.androidutils.clipboard.ClipboardHelper
 import io.element.android.libraries.androidutils.clipboard.FakeClipboardHelper
 import io.element.android.libraries.architecture.Presenter
@@ -119,6 +120,7 @@ class RoomDetailsPresenterTest {
             appPreferencesStore = appPreferencesStore,
             notificationCleaner = notificationCleaner,
             sessionPreferencesStore = sessionPreferencesStore,
+            friendProfileRepository = FakeFriendProfileRepository(),
         )
     }
 

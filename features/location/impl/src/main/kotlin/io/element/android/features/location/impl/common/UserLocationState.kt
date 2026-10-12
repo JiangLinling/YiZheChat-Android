@@ -33,8 +33,8 @@ fun rememberUserLocationState(hasLocationPermission: Boolean): UserLocationState
     } else {
         rememberPlatformLocationProvider(
             updateInterval = 5.seconds,
-            desiredAccuracy = DesiredAccuracy.High,
-            minDistance = 5.meters,
+            desiredAccuracy = DesiredAccuracy.Highest,
+            minDistance = 1.meters,
         )
     }
     val locationState = locationProvider.location.collectAsState()

@@ -22,6 +22,7 @@ import io.element.android.libraries.matrix.api.media.ImageInfo
 import io.element.android.libraries.matrix.api.media.VideoInfo
 import io.element.android.libraries.matrix.api.timeline.item.event.AudioMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.EventContent
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedMessageStatus
 import io.element.android.libraries.matrix.api.timeline.item.event.FailedToParseMessageLikeContent
 import io.element.android.libraries.matrix.api.timeline.item.event.FailedToParseStateContent
 import io.element.android.libraries.matrix.api.timeline.item.event.FileMessageType
@@ -55,6 +56,48 @@ import kotlin.time.Duration.Companion.minutes
 
 @RunWith(AndroidJUnit4::class)
 class InReplyToMetadataKtTest {
+    @Test
+    fun `current authorized summary replaces initial decrypting shell`() = runTest {
+        moleculeFlow(RecompositionMode.Immediate) {
+            anInReplyToDetailsReady(eventContent = aMessageContent("").copy(protectedMessageStatus = ProtectedMessageStatus.DECRYPTING), textContent = "[QA sticker]")
+                .copy(isTextContentAuthorizedProjection = true).metadata(hideImage = false)
+        }.test { assertThat(awaitItem()).isEqualTo(InReplyToMetadata.Text("[QA sticker]")) }
+    }
+
+    @Test
+    fun `expired revoked and unopened content ignores any captured summary`() = runTest {
+        for (status in listOf(ProtectedMessageStatus.EXPIRED, ProtectedMessageStatus.REVOKED, ProtectedMessageStatus.BURN_AFTER_READ_UNOPENED)) {
+            moleculeFlow(RecompositionMode.Immediate) {
+                anInReplyToDetailsReady(eventContent = aMessageContent("").copy(protectedMessageStatus = status), textContent = "old summary")
+                    .copy(isTextContentAuthorizedProjection = true).metadata(hideImage = false)
+            }.test { assertThat(awaitItem()).isEqualTo(InReplyToMetadata.Unavailable) }
+        }
+    }
+
+    @Test
+    fun `encrypted reply carrier does not disclose its body`() = runTest {
+        moleculeFlow(RecompositionMode.Immediate) {
+            anInReplyToDetailsReady(eventContent = aMessageContent("yizhe-secure-v1:opaque"))
+                .metadata(hideImage = false)
+        }.test { assertThat(awaitItem()).isEqualTo(InReplyToMetadata.Unavailable) }
+    }
+
+    @Test
+    fun `authorized volatile summary replaces encrypted reply carrier`() = runTest {
+        moleculeFlow(RecompositionMode.Immediate) {
+            anInReplyToDetailsReady(eventContent = aMessageContent("yizhe-secure-v1:opaque"), textContent = "[QA sticker]")
+                .copy(isTextContentAuthorizedProjection = true).metadata(hideImage = false)
+        }.test { assertThat(awaitItem()).isEqualTo(InReplyToMetadata.Text("[QA sticker]")) }
+    }
+
+    @Test
+    fun `missing authorized summary never falls back to carrier body`() = runTest {
+        moleculeFlow(RecompositionMode.Immediate) {
+            anInReplyToDetailsReady(eventContent = aMessageContent("yizhe-secure-v1:opaque"), textContent = "")
+                .copy(isTextContentAuthorizedProjection = true).metadata(hideImage = false)
+        }.test { assertThat(awaitItem()).isEqualTo(InReplyToMetadata.Unavailable) }
+    }
+
     @Test
     fun `any message content`() = runTest {
         moleculeFlow(RecompositionMode.Immediate) {
@@ -455,7 +498,7 @@ class InReplyToMetadataKtTest {
             ).metadata(hideImage = false)
         }.test {
             awaitItem().let {
-                assertThat(it).isEqualTo(InReplyToMetadata.UnableToDecrypt)
+                assertThat(it).isEqualTo(InReplyToMetadata.Unavailable)
             }
         }
     }
@@ -546,7 +589,7 @@ class InReplyToMetadataKtTest {
             ).metadata(hideImage = false)
         }.test {
             awaitItem().let {
-                assertThat(it).isNull()
+                assertThat(it).isEqualTo(InReplyToMetadata.Unavailable)
             }
         }
     }

@@ -15,5 +15,5 @@ object OnBoardingConfig {
     /**
      * The preferred initial homeserver for a new session. Users can still choose another server.
      */
-    const val DEFAULT_HOMESERVER_URL = "https://matrix.yizhesy.cn"
+    val DEFAULT_HOMESERVER_URL: String = BuildConfig.YIZHECHAT_HOMESERVER_URL
 }

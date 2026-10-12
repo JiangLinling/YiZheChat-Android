@@ -19,6 +19,8 @@ import io.element.android.features.invitepeople.test.FakeStartDMAction
 import io.element.android.features.startchat.api.ConfirmingStartDmWithMatrixUser
 import io.element.android.features.startchat.api.StartDMAction
 import io.element.android.features.userprofile.api.UserProfileEvents
+import io.element.android.features.userprofile.api.FriendProfileRepository
+import io.element.android.features.userprofile.test.FakeFriendProfileRepository
 import io.element.android.features.userprofile.api.UserProfileState
 import io.element.android.features.userprofile.api.UserProfileVerificationState
 import io.element.android.features.userprofile.impl.root.UserProfilePresenter
@@ -141,6 +143,7 @@ class UserProfilePresenterTest {
             ),
         )
         val client = createFakeMatrixClient().apply {
+            getRoomInfoFlowLambda = { kotlinx.coroutines.flow.flowOf(java.util.Optional.of(room.info())) }
             if (canFindRoom) {
                 givenGetRoomResult(A_ROOM_ID, room)
             }
@@ -171,7 +174,7 @@ class UserProfilePresenterTest {
         presenter.test {
             val initialState = awaitFirstItem()
             assertThat(initialState.userId).isEqualTo(A_USER_ID)
-            assertThat(initialState.userName).isNull()
+            assertThat(initialState.userName).isEqualTo(A_USER_ID.value)
             assertThat(initialState.avatarUrl).isNull()
             assertThat(initialState.isBlocked).isEqualTo(AsyncData.Success(false))
         }
@@ -406,6 +409,7 @@ class UserProfilePresenterTest {
         userId: UserId = UserId("@alice:server.org"),
         startDMAction: StartDMAction = FakeStartDMAction(),
         isElementCallAvailable: Boolean = true,
+        friendProfileRepository: FriendProfileRepository = FakeFriendProfileRepository(),
     ): UserProfilePresenter {
         return UserProfilePresenter(
             userId = userId,
@@ -414,6 +418,8 @@ class UserProfilePresenterTest {
             sessionEnterpriseService = FakeSessionEnterpriseService(
                 isElementCallAvailableResult = { isElementCallAvailable },
             ),
+            friendProfileRepository = friendProfileRepository,
+            friendshipRemoval = FakeFriendshipRemovalProtocol().apply { snapshot = null },
         )
     }
 }

@@ -58,16 +58,15 @@ class UserProfileNode(
     @Composable
     override fun View(modifier: Modifier) {
         val context = LocalContext.current
+        val state = presenter.present()
 
         fun onShareUser() {
-            userProfileNodeHelper.onShareUser(context, permalinkBuilder)
+            userProfileNodeHelper.onShareUser(context, permalinkBuilder, state.userName)
         }
 
         fun onStartDM(roomId: RoomId) {
             callback.navigateToRoom(roomId)
         }
-
-        val state = presenter.present()
 
         UserProfileView(
             state = state,

@@ -266,6 +266,11 @@ class RustSessionVerificationService(
             if (!isInitialized.get()) {
                 encryptionService.waitForE2eeInitializationTasks()
                 isInitialized.set(true)
+                // Listener emissions received before E2EE is ready are deliberately ignored above.
+                // Read the current value once initialization completes so consumers cannot remain
+                // stuck on Unknown when the SDK does not emit the same state again.
+                updateVerificationStatus()
+                recoveryState.value = encryptionService.recoveryState()
             }
 
             if (!this::verificationController.isInitialized) {

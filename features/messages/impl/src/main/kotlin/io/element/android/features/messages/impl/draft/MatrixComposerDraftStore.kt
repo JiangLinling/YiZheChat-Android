@@ -9,6 +9,7 @@
 package io.element.android.features.messages.impl.draft
 
 import dev.zacsweers.metro.Inject
+import io.element.android.features.messages.api.draft.ComposerDraftPreviewService
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.ThreadId
@@ -22,6 +23,7 @@ import timber.log.Timber
 @Inject
 class MatrixComposerDraftStore(
     private val client: MatrixClient,
+    private val draftPreviewService: ComposerDraftPreviewService,
 ) : ComposerDraftStore {
     override suspend fun loadDraft(roomId: RoomId, threadRoot: ThreadId?): ComposerDraft? {
         return client.getRoom(roomId)?.use { room ->
@@ -29,16 +31,16 @@ class MatrixComposerDraftStore(
                 .onFailure {
                     Timber.e(it, "Failed to load composer draft for room $roomId")
                 }
-                .onSuccess { draft ->
-                    room.clearComposerDraft(threadRoot)
-                    Timber.d("Loaded composer draft for room $roomId : $draft")
+                .onSuccess {
+                    // Restoration is a read. Retain the durable copy until an explicit edit/clear/send handoff.
+                    Timber.d("Loaded composer draft for room $roomId")
                 }
                 .getOrNull()
         }
     }
 
     override suspend fun updateDraft(roomId: RoomId, threadRoot: ThreadId?, draft: ComposerDraft?) {
-        client.getRoom(roomId)?.use { room ->
+        requireNotNull(client.getRoom(roomId)) { "Draft room is unavailable." }.use { room ->
             val updateDraftResult = if (draft == null) {
                 room.clearComposerDraft(threadRoot)
             } else {
@@ -49,8 +51,10 @@ class MatrixComposerDraftStore(
                     Timber.e(it, "Failed to update composer draft for room $roomId")
                 }
                 .onSuccess {
+                    if (threadRoot == null) draftPreviewService.update(roomId, draft)
                     Timber.d("Updated composer draft for room $roomId")
                 }
+                .getOrThrow()
         }
     }
 }

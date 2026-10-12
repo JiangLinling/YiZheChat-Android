@@ -68,7 +68,13 @@ object AppModule {
     @Provides
     @SingleIn(AppScope::class)
     fun providesBuildType(): BuildType {
-        return BuildType.valueOf(BuildConfig.BUILD_TYPE.uppercase())
+        return when (BuildConfig.BUILD_TYPE) {
+            "startupProfile" -> BuildType.DEBUG
+            // Internal Release uses the complete Release runtime/security path;
+            // only its application id and signing identity are isolated.
+            "internalRelease" -> BuildType.RELEASE
+            else -> BuildType.valueOf(BuildConfig.BUILD_TYPE.uppercase())
+        }
     }
 
     @Provides

@@ -16,6 +16,8 @@ import io.element.android.libraries.matrix.api.core.UserId
 @Immutable
 sealed interface LocalEventSendState {
     sealed interface Sending : LocalEventSendState {
+        /** Local secure preparation, before the encrypted event is accepted by Matrix's queue. */
+        data object Encrypting : Sending
         data object Event : Sending
         data class MediaWithProgress(
             val index: Long,

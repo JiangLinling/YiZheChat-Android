@@ -8,6 +8,7 @@
 
 package io.element.android.features.location.impl.show
 
+import io.element.android.features.location.api.live.PausedLiveLocationShare
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import io.element.android.features.location.api.Location
 import io.element.android.features.location.impl.common.ui.LocationConstraintsDialogState
@@ -24,6 +25,7 @@ class ShowLocationStateProvider : PreviewParameterProvider<ShowLocationState> {
         get() = sequenceOf(
             aShowLocationState(),
             aShowLocationState(isLive = true),
+            aShowLocationState(isLive = true, pausedLiveLocationShare = PausedLiveLocationShare.RECOVERABLE),
             aShowLocationState(isLive = true, locationShares = emptyList()),
             aShowLocationState(
                 constraintsDialogState = LocationConstraintsDialogState.PermissionDenied,
@@ -60,6 +62,7 @@ fun aShowLocationState(
     isTrackMyLocation: Boolean = false,
     appName: String = APP_NAME,
     eventSink: (ShowLocationEvent) -> Unit = {},
+    pausedLiveLocationShare: PausedLiveLocationShare? = null,
 ): ShowLocationState {
     return ShowLocationState(
         customMapStyleUrl = customMapStyleUrl,
@@ -71,6 +74,7 @@ fun aShowLocationState(
         appName = appName,
         isLive = isLive,
         eventSink = eventSink,
+        pausedLiveLocationShare = pausedLiveLocationShare,
     )
 }
 

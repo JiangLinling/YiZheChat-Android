@@ -45,6 +45,7 @@ dependencies {
     implementation(projects.libraries.preferences.api)
     implementation(projects.libraries.push.api)
     implementation(projects.libraries.sessionStorage.api)
+    implementation(projects.security.dataProtection.api)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.datetime)
 
@@ -59,4 +60,5 @@ dependencies {
     testImplementation(projects.libraries.preferences.test)
     testImplementation(projects.libraries.sessionStorage.test)
     testImplementation(projects.features.location.test)
+    testImplementation(projects.security.dataProtection.test)
 }

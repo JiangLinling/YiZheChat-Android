@@ -5,9 +5,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial.
  * Please see LICENSE files in the repository root for full details.
  */
+import extension.setupDependencyInjection
+import extension.testCommonDependencies
+
 plugins {
     id("io.element.android-library")
 }
+
+setupDependencyInjection()
 
 android {
     namespace = "io.element.android.libraries.encrypteddb"
@@ -27,4 +32,7 @@ dependencies {
     implementation(libs.google.tink)
 
     implementation(projects.libraries.androidutils)
+    implementation(projects.libraries.di)
+
+    testCommonDependencies(libs)
 }

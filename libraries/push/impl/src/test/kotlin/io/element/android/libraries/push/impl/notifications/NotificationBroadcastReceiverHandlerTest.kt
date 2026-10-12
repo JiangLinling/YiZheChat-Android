@@ -9,6 +9,7 @@
 package io.element.android.libraries.push.impl.notifications
 
 import android.content.Intent
+import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
@@ -46,6 +47,9 @@ import io.element.android.services.toolbox.api.strings.StringProvider
 import io.element.android.services.toolbox.api.systemclock.SystemClock
 import io.element.android.services.toolbox.test.strings.FakeStringProvider
 import io.element.android.services.toolbox.test.systemclock.FakeSystemClock
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.tests.testutils.lambda.lambdaError
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import io.element.android.tests.testutils.lambda.value
@@ -342,6 +346,7 @@ class NotificationBroadcastReceiverHandlerTest {
 
     @Test
     fun `Test send reply`() = runTest {
+        val appOperationalStateCoordinator = FakeAppOperationalStateCoordinator()
         val sendMessage = lambdaRecorder<String, String?, List<IntentionalMention>, MsgType, Boolean, Result<Unit>> { _, _, _, _, _ -> Result.success(Unit) }
         val replyMessage =
             lambdaRecorder<EventId?, String, String?, List<IntentionalMention>, Boolean, MsgType, Result<Unit>> { _, _, _, _, _, _ -> Result.success(Unit) }
@@ -352,20 +357,14 @@ class NotificationBroadcastReceiverHandlerTest {
         val joinedRoom = FakeJoinedRoom(
             liveTimeline = liveTimeline,
             baseRoom = FakeBaseRoom(getUpdatedMemberResult = { Result.success(aRoomMember()) }),
-        ).apply {
-            givenRoomInfo(
-                aRoomInfo(
-                    isDirect = true,
-                    activeMembersCount = 2,
-                )
-            )
-        }
+        )
         val onNotifiableEventsReceivedResult = lambdaRecorder<List<NotifiableEvent>, Unit> { _ -> }
         val onNotifiableEventReceived = FakeOnNotifiableEventReceived(onNotifiableEventsReceivedResult = onNotifiableEventsReceivedResult)
         val sut = createNotificationBroadcastReceiverHandler(
             joinedRoom = joinedRoom,
             onNotifiableEventReceived = onNotifiableEventReceived,
-            replyMessageExtractor = FakeReplyMessageExtractor(A_MESSAGE)
+            replyMessageExtractor = FakeReplyMessageExtractor(A_MESSAGE),
+            appOperationalStateCoordinator = appOperationalStateCoordinator,
         )
         sut.onReceive(
             createIntent(
@@ -374,6 +373,13 @@ class NotificationBroadcastReceiverHandlerTest {
             ),
         )
         advanceUntilIdle()
+        assertThat(appOperationalStateCoordinator.startedRequests).hasSize(1)
+        assertThat(appOperationalStateCoordinator.startedRequests.single().lifecycleId)
+            .isEqualTo(FullAppLifecycleId.LC_13)
+        assertThat(appOperationalStateCoordinator.startedRequests.single().trigger)
+            .isEqualTo("reply")
+        assertThat(appOperationalStateCoordinator.startedRequests.single().roomIdHash)
+            .isNotEmpty()
         sendMessage.assertions()
             .isCalledOnce()
             .with(
@@ -425,14 +431,7 @@ class NotificationBroadcastReceiverHandlerTest {
         val joinedRoom = FakeJoinedRoom(
             liveTimeline = liveTimeline,
             baseRoom = FakeBaseRoom(getUpdatedMemberResult = { Result.success(aRoomMember()) }),
-        ).apply {
-            givenRoomInfo(
-                aRoomInfo(
-                    isDirect = true,
-                    activeMembersCount = 2,
-                )
-            )
-        }
+        )
         val onNotifiableEventsReceivedResult = lambdaRecorder<List<NotifiableEvent>, Unit> { _ -> }
         val onNotifiableEventReceived = FakeOnNotifiableEventReceived(onNotifiableEventsReceivedResult = onNotifiableEventsReceivedResult)
         val sut = createNotificationBroadcastReceiverHandler(
@@ -492,6 +491,7 @@ class NotificationBroadcastReceiverHandlerTest {
         stringProvider: StringProvider = FakeStringProvider(),
         replyMessageExtractor: ReplyMessageExtractor = FakeReplyMessageExtractor(),
         activeRoomsHolder: ActiveRoomsHolder = DefaultActiveRoomsHolder(),
+        appOperationalStateCoordinator: AppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
     ): NotificationBroadcastReceiverHandler {
         return NotificationBroadcastReceiverHandler(
             appCoroutineScope = this,
@@ -510,6 +510,7 @@ class NotificationBroadcastReceiverHandlerTest {
             stringProvider = stringProvider,
             replyMessageExtractor = replyMessageExtractor,
             activeRoomsHolder = activeRoomsHolder,
+            appOperationalStateCoordinator = appOperationalStateCoordinator,
         )
     }
 }

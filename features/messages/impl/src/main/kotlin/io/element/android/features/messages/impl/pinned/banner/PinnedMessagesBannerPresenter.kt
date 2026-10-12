@@ -23,9 +23,11 @@ import io.element.android.features.messages.impl.pinned.DefaultPinnedEventsTimel
 import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.matrix.api.room.BaseRoom
+import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
@@ -121,14 +123,17 @@ class PinnedMessagesBannerPresenter(
                         is AsyncData.Failure -> flowOf(AsyncData.Failure(asyncTimeline.error))
                         is AsyncData.Loading -> flowOf(AsyncData.Loading())
                         is AsyncData.Success -> {
-                            asyncTimeline.data.timelineItems
-                                .map { timelineItems ->
-                                    val pinnedItems = timelineItems.mapNotNull { timelineItem ->
+                            combine(asyncTimeline.data.timelineItems, room.roomInfoFlow) { timelineItems, roomInfo ->
+                                val pinnedEventIds = roomInfo.pinnedEventIds.toSet()
+                                val pinnedItems = timelineItems
+                                    .filterIsInstance<MatrixTimelineItem.Event>()
+                                    .filter { it.eventId in pinnedEventIds }
+                                    .mapNotNull { timelineItem ->
                                         itemFactory.create(timelineItem)
                                     }.toImmutableList()
 
-                                    AsyncData.Success(pinnedItems)
-                                }
+                                AsyncData.Success(pinnedItems)
+                            }
                         }
                     }
                 }

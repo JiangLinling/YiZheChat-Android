@@ -8,6 +8,7 @@
 
 package io.element.android.features.preferences.impl.notifications
 
+import android.content.Intent
 import android.app.Activity
 import android.media.RingtoneManager
 import android.net.Uri
@@ -20,6 +21,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.progressSemantics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
@@ -126,6 +131,14 @@ private fun NotificationSettingsContentView(
     onTroubleshootNotificationsClick: () -> Unit,
 ) {
     val context = LocalContext.current
+    val notificationSettingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        state.eventSink(NotificationSettingsEvents.RefreshSystemNotificationsEnabled)
+    }
+    val preview = LocalInspectionMode.current
+    var floatingAllowed by remember { mutableStateOf(!preview && Settings.canDrawOverlays(context)) }
+    OnLifecycleEvent { _, event ->
+        if (event == Lifecycle.Event.ON_RESUME && !preview) floatingAllowed = Settings.canDrawOverlays(context)
+    }
     val systemSettings: NotificationSettingsState.AppSettings = state.appSettings
     if (systemSettings.appNotificationsEnabled && !systemSettings.systemNotificationsEnabled) {
         ListItem(
@@ -142,7 +155,9 @@ private fun NotificationSettingsContentView(
                 )
             },
             onClick = {
-                context.startNotificationSettingsIntent()
+                state.eventSink(NotificationSettingsEvents.OpenSystemNotificationSettings {
+                    context.startNotificationSettingsIntent(activityResultLauncher = notificationSettingsLauncher)
+                })
             }
         )
     }
@@ -201,6 +216,14 @@ private fun NotificationSettingsContentView(
         }
         SoundsPreferenceCategory(state = state)
         PreferenceCategory(title = stringResource(id = R.string.screen_notification_settings_additional_settings_section_title)) {
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.screen_notification_floating_window)) },
+                supportingContent = { Text(stringResource(if (floatingAllowed) R.string.screen_notification_floating_window_enabled else R.string.screen_notification_floating_window_permission)) },
+                onClick = {
+                    notificationSettingsLauncher.launch(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + context.packageName)))
+                },
+            )
+
             // TODO We are removing the call notification toggle until support for call notifications has been added
 //                PreferenceSwitch(
 //                    modifier = Modifier,

@@ -74,7 +74,7 @@ class DefaultDeclineInviteTest {
             .isCalledOnce()
             .with(value(client.sessionId), value(roomId))
 
-        assertThat(seenInvitesStore.seenRoomIds().first()).isEmpty()
+        assertThat(seenInvitesStore.seenRoomIds().first()).containsExactly(roomId)
     }
 
     @Test
@@ -101,7 +101,7 @@ class DefaultDeclineInviteTest {
             .isCalledOnce()
             .with(value(client.sessionId), value(roomId))
 
-        assertThat(seenInvitesStore.seenRoomIds().first()).isEmpty()
+        assertThat(seenInvitesStore.seenRoomIds().first()).containsExactly(roomId)
     }
 
     @Test
@@ -150,7 +150,7 @@ class DefaultDeclineInviteTest {
         assertThat(result.exceptionOrNull()).isEqualTo(DeclineInvite.Exception.BlockUserFailed)
 
         assert(clearMembershipNotificationForRoomLambda).isCalledOnce()
-        assertThat(seenInvitesStore.seenRoomIds().first()).isEmpty()
+        assertThat(seenInvitesStore.seenRoomIds().first()).containsExactly(roomId)
     }
 
     @Test
@@ -174,6 +174,6 @@ class DefaultDeclineInviteTest {
         assertThat(result.exceptionOrNull()).isEqualTo(DeclineInvite.Exception.ReportRoomFailed)
 
         assert(clearMembershipNotificationForRoomLambda).isCalledOnce()
-        assertThat(seenInvitesStore.seenRoomIds().first()).isEmpty()
+        assertThat(seenInvitesStore.seenRoomIds().first()).containsExactly(roomId)
     }
 }

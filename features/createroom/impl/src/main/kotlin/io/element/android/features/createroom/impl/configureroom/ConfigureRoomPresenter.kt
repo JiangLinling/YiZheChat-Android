@@ -32,6 +32,9 @@ import io.element.android.libraries.featureflag.api.FeatureFlagService
 import io.element.android.libraries.featureflag.api.FeatureFlags
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.core.RoomId
+import io.element.android.libraries.matrix.api.room.DirectRoomRelationState
+import io.element.android.libraries.matrix.api.room.directRoomRelationState
+import io.element.android.libraries.matrix.api.roomlist.RoomList
 import io.element.android.libraries.matrix.api.createroom.CreateRoomParameters
 import io.element.android.libraries.matrix.api.createroom.RoomPreset
 import io.element.android.libraries.matrix.api.room.alias.RoomAliasHelper
@@ -48,6 +51,18 @@ import io.element.android.libraries.mediaupload.api.MediaPreProcessor
 import io.element.android.libraries.permissions.api.PermissionsEvent
 import io.element.android.libraries.permissions.api.PermissionsPresenter
 import io.element.android.services.analytics.api.AnalyticsService
+import io.element.android.security.contentprotection.api.ContentProtectionService
+import io.element.android.security.contentprotection.api.RoomLifecycleProfileKind
+import io.element.android.security.dataprotection.api.DeletedIdentityProjection
+import io.element.android.security.dataprotection.api.isDeletedMatrixUserId
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.ManagementControlService
+import io.element.android.security.dataprotection.api.ManagedRoomCreationRequest
+import io.element.android.security.dataprotection.api.LifecycleOperationRequest
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
+import io.element.android.security.securestorage.api.accountIdHash
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -73,6 +88,10 @@ class ConfigureRoomPresenter(
     private val featureFlagService: FeatureFlagService,
     private val roomAliasHelper: RoomAliasHelper,
     private val mediaOptimizationConfigProvider: MediaOptimizationConfigProvider,
+    private val contentProtectionService: ContentProtectionService,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
+    private val deletedIdentityProjection: DeletedIdentityProjection,
+    private val managementControlService: ManagementControlService,
 ) : Presenter<ConfigureRoomState> {
     @AssistedFactory
     interface Factory {
@@ -81,11 +100,33 @@ class ConfigureRoomPresenter(
 
     private val cameraPermissionPresenter: PermissionsPresenter = permissionsPresenterFactory.create(android.Manifest.permission.CAMERA)
     private var pendingPermissionRequest = false
+    private var createdRoomAwaitingCompletion: Pair<RoomId, RoomLifecycleProfileKind>? = null
+    private var managedCreationOperation: LifecycleOperationRequest? = null
+    private var managedCreationConfig: CreateRoomConfig? = null
+    private var managedCreationRequest: ManagedRoomCreationRequest? = null
 
     @Composable
     override fun present(): ConfigureRoomState {
         val cameraPermissionState = cameraPermissionPresenter.present()
         val createRoomConfig by dataStore.getCreateRoomConfigFlow().collectAsState()
+        val deletedIdentityRevision by deletedIdentityProjection.revision.collectAsState()
+        val contactSummaries by matrixClient.roomListService.allRooms.summaries.collectAsState(initial = emptyList())
+        val contactsLoadingState by matrixClient.roomListService.allRooms.loadingState.collectAsState()
+        val contacts = remember(contactSummaries, deletedIdentityRevision) {
+            contactSummaries.filter { it.info.directRoomRelationState() == DirectRoomRelationState.ACCEPTED }
+                .mapNotNull { summary -> summary.info.heroes.singleOrNull { it.userId != matrixClient.sessionId } }
+                .filterNot { deletedIdentityProjection.isDeletedMatrixUserId(it.userId.value) }
+                .distinctBy { it.userId }
+                .sortedBy { it.displayName ?: it.userId.value }
+                .toImmutableList()
+        }
+        val contactsLoading = contactsLoadingState !is RoomList.LoadingState.Loaded ||
+            (contactsLoadingState as? RoomList.LoadingState.Loaded)?.numberOfRooms?.let { it > 0 && contactSummaries.isEmpty() } == true
+        LaunchedEffect(contacts, contactsLoading) {
+            if (!isSpace && !contactsLoading && createdRoomAwaitingCompletion == null && managedCreationConfig == null) {
+                dataStore.setInvites(dataStore.getCreateRoomConfigFlow().value.invites.filter { selected -> contacts.any { it.userId == selected.userId } })
+            }
+        }
         val homeserverName = remember { matrixClient.userIdServerName() }
         val isKnockFeatureEnabled by remember {
             featureFlagService.isFeatureEnabledFlow(FeatureFlags.Knock)
@@ -187,12 +228,24 @@ class ConfigureRoomPresenter(
         }
 
         fun handleEvent(event: ConfigureRoomEvents) {
+            if ((createRoomAction.value.isLoading() || createdRoomAwaitingCompletion != null || managedCreationConfig != null) &&
+                event != ConfigureRoomEvents.CreateRoom && event != ConfigureRoomEvents.CancelCreateRoom
+            ) return
             when (event) {
+                is ConfigureRoomEvents.ToggleInvite -> {
+                    val selected = createRoomConfig.invites.any { it.userId == event.user.userId }
+                    if (selected) {
+                        dataStore.setInvites(createRoomConfig.invites.filterNot { it.userId == event.user.userId })
+                    } else if (contacts.any { it.userId == event.user.userId }) {
+                        dataStore.setInvites(createRoomConfig.invites + event.user)
+                    }
+                }
                 is ConfigureRoomEvents.RoomNameChanged -> dataStore.setRoomName(event.name)
                 is ConfigureRoomEvents.TopicChanged -> dataStore.setTopic(event.topic)
                 is ConfigureRoomEvents.JoinRuleChanged -> dataStore.setJoinRule(event.joinRuleItem)
                 is ConfigureRoomEvents.RoomAddressChanged -> dataStore.setRoomAddress(event.roomAddress)
-                is ConfigureRoomEvents.CreateRoom -> createRoom(createRoomConfig)
+                is ConfigureRoomEvents.LifecycleProfileChanged -> dataStore.setLifecycleProfileKind(event.profileKind)
+                is ConfigureRoomEvents.CreateRoom -> if (!createRoomAction.value.isLoading()) createRoom(createRoomConfig)
                 is ConfigureRoomEvents.HandleAvatarAction -> {
                     when (event.action) {
                         AvatarAction.ChoosePhoto -> galleryImagePicker.launch()
@@ -225,6 +278,9 @@ class ConfigureRoomPresenter(
             spaces = spaces,
             isSpace = isSpace,
             eventSink = ::handleEvent,
+            contacts = contacts,
+            contactsLoading = contactsLoading,
+            isConfigurationLocked = createRoomAction.value.isLoading() || createdRoomAwaitingCompletion != null || managedCreationConfig != null,
         )
     }
 
@@ -233,13 +289,32 @@ class ConfigureRoomPresenter(
         createRoomAction: MutableState<AsyncAction<RoomId>>
     ) = launch {
         suspend {
-            val avatarUrl = config.avatarUri?.let { uploadAvatar(it.toUri()) }
+            appOperationalStateCoordinator.perform(
+                managedCreationOperation ?: lifecycleOperationRequest(
+                    lifecycleId = FullAppLifecycleId.LC_12,
+                    trigger = "room_create",
+                    accountIdHash = accountIdHash(matrixClient.sessionId.value),
+                    matrixDeviceIdHash = accountIdHash(matrixClient.deviceId.value),
+                ).copy(roomCreationProtocol = "managed-v1".takeIf { !isSpace && managementControlService.supportsManagedRoomCreation })
+                    .also { if (!isSpace && managementControlService.supportsManagedRoomCreation) managedCreationOperation = it }
+            ) {
+            if (createdRoomAwaitingCompletion == null) {
+                for (user in config.invites) {
+                    check(!deletedIdentityProjection.isDeletedMatrixUserId(user.userId.value)) { "A selected identity has been deleted." }
+                    val directRoomId = checkNotNull(matrixClient.findDM(user.userId).getOrThrow())
+                    val directInfo = matrixClient.getRoom(directRoomId)?.use { it.info() }
+                    check(directInfo?.directRoomRelationState() == DirectRoomRelationState.ACCEPTED) {
+                        "A selected contact no longer has an accepted direct relationship."
+                    }
+                }
+            }
+            val avatarUrl = managedCreationRequest?.avatarUrl ?: config.avatarUri?.takeIf { createdRoomAwaitingCompletion == null }?.let { uploadAvatar(it.toUri()) }
             val params = when (config.visibilityState) {
                 is RoomVisibilityState.Public -> {
                     CreateRoomParameters(
-                        name = config.roomName,
+                        name = if (isSpace) config.roomName else config.effectiveRoomName,
                         topic = config.topic,
-                        isEncrypted = false,
+                        isEncrypted = !isSpace,
                         isDirect = false,
                         visibility = RoomVisibility.Public,
                         joinRuleOverride = config.visibilityState.joinRuleItem.toJoinRule()
@@ -254,7 +329,7 @@ class ConfigureRoomPresenter(
                 }
                 is RoomVisibilityState.Private -> {
                     CreateRoomParameters(
-                        name = config.roomName,
+                        name = if (isSpace) config.roomName else config.effectiveRoomName,
                         topic = config.topic,
                         isEncrypted = true,
                         isDirect = false,
@@ -270,15 +345,49 @@ class ConfigureRoomPresenter(
                     )
                 }
             }
-            val roomId = matrixClient.createRoom(params)
-                .onFailure { failure ->
-                    Timber.e(failure, "Failed to create room")
+            val managedRoomId = if (createdRoomAwaitingCompletion == null && !isSpace && managementControlService.supportsManagedRoomCreation) {
+                check(managedCreationConfig == null || managedCreationConfig == config) { "The original managed room intent changed." }
+                managedCreationConfig = config
+                val joinRuleItem = config.visibilityState.joinRuleItem
+                val joinRule = when (joinRuleItem) {
+                    JoinRuleItem.PrivateVisibility.Private -> "invite"
+                    is JoinRuleItem.PrivateVisibility.Restricted -> "restricted"
+                    is JoinRuleItem.PrivateVisibility.AskToJoinRestricted -> "knock_restricted"
+                    JoinRuleItem.PublicVisibility.Public -> "public"
+                    JoinRuleItem.PublicVisibility.AskToJoin -> "knock"
                 }
-                .onSuccess {
-                    dataStore.clearCachedData()
-                    analyticsService.capture(CreatedRoom(isDM = false))
+                val parentRoomId = when (joinRuleItem) {
+                    is JoinRuleItem.PrivateVisibility.Restricted -> joinRuleItem.parentSpaceId.value
+                    is JoinRuleItem.PrivateVisibility.AskToJoinRestricted -> joinRuleItem.parentSpaceId.value
+                    else -> null
                 }
+                val request = managedCreationRequest ?: ManagedRoomCreationRequest(
+                    creatorUserId = matrixClient.sessionId.value,
+                    name = checkNotNull(config.effectiveRoomName),
+                    topic = config.topic,
+                    invitees = config.invites.map { it.userId.value },
+                    profileKind = config.lifecycleProfileKind.name,
+                    visibility = if (config.visibilityState is RoomVisibilityState.Public) "public" else "private",
+                    joinRule = joinRule,
+                    parentRoomId = parentRoomId,
+                    roomAliasName = params.roomAliasName.getOrNull(),
+                    avatarUrl = avatarUrl,
+                ).also { managedCreationRequest = it }
+                RoomId(checkNotNull(managementControlService.createManagedRoom(request)))
+            } else null
+            val roomId = createdRoomAwaitingCompletion?.first ?: (managedRoomId?.let { Result.success(it) } ?: matrixClient.createRoom(params))
+                .onFailure { failure -> Timber.e(failure, "Failed to create room") }
                 .getOrThrow()
+                .also { createdRoomAwaitingCompletion = it to config.lifecycleProfileKind }
+
+            if (!isSpace) {
+                check(createdRoomAwaitingCompletion?.second == config.lifecycleProfileKind) {
+                    "The pending room lifecycle selection changed during creation."
+                }
+                check(contentProtectionService.assignCreatedRoomLifecycle(roomId.value, config.lifecycleProfileKind)) {
+                    "The room lifecycle profile was not accepted."
+                }
+            }
 
             // Add the newly created room to the parent space too
             if (config.parentSpace != null) {
@@ -293,7 +402,17 @@ class ConfigureRoomPresenter(
             }
 
             roomId
+            }
         }.runCatchingUpdatingState(createRoomAction)
+            .onSuccess {
+                // Clear only after the coordinator accepted every client receipt.
+                createdRoomAwaitingCompletion = null
+                managedCreationConfig = null
+                managedCreationRequest = null
+                managedCreationOperation = null
+                dataStore.clearCachedData()
+                analyticsService.capture(CreatedRoom(isDM = false))
+            }
             .onFailure { Timber.e(it, "Could not create room or add it to parent space ${config.parentSpace?.roomId}") }
     }
 

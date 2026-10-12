@@ -104,6 +104,15 @@ class VoiceMessageComposerPlayer(
         }
     }
 
+    /** Drops the authorization-bound source so no paused player can retain a revoked descriptor. */
+    fun clear() {
+        seekJob?.cancel()
+        seekJob = null
+        seekingTo.value = null
+        mediaPath = null
+        mediaPlayer.clear()
+    }
+
     /**
      * Seek to a given position in the current media.
      *

@@ -22,8 +22,13 @@ setupDependencyInjection()
 
 dependencies {
     releaseImplementation(libs.matrix.sdk)
-    if (file("${rootDir.path}/libraries/rustsdk/matrix-rust-sdk.aar").exists()) {
-        println("\nNote: Using local binary of the Rust SDK.\n")
+    val isNextBuild = providers.gradleProperty("yizhe.next.enabled").orNull == "true"
+    val localRustSdk = file("${rootDir.path}/libraries/rustsdk/matrix-rust-sdk.aar")
+    if (isNextBuild) {
+        check(localRustSdk.exists()) {
+            "Next debug builds require the reviewed local Rust SDK AAR."
+        }
+        println("\nNote: Using Next-only local binary of the Rust SDK.\n")
         debugImplementation(projects.libraries.rustsdk)
     } else {
         debugImplementation(libs.matrix.sdk)
@@ -42,12 +47,17 @@ dependencies {
     implementation(projects.libraries.workmanager.api)
     implementation(projects.services.analytics.api)
     implementation(projects.services.toolbox.api)
+    implementation(projects.security.secureStorage.api)
+    implementation(projects.security.dataProtection.api)
+    implementation(projects.security.contentProtection.api)
     api(projects.libraries.matrix.api)
     implementation(projects.libraries.core)
     implementation("net.java.dev.jna:jna:5.18.1@aar")
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.serialization.json)
     implementation(libs.kotlinx.collections.immutable)
+    implementation(platform(libs.network.okhttp.bom))
+    implementation(libs.network.okhttp)
 
     testCommonDependencies(libs)
     testImplementation(projects.features.enterprise.test)
@@ -59,4 +69,7 @@ dependencies {
     testImplementation(projects.libraries.workmanager.test)
     testImplementation(projects.services.analytics.test)
     testImplementation(projects.services.toolbox.test)
+    testImplementation(projects.security.secureStorage.test)
+    testImplementation(projects.security.dataProtection.test)
+    testImplementation(projects.security.contentProtection.test)
 }

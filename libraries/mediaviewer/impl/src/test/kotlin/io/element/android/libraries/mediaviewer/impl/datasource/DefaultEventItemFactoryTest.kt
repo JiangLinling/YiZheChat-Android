@@ -127,6 +127,20 @@ class DefaultEventItemFactoryTest {
     }
 
     @Test
+    fun `video file uses preserved wire length while displaying plaintext size`() {
+        val result = createEventItemFactory().create(MatrixTimelineItem.Event(
+            uniqueId = A_UNIQUE_ID,
+            event = anEventTimelineItem(content = aMessageContent(messageType = FileMessageType(
+                filename = "video.mp4", caption = null, formattedCaption = null,
+                source = MediaSource("mxc://example.invalid/video", json = "{}"),
+                info = FileInfo("video/mp4", 123L, null, null, protectedWireSize = 456L),
+            ))),
+        )) as MediaItem.File
+        assertThat(result.mediaInfo.fileSize).isEqualTo(456L)
+        assertThat(result.mediaInfo.formattedFileSize).isEqualTo("123 Bytes")
+    }
+
+    @Test
     fun `create for FileMessageType`() {
         val factory = createEventItemFactory()
         val result = factory.create(

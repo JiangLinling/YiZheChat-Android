@@ -9,7 +9,6 @@
 package io.element.android.libraries.textcomposer
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -137,9 +136,8 @@ private fun ReplyToModeView(
     Row(
         modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(ElementTheme.colors.bgCanvasDefault)
-            .border(1.dp, ElementTheme.colors.separatorPrimary, RoundedCornerShape(6.dp))
-            .padding(4.dp)
+            .background(ElementTheme.colors.bgSubtleSecondary)
+            .padding(horizontal = 4.dp, vertical = 2.dp)
     ) {
         // Larger density DPI and font scale means less space to display the content, so we limit it to 1 line to avoid overflow issues
         val currentDensity = LocalDensity.current

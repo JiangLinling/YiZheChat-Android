@@ -12,9 +12,11 @@ import com.bumble.appyx.core.state.MutableSavedStateMapImpl
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.networkmonitor.test.FakeNetworkMonitor
 import io.element.android.libraries.matrix.api.sync.SyncService
+import io.element.android.libraries.matrix.api.sync.SyncState
 import io.element.android.libraries.matrix.test.A_SESSION_ID
 import io.element.android.libraries.matrix.test.FakeMatrixClient
 import io.element.android.libraries.matrix.test.auth.FakeMatrixAuthenticationService
+import io.element.android.libraries.matrix.test.sync.FakeSyncService
 import io.element.android.services.analytics.test.FakeAnalyticsService
 import io.element.android.services.appnavstate.test.FakeAppForegroundStateService
 import io.element.android.tests.testutils.testCoroutineDispatchers
@@ -24,6 +26,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MatrixSessionCacheTest {
@@ -121,6 +124,34 @@ class MatrixSessionCacheTest {
         runCurrent()
 
         assertThat(matrixSessionCache.getOrNull(A_SESSION_ID)).isNotNull()
+    }
+
+    @Test
+    fun `restoring a client does not start sync until explicitly allowed`() = runTest {
+        val startCount = AtomicInteger(0)
+        val syncService = FakeSyncService(initialSyncState = SyncState.Running).apply {
+            startSyncLambda = {
+                startCount.incrementAndGet()
+                Result.success(Unit)
+            }
+        }
+        val matrixClient = FakeMatrixClient(
+            sessionCoroutineScope = backgroundScope,
+            syncService = syncService,
+            userIdServerNameLambda = { A_SESSION_ID.value },
+        )
+        val authenticationService = FakeMatrixAuthenticationService().apply {
+            givenMatrixClient(matrixClient)
+        }
+        val matrixSessionCache = createMatrixSessionCache(authenticationService)
+
+        matrixSessionCache.getOrRestore(A_SESSION_ID).getOrThrow()
+        runCurrent()
+        assertThat(startCount.get()).isEqualTo(0)
+
+        assertThat(matrixSessionCache.startSync(A_SESSION_ID)).isTrue()
+        runCurrent()
+        assertThat(startCount.get()).isEqualTo(1)
     }
 
     private fun TestScope.createMatrixSessionCache(

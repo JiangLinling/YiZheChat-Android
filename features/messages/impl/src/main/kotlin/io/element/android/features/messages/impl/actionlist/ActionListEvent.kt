@@ -8,6 +8,7 @@
 
 package io.element.android.features.messages.impl.actionlist
 
+import androidx.compose.ui.unit.IntRect
 import io.element.android.features.messages.impl.UserEventPermissions
 import io.element.android.features.messages.impl.timeline.model.TimelineItem
 
@@ -16,5 +17,6 @@ sealed interface ActionListEvent {
     data class ComputeForMessage(
         val event: TimelineItem.Event,
         val userEventPermissions: UserEventPermissions,
+        val anchorBounds: IntRect = IntRect.Zero,
     ) : ActionListEvent
 }

@@ -18,16 +18,14 @@ sealed interface NotificationSound {
     data object SystemDefault : NotificationSound
 
     /**
-     * Use the bundled in-app sound. Semantically meaningful only for the noisy message channel,
-     * where it resolves to `R.raw.message`; the ringing-call channel has no bundled tone and
-     * treats this the same as [SystemDefault].
+     * Use the bundled in-app sound. The noisy message and ringing-call channels each resolve
+     * this choice to their own bundled tone.
      */
     data object ElementDefault : NotificationSound
 
     /**
-     * Use the bundled in-app fade sound. Like [ElementDefault] this is meaningful only for the
-     * noisy message channel (`R.raw.element_fade`); the ringing-call channel has no bundled tone
-     * and treats this the same as [SystemDefault].
+     * Use the bundled in-app fade sound for the noisy message channel. For calls, this falls back
+     * to the bundled call ringtone because call and message tones have separate defaults.
      */
     data object ElementFade : NotificationSound
 

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="local_pdf_jump_to_page">Go to page</string>
+    <string name="local_pdf_page_number">Page (1–%1$d)</string>
+    <string name="local_pdf_jump">Go</string>
+    <string name="local_pdf_cancel">Cancel</string>
+    <string name="error_content_export_disabled_by_policy">Saving and opening outside YiZheChat is disabled by your organization’s signed policy.</string>
+    <string name="error_external_share_disabled_by_policy">Sharing outside YiZheChat is disabled by your organization’s signed policy.</string>
+    <string name="error_protected_media_read_unavailable">Attachment access is unavailable. Reopen the attachment and try again.</string>
+    <string name="screen_media_segmented_playback_failed_closed">Secure video playback stopped because the next fragment could not be authorized or verified. Close this media to continue.</string>
+    <string name="screen_media_file_preview_unsupported">This file format can’t be previewed here. Use another app to open it.</string>
+    <string name="screen_media_office_loading">Loading document…</string>
+    <string name="screen_media_office_more_actions">More document actions</string>
+    <string name="screen_media_office_online_error">The document could not be opened. You can retry or use another app.</string>
+    <string name="screen_media_office_online_too_large">In-app viewing supports Office files up to 20 MB. Use another app to open this file.</string>
+    <string name="screen_media_office_online_unsupported">This Office format is not supported for in-app viewing.</string>
+    <string name="screen_media_office_online_source_unavailable">The downloaded attachment is no longer available. Return to the chat and try again.</string>
+    <string name="screen_media_office_online_unavailable">This Office file cannot be viewed in the app right now. You can use another app to open it.</string>
+    <string name="local_pdf_input_size_limit">This PDF exceeds the 256 MB local preview limit. Return to the file list to continue.</string>
+    <string name="local_pdf_page_count_limit">This PDF exceeds the 10,000-page local preview limit or has an invalid page count.</string>
+    <string name="local_pdf_page_geometry_invalid">This PDF page has invalid or excessive dimensions and cannot be rendered.</string>
+    <string name="local_pdf_memory_unavailable">There is not enough memory to display this PDF page. Close the preview and try again.</string>
+    <string name="local_pdf_source_unavailable">This viewing session has ended or the file is unavailable. Return to the list and open it again.</string>
+    <string name="local_pdf_render_failed">This PDF could not be read. It may be damaged, password protected or unsupported.</string>
+    <string name="error_historical_media_key_unavailable">The historical file key is no longer available. This file can’t be opened.</string>
+</resources>

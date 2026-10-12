@@ -15,6 +15,7 @@ import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.SingleIn
 import io.element.android.libraries.androidutils.hash.hash
+import io.element.android.libraries.androidutils.startup.StartupTrace
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.MatrixClientProvider
 import io.element.android.libraries.matrix.api.auth.MatrixAuthenticationService
@@ -75,6 +76,17 @@ class MatrixSessionCache(
         return sessionIdsToMatrixSession[sessionId]?.syncOrchestrator
     }
 
+    /**
+     * Starts Matrix synchronization only after the logged-in security setup has granted access.
+     * Restoring a Matrix client is intentionally separate from starting its network sync so a
+     * managed-approval-pending device cannot download room or encryption data in the background.
+     */
+    fun startSync(sessionId: SessionId): Boolean {
+        val syncOrchestrator = sessionIdsToMatrixSession[sessionId]?.syncOrchestrator ?: return false
+        syncOrchestrator.start()
+        return true
+    }
+
     @Suppress("UNCHECKED_CAST")
     suspend fun restoreWithSavedState(state: SavedStateMap?) {
         Timber.d("Restore state")
@@ -99,7 +111,9 @@ class MatrixSessionCache(
 
     private suspend fun restore(sessionId: SessionId): Result<MatrixClient> {
         Timber.d("Restore matrix session: $sessionId")
-        return authenticationService.restoreSession(sessionId)
+        return StartupTrace.measureSuspend("MatrixClient.restoreSession") {
+            authenticationService.restoreSession(sessionId)
+        }
             .onSuccess { matrixClient ->
                 // Add the current homeserver (hashed) to the extra info
                 // This may not play well with multiple sessions, but it should work for now
@@ -122,7 +136,6 @@ class MatrixSessionCache(
             matrixClient = matrixClient,
             syncOrchestrator = syncOrchestrator,
         )
-        syncOrchestrator.start()
     }
 }
 

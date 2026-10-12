@@ -49,9 +49,7 @@ class DefaultPinnedMessagesBannerFormatter(
                 val text = content.body ?: content.filename
                 text.prefixWith(CommonStrings.common_sticker)
             }
-            is UnableToDecryptContent -> {
-                sp.getString(CommonStrings.common_waiting_for_decryption_key)
-            }
+            is UnableToDecryptContent -> ""
             is PollContent -> {
                 content.question.prefixWith(CommonStrings.a11y_poll)
             }

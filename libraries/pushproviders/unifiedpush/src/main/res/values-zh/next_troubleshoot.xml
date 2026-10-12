@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="troubleshoot_notifications_test_push_gateway_title">测试推送网关</string>
+    <string name="troubleshoot_notifications_test_push_gateway_description">检查手机能否访问网关入口，并确认其 Matrix 网关类型。</string>
+    <string name="troubleshoot_notifications_test_push_gateway_success">网关入口可访问且类型正确：%1$s</string>
+    <string name="troubleshoot_notifications_test_push_gateway_not_matrix">该地址不是 Matrix 推送网关：%1$s</string>
+    <string name="troubleshoot_notifications_test_push_gateway_failure">检查推送网关失败：%1$s，%2$s</string>
+</resources>

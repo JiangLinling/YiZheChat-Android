@@ -9,6 +9,7 @@
 package io.element.android.features.messages.impl.timeline.model.event
 
 import io.element.android.libraries.matrix.api.media.MediaSource
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedMediaAlbum
 import kotlin.time.Duration
 
 data class TimelineItemVideoContent(
@@ -29,6 +30,10 @@ data class TimelineItemVideoContent(
     override val mimeType: String,
     override val formattedFileSize: String,
     override val fileExtension: String,
+    override val isBurnAfterRead: Boolean = false,
+    val mediaAlbum: ProtectedMediaAlbum? = null,
+    val localMediaProgress: Float? = null,
+    val localPreviewUri: String? = null,
 ) : TimelineItemEventContentWithAttachment {
     override val type: String = "TimelineItemImageContent"
 

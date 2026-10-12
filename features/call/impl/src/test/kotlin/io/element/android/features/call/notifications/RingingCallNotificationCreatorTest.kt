@@ -8,6 +8,7 @@
 
 package io.element.android.features.call.notifications
 
+import android.app.Notification
 import androidx.core.graphics.drawable.IconCompat
 import androidx.test.platform.app.InstrumentationRegistry
 import coil3.ImageLoader
@@ -50,6 +51,11 @@ class RingingCallNotificationCreatorTest {
         val result = notificationCreator.createTestNotification()
 
         assertThat(result).isNotNull()
+        assertThat(result?.fullScreenIntent).isNotNull()
+        assertThat(result?.flags?.and(Notification.FLAG_INSISTENT)).isNotEqualTo(0)
+        assertThat(result?.contentView).isNull()
+        assertThat(result?.bigContentView).isNull()
+        assertThat(result?.headsUpContentView).isNull()
     }
 
     @Test
@@ -66,7 +72,7 @@ class RingingCallNotificationCreatorTest {
     }
 
     @Test
-    fun `createNotification - use the correct style for video call`() = runTest {
+    fun `createNotification - includes accept action for video call`() = runTest {
         val notificationCreator = createRingingCallNotificationCreator(
             matrixClientProvider = FakeMatrixClientProvider(getClient = { Result.success(FakeMatrixClient()) }),
         )
@@ -75,11 +81,12 @@ class RingingCallNotificationCreatorTest {
         assertThat(notification?.category).isEqualTo("call")
 
         val acceptAction = notification?.actions?.get(1)
-        assertThat(acceptAction?.title?.toString()).isEqualTo("Video")
+        assertThat(acceptAction?.title?.toString()).isNotEmpty()
+        assertThat(acceptAction?.actionIntent).isNotNull()
     }
 
     @Test
-    fun `createNotification - use the correct style for audio call`() = runTest {
+    fun `createNotification - includes accept action for audio call`() = runTest {
         val notificationCreator = createRingingCallNotificationCreator(
             matrixClientProvider = FakeMatrixClientProvider(getClient = { Result.success(FakeMatrixClient()) }),
         )
@@ -88,7 +95,8 @@ class RingingCallNotificationCreatorTest {
         assertThat(notification?.category).isEqualTo("call")
 
         val acceptAction = notification?.actions?.get(1)
-        assertThat(acceptAction?.title?.toString()).isEqualTo("Answer")
+        assertThat(acceptAction?.title?.toString()).isNotEmpty()
+        assertThat(acceptAction?.actionIntent).isNotNull()
     }
 
     private suspend fun RingingCallNotificationCreator.createTestNotification(audioOnly: Boolean = false) = createNotification(

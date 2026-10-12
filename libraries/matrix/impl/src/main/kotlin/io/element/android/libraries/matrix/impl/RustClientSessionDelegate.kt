@@ -42,6 +42,7 @@ class RustClientSessionDelegate(
     private val sessionStore: SessionStore,
     private val appCoroutineScope: CoroutineScope,
     private val analyticsService: AnalyticsService,
+    private val accountSessionSecretVault: AccountSessionSecretVault,
 ) : ClientSessionDelegate, ClientDelegate {
     // Used to ensure several calls to `didReceiveAuthError` don't trigger multiple logouts
     private val isLoggingOut = AtomicBoolean(false)
@@ -90,7 +91,8 @@ class RustClientSessionDelegate(
                 passphrase = existingData.passphrase,
                 sessionPaths = existingData.getSessionPaths(),
             )
-            runBlocking { sessionStore.updateData(newData) }
+            val protectedData = runBlocking { accountSessionSecretVault.protectForStorage(newData) }
+            runBlocking { sessionStore.updateData(protectedData) }
             Timber.tag(loggerTag.value).i("Saved new session data.")
         }.onFailure {
             Timber.tag(loggerTag.value).e(it, "Failed to save new session data.")

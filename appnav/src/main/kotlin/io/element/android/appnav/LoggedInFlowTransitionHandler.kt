@@ -13,15 +13,14 @@ import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import com.bumble.appyx.core.navigation.transition.JumpToEndTransitionHandler
 import com.bumble.appyx.core.navigation.transition.ModifierTransitionHandler
 import com.bumble.appyx.core.navigation.transition.TransitionDescriptor
 import com.bumble.appyx.navmodel.backstack.BackStack
-import com.bumble.appyx.navmodel.backstack.transitionhandler.rememberBackstackFader
 import com.bumble.appyx.navmodel.backstack.transitionhandler.rememberBackstackSlider
 
 /**
- * A TransitionHandler that uses fade transition when Placeholder is being removed,
- * and slide transition for all other cases.
+ * Completes startup-gate replacements immediately; later user navigation keeps its slide transition.
  */
 class LoggedInFlowTransitionHandler(
     private val backstack: BackStack<LoggedInFlowNode.NavTarget>,
@@ -33,13 +32,18 @@ class LoggedInFlowTransitionHandler(
         transition: Transition<BackStack.State>,
         descriptor: TransitionDescriptor<LoggedInFlowNode.NavTarget, BackStack.State>
     ): Modifier {
-        val isPlaceholderBeingRemoved = backstack.elements.value.any { element ->
-            element.key.navTarget == LoggedInFlowNode.NavTarget.Placeholder &&
-                element.targetState != BackStack.State.ACTIVE
+        val hasStartupGate = backstack.elements.value.any { element ->
+            isStartupGate(element.key.navTarget)
         }
-        val handler = if (isPlaceholderBeingRemoved) fader else slider
+        val handler = if (hasStartupGate) fader else slider
         return handler.createModifier(modifier, transition, descriptor)
     }
+}
+
+internal fun isStartupGate(target: LoggedInFlowNode.NavTarget): Boolean = when (target) {
+    LoggedInFlowNode.NavTarget.Placeholder, LoggedInFlowNode.NavTarget.SecuritySetup,
+    is LoggedInFlowNode.NavTarget.StartupFailure -> true
+    else -> false
 }
 
 @Composable
@@ -49,9 +53,7 @@ fun rememberLoggedInFlowTransitionHandler(
     val slider = rememberBackstackSlider<LoggedInFlowNode.NavTarget>(
         transitionSpec = { spring(stiffness = Spring.StiffnessMediumLow) },
     )
-    val fader = rememberBackstackFader<LoggedInFlowNode.NavTarget>(
-        transitionSpec = { spring(stiffness = Spring.StiffnessMediumLow) },
-    )
+    val fader = remember { JumpToEndTransitionHandler<LoggedInFlowNode.NavTarget, BackStack.State>() }
     return remember(backstack, slider, fader) {
         LoggedInFlowTransitionHandler(backstack, slider, fader)
     }

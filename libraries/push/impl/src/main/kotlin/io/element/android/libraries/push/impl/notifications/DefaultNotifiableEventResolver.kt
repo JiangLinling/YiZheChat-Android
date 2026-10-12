@@ -8,6 +8,7 @@
 
 package io.element.android.libraries.push.impl.notifications
 
+import android.content.ContentResolver
 import android.content.Context
 import android.graphics.ImageDecoder
 import android.net.Uri
@@ -43,6 +44,8 @@ import io.element.android.libraries.matrix.api.timeline.item.event.EventType
 import io.element.android.libraries.matrix.api.timeline.item.event.FileMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.ImageMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.LocationMessageType
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageType
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageTypeWithAttachment
 import io.element.android.libraries.matrix.api.timeline.item.event.NoticeMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.OtherMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.StickerMessageType
@@ -55,9 +58,15 @@ import io.element.android.libraries.push.impl.db.PushRequest
 import io.element.android.libraries.push.impl.notifications.model.InviteNotifiableEvent
 import io.element.android.libraries.push.impl.notifications.model.NotifiableMessageEvent
 import io.element.android.libraries.push.impl.notifications.model.ResolvedPushEvent
+import io.element.android.libraries.push.impl.notifications.model.SimpleNotifiableEvent
 import io.element.android.libraries.ui.strings.CommonStrings
+import io.element.android.security.contentprotection.api.ContentProtectionService
+import io.element.android.security.contentprotection.api.RoomLifecycleProfileKind
+import io.element.android.security.dataprotection.api.ProtectedPreviewAuthorizationGate
 import io.element.android.services.toolbox.api.strings.StringProvider
+import kotlinx.coroutines.CancellationException
 import timber.log.Timber
+import java.io.File
 
 private val loggerTag = LoggerTag("DefaultNotifiableEventResolver", LoggerTag.NotificationLoggerTag)
 
@@ -93,6 +102,9 @@ class DefaultNotifiableEventResolver(
     private val callNotificationEventResolver: CallNotificationEventResolver,
     private val fallbackNotificationFactory: FallbackNotificationFactory,
     private val featureFlagService: FeatureFlagService,
+    private val notificationPrivacySanitizer: NotificationPrivacySanitizer,
+    private val protectedPreviewAuthorizationGate: ProtectedPreviewAuthorizationGate,
+    private val contentProtectionService: ContentProtectionService,
 ) : NotifiableEventResolver {
     override suspend fun resolveEvents(
         sessionId: SessionId,
@@ -129,7 +141,15 @@ class DefaultNotifiableEventResolver(
                 if (notificationDataResult == null) {
                     request to Result.failure(NotificationResolverException.UnknownError("No notification data for ${request.roomId} - ${request.eventId}"))
                 } else {
-                    request to notificationDataResult
+                    request to notificationDataResult.map { event ->
+                        if (event is ResolvedPushEvent.Event && event.notifiableEvent is NotifiableMessageEvent) {
+                            event.copy(notifiableEvent = event.notifiableEvent.copy(
+                                isNtfyDelivery = request.providerInfo.startsWith("UnifiedPush - "),
+                            ))
+                        } else {
+                            event
+                        }
+                    }
                 }
             }
         )
@@ -141,9 +161,35 @@ class DefaultNotifiableEventResolver(
     ): Result<ResolvedPushEvent> = runCatchingExceptions {
         when (val content = this.content) {
             is NotificationContent.MessageLike.RoomMessage -> {
-                val showMediaPreview = client.mediaPreviewService.getMediaPreviewValue().isPreviewEnabled(roomJoinRule)
+                val requiresAuthorization = notificationPrivacySanitizer.requiresContentAuthorization()
+                val canAttemptPreview = !requiresAuthorization || protectedPreviewAuthorizationGate.canAttemptPreview()
+                val roomProfileKind = if (requiresAuthorization && canAttemptPreview) {
+                    try {
+                        contentProtectionService.resolveRoomLifecycle(roomId.value).profileKind
+                    } catch (failure: CancellationException) {
+                        throw failure
+                    } catch (failure: Exception) {
+                        Timber.tag(loggerTag.value).w(failure, "Failed to resolve signed room notification policy")
+                        null
+                    }
+                } else {
+                    null
+                }
+                val forceGenericPresentation = content.isBurnAfterRead ||
+                    requiresAuthorization && (
+                        !canAttemptPreview ||
+                            roomProfileKind != RoomLifecycleProfileKind.STANDARD ||
+                            !protectedPreviewAuthorizationGate.canDisplayAuthorizedContent(content.isContentProtectionAuthorized)
+                        ) ||
+                    content.messageType.isProtectedTransportCarrier()
+                if (forceGenericPresentation) {
+                    Timber.tag(loggerTag.value).d("Showing a generic notification under the signed room message policy")
+                }
+                val showMediaPreview = !forceGenericPresentation && notificationPrivacySanitizer.allowsContent() &&
+                    client.mediaPreviewService.getMediaPreviewValue().isPreviewEnabled(roomJoinRule)
                 val senderDisambiguatedDisplayName = getDisambiguatedDisplayName(content.senderId)
-                val imageMimeType = content.getImageMimetype()
+                    .takeUnless { forceGenericPresentation }
+                val imageMimeType = content.getImageMimetype().takeUnless { forceGenericPresentation }
                 val imageUriString = if (showMediaPreview && imageMimeType != null) {
                     content.fetchImageIfPresent(client, imageMimeType)?.toString()
                 } else {
@@ -159,11 +205,15 @@ class DefaultNotifiableEventResolver(
                         .w("No image uri returned for message with an image and previews enabled. Something went wrong.")
                 }
 
-                val messageBody = descriptionFromMessageContent(
-                    content = content,
-                    senderDisambiguatedDisplayName = senderDisambiguatedDisplayName,
-                    hasImageUri = imageUriString != null,
-                )
+                val messageBody = if (forceGenericPresentation) {
+                    null
+                } else {
+                    descriptionFromMessageContent(
+                        content = content,
+                        senderDisambiguatedDisplayName = checkNotNull(senderDisambiguatedDisplayName),
+                        hasImageUri = imageUriString != null,
+                    )
+                }
                 val notifiableMessageEvent = buildNotifiableMessageEvent(
                     sessionId = userId,
                     senderId = content.senderId,
@@ -176,13 +226,22 @@ class DefaultNotifiableEventResolver(
                     body = messageBody,
                     imageUriString = imageUriString,
                     imageMimeType = imageMimeType.takeIf { imageUriString != null },
-                    roomName = roomDisplayName,
+                    roomName = roomDisplayName.takeUnless { forceGenericPresentation },
                     roomIsDm = isDm,
-                    roomAvatarPath = roomAvatarUrl,
-                    senderAvatarPath = senderAvatarUrl,
+                    roomAvatarPath = roomAvatarUrl.takeUnless { forceGenericPresentation },
+                    senderAvatarPath = senderAvatarUrl.takeUnless { forceGenericPresentation },
                     hasMentionOrReply = hasMention,
                 )
-                ResolvedPushEvent.Event(notifiableMessageEvent)
+                notificationPrivacySanitizer.sanitize(
+                    event = ResolvedPushEvent.Event(notifiableMessageEvent),
+                    forceHidden = forceGenericPresentation,
+                    genericBodyOverride = when {
+                        content.isBurnAfterRead -> stringProvider.getString(R.string.notification_burn_after_read_content)
+                        requiresAuthorization && roomProfileKind != RoomLifecycleProfileKind.STANDARD ->
+                            stringProvider.getString(R.string.notification_confidential_content)
+                        else -> null
+                    },
+                )
             }
             is NotificationContent.Invite -> {
                 val senderDisambiguatedDisplayName = getDisambiguatedDisplayName(content.senderId)
@@ -270,14 +329,29 @@ class DefaultNotifiableEventResolver(
                 throw NotificationResolverException.EventFilteredOut
             }
             NotificationContent.MessageLike.RoomEncrypted -> {
-                Timber.tag(loggerTag.value).w("Notification with encrypted content -> fallback")
-                val fallbackNotifiableEvent = fallbackNotificationFactory.create(
-                    sessionId = userId,
-                    roomId = roomId,
-                    eventId = eventId,
-                    cause = "Unable to decrypt event content",
+                if (notificationPrivacySanitizer.requiresContentAuthorization() &&
+                    !protectedPreviewAuthorizationGate.canAttemptPreview()
+                ) {
+                    Timber.tag(loggerTag.value).d("Suppressing encrypted message notification while preview gate is locked")
+                    throw NotificationResolverException.EventFilteredOut
+                }
+                Timber.tag(loggerTag.value).d("Showing a generic notification for encrypted content")
+                val genericBody = stringProvider.getString(R.string.notification_fallback_content)
+                ResolvedPushEvent.Event(
+                    SimpleNotifiableEvent(
+                        sessionId = userId,
+                        roomId = roomId,
+                        eventId = eventId,
+                        editedEventId = null,
+                        noisy = isNoisy,
+                        title = genericBody,
+                        description = genericBody,
+                        type = EventType.MESSAGE,
+                        timestamp = timestamp,
+                        soundName = null,
+                        canBeReplaced = true,
+                    )
                 )
-                ResolvedPushEvent.Event(fallbackNotifiableEvent)
             }
             is NotificationContent.MessageLike.RoomRedaction -> {
                 // Note: this case will be handled below
@@ -322,7 +396,7 @@ class DefaultNotifiableEventResolver(
                 throw NotificationResolverException.EventFilteredOut
             }
         }
-    }
+    }.map(notificationPrivacySanitizer::sanitize)
 
     private fun descriptionFromMessageContent(
         content: NotificationContent.MessageLike.RoomMessage,
@@ -404,8 +478,13 @@ class DefaultNotifiableEventResolver(
                 Timber.tag(loggerTag.value).e(it, "Failed to download image for notification")
             }
             .map { mediaFile ->
-                val authority = "${context.packageName}.notifications.fileprovider"
-                FileProvider.getUriForFile(context, authority, mediaFile)
+                val uri = mediaFile.uri()
+                if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
+                    uri
+                } else {
+                    val authority = "${context.packageName}.notifications.fileprovider"
+                    FileProvider.getUriForFile(context, authority, File(mediaFile.path()))
+                }
             }
             .getOrNull()
     }
@@ -418,6 +497,18 @@ class DefaultNotifiableEventResolver(
         }
     }
 }
+
+private fun MessageType.isProtectedTransportCarrier(): Boolean = when (this) {
+    is TextMessageType -> body.startsWith(PROTECTED_TEXT_CARRIER_PREFIX)
+    is OtherMessageType -> body.startsWith(PROTECTED_TEXT_CARRIER_PREFIX) || msgType == PROTECTED_MESSAGE_TYPE
+    is MessageTypeWithAttachment -> filename.startsWith(PROTECTED_MEDIA_PREFIX) && filename.endsWith(PROTECTED_MEDIA_SUFFIX)
+    else -> false
+}
+
+private const val PROTECTED_TEXT_CARRIER_PREFIX = "yizhe-secure-v1:"
+private const val PROTECTED_MESSAGE_TYPE = "io.yizhe.secure.v1"
+private const val PROTECTED_MEDIA_PREFIX = ".yizhe-"
+private const val PROTECTED_MEDIA_SUFFIX = ".yzm"
 
 @Suppress("LongParameterList")
 internal fun buildNotifiableMessageEvent(

@@ -13,6 +13,7 @@ import io.element.android.libraries.matrix.test.A_DEVICE_ID
 import io.element.android.libraries.matrix.test.A_USER_ID
 import io.element.android.tests.testutils.lambda.lambdaError
 import io.element.android.tests.testutils.simulateLongTask
+import org.matrix.rustcomponents.sdk.AuthData
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.ClientDelegate
 import org.matrix.rustcomponents.sdk.CreateRoomParameters
@@ -52,6 +53,11 @@ class FakeFfiClient(
     private val getStoreSizesResult: () -> StoreSizes = { lambdaError() },
     private val createRoomResult: (CreateRoomParameters) -> String = { lambdaError() },
     private val homeserverCapabilities: HomeserverCapabilities = FakeFfiHomeserverCapabilities(),
+    private val loginResult: suspend (String, String, String?, String?) -> Unit = { _, _, _, _ -> Unit },
+    private val logoutResult: suspend () -> Unit = {},
+    private val deactivateAccountResult: suspend (AuthData?, Boolean) -> Unit = { _, _ -> lambdaError() },
+    private val restoreSessionResult: suspend (Session) -> Unit = {},
+    private val setDelegateResult: (ClientDelegate?) -> TaskHandle = { FakeFfiTaskHandle() },
     private val closeResult: () -> Unit = {},
 ) : Client(NoHandle) {
     override fun userId(): String = userId
@@ -60,9 +66,14 @@ class FakeFfiClient(
     override suspend fun getNotificationSettings(): NotificationSettings = notificationSettings
     override fun encryption(): Encryption = encryption
     override fun session(): Session = session
-    override fun setDelegate(delegate: ClientDelegate?): TaskHandle = FakeFfiTaskHandle()
+    override fun setDelegate(delegate: ClientDelegate?): TaskHandle = setDelegateResult(delegate)
     override suspend fun cachedAvatarUrl(): String? = null
-    override suspend fun restoreSession(session: Session) = Unit
+    override suspend fun restoreSession(session: Session) = restoreSessionResult(session)
+    override suspend fun login(username: String, password: String, initialDeviceName: String?, deviceId: String?) =
+        loginResult(username, password, initialDeviceName, deviceId)
+    override suspend fun logout() = logoutResult()
+    override suspend fun deactivateAccount(authData: AuthData?, eraseData: Boolean) =
+        deactivateAccountResult(authData, eraseData)
     override fun syncService(): SyncServiceBuilder = FakeFfiSyncServiceBuilder()
     override suspend fun spaceService(): SpaceService = FakeFfiSpaceService()
     override fun roomDirectorySearch(): RoomDirectorySearch = FakeFfiRoomDirectorySearch()

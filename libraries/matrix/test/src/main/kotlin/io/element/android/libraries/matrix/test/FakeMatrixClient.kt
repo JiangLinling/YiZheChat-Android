@@ -11,6 +11,7 @@ package io.element.android.libraries.matrix.test
 import io.element.android.libraries.matrix.api.HomeserverCapabilitiesProvider
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.analytics.SdkStoreSizes
+import io.element.android.libraries.matrix.api.auth.OpenIdToken
 import io.element.android.libraries.matrix.api.core.DeviceId
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomAlias
@@ -106,11 +107,13 @@ class FakeMatrixClient(
     private val createLinkDesktopHandlerResult: () -> Result<LinkDesktopHandler> = { lambdaError() },
     private var unIgnoreUserResult: (UserId) -> Result<Unit> = { Result.success(Unit) },
     private val canReportRoomLambda: () -> Boolean = { false },
+    private val ensureServerVersionsReadyLambda: suspend () -> Result<Unit> = { Result.success(Unit) },
     private val isLivekitRtcSupportedLambda: () -> Boolean = { false },
     override val ignoredUsersFlow: StateFlow<ImmutableList<UserId>> = MutableStateFlow(persistentListOf()),
     override val ownBeaconInfoUpdates: Flow<BeaconInfoUpdate> = emptyFlow(),
     private val getMaxUploadSizeResult: () -> Result<Long> = { lambdaError() },
     private val getJoinedRoomIdsResult: () -> Result<Set<RoomId>> = { Result.success(emptySet()) },
+    private val getRemoteJoinedRoomIdsResult: () -> Result<Set<RoomId>> = { Result.success(emptySet()) },
     private val getRecentEmojisLambda: () -> Result<List<String>> = { Result.success(emptyList()) },
     private val addRecentEmojiLambda: (String) -> Result<Unit> = { Result.success(Unit) },
     private val markRoomAsFullyReadResult: (RoomId, EventId) -> Result<Unit> = { _, _ -> lambdaError() },
@@ -118,12 +121,15 @@ class FakeMatrixClient(
     private val getMapStyleUrlResult: () -> Result<String?> = { lambdaError() },
     private val getDatabaseSizesLambda: () -> Result<SdkStoreSizes> = { lambdaError() },
     private val resetWellKnownConfigLambda: () -> Result<Unit> = { lambdaError() },
+    private val requestOpenIdTokenLambda: () -> Result<OpenIdToken> = { lambdaError() },
 ) : MatrixClient {
     var setDisplayNameCalled: Boolean = false
         private set
     var uploadAvatarCalled: Boolean = false
         private set
     var removeAvatarCalled: Boolean = false
+        private set
+    var getJoinedRoomCalledCount: Int = 0
         private set
 
     private val _userProfile: MutableStateFlow<MatrixUser> = MutableStateFlow(MatrixUser(sessionId, userDisplayName, userAvatarUrl))
@@ -153,11 +159,16 @@ class FakeMatrixClient(
     }
     var logoutLambda: (Boolean, Boolean) -> Unit = { _, _ -> }
 
+    var getCurrentRoomInfoLambda: (suspend (RoomId) -> Result<RoomInfo>)? = null
+    override suspend fun getCurrentRoomInfo(roomId: RoomId): Result<RoomInfo> =
+        getCurrentRoomInfoLambda?.invoke(roomId) ?: super<MatrixClient>.getCurrentRoomInfo(roomId)
+
     override suspend fun getRoom(roomId: RoomId): BaseRoom? {
         return getRoomResults[roomId]
     }
 
     override suspend fun getJoinedRoom(roomId: RoomId): JoinedRoom? {
+        getJoinedRoomCalledCount += 1
         return getRoomResults[roomId] as? JoinedRoom
     }
 
@@ -167,6 +178,10 @@ class FakeMatrixClient(
 
     override suspend fun getJoinedRoomIds(): Result<Set<RoomId>> {
         return getJoinedRoomIdsResult()
+    }
+
+    override suspend fun getRemoteJoinedRoomIds(): Result<Set<RoomId>> {
+        return getRemoteJoinedRoomIdsResult()
     }
 
     override suspend fun ignoreUser(userId: UserId): Result<Unit> = simulateLongTask {
@@ -342,12 +357,20 @@ class FakeMatrixClient(
         return getUrlLambda(url)
     }
 
+    override suspend fun requestOpenIdToken(): Result<OpenIdToken> {
+        return requestOpenIdTokenLambda()
+    }
+
     override suspend fun currentSlidingSyncVersion(): Result<SlidingSyncVersion> {
         return currentSlidingSyncVersionLambda()
     }
 
     override suspend fun canReportRoom(): Boolean {
         return canReportRoomLambda()
+    }
+
+    override suspend fun ensureServerVersionsReady(): Result<Unit> {
+        return ensureServerVersionsReadyLambda()
     }
 
     override suspend fun isLivekitRtcSupported(): Boolean {

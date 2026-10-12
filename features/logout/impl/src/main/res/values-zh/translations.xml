@@ -3,11 +3,18 @@
   <string name="screen_signout_confirmation_dialog_content">"你确定要移除此设备？"</string>
   <string name="screen_signout_confirmation_dialog_submit">"移除此设备"</string>
   <string name="screen_signout_confirmation_dialog_title">"移除此设备"</string>
+  <string name="screen_signout_unbacked_keys_title">"部分消息密钥尚未完成备份"</string>
+  <string name="screen_signout_unbacked_keys_content">"移除此设备会销毁本机密钥。尚未上传完成的消息密钥，重新登录后可能永久无法恢复。"</string>
+  <string name="screen_signout_unbacked_keys_submit">"仍要移除"</string>
+  <string name="screen_signout_unbacked_keys_wait">"等待备份"</string>
   <string name="screen_signout_in_progress_dialog_content">"正在移除设备…"</string>
   <string name="screen_signout_key_backup_disabled_subtitle">"这是你的唯一设备。一旦移除，下次登录时你需要使用恢复密钥验证数字身份并恢复加密聊天。"</string>
   <string name="screen_signout_key_backup_disabled_title">"你即将失去加密聊天的访问权"</string>
   <string name="screen_signout_key_backup_offline_subtitle">"当你离线时，密钥仍在备份。重新连接以便在移除设备之前备份密钥。"</string>
   <string name="screen_signout_key_backup_offline_title">"你的密钥仍在备份中"</string>
+  <string name="screen_signout_key_backup_disabled_state_subtitle">"密钥备份已关闭。移除此设备后，仅保存在本机的消息密钥将永久丢失。"</string>
+  <string name="screen_signout_key_backup_lagged_subtitle">"备份状态已落后，当前无法确认所有消息密钥均已保存。请保留此设备并稍后重试。"</string>
+  <string name="screen_signout_key_backup_failed_subtitle">"当前设备未能完成消息密钥备份。请在备份成功前保留此设备。"</string>
   <string name="screen_signout_key_backup_ongoing_subtitle">"请等待此操作完成再移除此设备。"</string>
   <string name="screen_signout_key_backup_ongoing_title">"你的密钥仍在备份中"</string>
   <string name="screen_signout_preference_item">"移除此设备"</string>
@@ -15,4 +22,11 @@
   <string name="screen_signout_recovery_disabled_title">"你即将失去加密聊天的访问权"</string>
   <string name="screen_signout_save_recovery_key_subtitle">"这是你的唯一设备。一旦移除，下次登录时你需要使用恢复密钥验证数字身份并恢复加密聊天。"</string>
   <string name="screen_signout_save_recovery_key_title">"确保你移除此设备前拥有恢复密钥"</string>
+  <string name="screen_signout_recovery_readiness_title">"历史恢复准备情况"</string>
+  <string name="screen_signout_recovery_readiness_summary">"恢复设置：%1$s\n密钥备份：%2$s\n其他设备：%3$s"</string>
+  <string name="screen_signout_readiness_ready">"已就绪"</string>
+  <string name="screen_signout_readiness_attention">"需要处理"</string>
+  <string name="screen_signout_readiness_available">"可用于确认"</string>
+  <string name="screen_signout_readiness_unavailable">"无其他设备"</string>
+  <string name="screen_signout_non_recoverable_notice">"移除此设备会清除本机密钥与缓存。重新登录后，常规历史需要完成 Matrix 恢复和设备授权；保密历史可能还需额外审批。已到期、已撤回、已销毁及闪阅结束的消息均不可恢复。"</string>
 </resources>

@@ -8,6 +8,7 @@
 
 package io.element.android.features.messages.impl.pinned.list
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -30,6 +32,7 @@ import io.element.android.features.messages.impl.actionlist.ActionListView
 import io.element.android.features.messages.impl.actionlist.model.TimelineItemAction
 import io.element.android.features.messages.impl.link.LinkEvent
 import io.element.android.features.messages.impl.link.LinkView
+import io.element.android.features.messages.impl.timeline.LocalTimelineIsTalkbackActive
 import io.element.android.features.messages.impl.timeline.TimelineEvent
 import io.element.android.features.messages.impl.timeline.components.TimelineItemRow
 import io.element.android.features.messages.impl.timeline.components.event.TimelineItemEventContentView
@@ -51,6 +54,7 @@ import io.element.android.libraries.designsystem.theme.components.TopAppBar
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.ui.strings.CommonStrings
+import io.element.android.libraries.ui.utils.a11y.isTalkbackActive
 import io.element.android.services.analytics.compose.LocalAnalyticsService
 import io.element.android.services.analyticsproviders.api.trackers.captureInteraction
 import io.element.android.wysiwyg.link.Link
@@ -117,27 +121,30 @@ private fun PinnedMessagesListContent(
     onErrorDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier.fillMaxSize()) {
-        when (state) {
-            PinnedMessagesListState.Failed -> {
-                ErrorDialog(
-                    title = stringResource(id = CommonStrings.error_unknown),
-                    content = stringResource(id = CommonStrings.error_failed_loading_messages),
-                    onSubmit = onErrorDismiss
+    val talkbackActive = isTalkbackActive()
+    CompositionLocalProvider(LocalTimelineIsTalkbackActive provides talkbackActive) {
+        Box(modifier.fillMaxSize()) {
+            when (state) {
+                PinnedMessagesListState.Failed -> {
+                    ErrorDialog(
+                        title = stringResource(id = CommonStrings.error_unknown),
+                        content = stringResource(id = CommonStrings.error_failed_loading_messages),
+                        onSubmit = onErrorDismiss
+                    )
+                }
+                PinnedMessagesListState.Empty -> PinnedMessagesListEmpty()
+                is PinnedMessagesListState.Filled -> PinnedMessagesListLoaded(
+                    state = state,
+                    displayThreadSummaries = state.displayThreadSummaries,
+                    onEventClick = onEventClick,
+                    onUserDataClick = onUserDataClick,
+                    onLinkClick = onLinkClick,
+                    onLinkLongClick = onLinkLongClick,
                 )
-            }
-            PinnedMessagesListState.Empty -> PinnedMessagesListEmpty()
-            is PinnedMessagesListState.Filled -> PinnedMessagesListLoaded(
-                state = state,
-                displayThreadSummaries = state.displayThreadSummaries,
-                onEventClick = onEventClick,
-                onUserDataClick = onUserDataClick,
-                onLinkClick = onLinkClick,
-                onLinkLongClick = onLinkLongClick,
-            )
-            PinnedMessagesListState.Loading -> {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                PinnedMessagesListState.Loading -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 }
             }
         }
@@ -206,6 +213,7 @@ private fun PinnedMessagesListLoaded(
         modifier = modifier.fillMaxSize(),
         state = rememberLazyListState(),
         reverseLayout = true,
+        verticalArrangement = Arrangement.Top,
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
         items(
@@ -292,7 +300,9 @@ private fun TimelineItemEventContentViewWrapper(
             modifier = modifier,
             onContentClick = onContentClick,
             onLongClick = onLongClick,
-            onContentLayoutChange = onContentLayoutChange
+            onContentLayoutChange = onContentLayoutChange,
+            isMine = event.isMine,
+            localSendState = event.localSendState,
         )
     }
 }

@@ -31,6 +31,8 @@ import io.element.android.libraries.matrix.api.timeline.item.event.MessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.NoticeMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.OtherMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.OtherState
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedMessageStatus
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedOperationContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RedactedContent
 import io.element.android.libraries.matrix.api.timeline.item.event.StateContent
 import io.element.android.libraries.matrix.api.timeline.item.event.StickerMessageType
@@ -118,7 +120,6 @@ class DefaultRoomLatestEventFormatterTest {
     @Test
     @Config(qualifiers = "en")
     fun `Unable to decrypt content`() {
-        val expected = "Waiting for this message"
         val senderName = "Someone"
         sequenceOf(false, true).forEach { isDm ->
             val message = createLatestEvent(
@@ -127,12 +128,7 @@ class DefaultRoomLatestEventFormatterTest {
                 content = UnableToDecryptContent(data = UnableToDecryptContent.Data.Unknown, threadInfo = null),
             )
             val result = formatter.format(message, isDm)
-            if (isDm) {
-                assertThat(result).isEqualTo(expected)
-            } else {
-                assertThat(result).isInstanceOf(AnnotatedString::class.java)
-                assertThat(result.toString()).isEqualTo("$senderName: $expected")
-            }
+            assertThat(result).isNull()
         }
     }
 
@@ -179,6 +175,18 @@ class DefaultRoomLatestEventFormatterTest {
             senderName = "Bob",
             expectedPrefix = "You",
         )
+    }
+
+    @Test
+    @Config(qualifiers = "en")
+    fun `Protected text carrier does not expose its envelope in room preview`() {
+        val protectedBody = "yizhe-secure-v1:opaque-envelope"
+        val content = MessageContent(protectedBody, null, false, null, TextMessageType(protectedBody, null))
+        val message = createLatestEvent(sentByYou = false, senderDisplayName = "Alice", content = content)
+
+        val result = formatter.format(message, isDmRoom = false)
+
+        assertThat(result).isNull()
     }
 
     private fun testMessageContents(
@@ -953,6 +961,54 @@ class DefaultRoomLatestEventFormatterTest {
     }
 
     // endregion
+
+    @Test
+    @Config(qualifiers = "en")
+    fun `authorized relay end preview names the action in groups and DMs`() {
+        val content = MessageContent(
+            body = "", inReplyTo = null, isEdited = false, threadInfo = null,
+            type = TextMessageType("", null), isContentProtectionAuthorized = true,
+            protectedPreviewOperation = ProtectedOperationContent.Operation.RELAY_CLOSE,
+        )
+        assertThat(formatter.format(createLatestEvent(true, "Alice", content), false).toString()).isEqualTo("You: Relay ended")
+        assertThat(formatter.format(createLatestEvent(false, "Bob", content), false).toString()).isEqualTo("Bob: Relay ended")
+        assertThat(formatter.format(createLatestEvent(true, "Alice", content), true).toString()).isEqualTo("Relay ended")
+        assertThat(formatter.format(createLatestEvent(false, "Bob", content), true).toString()).isEqualTo("Relay ended")
+    }
+
+    @Test
+    @Config(qualifiers = "zh")
+    fun `relay end preview is localized`() {
+        val content = MessageContent(
+            body = "", inReplyTo = null, isEdited = false, threadInfo = null,
+            type = TextMessageType("", null), isContentProtectionAuthorized = true,
+            protectedPreviewOperation = ProtectedOperationContent.Operation.RELAY_CLOSE,
+        )
+        assertThat(formatter.format(createLatestEvent(true, "Alice", content), true).toString()).isEqualTo("已结束接龙")
+    }
+
+    @Test
+    fun `unauthorized or denied relay metadata cannot produce a preview`() {
+        val content = MessageContent(
+            body = "", inReplyTo = null, isEdited = false, threadInfo = null,
+            type = TextMessageType("", null),
+            protectedPreviewOperation = ProtectedOperationContent.Operation.RELAY_CLOSE,
+        )
+        assertThat(formatter.format(createLatestEvent(true, "Alice", content), false)).isNull()
+        val denied = content.copy(isContentProtectionAuthorized = true, protectedMessageStatus = ProtectedMessageStatus.ACCESS_DENIED)
+        assertThat(formatter.format(createLatestEvent(true, "Alice", denied), false)).isNull()
+    }
+
+    @Test
+    fun `empty bodies and internal operations do not leave a sender-only preview`() {
+        val content = MessageContent(
+            body = "", inReplyTo = null, isEdited = false, threadInfo = null,
+            type = TextMessageType("", null), isContentProtectionAuthorized = true,
+        )
+        assertThat(formatter.format(createLatestEvent(true, "Alice", content), false)).isNull()
+        val internal = content.copy(protectedPreviewOperation = ProtectedOperationContent.Operation.HIDDEN)
+        assertThat(formatter.format(createLatestEvent(true, "Alice", internal), false)).isNull()
+    }
 
     private fun createLatestEvent(
         sentByYou: Boolean,

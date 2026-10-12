@@ -8,8 +8,14 @@
 
 package io.element.android.features.home.impl.search
 
+import io.element.android.security.dataprotection.test.FakeDeletedIdentityProjection
+
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.home.impl.datasource.aRoomListRoomSummaryFactory
+import io.element.android.features.userprofile.test.FakeFriendProfileRepository
+import io.element.android.features.userprofile.api.FriendPrivateProfile
+import io.element.android.features.userprofile.api.FriendProfileRepository
+import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.dateformatter.test.FakeDateFormatter
 import io.element.android.libraries.eventformatter.test.FakeRoomLatestEventFormatter
 import io.element.android.libraries.matrix.api.roomlist.RoomListFilter
@@ -17,6 +23,8 @@ import io.element.android.libraries.matrix.api.roomlist.RoomListService
 import io.element.android.libraries.matrix.test.room.aRoomSummary
 import io.element.android.libraries.matrix.test.roomlist.FakeDynamicRoomList
 import io.element.android.libraries.matrix.test.roomlist.FakeRoomListService
+import io.element.android.libraries.matrix.test.FakeMatrixClient
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.tests.testutils.lambda.assert
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import io.element.android.tests.testutils.test
@@ -118,6 +126,43 @@ class RoomListSearchPresenterTest {
     }
 
     @Test
+    fun `present - query finds encrypted local friend profile`() = runTest {
+        val friendId = UserId("@alice:example.org")
+        val presenter = createRoomListSearchPresenter(
+            friendProfileRepository = FakeFriendProfileRepository(
+                mapOf(friendId to FriendPrivateProfile(userId = friendId, remarkName = "爱丽丝", tags = "同事"))
+            )
+        )
+        presenter.test {
+            val initialState = awaitItem()
+            initialState.query.edit { append("同事") }
+            val resultState = awaitItem()
+            assertThat(resultState.contactResults.map { it.userId }).containsExactly(friendId)
+        }
+    }
+
+    @Test
+    fun `present - lifecycle failure does not perform room search`() = runTest {
+        val roomList = FakeDynamicRoomList()
+        val coordinator = FakeAppOperationalStateCoordinator(
+            startFailure = { IllegalStateException("lifecycle unavailable") },
+        )
+        val presenter = createRoomListSearchPresenter(
+            roomListService = FakeRoomListService(createRoomListLambda = { roomList }),
+            appOperationalStateCoordinator = coordinator,
+        )
+        presenter.test {
+            val initialState = awaitItem()
+            initialState.query.edit { append("Search") }
+            awaitItem()
+            testScheduler.advanceUntilIdle()
+
+            assertThat(coordinator.startedRequests).hasSize(1)
+            assertThat(roomList.currentFilter.value).isEqualTo(RoomListFilter.None)
+        }
+    }
+
+    @Test
     fun `present - UpdateVisibleRange triggers pagination when near end`() = runTest {
         val loadMoreLambda = lambdaRecorder<Unit> { }
         val roomList = FakeDynamicRoomList(loadMoreLambda = loadMoreLambda)
@@ -144,6 +189,8 @@ class RoomListSearchPresenterTest {
 
 fun TestScope.createRoomListSearchPresenter(
     roomListService: RoomListService = FakeRoomListService(),
+    friendProfileRepository: FriendProfileRepository = FakeFriendProfileRepository(),
+    appOperationalStateCoordinator: FakeAppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
 ): RoomListSearchPresenter {
     return RoomListSearchPresenter(
         dataSourceFactory = object : RoomListSearchDataSource.Factory {
@@ -156,8 +203,12 @@ fun TestScope.createRoomListSearchPresenter(
                     ),
                     coroutineDispatchers = testCoroutineDispatchers(),
                     coroutineScope = coroutineScope,
+                    deletedIdentityProjection = FakeDeletedIdentityProjection(),
                 )
             }
-        }
+        },
+        friendProfileRepository = friendProfileRepository,
+        client = FakeMatrixClient(),
+        appOperationalStateCoordinator = appOperationalStateCoordinator,
     )
 }

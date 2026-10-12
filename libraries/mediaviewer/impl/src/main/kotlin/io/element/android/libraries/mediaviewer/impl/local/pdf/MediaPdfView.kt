@@ -9,9 +9,14 @@
 package io.element.android.libraries.mediaviewer.impl.local.pdf
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
+import io.element.android.libraries.localofficeviewer.api.FilePreviewRuntime
 import io.element.android.libraries.mediaviewer.api.local.LocalMedia
 import io.element.android.libraries.mediaviewer.impl.local.LocalMediaViewState
+import io.element.android.libraries.mediaviewer.impl.viewer.topAppBarHeight
 
 @Composable
 fun MediaPdfView(
@@ -19,15 +24,31 @@ fun MediaPdfView(
     localMedia: LocalMedia?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    topContentPadding: Dp = topAppBarHeight,
+    backgroundColor: Color = Color.Transparent,
+    showPageIndicator: Boolean = false,
+    manageLocalReadyState: Boolean = true,
+    loadingText: String? = null,
+    onSourceFailure: (Throwable) -> Unit = {},
+    runtimeFactory: (() -> FilePreviewRuntime?)? = null,
 ) {
+    val currentOnSourceFailure = rememberUpdatedState(onSourceFailure)
     val pdfViewerState = rememberPdfViewerState(
         model = localMedia?.uri,
         zoomableState = localMediaViewState.zoomableState,
+        onFailure = { currentOnSourceFailure.value(it) },
+        runtimeFactory = runtimeFactory,
     )
-    localMediaViewState.isReady = pdfViewerState.isLoaded
+    if (manageLocalReadyState) {
+        localMediaViewState.isReady = pdfViewerState.isLoaded
+    }
     PdfViewer(
         pdfViewerState = pdfViewerState,
         onClick = onClick,
+        topContentPadding = topContentPadding,
+        backgroundColor = backgroundColor,
+        showPageIndicator = showPageIndicator,
+        loadingText = loadingText,
         modifier = modifier,
     )
 }

@@ -12,6 +12,7 @@ import io.element.android.libraries.matrix.api.exception.ClientException
 
 sealed class PusherRegistrationFailure : Exception() {
     class AccountNotVerified : PusherRegistrationFailure()
+    class DisabledByDeployment : PusherRegistrationFailure()
     class NoProvidersAvailable : PusherRegistrationFailure()
     class NoDistributorsAvailable : PusherRegistrationFailure()
 

@@ -30,7 +30,7 @@ class InMemoryAppPreferencesStore(
     messageSound: NotificationSound = NotificationSound.SystemDefault,
     messageSoundChannelVersion: Int = 0,
     messageSoundDisplayName: String? = null,
-    callRingtone: NotificationSound = NotificationSound.SystemDefault,
+    callRingtone: NotificationSound = NotificationSound.ElementDefault,
     callRingtoneChannelVersion: Int = 0,
     callRingtoneDisplayName: String? = null,
 ) : AppPreferencesStore {

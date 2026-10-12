@@ -15,6 +15,7 @@ import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.pushproviders.api.Config
 import io.element.android.libraries.pushproviders.api.Distributor
 import io.element.android.libraries.pushproviders.api.PushProvider
+import io.element.android.libraries.pushproviders.unifiedpush.embedded.EmbeddedNtfyManager
 import io.element.android.libraries.pushstore.api.clientsecret.PushClientSecret
 
 @ContributesIntoSet(AppScope::class)
@@ -25,18 +26,25 @@ class UnifiedPushProvider(
     private val pushClientSecret: PushClientSecret,
     private val unifiedPushStore: UnifiedPushStore,
     private val unifiedPushSessionPushConfigProvider: UnifiedPushSessionPushConfigProvider,
+    private val embeddedNtfyManager: EmbeddedNtfyManager,
 ) : PushProvider {
     override val index = UnifiedPushConfig.INDEX
     override val name = UnifiedPushConfig.NAME
     override val supportMultipleDistributors = true
 
     override fun getDistributors(): List<Distributor> {
-        return unifiedPushDistributorProvider.getDistributors()
+        return listOf(EmbeddedNtfyManager.DISTRIBUTOR) + unifiedPushDistributorProvider.getDistributors()
+            .filterNot { it.value == EmbeddedNtfyManager.DISTRIBUTOR_VALUE }
     }
 
     override suspend fun registerWith(matrixClient: MatrixClient, distributor: Distributor): Result<Unit> {
         val clientSecret = pushClientSecret.getSecretForUser(matrixClient.sessionId)
-        return registerUnifiedPushUseCase.execute(distributor, clientSecret)
+        val result = if (distributor.value == EmbeddedNtfyManager.DISTRIBUTOR_VALUE) {
+            embeddedNtfyManager.register(matrixClient, clientSecret)
+        } else {
+            registerUnifiedPushUseCase.execute(distributor, clientSecret)
+        }
+        return result
             .onSuccess {
                 unifiedPushStore.setDistributorValue(matrixClient.sessionId, distributor.value)
             }
@@ -53,12 +61,29 @@ class UnifiedPushProvider(
 
     override suspend fun unregister(matrixClient: MatrixClient): Result<Unit> {
         val clientSecret = pushClientSecret.getSecretForUser(matrixClient.sessionId)
-        return unRegisterUnifiedPushUseCase.unregister(matrixClient, clientSecret)
+        return if (unifiedPushStore.getDistributorValue(matrixClient.sessionId) == EmbeddedNtfyManager.DISTRIBUTOR_VALUE) {
+            embeddedNtfyManager.unregister(matrixClient, clientSecret)
+        } else {
+            unRegisterUnifiedPushUseCase.unregister(matrixClient, clientSecret)
+        }
+    }
+
+    override suspend fun unregisterAllForAccount(matrixClient: MatrixClient): Result<Unit> {
+        val clientSecret = pushClientSecret.getSecretForUser(matrixClient.sessionId)
+        return if (unifiedPushStore.getDistributorValue(matrixClient.sessionId) == EmbeddedNtfyManager.DISTRIBUTOR_VALUE) {
+            embeddedNtfyManager.unregisterAccount(matrixClient, clientSecret)
+        } else {
+            unRegisterUnifiedPushUseCase.unregister(matrixClient, clientSecret)
+        }
     }
 
     override suspend fun onSessionDeleted(sessionId: SessionId) {
         val clientSecret = pushClientSecret.getSecretForUser(sessionId)
-        unRegisterUnifiedPushUseCase.cleanup(clientSecret)
+        if (unifiedPushStore.getDistributorValue(sessionId) == EmbeddedNtfyManager.DISTRIBUTOR_VALUE) {
+            embeddedNtfyManager.cleanup(clientSecret)
+        } else {
+            unRegisterUnifiedPushUseCase.cleanup(clientSecret)
+        }
     }
 
     override suspend fun getPushConfig(sessionId: SessionId): Config? {

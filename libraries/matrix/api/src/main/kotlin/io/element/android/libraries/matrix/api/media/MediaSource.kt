@@ -22,7 +22,13 @@ data class MediaSource(
      * This is used to hold data for encrypted media.
      */
     val json: String? = null,
+    /** Trusted enclosing Matrix event scope; never recovered from an MXC URL or media header. */
+    val eventOrigin: MediaEventOrigin? = null,
 ) : Parcelable {
+    // Navigation targets and SDK wrappers may be logged recursively. Neither the encrypted
+    // descriptor (which contains the media key) nor a potentially signed URL is diagnostic data.
+    override fun toString(): String = "MediaSource(encrypted=${json != null})"
+
     /**
      * A URL with invalid parts (like `#fragment`, if it's an MXC url) removed.
      */
@@ -33,4 +39,14 @@ data class MediaSource(
     } else {
         url
     }
+}
+
+@Parcelize
+data class MediaEventOrigin(val roomId: String, val eventId: String?) : Parcelable {
+    init {
+        require(roomId.startsWith("!") && roomId.length > 1)
+        require(eventId == null || (eventId.startsWith("$") && eventId.length > 1))
+    }
+
+    override fun toString(): String = "MediaEventOrigin(canonical=${eventId != null})"
 }

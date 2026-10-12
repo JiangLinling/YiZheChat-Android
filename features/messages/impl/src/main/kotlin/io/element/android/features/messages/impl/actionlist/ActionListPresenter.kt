@@ -9,6 +9,7 @@
 package io.element.android.features.messages.impl.actionlist
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -19,7 +20,9 @@ import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
 import dev.zacsweers.metro.ContributesBinding
+import io.element.android.features.messages.api.MessageReferenceStore
 import io.element.android.features.messages.impl.UserEventPermissions
+import io.element.android.features.messages.impl.commoninfo.commonInfoMessageText
 import io.element.android.features.messages.impl.actionlist.model.TimelineItemAction
 import io.element.android.features.messages.impl.actionlist.model.TimelineItemActionComparator
 import io.element.android.features.messages.impl.actionlist.model.TimelineItemActionPostProcessor
@@ -34,6 +37,7 @@ import io.element.android.features.messages.impl.timeline.model.event.TimelineIt
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRedactedContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRtcNotificationContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemStateContent
+import io.element.android.features.messages.impl.timeline.model.event.TimelineItemTextBasedContent
 import io.element.android.features.messages.impl.timeline.model.event.canBeCopied
 import io.element.android.features.messages.impl.timeline.model.event.canBeForwarded
 import io.element.android.features.messages.impl.timeline.model.event.canReact
@@ -76,6 +80,7 @@ class DefaultActionListPresenter(
     private val dateFormatter: DateFormatter,
     private val featureFlagService: FeatureFlagService,
     private val getRecentEmojis: GetRecentEmojis,
+    private val messageReferenceStore: MessageReferenceStore,
 ) : ActionListPresenter {
     @AssistedFactory
     @ContributesBinding(RoomScope::class)
@@ -88,7 +93,9 @@ class DefaultActionListPresenter(
 
     private val comparator = TimelineItemActionComparator()
 
-    private val suggestedEmojis = persistentListOf("👍️", "👎️", "🔥", "❤️", "👏")
+    // Four stable quick reactions. The fifth, equally-sized cell is the existing
+    // add-reaction icon rendered by ActionListView.
+    private val suggestedEmojis = persistentListOf("👍️", "👎️", "🔥", "❤️")
 
     @Composable
     override fun present(): ActionListState {
@@ -104,6 +111,10 @@ class DefaultActionListPresenter(
         val pinnedEventIds by remember {
             room.roomInfoFlow.map { it.pinnedEventIds }
         }.collectAsState(initial = persistentListOf())
+        val messageReferences by messageReferenceStore.state.collectAsState()
+        LaunchedEffect(messageReferenceStore) {
+            messageReferenceStore.load()
+        }
 
         val isThreadsEnabled = featureFlagService.isFeatureEnabledFlow(FeatureFlags.Threads).collectAsState(false)
 
@@ -117,6 +128,8 @@ class DefaultActionListPresenter(
                     pinnedEventIds = pinnedEventIds,
                     target = target,
                     isThreadsEnabled = isThreadsEnabled.value,
+                    anchorBounds = event.anchorBounds,
+                    isFavourite = event.event.eventId?.let { messageReferences.isFavourite(room.roomId, it) } == true,
                 )
             }
         }
@@ -134,6 +147,8 @@ class DefaultActionListPresenter(
         pinnedEventIds: ImmutableList<EventId>,
         target: MutableState<ActionListState.Target>,
         isThreadsEnabled: Boolean,
+        anchorBounds: androidx.compose.ui.unit.IntRect,
+        isFavourite: Boolean,
     ) = launch {
         target.value = ActionListState.Target.Loading(timelineItem)
 
@@ -143,13 +158,15 @@ class DefaultActionListPresenter(
             isDeveloperModeEnabled = isDeveloperModeEnabled,
             isEventPinned = pinnedEventIds.contains(timelineItem.eventId),
             isThreadsEnabled = isThreadsEnabled,
+            isFavourite = isFavourite,
         )
 
         val verifiedUserSendFailure = userSendFailureFactory.create(timelineItem.localSendState)
-        val displayEmojiReactions = usersEventPermissions.canSendReaction && timelineItem.content.canReact()
+        val displayEmojiReactions = usersEventPermissions.canSendReaction &&
+            timelineItem.content.canReact() &&
+            !timelineItem.content.isBurnAfterRead
 
         if (actions.isNotEmpty() || displayEmojiReactions || verifiedUserSendFailure != VerifiedUserSendFailure.None) {
-            val recentEmojis = getRecentEmojis().getOrNull()?.toImmutableList() ?: persistentListOf()
             target.value = ActionListState.Target.Success(
                 event = timelineItem,
                 sentTimeFull = dateFormatter.format(
@@ -160,10 +177,8 @@ class DefaultActionListPresenter(
                 displayEmojiReactions = displayEmojiReactions,
                 verifiedUserSendFailure = verifiedUserSendFailure,
                 actions = actions.toImmutableList(),
-                // Merge suggested and recent emojis, removing duplicates and returning at most 100
-                recentEmojis = (suggestedEmojis + recentEmojis).distinct()
-                    .take(100)
-                    .toImmutableList()
+                recentEmojis = suggestedEmojis,
+                anchorBounds = anchorBounds,
             )
         } else {
             target.value = ActionListState.Target.None
@@ -176,9 +191,14 @@ class DefaultActionListPresenter(
         isDeveloperModeEnabled: Boolean,
         isEventPinned: Boolean,
         isThreadsEnabled: Boolean,
+        isFavourite: Boolean,
     ): List<TimelineItemAction> {
         val canRedact = timelineItem.isMine && usersEventPermissions.canRedactOwn || !timelineItem.isMine && usersEventPermissions.canRedactOther
         return buildSet {
+            if (timelineItem.localSendState is io.element.android.libraries.matrix.api.timeline.item.event.LocalEventSendState.Failed.Unknown &&
+                timelineItem.isMine && timelineItem.localSendState.error !in setOf("MediaCancellationPendingException", "MediaSendOutcomeUnknownException")) {
+                add(TimelineItemAction.Retry)
+            }
             if (timelineItem.canBeRepliedTo && usersEventPermissions.canSendMessage) {
                 if (isThreadsEnabled && timelineMode !is Timeline.Mode.Thread && timelineItem.isRemote) {
                     // If threads are enabled, we can reply in thread if the item is remote
@@ -196,6 +216,13 @@ class DefaultActionListPresenter(
             }
             if (timelineItem.isRemote && timelineItem.content.canBeForwarded()) {
                 add(TimelineItemAction.Forward)
+            }
+            if (timelineItem.isRemote && !timelineItem.content.isBurnAfterRead) {
+                add(if (isFavourite) TimelineItemAction.Unfavourite else TimelineItemAction.Favourite)
+                add(TimelineItemAction.DeleteLocal)
+                if (timelineMode is Timeline.Mode.Live && timelineItem.content.canBeForwarded()) {
+                    add(TimelineItemAction.MultiSelect)
+                }
             }
             if (timelineItem.isEditable && usersEventPermissions.canSendMessage) {
                 if (timelineItem.content is TimelineItemEventContentWithAttachment) {
@@ -225,20 +252,19 @@ class DefaultActionListPresenter(
             }
             if (timelineItem.content.canBeCopied()) {
                 add(TimelineItemAction.CopyText)
+                if (commonInfoMessageText(timelineItem) != null) add(TimelineItemAction.AddToCommon)
+            } else if (timelineItem.content is TimelineItemTextBasedContent && timelineItem.content.isProtectedContentShell) {
+                add(TimelineItemAction.CopyUnavailable)
             } else if ((timelineItem.content as? TimelineItemEventContentWithAttachment)?.caption.isNullOrBlank().not()) {
                 add(TimelineItemAction.CopyCaption)
             }
-            if (timelineItem.isRemote) {
-                add(TimelineItemAction.CopyLink)
-            }
-            if (isDeveloperModeEnabled) {
-                add(TimelineItemAction.ViewSource)
-            }
+            // Link/source capabilities remain in code for internal tooling, but they are not
+            // exposed in the user-facing long-press menu.
             if (!timelineItem.isMine) {
                 add(TimelineItemAction.ReportContent)
             }
             if (canRedact) {
-                add(TimelineItemAction.Redact)
+                add(if (timelineItem.isMine) TimelineItemAction.Withdraw else TimelineItemAction.Redact)
             }
         }
             .postFilter(timelineItem.content)
@@ -252,6 +278,7 @@ class DefaultActionListPresenter(
  */
 private fun Iterable<TimelineItemAction>.postFilter(content: TimelineItemEventContent): Iterable<TimelineItemAction> {
     return filter { action ->
+        if (content.isBurnAfterRead && action in BURN_AFTER_READ_FORBIDDEN_ACTIONS) return@filter false
         when (content) {
             is TimelineItemRtcNotificationContent,
             is TimelineItemLegacyCallInviteContent,
@@ -263,3 +290,22 @@ private fun Iterable<TimelineItemAction>.postFilter(content: TimelineItemEventCo
         }
     }
 }
+
+private val BURN_AFTER_READ_FORBIDDEN_ACTIONS = setOf(
+    TimelineItemAction.Reply,
+    TimelineItemAction.ReplyInThread,
+    TimelineItemAction.Forward,
+    TimelineItemAction.CopyText,
+    TimelineItemAction.AddToCommon,
+    TimelineItemAction.CopyCaption,
+    TimelineItemAction.CopyLink,
+    TimelineItemAction.Favourite,
+    TimelineItemAction.Unfavourite,
+    TimelineItemAction.MultiSelect,
+    TimelineItemAction.Edit,
+    TimelineItemAction.AddCaption,
+    TimelineItemAction.EditCaption,
+    TimelineItemAction.RemoveCaption,
+    TimelineItemAction.Pin,
+    TimelineItemAction.Unpin,
+)

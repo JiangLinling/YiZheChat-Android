@@ -29,7 +29,20 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 interface JoinedRoom : BaseRoom {
+    /**
+     * Retain native room dependencies across an already-started session-owned send, including
+     * lifecycle admission, membership lookup, protection and Matrix enqueue. Navigation may close
+     * the room meanwhile; cancellation and authorization checks remain unchanged.
+     */
+    suspend fun <T> withSendLifetime(block: suspend () -> T): T = block()
+
+    /** Dependency retention only, never admission for another send or continued read access. */
+    fun retainSendLifetime(): AutoCloseable = AutoCloseable {}
+
     val syncUpdateFlow: StateFlow<Long>
+
+    /** True only for an authenticated leave of the exact member referenced by this invitation. */
+    fun observeCallInvitationDeparture(notificationEventId: EventId): Flow<Boolean>
 
     val roomTypingMembersFlow: Flow<List<UserId>>
     val identityStateChangesFlow: Flow<List<IdentityStateChange>>
@@ -54,8 +67,6 @@ interface JoinedRoom : BaseRoom {
     suspend fun createTimeline(
         createTimelineParams: CreateTimelineParams,
     ): Result<Timeline>
-
-    suspend fun editMessage(eventId: EventId, body: String, htmlBody: String?, intentionalMentions: List<IntentionalMention>): Result<Unit>
 
     /**
      * Send a typing notification.
@@ -204,7 +215,10 @@ interface JoinedRoom : BaseRoom {
      * Stop sharing live location in this room.
      * @return Result indicating success or failure.
      */
-    suspend fun stopLiveLocationShare(): Result<Unit>
+    suspend fun stopLiveLocationShare(protectedAggregateId: String? = null): Result<Unit>
+
+    /** Release this room's ephemeral producer payloads; encrypted history is retained. */
+    suspend fun releaseLiveLocationProducer(): Result<Unit> = Result.failure(UnsupportedOperationException("Live producer cleanup unavailable"))
 
     /**
      * Send a live location update while a live location share is active.

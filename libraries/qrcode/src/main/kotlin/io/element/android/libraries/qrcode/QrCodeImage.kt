@@ -54,6 +54,11 @@ private fun BitMatrix.toBitmap(
     return Bitmap.createBitmap(colorBuffer, width, height, Bitmap.Config.ARGB_8888)
 }
 
+fun createQrCodeBitmap(
+    data: String,
+    size: Int = 1024,
+): Bitmap = data.toBitMatrix(size).toBitmap()
+
 @Composable
 fun QrCodeImage(
     data: String,

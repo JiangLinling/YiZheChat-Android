@@ -26,6 +26,7 @@ import androidx.core.os.ExecutorCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.emptyFlow
@@ -44,14 +45,17 @@ class PlatformLocationProvider(
     context: Context,
     private val updateInterval: Duration,
     private val minDistance: Length,
-    private val desiredAccuracy: DesiredAccuracy = DesiredAccuracy.High,
+    private val desiredAccuracy: DesiredAccuracy = DesiredAccuracy.Highest,
     coroutineScope: CoroutineScope,
     sharingStarted: SharingStarted = SharingStarted.WhileSubscribed(stopTimeoutMillis = 1000),
+    private val onCollectionStarted: () -> Unit = {},
+    private val onCollectionReleased: (Boolean) -> Unit = {},
 ) : LocationProvider {
     override val location: StateFlow<Location?>
+    // Live collection uses this cold flow: no stateIn coordinate cache survives stop.
+    val locationUpdates: Flow<Location?>
 
     init {
-        if (!handlerThread.isAlive) handlerThread.start()
         if (
             context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
             context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
@@ -65,6 +69,7 @@ class PlatformLocationProvider(
         } else {
             emptyFlow()
         }
+        locationUpdates = locationFlow
         location = locationFlow.stateIn(coroutineScope, sharingStarted, null)
     }
 
@@ -72,20 +77,31 @@ class PlatformLocationProvider(
         anyOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION]
     )
     private fun createProviderFlow(locationManager: LocationManager, provider: String) = callbackFlow {
-        send(locationManager.getLastKnownLocation(provider)?.asMapLibreLocation())
+        val handlerThread = HandlerThread("PlatformLocationProvider").apply { start() }
+        onCollectionStarted()
         val listener = LocationListenerCompat { trySend(it.asMapLibreLocation()) }
         val request = LocationRequestCompat.Builder(updateInterval.inWholeMilliseconds)
             .setQuality(desiredAccuracy.toLocationRequestQuality())
             .setMinUpdateDistanceMeters(minDistance.inMeters.toFloat())
             .build()
-        LocationManagerCompat.requestLocationUpdates(
-            locationManager,
-            provider,
-            request,
-            ExecutorCompat.create(Handler(handlerThread.looper)),
-            listener,
-        )
-        awaitClose { LocationManagerCompat.removeUpdates(locationManager, listener) }
+        var clean = false
+        try {
+            LocationManagerCompat.requestLocationUpdates(
+                locationManager, provider, request, ExecutorCompat.create(Handler(handlerThread.looper)), listener,
+            )
+            send(locationManager.getLastKnownLocation(provider)?.asMapLibreLocation())
+            awaitClose { LocationManagerCompat.removeUpdates(locationManager, listener) }
+            clean = true
+        } finally {
+            // awaitClose executes removeUpdates on cancellation too. Repeating removal
+            // also covers registration/send failure; no acknowledgement escapes failure.
+            try {
+                LocationManagerCompat.removeUpdates(locationManager, listener)
+                handlerThread.quitSafely()
+                handlerThread.join()
+                clean = !handlerThread.isAlive
+            } finally { onCollectionReleased(clean) }
+        }
     }
 
     private companion object {
@@ -94,7 +110,6 @@ class PlatformLocationProvider(
             LocationManager.GPS_PROVIDER,
             LocationManager.NETWORK_PROVIDER,
         )
-        private val handlerThread by lazy { HandlerThread("PlatformLocationProvider") }
     }
 }
 
@@ -111,7 +126,7 @@ private fun DesiredAccuracy.toLocationRequestQuality(): Int = when (this) {
 fun rememberPlatformLocationProvider(
     updateInterval: Duration,
     minDistance: Length,
-    desiredAccuracy: DesiredAccuracy = DesiredAccuracy.High,
+    desiredAccuracy: DesiredAccuracy = DesiredAccuracy.Highest,
     context: Context = LocalContext.current,
     coroutineScope: CoroutineScope = rememberCoroutineScope(),
     sharingStarted: SharingStarted = SharingStarted.WhileSubscribed(stopTimeoutMillis = 1000),

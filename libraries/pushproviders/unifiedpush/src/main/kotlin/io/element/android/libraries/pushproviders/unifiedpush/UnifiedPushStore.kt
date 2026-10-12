@@ -23,6 +23,7 @@ interface UnifiedPushStore {
     fun storePushGateway(clientSecret: String, gateway: String?)
     fun getDistributorValue(userId: UserId): String?
     fun setDistributorValue(userId: UserId, value: String)
+    fun clearDistributorValue(userId: UserId)
 }
 
 @ContributesBinding(AppScope::class)
@@ -82,6 +83,10 @@ class SharedPreferencesUnifiedPushStore(
         sharedPreferences.edit {
             putString(PREFS_DISTRIBUTOR + userId, value)
         }
+    }
+
+    override fun clearDistributorValue(userId: UserId) {
+        sharedPreferences.edit { remove(PREFS_DISTRIBUTOR + userId) }
     }
 
     companion object {

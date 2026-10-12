@@ -139,7 +139,7 @@ class SafeChildrenTransitionScope<T : Any, S>(
                             delay(10)
                         }
                         disposedNavKeys.remove(navKey)
-                        Timber.v("Removed NavKey ${navKey} from saveableStateHolder. NavTarget: ${navKey.navTarget}")
+                        Timber.v("Removed navigation entry %s (%s)", navKey.id, navKey.navTarget::class.java.simpleName)
                         saveableStateHolder.removeState(navKey)
                     }
                 }
@@ -174,7 +174,7 @@ class SafeChildrenTransitionScope<T : Any, S>(
                         ////////// MODIFIED ////////////
                         DisposableEffect(navElement.key) {
                             onDispose {
-                                Timber.v("Disposed NavKey ${navElement.key}. NavTarget: ${navElement.key.navTarget}")
+                                Timber.v("Disposed navigation entry %s (%s)", navElement.key.id, navElement.key.navTarget::class.java.simpleName)
                                 disposedNavKeys.add(navElement.key)
                             }
                         }

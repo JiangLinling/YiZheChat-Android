@@ -19,6 +19,7 @@ class FakeActiveCallManager(
     var registerIncomingCallResult: (CallNotificationData) -> Unit = {},
     var hangUpCallResult: (CallData, CallNotificationData?) -> Unit = { _, _ -> },
     var joinedCallResult: (CallData) -> Unit = {},
+    var mediaConnectedResult: suspend (CallData) -> Unit = {},
 ) : ActiveCallManager {
     override val activeCall = MutableStateFlow<ActiveCall?>(null)
 
@@ -30,8 +31,22 @@ class FakeActiveCallManager(
         hangUpCallResult(callData, notificationData)
     }
 
+    override suspend fun prepareHangUpCall(
+        callData: CallData,
+        notificationData: CallNotificationData?,
+    ): suspend () -> Unit = {
+        simulateLongTask { hangUpCallResult(callData, notificationData) }
+    }
+
     override suspend fun joinedCall(callData: CallData) = simulateLongTask {
         joinedCallResult(callData)
+    }
+
+    override suspend fun validateIncomingCall(callData: CallData, invitationRoom: io.element.android.libraries.matrix.api.room.JoinedRoom?) = Unit
+    override suspend fun bindOutgoingInvitation(callData: CallData, eventId: io.element.android.libraries.matrix.api.core.EventId) = Unit
+
+    override suspend fun mediaConnected(callData: CallData) {
+        mediaConnectedResult(callData)
     }
 
     fun setActiveCall(value: ActiveCall?) {

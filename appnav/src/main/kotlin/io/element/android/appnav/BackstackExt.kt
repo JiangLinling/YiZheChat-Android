@@ -9,17 +9,19 @@
 package io.element.android.appnav
 
 import com.bumble.appyx.navmodel.backstack.BackStack
+import com.bumble.appyx.navmodel.backstack.activeElement
 import com.bumble.appyx.navmodel.backstack.operation.NewRoot
 import com.bumble.appyx.navmodel.backstack.operation.Remove
 
 /**
- * Don't process NewRoot if the nav target already exists in the stack.
+ * Don't process [NewRoot] if the requested nav target is already active.
+ *
+ * A target that only exists underneath the active element must still become the new root. Otherwise
+ * a completed child flow can remain visible until process recreation even though the parent state
+ * already requested navigation back to its root.
  */
 fun <T : Any> BackStack<T>.safeRoot(element: T) {
-    val containsRoot = elements.value.any {
-        it.key.navTarget == element
-    }
-    if (containsRoot) return
+    if (activeElement == element) return
     accept(NewRoot(element))
 }
 

@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.text.HtmlCompat
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
@@ -45,7 +46,20 @@ internal fun TextFormatting(
 
     fun onInlineFormatClick(inlineFormat: InlineFormat) {
         coroutineScope.launch {
+            val selection = state.selection
+            val shouldFormatWholeDraft = selection.first == selection.second && state.messageHtml.isNotBlank()
+            val caret = if (shouldFormatWholeDraft) {
+                HtmlCompat.fromHtml(state.messageHtml, HtmlCompat.FROM_HTML_MODE_LEGACY).length
+            } else {
+                null
+            }
+            if (caret != null && caret > 0) {
+                state.setSelection(0, caret)
+            }
             state.toggleInlineFormat(inlineFormat)
+            if (caret != null && caret > 0) {
+                state.setSelection(caret, caret)
+            }
         }
     }
 

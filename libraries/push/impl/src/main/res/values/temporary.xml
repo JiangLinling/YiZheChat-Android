@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_foreground_history_channel">In-app notification history</string>
+    <string name="notification_foreground_close">Close</string>
+    <string name="notification_foreground_send">Send</string>
+    <string name="notification_foreground_incoming_call">Incoming call</string>
+    <string name="notification_foreground_action_unavailable">This notification is no longer available. Open the conversation to continue.</string>
+    <string name="a11y_notification_open_chat_window">Open chat window</string>
+    <string name="notification_floating_history_channel">Floating message history</string>
+</resources>

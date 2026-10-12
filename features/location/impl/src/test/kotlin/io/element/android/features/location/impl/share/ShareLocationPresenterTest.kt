@@ -29,6 +29,7 @@ import io.element.android.features.location.impl.common.ui.LocationConstraintsDi
 import io.element.android.features.location.impl.live.LiveLocationStore
 import io.element.android.features.location.test.FakeActiveLiveLocationShareManager
 import io.element.android.features.messages.test.FakeMessageComposerContext
+import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.dateformatter.test.FakeDurationFormatter
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
@@ -50,6 +51,8 @@ import io.element.android.libraries.matrix.test.room.powerlevels.FakeRoomPermiss
 import io.element.android.libraries.matrix.test.timeline.FakeTimeline
 import io.element.android.libraries.preferences.api.store.PreferenceDataStoreFactory
 import io.element.android.libraries.preferences.test.FakePreferenceDataStoreFactory
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.services.analytics.test.FakeAnalyticsService
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.lambda.assert
@@ -86,14 +89,17 @@ class ShareLocationPresenterTest {
     private fun TestScope.createShareLocationPresenter(
         joinedRoom: JoinedRoom = FakeJoinedRoom(),
         timelineMode: Timeline.Mode = Timeline.Mode.Live,
+        burnAfterRead: Boolean = false,
         locationActions: FakeLocationActions = fakeLocationActions,
         liveLocationShareManager: FakeActiveLiveLocationShareManager = FakeActiveLiveLocationShareManager(),
         liveLocationStore: LiveLocationStore = createLiveLocationStore(sessionId = joinedRoom.sessionId),
         client: FakeMatrixClient = fakeMatrixClient,
+        operationalStateCoordinator: FakeAppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
     ): ShareLocationPresenter = ShareLocationPresenter(
         permissionsPresenterFactory = { fakePermissionsPresenter },
         room = joinedRoom,
         timelineMode = timelineMode,
+        burnAfterRead = burnAfterRead,
         analyticsService = fakeAnalyticsService,
         messageComposerContext = fakeMessageComposerContext,
         locationActions = locationActions,
@@ -102,6 +108,10 @@ class ShareLocationPresenterTest {
         durationFormatter = durationFormatter,
         liveLocationShareManager = liveLocationShareManager,
         liveLocationStore = liveLocationStore,
+        appOperationalStateCoordinator = operationalStateCoordinator,
+        mapProviderConfigurationService = object : io.element.android.security.dataprotection.api.MapProviderConfigurationService {
+            override suspend fun fetch() = Result.success(io.element.android.security.dataprotection.api.MapProviderConfiguration())
+        },
     )
 
     @Test
@@ -303,7 +313,8 @@ class ShareLocationPresenterTest {
             val settingsOpenedState = awaitItem()
 
             assertThat(settingsOpenedState.dialogState).isEqualTo(ShareLocationState.Dialog.None)
-            assertThat(fakeLocationActions.openSettingsInvocationsCount).isEqualTo(1)
+            assertThat(fakePermissionsPresenter.events.last()).isEqualTo(PermissionsEvents.OpenAppSettings)
+            assertThat(fakeLocationActions.openSettingsInvocationsCount).isEqualTo(0)
         }
     }
 
@@ -529,7 +540,7 @@ class ShareLocationPresenterTest {
 
     @Test
     fun `ShareStaticLocation sends user location`() = runTest {
-        val sendLocationResult = lambdaRecorder { _: String, _: String, _: String?, _: Int?, _: AssetType?, _: EventId? ->
+        val sendLocationResult = lambdaRecorder { _: String, _: String, _: String?, _: Int?, _: AssetType?, _: EventId?, _: Boolean ->
             Result.success(Unit)
         }
         val joinedRoom = FakeJoinedRoom(
@@ -565,6 +576,7 @@ class ShareLocationPresenterTest {
                     value(15),
                     value(AssetType.SENDER),
                     value(null),
+                    value(false),
                 )
 
             assertThat(fakeAnalyticsService.capturedEvents.size).isEqualTo(1)
@@ -582,7 +594,7 @@ class ShareLocationPresenterTest {
 
     @Test
     fun `ShareStaticLocation sends pinned location`() = runTest {
-        val sendLocationResult = lambdaRecorder { _: String, _: String, _: String?, _: Int?, _: AssetType?, _: EventId? ->
+        val sendLocationResult = lambdaRecorder { _: String, _: String, _: String?, _: Int?, _: AssetType?, _: EventId?, _: Boolean ->
             Result.success(Unit)
         }
         val joinedRoom = FakeJoinedRoom(
@@ -617,6 +629,7 @@ class ShareLocationPresenterTest {
                     value(15),
                     value(AssetType.PIN),
                     value(null),
+                    value(false),
                 )
 
             assertThat(fakeAnalyticsService.capturedEvents.size).isEqualTo(1)
@@ -628,6 +641,88 @@ class ShareLocationPresenterTest {
                     messageType = Composer.MessageType.LocationPin,
                 )
             )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `burn after read sends a one-time static location and disables live sharing`() = runTest {
+        val sendLocationResult = lambdaRecorder { _: String, _: String, _: String?, _: Int?, _: AssetType?, _: EventId?, _: Boolean ->
+            Result.success(Unit)
+        }
+        val joinedRoom = FakeJoinedRoom(
+            liveTimeline = FakeTimeline().apply {
+                sendLocationLambda = sendLocationResult
+            },
+        )
+        val presenter = createShareLocationPresenter(joinedRoom, burnAfterRead = true)
+        fakePermissionsPresenter.givenState(
+            aPermissionsState(
+                permissions = PermissionsState.Permissions.AllGranted,
+                shouldShowRationale = false,
+            )
+        )
+
+        presenter.test {
+            val initialState = awaitFirstItem()
+            assertThat(initialState.canShareLiveLocation).isFalse()
+            initialState.eventSink(
+                ShareLocationEvent.ShareStaticLocation(
+                    location = Location(lat = 3.0, lon = 4.0, accuracy = 5.0f),
+                    isPinned = false,
+                )
+            )
+            advanceUntilIdle()
+
+            sendLocationResult.assertions().isCalledOnce().with(
+                value("Location was shared at geo:3.0,4.0;u=5.0"),
+                value("geo:3.0,4.0;u=5.0"),
+                value(null),
+                value(15),
+                value(AssetType.SENDER),
+                value(null),
+                value(true),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `ShareStaticLocation exposes send failure and does not capture analytics`() = runTest {
+        val failure = IllegalStateException("send failed")
+        val joinedRoom = FakeJoinedRoom(
+            liveTimeline = FakeTimeline().apply {
+                sendLocationLambda = { _, _, _, _, _, _, _ -> Result.failure(failure) }
+            },
+        )
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val shareLocationPresenter = createShareLocationPresenter(joinedRoom, operationalStateCoordinator = coordinator)
+        fakePermissionsPresenter.givenState(
+            aPermissionsState(
+                permissions = PermissionsState.Permissions.AllGranted,
+                shouldShowRationale = false,
+            )
+        )
+
+        shareLocationPresenter.test {
+            val initialState = awaitFirstItem()
+
+            initialState.eventSink(
+                ShareLocationEvent.ShareStaticLocation(
+                    location = Location(lat = 1.0, lon = 2.0),
+                    isPinned = true,
+                )
+            )
+
+            assertThat(awaitItem().shareStaticLocationAction).isInstanceOf(AsyncAction.Loading::class.java)
+            val failedState = awaitItem()
+            val exposedFailure = failedState.shareStaticLocationAction as AsyncAction.Failure
+            assertThat(exposedFailure.error).isInstanceOf(IllegalStateException::class.java)
+            assertThat(exposedFailure.error).hasMessageThat().isEqualTo("send failed")
+            assertThat(coordinator.startedRequests).hasSize(1)
+            assertThat(coordinator.startedRequests.single().lifecycleId).isEqualTo(FullAppLifecycleId.LC_17)
+            assertThat(coordinator.clientReceipts).isEmpty()
+            assertThat(fakeAnalyticsService.capturedEvents).isEmpty()
             cancelAndIgnoreRemainingEvents()
         }
     }

@@ -21,6 +21,7 @@ import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.di.annotations.ApplicationContext
+import io.element.android.security.dataprotection.api.DataProtectionPolicyProvider
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
@@ -36,12 +37,14 @@ interface FileSave {
 class DefaultFileSave(
     @ApplicationContext private val context: Context,
     private val dispatchers: CoroutineDispatchers,
+    private val policyProvider: DataProtectionPolicyProvider,
 ) : FileSave {
     override suspend fun save(
         path: String,
     ) {
         withContext(dispatchers.io) {
             runCatchingExceptions {
+                check(policyProvider.current().policy.allowContentExport) { "File export is disabled by policy." }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     saveOnDiskUsingMediaStore(path)
                 } else {

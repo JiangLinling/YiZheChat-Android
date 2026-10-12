@@ -17,13 +17,22 @@ import io.element.android.features.messages.impl.typing.TypingNotificationState
 import io.element.android.features.roomcall.api.RoomCallState
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.UniqueId
+import io.element.android.libraries.matrix.api.encryption.HistoryRecoveryStatus
 import io.element.android.libraries.matrix.api.room.tombstone.PredecessorRoom
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableSet
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentSetOf
 import kotlin.time.Duration
 
 data class TimelineState(
     val timelineItems: ImmutableList<TimelineItem>,
+    /**
+     * Sender-only fast-path presentation while the authoritative timeline row is still being built.
+     * These entries never participate in timeline ordering, pagination, receipts, or lifecycle state.
+     */
+    val pendingMediaSendPresentations: ImmutableList<PendingMediaSendPresentation> = persistentListOf(),
     val timelineRoomInfo: TimelineRoomInfo,
     val timelineMode: Timeline.Mode,
     val renderReadReceipts: Boolean,
@@ -32,18 +41,48 @@ data class TimelineState(
     val focusRequestState: FocusRequestState,
     // If not null, info will be rendered in a dialog
     val messageShieldDialogData: MessageShieldData?,
+    val activeBurnAfterReadEventId: EventId?,
+    /** Non-null only while online lifecycle/KMS authorization is in progress. */
+    val openingBurnAfterReadEventId: EventId? = null,
+    /** Non-null after a fail-closed open; plaintext was not made active. */
+    val burnAfterReadOpenRejectedEventId: EventId? = null,
+    /** Authorized burn-after-read content kept outside the ordinary timeline projection. */
+    val activeBurnAfterReadPreview: TimelineItem.Event? = null,
+    /** Items retained only long enough to render a terminal destruction transition. */
+    val retainedBurnAfterReadEventIds: ImmutableSet<EventId> = persistentSetOf(),
+    /** Subset of retained items whose terminal destruction animation is currently running. */
+    val destroyingBurnAfterReadEventIds: ImmutableSet<EventId> = persistentSetOf(),
+    /** Ordinary messages retained while a local delete or Matrix redaction is committed. */
+    val retainedMessageRemovalEventIds: ImmutableSet<EventId> = persistentSetOf(),
+    /** Retained messages whose destructive operation is still in flight. */
+    val pendingMessageRemovalEventIds: ImmutableSet<EventId> = persistentSetOf(),
+    /** Retained messages currently playing the terminal destruction transition. */
+    val destroyingMessageRemovalEventIds: ImmutableSet<EventId> = persistentSetOf(),
     val resolveVerifiedUserSendFailureState: ResolveVerifiedUserSendFailureState,
     val displayThreadSummaries: Boolean,
+    /** Aggregate room-level explanation for history that is intentionally absent from the item list. */
+    val historyRecoveryStatus: HistoryRecoveryStatus = HistoryRecoveryStatus.IDLE,
+    val hiddenHistoryCandidateCount: Int = 0,
+    val previousViewedEventId: EventId? = null,
+    val newMessageNavigation: io.element.android.features.messages.api.RoomReadingNavigation =
+        io.element.android.features.messages.api.RoomReadingNavigation(),
+    val navigatingToFirstNewMessage: Boolean = false,
+    val newMessageDividerEventId: EventId? = null,
     val eventSink: (TimelineEvent) -> Unit,
 ) {
-    private val lastTimelineEvent = timelineItems.firstOrNull { it is TimelineItem.Event } as? TimelineItem.Event
+    private val lastTimelineEvent = timelineItems.firstNotNullOfOrNull { it.events().firstOrNull() }
     val hasAnyEvent = lastTimelineEvent != null
     val focusedEventId = focusRequestState.eventId()
 
     fun isLastOutgoingMessage(uniqueId: UniqueId): Boolean {
-        return isLive && lastTimelineEvent != null && lastTimelineEvent.isMine && lastTimelineEvent.id == uniqueId
+        return isLive && lastTimelineEvent != null && lastTimelineEvent.isMine && lastTimelineEvent.identifier() == uniqueId
     }
 }
+
+@Immutable
+data class PendingMediaSendPresentation(
+    val displayId: UniqueId,
+)
 
 @Immutable
 sealed interface FocusRequestState {

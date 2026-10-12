@@ -15,6 +15,7 @@ import com.google.common.truth.Truth.assertThat
 import io.element.android.appconfig.VoiceMessageConfig
 import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.voicerecorder.api.VoiceRecorderState
+import io.element.android.libraries.voicerecorder.api.VoiceRecorderStopReason
 import io.element.android.libraries.voicerecorder.impl.audio.Audio
 import io.element.android.libraries.voicerecorder.impl.audio.AudioConfig
 import io.element.android.libraries.voicerecorder.impl.audio.SampleRate
@@ -75,12 +76,14 @@ class DefaultVoiceRecorderTest {
             assertThat(awaitItem()).isEqualTo(VoiceRecorderState.Recording(VoiceMessageConfig.maxVoiceMessageDuration, listOf()))
             timeSource += 1.milliseconds
 
+            skipItems(1) // Finalizing
             assertThat(awaitItem()).isEqualTo(
                 VoiceRecorderState.Finished(
                     file = File(FILE_PATH),
                     mimeType = MimeTypes.Ogg,
                     waveform = List(100) { 1f },
                     duration = VoiceMessageConfig.maxVoiceMessageDuration,
+                    stopReason = VoiceRecorderStopReason.MAX_DURATION,
                 )
             )
         }
@@ -97,6 +100,7 @@ class DefaultVoiceRecorderTest {
             timeSource += 5.seconds
             skipItems(2)
             voiceRecorder.stopRecord()
+            skipItems(1) // Finalizing
             assertThat(awaitItem()).isEqualTo(
                 VoiceRecorderState.Finished(
                     file = File(FILE_PATH),
@@ -119,6 +123,24 @@ class DefaultVoiceRecorderTest {
             skipItems(3)
             voiceRecorder.stopRecord(cancelled = true)
             assertThat(awaitItem()).isEqualTo(VoiceRecorderState.Idle)
+            assertThat(fakeFileSystem.files[File(FILE_PATH)]).isNull()
+        }
+    }
+
+    @Test
+    fun `when shorter than minimum duration, it deletes scratch and reports too short`() = runTest {
+        val voiceRecorder = createDefaultVoiceRecorder()
+        voiceRecorder.state.test {
+            assertThat(awaitItem()).isEqualTo(VoiceRecorderState.Idle)
+            voiceRecorder.startRecord()
+            skipItems(3)
+
+            voiceRecorder.stopRecord()
+
+            skipItems(2) // Finalizing, then Idle while the controlled scratch file is deleted.
+            assertThat(awaitItem()).isEqualTo(
+                VoiceRecorderState.Failed(io.element.android.libraries.voicerecorder.api.VoiceRecorderFailure.TOO_SHORT)
+            )
             assertThat(fakeFileSystem.files[File(FILE_PATH)]).isNull()
         }
     }

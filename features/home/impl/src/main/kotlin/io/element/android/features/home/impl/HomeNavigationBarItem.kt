@@ -19,8 +19,11 @@ enum class HomeNavigationBarItem(
     Chats(
         labelRes = R.string.screen_home_tab_chats
     ),
-    Spaces(
-        labelRes = R.string.screen_home_tab_spaces
+    Contacts(
+        labelRes = R.string.screen_home_tab_contacts
+    ),
+    Me(
+        labelRes = R.string.screen_home_tab_me
     );
 
     @Composable
@@ -28,7 +31,8 @@ enum class HomeNavigationBarItem(
         isSelected: Boolean,
     ) = when (this) {
         Chats -> if (isSelected) CompoundIcons.ChatSolid() else CompoundIcons.Chat()
-        Spaces -> if (isSelected) CompoundIcons.SpaceSolid() else CompoundIcons.Space()
+        Contacts -> if (isSelected) CompoundIcons.UserProfileSolid() else CompoundIcons.UserProfile()
+        Me -> if (isSelected) CompoundIcons.UserSolid() else CompoundIcons.User()
     }
 
     companion object {

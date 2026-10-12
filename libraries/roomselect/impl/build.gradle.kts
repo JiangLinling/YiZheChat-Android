@@ -27,6 +27,7 @@ android {
 setupDependencyInjection()
 
 dependencies {
+    implementation(projects.features.userprofile.api)
     implementation(projects.libraries.core)
     implementation(projects.libraries.androidutils)
     implementation(projects.libraries.architecture)
@@ -37,5 +38,6 @@ dependencies {
     api(projects.libraries.roomselect.api)
 
     testCommonDependencies(libs, includeTestComposeView = true)
+    testImplementation(projects.features.userprofile.test)
     testImplementation(projects.libraries.matrix.test)
 }

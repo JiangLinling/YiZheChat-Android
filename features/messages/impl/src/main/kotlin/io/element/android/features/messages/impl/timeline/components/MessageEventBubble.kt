@@ -32,6 +32,7 @@ import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
+import io.element.android.features.messages.impl.timeline.LocalTimelineIsTalkbackActive
 import io.element.android.features.messages.impl.timeline.model.TimelineItemGroupPosition
 import io.element.android.features.messages.impl.timeline.model.bubble.BubbleState
 import io.element.android.features.messages.impl.timeline.model.bubble.BubbleStateProvider
@@ -47,25 +48,24 @@ import io.element.android.libraries.designsystem.theme.messageFromMeBackground
 import io.element.android.libraries.designsystem.theme.messageFromOtherBackground
 import io.element.android.libraries.testtags.TestTags
 import io.element.android.libraries.testtags.testTag
-import io.element.android.libraries.ui.utils.a11y.isTalkbackActive
 import io.element.android.libraries.ui.utils.graphics.drawInLayer
 
 private val BUBBLE_RADIUS = 12.dp
 private val avatarRadius = AvatarSize.TimelineSender.dp / 2
 
-private val MIN_BUBBLE_WIDTH = 80.dp
-
 @Composable
 fun MessageEventBubble(
     state: BubbleState,
-    interactionSource: MutableInteractionSource,
+    interactionSource: MutableInteractionSource?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    drawBackground: Boolean = true,
     modifier: Modifier = Modifier,
+    contentHandlesGestures: Boolean = false,
     content: @Composable BoxScope.() -> Unit = {},
 ) {
-    val clickableModifier = if (isTalkbackActive()) {
-        Modifier
+    val clickableModifier = if (LocalTimelineIsTalkbackActive.current || contentHandlesGestures) {
+        Modifier.onKeyboardContextMenuAction(onLongClick)
     } else {
         Modifier
             .combinedClickable(
@@ -88,23 +88,17 @@ fun MessageEventBubble(
             .drawWithCache {
                 // Calculate the outline of the background and cache it
                 val outline = bubbleShape.createOutline(size, layoutDirection, this)
-
                 onDrawWithContent {
-                    // Draw the contents in a layer to be able to clip them with the same outline
-                    // For some reason, doing this clipping outside a layer messes up with the touch events
                     drawInLayer(
-                        composingStrategy = CompositingStrategy.Offscreen,
+                        composingStrategy = if (cutTopStart) CompositingStrategy.Offscreen else CompositingStrategy.Auto,
                         outline = outline,
                         clip = true,
                     ) {
-                        // Draw the background first, so that it's behind the content
-                        drawRect(backgroundBubbleColor)
-
-                        // Then draw the content on top of it
+                        if (drawBackground) {
+                            drawRect(backgroundBubbleColor)
+                        }
                         drawContent()
-
-                        // And then clip the top start corner if needed to make room for the avatar
-                        if (cutTopStart) {
+                        if (drawBackground && cutTopStart) {
                             drawCircle(
                                 color = Color.Black,
                                 center = Offset(
@@ -126,7 +120,6 @@ fun MessageEventBubble(
             modifier = Modifier
                 .testTag(TestTags.messageBubble)
                 .widthIn(
-                    min = MIN_BUBBLE_WIDTH,
                     max = (constraints.maxWidth * MessageEventBubbleDefaults.BUBBLE_WIDTH_RATIO)
                         .toInt()
                         .toDp()
@@ -191,7 +184,7 @@ internal fun MessageEventBubblePreview(@PreviewParameter(BubbleStateProvider::cl
     ) {
         MessageEventBubble(
             state = state,
-            interactionSource = remember { MutableInteractionSource() },
+            interactionSource = null,
             onClick = {},
             onLongClick = {},
         ) {

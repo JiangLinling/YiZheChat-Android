@@ -10,6 +10,8 @@ package io.element.android.features.userprofile.shared
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,6 +26,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
@@ -56,7 +59,9 @@ fun UserProfileHeaderSection(
     openAvatarPreview: (url: String) -> Unit,
     onUserIdClick: () -> Unit,
     withdrawVerificationClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    remarkName: String? = null,
 ) {
     Column(
         modifier = modifier
@@ -64,41 +69,75 @@ fun UserProfileHeaderSection(
             .padding(horizontal = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Avatar(
-            avatarData = AvatarData(userId.value, userName, avatarUrl, AvatarSize.UserHeader),
-            avatarType = AvatarType.User,
-            contentDescription = stringResource(CommonStrings.a11y_user_avatar),
-            modifier = Modifier
-                .clip(CircleShape)
-                .clickable(
-                    enabled = avatarUrl != null,
-                    onClickLabel = stringResource(CommonStrings.action_view),
-                ) {
-                    openAvatarPreview(avatarUrl!!)
+        if (compact) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.Top) {
+                Avatar(
+                    avatarData = AvatarData(userId.value, userName, avatarUrl, AvatarSize.DmCreationConfirmation),
+                    avatarType = AvatarType.User,
+                    contentDescription = stringResource(CommonStrings.a11y_user_avatar),
+                    modifier = Modifier.clip(CircleShape).clickable(
+                        enabled = avatarUrl != null,
+                        onClickLabel = stringResource(CommonStrings.action_view),
+                    ) { avatarUrl?.let(openAvatarPreview) }.testTag(TestTags.memberDetailAvatar),
+                )
+                Spacer(Modifier.width(20.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = remarkName?.takeIf { it.isNotBlank() } ?: userName ?: userId.value,
+                        style = ElementTheme.typography.fontHeadingSmMedium,
+                        modifier = Modifier.semantics { heading() },
+                    )
+                    if (!remarkName.isNullOrBlank() && userName != null && remarkName != userName) {
+                        Text(userName, style = ElementTheme.typography.fontBodyMdRegular, color = ElementTheme.colors.textSecondary)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = userId.value.substringBefore(':').removePrefix("@"),
+                        style = ElementTheme.typography.fontBodySmRegular,
+                        color = ElementTheme.colors.textSecondary,
+                        modifier = Modifier.niceClickable { onUserIdClick() },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                .testTag(TestTags.memberDetailAvatar)
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        if (userName != null) {
-            Text(
+            }
+        } else {
+            Avatar(
+                avatarData = AvatarData(userId.value, userName, avatarUrl, AvatarSize.UserHeader),
+                avatarType = AvatarType.User,
+                contentDescription = stringResource(CommonStrings.a11y_user_avatar),
                 modifier = Modifier
-                    .clipToBounds()
-                    .semantics {
-                        heading()
-                    },
-                text = userName,
-                style = ElementTheme.typography.fontHeadingLgBold,
+                    .clip(CircleShape)
+                    .clickable(
+                        enabled = avatarUrl != null,
+                        onClickLabel = stringResource(CommonStrings.action_view),
+                    ) {
+                        openAvatarPreview(avatarUrl!!)
+                    }
+                    .testTag(TestTags.memberDetailAvatar)
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            if (userName != null) {
+                Text(
+                    modifier = Modifier
+                        .clipToBounds()
+                        .semantics {
+                            heading()
+                        },
+                    text = userName,
+                    style = ElementTheme.typography.fontHeadingLgBold,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+            Text(
+                modifier = Modifier.niceClickable { onUserIdClick() },
+                text = userId.value,
+                style = ElementTheme.typography.fontBodyLgRegular,
+                color = ElementTheme.colors.textSecondary,
                 textAlign = TextAlign.Center,
             )
-            Spacer(modifier = Modifier.height(6.dp))
         }
-        Text(
-            modifier = Modifier.niceClickable { onUserIdClick() },
-            text = userId.value,
-            style = ElementTheme.typography.fontBodyLgRegular,
-            color = ElementTheme.colors.textSecondary,
-            textAlign = TextAlign.Center,
-        )
         when (verificationState) {
             UserProfileVerificationState.UNKNOWN, UserProfileVerificationState.UNVERIFIED -> Unit
             UserProfileVerificationState.VERIFIED -> {
@@ -131,7 +170,7 @@ fun UserProfileHeaderSection(
                 )
             }
         }
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(if (compact) 16.dp else 40.dp))
     }
 }
 

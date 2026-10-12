@@ -18,4 +18,18 @@
   <string name="screen_bug_report_send_notification_settings_description">"如果你遭遇通知相关问题，上传通知设置可以帮助我们调查根本原因。请注意：这些规则可能包含私人信息，例如你的显示名称或用于接收通知的关键词。"</string>
   <string name="screen_bug_report_send_notification_settings_title">"发送通知设置"</string>
   <string name="screen_bug_report_view_logs">"查看日志"</string>
+  <string name="screen_bug_report_intro">"请说清楚发生了什么，也可以添加图片或录屏，方便我们快速复现。"</string>
+  <string name="screen_bug_report_attachments_title">"图片和录屏"</string>
+  <string name="screen_bug_report_add_media">"添加图片或录屏"</string>
+  <string name="screen_bug_report_attachments_hint">"已添加 %1$d/%2$d · 上传前自动压缩 · 合计不超过 20 MB"</string>
+  <string name="screen_bug_report_attachment_selection_trimmed">"已达到数量上限，只添加了剩余可用的附件。"</string>
+  <string name="screen_bug_report_attachment_compressing">"正在压缩…"</string>
+  <string name="screen_bug_report_attachment_unsupported">"不支持这种格式，请删除后继续。"</string>
+  <string name="screen_bug_report_attachment_compression_failed">"压缩失败，不会上传原文件，请删除后重试。"</string>
+  <string name="screen_bug_report_attachment_too_large">"压缩后仍超过 15 MB，请删除后继续。"</string>
+  <string name="screen_bug_report_attachments_total_too_large">"附件合计超过 20 MB，请删除部分附件。"</string>
+  <string name="screen_bug_report_remove_attachment">"删除附件"</string>
+  <string name="screen_bug_report_current_screenshot">"当前截图"</string>
+  <string name="screen_bug_report_include_title">"随反馈提交"</string>
+  <string name="screen_bug_report_privacy_notice">"诊断信息可能包含显示名称或消息片段，不想发送的内容可以关闭。图片和视频只会在本机压缩后上传。"</string>
 </resources>

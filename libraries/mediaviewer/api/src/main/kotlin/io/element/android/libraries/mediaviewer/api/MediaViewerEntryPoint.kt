@@ -31,6 +31,7 @@ interface MediaViewerEntryPoint : FeatureEntryPoint {
 
     interface Callback : Plugin {
         fun onDone()
+        fun onPlaybackEnded() = onDone()
         fun viewInTimeline(eventId: EventId)
         fun forwardEvent(eventId: EventId, fromPinnedEvents: Boolean)
     }
@@ -42,6 +43,7 @@ interface MediaViewerEntryPoint : FeatureEntryPoint {
         val mediaSource: MediaSource,
         val thumbnailSource: MediaSource?,
         val canShowInfo: Boolean,
+        val isOneTimeView: Boolean = false,
     ) : NodeInputs
 
     sealed interface MediaViewerMode : Parcelable {

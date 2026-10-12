@@ -11,13 +11,16 @@ package io.element.android.features.home.impl.components
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.Lifecycle
 import io.element.android.features.home.impl.R
 import io.element.android.libraries.designsystem.components.Announcement
 import io.element.android.libraries.designsystem.components.AnnouncementType
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
+import io.element.android.libraries.designsystem.utils.OnLifecycleEvent
 import io.element.android.libraries.fullscreenintent.api.FullScreenIntentPermissionsEvents
 import io.element.android.libraries.fullscreenintent.api.FullScreenIntentPermissionsState
+import io.element.android.libraries.fullscreenintent.api.MissingCallPermission
 import io.element.android.libraries.fullscreenintent.api.aFullScreenIntentPermissionsState
 import io.element.android.libraries.ui.strings.CommonStrings
 
@@ -26,9 +29,20 @@ fun FullScreenIntentPermissionBanner(
     state: FullScreenIntentPermissionsState,
     modifier: Modifier = Modifier
 ) {
+    OnLifecycleEvent { _, event ->
+        if (event == Lifecycle.Event.ON_RESUME) {
+            state.eventSink(FullScreenIntentPermissionsEvents.Refresh)
+        }
+    }
     Announcement(
-        title = stringResource(R.string.full_screen_intent_banner_title),
-        description = stringResource(R.string.full_screen_intent_banner_message),
+        title = when (state.missingPermission) {
+            MissingCallPermission.DoNotDisturbAccess -> stringResource(R.string.screen_home_call_dnd_access_banner_title)
+            else -> stringResource(R.string.full_screen_intent_banner_title)
+        },
+        description = when (state.missingPermission) {
+            MissingCallPermission.DoNotDisturbAccess -> stringResource(R.string.screen_home_call_dnd_access_banner_message)
+            else -> stringResource(R.string.full_screen_intent_banner_message)
+        },
         type = AnnouncementType.Actionable(
             actionText = stringResource(CommonStrings.action_continue),
             onDismissClick = { state.eventSink(FullScreenIntentPermissionsEvents.Dismiss) },
@@ -42,6 +56,12 @@ fun FullScreenIntentPermissionBanner(
 @Composable
 internal fun FullScreenIntentPermissionBannerPreview() {
     ElementPreview {
-        FullScreenIntentPermissionBanner(aFullScreenIntentPermissionsState())
+        FullScreenIntentPermissionBanner(
+            aFullScreenIntentPermissionsState(
+                permissionGranted = false,
+                missingPermission = MissingCallPermission.FullScreenIntent,
+                shouldDisplay = true,
+            )
+        )
     }
 }

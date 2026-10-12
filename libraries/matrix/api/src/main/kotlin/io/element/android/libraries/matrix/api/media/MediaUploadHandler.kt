@@ -12,9 +12,15 @@ package io.element.android.libraries.matrix.api.media
  * This is an abstraction over the Rust SDK's `SendAttachmentJoinHandle` which allows us to either [await] the upload process or [cancel] it.
  */
 interface MediaUploadHandler {
+    /** Existing encrypted aggregate identity, for local presentation correlation only. */
+    val protectedMediaTransportName: String? get() = null
+
     /** Await the upload process to finish. */
     suspend fun await(): Result<Unit>
 
     /** Cancel the upload process. */
     fun cancel()
+
+    /** Stop the exact owner and reconcile its outcome. A cancellation signal alone proves nothing. */
+    suspend fun cancelPending(): Result<MediaSendCancellationResult> = Result.success(MediaSendCancellationResult.Unknown)
 }

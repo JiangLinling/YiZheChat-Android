@@ -13,6 +13,8 @@ import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.push.impl.db.PushRequest
 import io.element.android.tests.testutils.lambda.lambdaError
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.time.Instant
 
 class FakePushHistoryService(
@@ -29,7 +31,14 @@ class FakePushHistoryService(
     private val replacePushRequests: (List<PushRequest>) -> Result<Unit> = { lambdaError() },
     private val getPendingPushRequests: (SessionId, Instant?) -> Result<List<PushRequest>> = { _, _ -> lambdaError() },
     private val removeOldPushRequests: (SessionId) -> Result<Unit> = { lambdaError() },
+    private val pendingRequests: Flow<List<PushRequest>> = MutableStateFlow(emptyList()),
 ) : PushHistoryService {
+    override fun observePendingPushRequests(sessionId: SessionId, since: Instant) = pendingRequests
+
+    override suspend fun enqueuePushRequest(pushRequest: PushRequest): Result<Unit> {
+        return enqueuePushRequest.invoke(pushRequest)
+    }
+
     override fun onPushResult(
         providerInfo: String,
         eventId: EventId?,

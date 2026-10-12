@@ -25,6 +25,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.Extras
@@ -35,10 +37,19 @@ import io.element.android.compound.theme.ElementTheme
 import io.element.android.features.location.api.internal.StaticMapPlaceholder
 import io.element.android.features.location.api.internal.StaticMapUrlBuilder
 import io.element.android.features.location.api.internal.centerBottomEdge
+import io.element.android.features.location.api.internal.rememberTileStyleUrl
 import io.element.android.libraries.designsystem.components.LocationPin
 import io.element.android.libraries.designsystem.components.PinVariant
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
+import org.maplibre.compose.camera.CameraPosition
+import org.maplibre.compose.camera.rememberCameraState
+import org.maplibre.compose.map.GestureOptions
+import org.maplibre.compose.map.MapOptions
+import org.maplibre.compose.map.MaplibreMap
+import org.maplibre.compose.map.RenderOptions
+import org.maplibre.compose.style.BaseStyle
+import org.maplibre.spatialk.geojson.Position
 
 /**
  * Shows a static map image downloaded via a third party service's static maps API.
@@ -128,6 +139,16 @@ private fun BoxWithConstraintsScope.LoadableMapContent(
     var retryHash by remember { mutableIntStateOf(0) }
     val builder = remember { StaticMapUrlBuilder() }
 
+    if (!builder.isServiceAvailable()) {
+        KeylessMapContent(
+            location = location,
+            zoom = zoom,
+            pinVariant = pinVariant,
+            contentDescription = contentDescription,
+        )
+        return
+    }
+
     val painter = rememberAsyncImagePainter(
         model = if (constraints.isZero) {
             // Avoid building a URL if any of the size constraints is zero
@@ -178,6 +199,56 @@ private fun BoxWithConstraintsScope.LoadableMapContent(
         }
     }
 }
+
+/**
+ * Renders a real map thumbnail when no static-map API key is configured.
+ *
+ * The full-screen location views already use this keyless OpenFreeMap/MapLibre path. Reusing it
+ * here prevents valid coordinates from being represented by the permanent blurred placeholder.
+ */
+@Composable
+private fun BoxWithConstraintsScope.KeylessMapContent(
+    location: Location,
+    zoom: Double,
+    pinVariant: PinVariant,
+    contentDescription: String?,
+) {
+    val mapWidth = maxWidth
+    val mapHeight = maxHeight
+    val cameraPosition = remember(location, zoom) {
+        CameraPosition(
+            target = Position(latitude = location.lat, longitude = location.lon),
+            zoom = zoom,
+        )
+    }
+    val cameraState = rememberCameraState(firstPosition = cameraPosition)
+    val styleUrl = rememberTileStyleUrl(customMapStyleUrl = null)
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.semantics(mergeDescendants = true) {
+            contentDescription?.let { this.contentDescription = it }
+        },
+    ) {
+        MaplibreMap(
+            // SurfaceView synchronously waits for its render thread during keyboard/list resize.
+            // A timeline thumbnail must compose and scroll with the message, without owning gestures.
+            options = timelineMapOptions,
+            baseStyle = BaseStyle.Uri(styleUrl),
+            cameraState = cameraState,
+            modifier = Modifier.size(width = mapWidth, height = mapHeight),
+        )
+        LocationPin(
+            variant = pinVariant,
+            modifier = Modifier.centerBottomEdge(this@KeylessMapContent),
+        )
+    }
+}
+
+internal val timelineMapOptions = MapOptions(
+    renderOptions = RenderOptions.Standard.copy(renderMode = RenderOptions.RenderMode.TextureView),
+    gestureOptions = GestureOptions.AllDisabled,
+)
 
 @PreviewsDayNight
 @Composable

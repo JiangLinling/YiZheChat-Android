@@ -10,10 +10,15 @@ package io.element.android.features.location.api
 
 import com.bumble.appyx.core.modality.BuildContext
 import com.bumble.appyx.core.node.Node
+import com.bumble.appyx.core.plugin.Plugin
 import io.element.android.libraries.architecture.FeatureEntryPoint
 import io.element.android.libraries.architecture.NodeInputs
 
 interface ShowLocationEntryPoint : FeatureEntryPoint {
+    fun interface Callback : Plugin {
+        fun onDone()
+    }
+
     data class Inputs(
         val mode: ShowLocationMode,
     ) : NodeInputs
@@ -22,5 +27,6 @@ interface ShowLocationEntryPoint : FeatureEntryPoint {
         parentNode: Node,
         buildContext: BuildContext,
         inputs: Inputs,
+        callback: Callback = Callback {},
     ): Node
 }

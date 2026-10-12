@@ -45,6 +45,17 @@ class DefaultPreferencesEntryPoint : PreferencesEntryPoint {
 internal fun PreferencesEntryPoint.InitialTarget.toNavTarget() = when (this) {
     is PreferencesEntryPoint.InitialTarget.Root -> PreferencesFlowNode.NavTarget.Root
     is PreferencesEntryPoint.InitialTarget.NotificationSettings -> PreferencesFlowNode.NavTarget.NotificationSettings
+    PreferencesEntryPoint.InitialTarget.ChatSecurity -> PreferencesFlowNode.NavTarget.ChatSecurity
     PreferencesEntryPoint.InitialTarget.NotificationTroubleshoot -> PreferencesFlowNode.NavTarget.TroubleshootNotifications
     PreferencesEntryPoint.InitialTarget.DeveloperSettings -> PreferencesFlowNode.NavTarget.DeveloperSettings
+    PreferencesEntryPoint.InitialTarget.AdvancedSettings -> PreferencesFlowNode.NavTarget.AdvancedSettings
+    PreferencesEntryPoint.InitialTarget.Labs -> PreferencesFlowNode.NavTarget.Labs
+    PreferencesEntryPoint.InitialTarget.AnalyticsSettings -> PreferencesFlowNode.NavTarget.AnalyticsSettings
+    PreferencesEntryPoint.InitialTarget.About -> PreferencesFlowNode.NavTarget.About
+    PreferencesEntryPoint.InitialTarget.LockScreenSettings -> PreferencesFlowNode.NavTarget.LockScreenSettings
+    is PreferencesEntryPoint.InitialTarget.UserProfile -> PreferencesFlowNode.NavTarget.UserProfile(matrixUser)
+    PreferencesEntryPoint.InitialTarget.BlockedUsers -> PreferencesFlowNode.NavTarget.BlockedUsers
+    PreferencesEntryPoint.InitialTarget.MessageFavourites -> PreferencesFlowNode.NavTarget.MessageFavourites
+    PreferencesEntryPoint.InitialTarget.SignOut -> PreferencesFlowNode.NavTarget.SignOut
+    PreferencesEntryPoint.InitialTarget.AccountDeactivation -> PreferencesFlowNode.NavTarget.AccountDeactivation
 }

@@ -40,6 +40,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(projects.services.apperror.api)
     implementation(projects.libraries.featureflag.api)
+    implementation(projects.security.dataProtection.api)
     api(projects.features.invitepeople.api)
 
     testCommonDependencies(libs, true)
@@ -47,4 +48,5 @@ dependencies {
     testImplementation(projects.libraries.usersearch.test)
     testImplementation(projects.services.apperror.test)
     testImplementation(projects.libraries.featureflag.test)
+    testImplementation(projects.security.dataProtection.test)
 }

@@ -10,6 +10,7 @@ package io.element.android.libraries.push.impl.test
 
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
+import io.element.android.appconfig.NextDeploymentConfig
 import io.element.android.appconfig.PushConfig
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
@@ -27,7 +28,7 @@ class DefaultTestPush(
     override suspend fun execute(config: Config) {
         pushGatewayNotifyRequest.execute(
             PushGatewayNotifyRequest.Params(
-                url = config.url,
+                url = NextDeploymentConfig.clientReachablePushGatewayUrl(config.url),
                 appId = PushConfig.PUSHER_APP_ID,
                 pushKey = config.pushKey,
                 eventId = TEST_EVENT_ID,

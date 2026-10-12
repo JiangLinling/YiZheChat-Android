@@ -30,6 +30,7 @@ import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.v2.runAndroidComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.common.truth.Truth.assertThat
 import io.element.android.emojibasebindings.Emoji
 import io.element.android.emojibasebindings.EmojibaseCategory
 import io.element.android.emojibasebindings.EmojibaseStore
@@ -55,15 +56,22 @@ import io.element.android.features.messages.impl.timeline.components.reactionsum
 import io.element.android.features.messages.impl.timeline.components.receipt.aReadReceiptData
 import io.element.android.features.messages.impl.timeline.components.receipt.bottomsheet.ReadReceiptBottomSheetEvent
 import io.element.android.features.messages.impl.timeline.model.TimelineItem
+import io.element.android.features.messages.impl.timeline.model.event.RtcNotificationState
+import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRtcNotificationContent
 import io.element.android.features.messages.impl.timeline.model.event.aTimelineItemTextContent
 import io.element.android.features.roomcall.api.aStandByCallState
+import io.element.android.libraries.matrix.api.core.DeviceId
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.UserId
+import io.element.android.libraries.matrix.api.encryption.HistoryRecoveryStatus
+import io.element.android.libraries.matrix.api.notification.CallIntent
 import io.element.android.libraries.matrix.api.room.tombstone.SuccessorRoom
+import io.element.android.libraries.matrix.api.timeline.item.event.LocalEventSendState
 import io.element.android.libraries.matrix.api.timeline.item.event.getAvatarUrl
 import io.element.android.libraries.matrix.api.timeline.item.event.getDisplayName
 import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.test.AN_EVENT_ID
+import io.element.android.libraries.matrix.test.A_USER_ID
 import io.element.android.libraries.testtags.TestTags
 import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.tests.testutils.EnsureCalledOnceWithTwoParamsAndResult
@@ -88,6 +96,39 @@ import kotlin.time.Duration.Companion.milliseconds
 
 @RunWith(AndroidJUnit4::class)
 class MessagesViewTest {
+    @Test
+    fun `room history banner is reserved for stable actionable states`() {
+        assertThat(HistoryRecoveryStatus.AUTHORIZING_DEVICE.shouldShowRoomRecoveryBanner()).isFalse()
+        assertThat(HistoryRecoveryStatus.RETRYING.shouldShowRoomRecoveryBanner()).isFalse()
+        assertThat(HistoryRecoveryStatus.WAITING_FOR_NETWORK.shouldShowRoomRecoveryBanner()).isFalse()
+        assertThat(HistoryRecoveryStatus.STANDARD_AUTHORIZED.shouldShowRoomRecoveryBanner()).isFalse()
+        assertThat(HistoryRecoveryStatus.IDENTITY_RESET_UNRECOVERABLE.shouldShowRoomRecoveryBanner()).isFalse()
+        assertThat(HistoryRecoveryStatus.WAITING_FOR_OLD_DEVICE.shouldShowRoomRecoveryBanner()).isTrue()
+        assertThat(HistoryRecoveryStatus.WAITING_FOR_ADMIN_APPROVAL.shouldShowRoomRecoveryBanner()).isTrue()
+        assertThat(HistoryRecoveryStatus.FAILED_CLOSED.shouldShowRoomRecoveryBanner()).isTrue()
+        assertThat(shouldDisplayHistoryRecoveryBanner(HistoryRecoveryStatus.FAILED_CLOSED, acknowledged = false)).isTrue()
+        assertThat(shouldDisplayHistoryRecoveryBanner(HistoryRecoveryStatus.FAILED_CLOSED, acknowledged = true)).isFalse()
+    }
+
+    @Test
+    fun `confirmed event refreshes actions shown for its optimistic row`() {
+        val optimistic = aTimelineItemEvent(
+            isMine = true,
+            isEditable = false,
+            canBeRepliedTo = false,
+            sendState = LocalEventSendState.Sending.Event,
+        ).copy(eventId = null)
+        val confirmed = optimistic.copy(
+            eventId = AN_EVENT_ID,
+            isEditable = true,
+            canBeRepliedTo = true,
+            localSendState = null,
+        )
+
+        assertThat(confirmed.hasDifferentActionCapabilitiesFrom(optimistic)).isTrue()
+        assertThat(confirmed.hasDifferentActionCapabilitiesFrom(confirmed)).isFalse()
+    }
+
     @Test
     fun `clicking on back invoke expected callback`() = runAndroidComposeUiTest {
         val eventsRecorder = EventsRecorder<MessagesEvent>(expectEvents = false)
@@ -148,6 +189,69 @@ class MessagesViewTest {
             )
             val joinVoiceCallContentDescription = activity!!.getString(CommonStrings.a11y_start_voice_call)
             onNodeWithContentDescription(joinVoiceCallContentDescription).performClick()
+        }
+    }
+
+    @Test
+    fun `clicking call with unsigned device failure requires confirmation before retry event`() = runAndroidComposeUiTest {
+        val eventsRecorder = EventsRecorder<MessagesEvent>()
+        val failedEvent = aTimelineItemEvent(
+            isMine = true,
+            sendState = LocalEventSendState.Failed.VerifiedUserHasUnsignedDevice(
+                mapOf(A_USER_ID to listOf(DeviceId("NEW_DEVICE")))
+            ),
+        )
+        val state = aMessagesState(
+            timelineState = aTimelineState(timelineItems = persistentListOf(failedEvent)),
+            roomCallState = aStandByCallState(isDM = true),
+            eventSink = eventsRecorder,
+        )
+        setMessagesView(state = state)
+
+        onNodeWithContentDescription(activity!!.getString(CommonStrings.a11y_start_voice_call)).performClick()
+        onNodeWithText("Send anyway and call").performClick()
+
+        eventsRecorder.assertSingle(MessagesEvent.ResolveUnsignedDeviceAndStartCall(failedEvent, isAudioCall = true))
+    }
+
+    @Test
+    fun `clicking call with changed identity stays in stronger verification flow`() = runAndroidComposeUiTest {
+        val timelineEventsRecorder = EventsRecorder<TimelineEvent>()
+        val failedEvent = aTimelineItemEvent(
+            isMine = true,
+            sendState = LocalEventSendState.Failed.VerifiedUserChangedIdentity(listOf(A_USER_ID)),
+        )
+        val state = aMessagesState(
+            timelineState = aTimelineState(
+                timelineItems = persistentListOf(failedEvent),
+                eventSink = timelineEventsRecorder,
+            ),
+            roomCallState = aStandByCallState(isDM = true),
+        )
+        setMessagesView(state = state)
+        timelineEventsRecorder.clear()
+
+        onNodeWithContentDescription(activity!!.getString(CommonStrings.a11y_start_voice_call)).performClick()
+
+        timelineEventsRecorder.assertSingle(TimelineEvent.ComputeVerifiedUserSendFailure(failedEvent))
+    }
+
+    @Test
+    fun `clicking an audio call record starts another audio call`() = runAndroidComposeUiTest {
+        val callRecord = aTimelineItemEvent(
+            content = TimelineItemRtcNotificationContent(
+                callIntent = CallIntent.AUDIO,
+                state = RtcNotificationState.Started,
+            ),
+        )
+        val state = aMessagesState(
+            timelineState = aTimelineState(timelineItems = persistentListOf(callRecord)),
+            roomCallState = aStandByCallState(isDM = true),
+        )
+
+        ensureCalledOnceWithParam(true) { callback ->
+            setMessagesView(state = state, onJoinCallClick = callback)
+            onAllNodesWithTag(TestTags.messageBubble.value).onFirst().performClick()
         }
     }
 
@@ -224,12 +328,14 @@ class MessagesViewTest {
         )
         // Cannot perform click on "Text", it's not detected. Use tag instead
         onAllNodesWithTag(TestTags.messageBubble.value).onFirst().performTouchInput { longClick() }
-        eventsRecorder.assertSingle(
-            ActionListEvent.ComputeForMessage(
-                event = timelineItem,
-                userEventPermissions = state.userEventPermissions,
-            )
-        )
+        eventsRecorder.assertSize(1)
+        eventsRecorder.assertTrue(0) { event ->
+            event is ActionListEvent.ComputeForMessage &&
+                event.event == timelineItem &&
+                event.userEventPermissions == state.userEventPermissions &&
+                event.anchorBounds.width > 0 &&
+                event.anchorBounds.height > 0
+        }
     }
 
     @Test
@@ -241,6 +347,7 @@ class MessagesViewTest {
                 renderReadReceipts = true,
                 timelineItems = persistentListOf(
                     aTimelineItemEvent(
+                        isMine = true,
                         readReceiptState = aTimelineItemReadReceipts(
                             receipts = listOf(
                                 aReadReceiptData(0),
@@ -299,6 +406,7 @@ class MessagesViewTest {
     }
 
     @Test
+    @Config(qualifiers = "h1024dp")
     fun `clicking on send location invoke expected callback`() = runAndroidComposeUiTest {
         val eventsRecorder = EventsRecorder<MessagesEvent>(expectEvents = false)
         val state = aMessagesState(
@@ -312,11 +420,13 @@ class MessagesViewTest {
                 state = state,
                 onSendLocationClick = callback,
             )
-            clickOn(R.string.screen_room_attachment_source_location)
+            mainClock.advanceTimeBy(milliseconds = 1_000)
+            onNodeWithContentDescription(activity!!.getString(R.string.screen_room_attachment_source_location_short)).performClick()
         }
     }
 
     @Test
+    @Config(qualifiers = "h1024dp")
     fun `clicking on create poll invoke expected callback`() = runAndroidComposeUiTest {
         val eventsRecorder = EventsRecorder<MessagesEvent>(expectEvents = false)
         val state = aMessagesState(
@@ -330,8 +440,9 @@ class MessagesViewTest {
                 state = state,
                 onCreatePollClick = callback,
             )
+            mainClock.advanceTimeBy(milliseconds = 1_000)
             // Then click on the poll action
-            clickOn(R.string.screen_room_attachment_source_poll)
+            onNodeWithContentDescription(activity!!.getString(R.string.screen_room_attachment_source_poll)).performClick()
         }
     }
 
@@ -521,6 +632,9 @@ class MessagesViewTest {
         setMessagesView(
             state = stateWithActionListState,
         )
+        // Settle initial layout and geometry reporting before recording the user action.
+        mainClock.advanceTimeBy(milliseconds = 1_000)
+        waitForIdle()
         // Clear initial 'LoadMore' event emitted when setting the state
         eventsRecorder.clear()
 
@@ -642,6 +756,18 @@ class MessagesViewTest {
         setMessagesView(state = state)
         assertNoNodeWithText(R.string.screen_room_timeline_tombstoned_room_message)
         assertNoNodeWithText(R.string.screen_room_timeline_tombstoned_room_action)
+    }
+
+    @Test
+    fun `paused live location banner shows explanation and emits Stop`() = runAndroidComposeUiTest {
+        val events = EventsRecorder<MessagesEvent>()
+        val state = aMessagesState(
+            pausedLiveLocationShare = io.element.android.features.location.api.live.PausedLiveLocationShare.RECOVERABLE,
+            eventSink = events,
+        )
+        setMessagesView(state)
+        clickOn(CommonStrings.action_stop)
+        events.assertSingle(MessagesEvent.StopLiveLocationShare)
     }
 
     @Test

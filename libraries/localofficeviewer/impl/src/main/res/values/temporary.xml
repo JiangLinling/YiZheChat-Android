@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="local_office_session_expired">This preview session has expired. Return to the file list and open it again.</string>
+    <string name="local_office_session_ended">This preview session has ended. Return to the file list and open it again.</string>
+    <string name="local_office_validating">Verifying the document before opening…</string>
+    <string name="local_office_unsupported">This file format is not supported for local viewing.</string>
+    <string name="local_office_security_blocked">The file did not pass the local safety checks and was not opened.</string>
+    <string name="local_office_validation_failed">The file could not be verified locally. The source was closed; you can retry without uploading it.</string>
+    <string name="local_office_render_failed">The document could not be displayed locally. It was not uploaded.</string>
+    <string name="local_office_render_timeout">Local rendering took too long and was stopped. The file was not uploaded.</string>
+    <string name="local_office_session_locked">The local viewing session ended when the app was locked or left the foreground. Open the file again to re-authorize it.</string>
+    <string name="local_office_retry">Retry locally</string>
+    <string name="local_office_input_size_limit">This document exceeds the 64 MB local preview limit. Return to the file list to continue.</string>
+    <string name="local_office_complexity_limit">This document contains more expanded content than local viewing can safely handle.</string>
+    <string name="local_office_memory_unavailable">There is not enough memory to open this document. Close the preview and try again.</string>
+    <string name="local_office_validation_timeout">Verifying this document took too long and was stopped. You can retry locally.</string>
+    <string name="local_office_legacy_fidelity_warning">Legacy preview may omit layout, images or slides. The original file remains unchanged.</string>
+</resources>

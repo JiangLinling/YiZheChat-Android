@@ -12,6 +12,14 @@ import io.element.android.libraries.matrix.api.core.UniqueId
 import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.api.timeline.item.virtual.VirtualTimelineItem
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+
+/** A cold timeline must keep marker history private to each subscription. */
+internal fun Flow<List<MatrixTimelineItem>>.withLastForwardIndicators(mode: Timeline.Mode): Flow<List<MatrixTimelineItem>> = flow {
+    val processor = LastForwardIndicatorsPostProcessor(mode)
+    collect { emit(processor.process(it)) }
+}
 
 /**
  * This post processor is responsible for adding virtual items to indicate all the previous last forward item.
@@ -19,7 +27,7 @@ import io.element.android.libraries.matrix.api.timeline.item.virtual.VirtualTime
 class LastForwardIndicatorsPostProcessor(
     private val mode: Timeline.Mode,
 ) {
-    private val lastForwardIdentifiers = LinkedHashSet<UniqueId>()
+    private var lastForwardIdentifiers: Set<UniqueId> = emptySet()
 
     fun process(
         items: List<MatrixTimelineItem>,
@@ -28,23 +36,26 @@ class LastForwardIndicatorsPostProcessor(
         if (mode !is Timeline.Mode.FocusedOnEvent) {
             return items
         } else {
+            val latestEventIdentifier = items.latestEventIdentifier()
+            // Rendering reads one immutable snapshot, even if this processor is used concurrently.
+            val historicalIdentifiers = synchronized(this) {
+                val previous = lastForwardIdentifiers - latestEventIdentifier
+                lastForwardIdentifiers = previous + latestEventIdentifier
+                previous
+            }
             return buildList {
-                val latestEventIdentifier = items.latestEventIdentifier()
-                // Remove if it always exists (this should happen only when no new events are added)
-                lastForwardIdentifiers.remove(latestEventIdentifier)
 
                 items.forEach { item ->
                     add(item)
 
                     if (item is MatrixTimelineItem.Event) {
-                        if (lastForwardIdentifiers.contains(item.uniqueId)) {
+                        if (item.uniqueId != latestEventIdentifier && item.uniqueId in historicalIdentifiers) {
                             add(createLastForwardIndicator(item.uniqueId))
                         }
                     }
                 }
                 // This is important to always add this one at the end of the list so it's used to keep the scroll position.
                 add(createLastForwardIndicator(latestEventIdentifier))
-                lastForwardIdentifiers.add(latestEventIdentifier)
             }
         }
     }

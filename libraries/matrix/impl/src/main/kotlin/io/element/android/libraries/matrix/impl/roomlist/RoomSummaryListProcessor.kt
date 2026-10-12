@@ -56,9 +56,7 @@ class RoomSummaryListProcessor(
         // Timber.d("Apply room list update: ${update.describe()}")
         when (update) {
             is RoomListEntriesUpdate.Append -> {
-                val roomSummaries = update.values.map {
-                    buildSummaryForRoomListEntry(it)
-                }
+                val roomSummaries = buildRoomSummaryBatch(update.values, roomSummaryFactory)
                 addAll(roomSummaries)
             }
             is RoomListEntriesUpdate.PushBack -> {
@@ -82,7 +80,7 @@ class RoomSummaryListProcessor(
             }
             is RoomListEntriesUpdate.Reset -> {
                 clear()
-                addAll(update.values.map { buildSummaryForRoomListEntry(it) })
+                addAll(buildRoomSummaryBatch(update.values, roomSummaryFactory))
             }
             RoomListEntriesUpdate.PopBack -> {
                 removeLastOrNull()

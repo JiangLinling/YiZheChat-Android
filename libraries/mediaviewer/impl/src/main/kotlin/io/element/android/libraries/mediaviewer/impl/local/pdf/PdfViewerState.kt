@@ -21,6 +21,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import io.element.android.libraries.architecture.AsyncData
+import io.element.android.libraries.localofficeviewer.api.FilePreviewRuntime
+import io.element.android.libraries.localofficeviewer.api.FilePreviewRuntimeCleanup
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.CoroutineScope
 import me.saket.telephoto.zoomable.ZoomableState
@@ -33,6 +35,8 @@ class PdfViewerState(
     private val context: Context,
     val zoomableState: ZoomableState,
     val lazyListState: LazyListState,
+    private val onFailure: (Throwable) -> Unit,
+    private val runtimeFactory: (() -> FilePreviewRuntime?)? = null,
 ) {
     var isLoaded by mutableStateOf(false)
     private var pdfRendererManager by mutableStateOf<PdfRendererManager?>(null)
@@ -45,12 +49,33 @@ class PdfViewerState(
     }
 
     fun openForWidth(maxWidth: Int) {
-        ParcelFileDescriptorFactory(context).create(model)
-            .onSuccess {
-                pdfRendererManager = PdfRendererManager(it, maxWidth, coroutineScope).apply {
+        pdfRendererManager?.close()
+        val runtime = runtimeFactory?.invoke()
+        if (runtimeFactory != null && runtime == null) {
+            onFailure(IllegalStateException("The local-preview runtime owner is already released."))
+            return
+        }
+        val descriptorFactory = ParcelFileDescriptorFactory(context)
+        descriptorFactory.create(model)
+            .onSuccess { parcelFileDescriptor ->
+                pdfRendererManager = PdfRendererManager(
+                    parcelFileDescriptor = parcelFileDescriptor,
+                    width = maxWidth,
+                    coroutineScope = coroutineScope,
+                    onReady = { isLoaded = true },
+                    onFailure = {
+                        isLoaded = false
+                        onFailure(it)
+                    },
+                    onCleanup = { runtime?.complete(it) },
+                    sourceAccessCheck = descriptorFactory.sourceAccessCheck(model) { parcelFileDescriptor.statSize },
+                ).apply {
                     open()
                 }
-                isLoaded = true
+            }
+            .onFailure {
+                runtime?.complete(FilePreviewRuntimeCleanup(true, true, true))
+                onFailure(it)
             }
     }
 
@@ -67,6 +92,8 @@ fun rememberPdfViewerState(
     lazyListState: LazyListState = rememberLazyListState(),
     context: Context = LocalContext.current,
     coroutineScope: CoroutineScope = rememberCoroutineScope(),
+    onFailure: (Throwable) -> Unit = {},
+    runtimeFactory: (() -> FilePreviewRuntime?)? = null,
 ): PdfViewerState {
     return remember(model) {
         PdfViewerState(
@@ -74,7 +101,9 @@ fun rememberPdfViewerState(
             coroutineScope = coroutineScope,
             context = context,
             zoomableState = zoomableState,
-            lazyListState = lazyListState
+            lazyListState = lazyListState,
+            onFailure = onFailure,
+            runtimeFactory = runtimeFactory,
         )
     }
 }

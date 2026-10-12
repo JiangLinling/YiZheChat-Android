@@ -31,6 +31,9 @@ dependencies {
     implementation(projects.libraries.core)
     implementation(projects.libraries.architecture)
     implementation(projects.libraries.matrix.api)
+    implementation(projects.libraries.push.api)
+    implementation(projects.libraries.pushproviders.api)
+    implementation(projects.security.dataProtection.api)
     implementation(projects.libraries.designsystem)
     implementation(projects.libraries.testtags)
     implementation(projects.libraries.uiStrings)
@@ -38,4 +41,7 @@ dependencies {
 
     testCommonDependencies(libs, true)
     testImplementation(projects.libraries.matrix.test)
+    testImplementation(projects.libraries.push.test)
+    testImplementation(projects.libraries.pushproviders.test)
+    testImplementation(projects.security.dataProtection.test)
 }

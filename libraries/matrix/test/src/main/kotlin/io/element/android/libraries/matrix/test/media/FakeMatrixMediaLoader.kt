@@ -9,6 +9,7 @@
 package io.element.android.libraries.matrix.test.media
 
 import io.element.android.libraries.matrix.api.media.MatrixMediaLoader
+import io.element.android.libraries.matrix.api.media.MediaCachePolicy
 import io.element.android.libraries.matrix.api.media.MediaFile
 import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.tests.testutils.simulateLongTask
@@ -16,8 +17,11 @@ import io.element.android.tests.testutils.simulateLongTask
 class FakeMatrixMediaLoader : MatrixMediaLoader {
     var shouldFail = false
     var path: String = ""
+    var lastContentCachePolicy: MediaCachePolicy? = null
+    var lastThumbnailCachePolicy: MediaCachePolicy? = null
 
-    override suspend fun loadMediaContent(source: MediaSource): Result<ByteArray> = simulateLongTask {
+    override suspend fun loadMediaContent(source: MediaSource, cachePolicy: MediaCachePolicy): Result<ByteArray> = simulateLongTask {
+        lastContentCachePolicy = cachePolicy
         if (shouldFail) {
             Result.failure(RuntimeException())
         } else {
@@ -25,7 +29,13 @@ class FakeMatrixMediaLoader : MatrixMediaLoader {
         }
     }
 
-    override suspend fun loadMediaThumbnail(source: MediaSource, width: Long, height: Long): Result<ByteArray> = simulateLongTask {
+    override suspend fun loadMediaThumbnail(
+        source: MediaSource,
+        width: Long,
+        height: Long,
+        cachePolicy: MediaCachePolicy,
+    ): Result<ByteArray> = simulateLongTask {
+        lastThumbnailCachePolicy = cachePolicy
         if (shouldFail) {
             Result.failure(RuntimeException())
         } else {

@@ -17,6 +17,7 @@ import io.element.android.libraries.matrix.api.roomlist.RoomListFilter as Matrix
  */
 enum class RoomListFilter(val stringResource: Int) {
     Unread(R.string.screen_roomlist_filter_unreads),
+    Mentions(R.string.screen_roomlist_filter_mentions),
     People(R.string.screen_roomlist_filter_people),
     Rooms(R.string.screen_roomlist_filter_rooms),
     Favourites(R.string.screen_roomlist_filter_favourites),
@@ -26,9 +27,10 @@ enum class RoomListFilter(val stringResource: Int) {
         get() = when (this) {
             Rooms -> setOf(People, Invites)
             People -> setOf(Rooms, Invites)
-            Unread -> setOf(Invites)
+            Unread -> setOf(Mentions, Invites)
+            Mentions -> setOf(Unread, Invites)
             Favourites -> setOf(Invites)
-            Invites -> setOf(Rooms, People, Unread, Favourites)
+            Invites -> setOf(Rooms, People, Unread, Mentions, Favourites)
         }
 }
 
@@ -37,6 +39,7 @@ fun RoomListFilter.into(): MatrixRoomListFilter {
         RoomListFilter.Rooms -> MatrixRoomListFilter.Category.Group
         RoomListFilter.People -> MatrixRoomListFilter.Category.People
         RoomListFilter.Unread -> MatrixRoomListFilter.Unread
+        RoomListFilter.Mentions -> MatrixRoomListFilter.Unread
         RoomListFilter.Favourites -> MatrixRoomListFilter.Favorite
         RoomListFilter.Invites -> MatrixRoomListFilter.Invite
     }

@@ -51,7 +51,13 @@ class DefaultRoomGroupMessageCreator(
         existingNotification: Notification?,
     ): Notification {
         val lastKnownRoomEvent = events.last()
-        val roomName = lastKnownRoomEvent.roomName ?: lastKnownRoomEvent.senderDisambiguatedDisplayName ?: "Room name (${roomId.value.take(8)}…)"
+        val roomName = resolveNotificationRoomDisplayName(
+            roomId = roomId,
+            roomName = lastKnownRoomEvent.roomName,
+            senderDisplayName = lastKnownRoomEvent.senderDisambiguatedDisplayName,
+            isDm = lastKnownRoomEvent.roomIsDm,
+            genericDisplayName = stringProvider.getString(R.string.notification_new_messages),
+        )
         val roomIsGroup = !lastKnownRoomEvent.roomIsDm
 
         val tickerText = if (roomIsGroup) {
@@ -107,3 +113,32 @@ class DefaultRoomGroupMessageCreator(
         }
     }
 }
+
+internal fun resolveNotificationRoomDisplayName(
+    roomId: RoomId,
+    roomName: String?,
+    senderDisplayName: String?,
+    isDm: Boolean,
+    genericDisplayName: String,
+): String {
+    val usableRoomName = roomName
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && !it.isGeneratedRoomName(roomId) }
+    val usableSenderDisplayName = senderDisplayName
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+
+    return when {
+        usableRoomName != null -> usableRoomName
+        isDm && usableSenderDisplayName != null -> usableSenderDisplayName
+        else -> genericDisplayName
+    }
+}
+
+private fun String.isGeneratedRoomName(roomId: RoomId): Boolean {
+    return this == roomId.value ||
+        startsWith(MATRIX_SDK_GENERATED_ROOM_NAME_PREFIX) && contains(roomId.value.take(ROOM_ID_PREVIEW_LENGTH))
+}
+
+private const val MATRIX_SDK_GENERATED_ROOM_NAME_PREFIX = "Room name ("
+private const val ROOM_ID_PREVIEW_LENGTH = 8

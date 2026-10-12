@@ -14,45 +14,41 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewParameter
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.messages.impl.actionlist.model.TimelineItemAction
@@ -61,7 +57,6 @@ import io.element.android.features.messages.impl.crypto.sendfailure.VerifiedUser
 import io.element.android.features.messages.impl.crypto.sendfailure.VerifiedUserSendFailure.None
 import io.element.android.features.messages.impl.crypto.sendfailure.VerifiedUserSendFailure.UnsignedDevice
 import io.element.android.features.messages.impl.timeline.a11y.a11yReactionAction
-import io.element.android.features.messages.impl.timeline.components.MessageShieldView
 import io.element.android.features.messages.impl.timeline.model.TimelineItem
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemAudioContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemEncryptedContent
@@ -86,14 +81,10 @@ import io.element.android.libraries.designsystem.components.list.ListItemContent
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.designsystem.text.toSp
-import io.element.android.libraries.designsystem.theme.components.HorizontalDivider
 import io.element.android.libraries.designsystem.theme.components.Icon
 import io.element.android.libraries.designsystem.theme.components.IconSource
 import io.element.android.libraries.designsystem.theme.components.ListItem
-import io.element.android.libraries.designsystem.theme.components.ListItemStyle
-import io.element.android.libraries.designsystem.theme.components.ModalBottomSheet
 import io.element.android.libraries.designsystem.theme.components.Text
-import io.element.android.libraries.designsystem.theme.components.hide
 import io.element.android.libraries.matrix.ui.messages.sender.SenderName
 import io.element.android.libraries.matrix.ui.messages.sender.SenderNameMode
 import io.element.android.libraries.ui.strings.CommonStrings
@@ -109,34 +100,27 @@ fun ActionListView(
     onVerifiedUserSendFailureClick: (TimelineItem.Event) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val sheetState = rememberModalBottomSheetState()
-    val coroutineScope = rememberCoroutineScope()
-    val targetItem = (state.target as? ActionListState.Target.Success)?.event
+    val target = state.target as? ActionListState.Target.Success
+    val targetItem = target?.event
 
     fun onItemActionClick(
         itemAction: TimelineItemAction
     ) {
         if (targetItem == null) return
-        sheetState.hide(coroutineScope) {
-            state.eventSink(ActionListEvent.Clear)
-            onSelectAction(itemAction, targetItem)
-        }
+        state.eventSink(ActionListEvent.Clear)
+        onSelectAction(itemAction, targetItem)
     }
 
     fun onEmojiReactionClick(emoji: String) {
         if (targetItem == null) return
-        sheetState.hide(coroutineScope) {
-            state.eventSink(ActionListEvent.Clear)
-            onEmojiReactionClick(emoji, targetItem)
-        }
+        state.eventSink(ActionListEvent.Clear)
+        onEmojiReactionClick(emoji, targetItem)
     }
 
     fun onCustomReactionClick() {
         if (targetItem == null) return
-        sheetState.hide(coroutineScope) {
-            state.eventSink(ActionListEvent.Clear)
-            onCustomReactionClick(targetItem)
-        }
+        state.eventSink(ActionListEvent.Clear)
+        onCustomReactionClick(targetItem)
     }
 
     fun onDismiss() {
@@ -145,30 +129,63 @@ fun ActionListView(
 
     fun onVerifiedUserSendFailureClick() {
         if (targetItem == null) return
-        sheetState.hide(coroutineScope) {
-            state.eventSink(ActionListEvent.Clear)
-            onVerifiedUserSendFailureClick(targetItem)
-        }
+        state.eventSink(ActionListEvent.Clear)
+        onVerifiedUserSendFailureClick(targetItem)
     }
 
     if (targetItem != null) {
-        ModalBottomSheet(
-            sheetState = sheetState,
+        Popup(
+            popupPositionProvider = MessageActionPopupPositionProvider(target.anchorBounds),
             onDismissRequest = ::onDismiss,
-            modifier = modifier,
-            scrollable = false,
+            properties = PopupProperties(focusable = true),
         ) {
-            ActionListViewContent(
-                state = state,
-                onActionClick = ::onItemActionClick,
-                onEmojiReactionClick = ::onEmojiReactionClick,
-                onCustomReactionClick = ::onCustomReactionClick,
-                onVerifiedUserSendFailureClick = ::onVerifiedUserSendFailureClick,
-                modifier = Modifier
-                    .navigationBarsPadding()
-                    .imePadding()
+            Surface(
+                modifier = modifier.widthIn(min = 300.dp, max = 352.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = ElementTheme.colors.bgCanvasDefault,
+                shadowElevation = 8.dp,
+            ) {
+                ActionListViewContent(
+                    state = state,
+                    onActionClick = ::onItemActionClick,
+                    onEmojiReactionClick = ::onEmojiReactionClick,
+                    onCustomReactionClick = ::onCustomReactionClick,
+                    onVerifiedUserSendFailureClick = ::onVerifiedUserSendFailureClick,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                )
+            }
+        }
+    }
+}
+
+private class MessageActionPopupPositionProvider(
+    private val messageBounds: IntRect,
+) : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset {
+        val edge = 8
+        if (messageBounds == IntRect.Zero) {
+            return IntOffset(
+                x = ((windowSize.width - popupContentSize.width) / 2).coerceAtLeast(edge),
+                y = ((windowSize.height - popupContentSize.height) / 2).coerceAtLeast(edge),
             )
         }
+        val x = (messageBounds.left + (messageBounds.width - popupContentSize.width) / 2)
+            .coerceIn(edge, (windowSize.width - popupContentSize.width - edge).coerceAtLeast(edge))
+        val gap = 8
+        val above = messageBounds.top - popupContentSize.height - gap
+        val below = messageBounds.bottom + gap
+        val y = if (above >= edge) {
+            above
+        } else {
+            below
+            .coerceAtMost((windowSize.height - popupContentSize.height - edge).coerceAtLeast(edge))
+        }
+        return IntOffset(x, y)
     }
 }
 
@@ -189,74 +206,87 @@ private fun ActionListViewContent(
         }
 
         is ActionListState.Target.Success -> {
-            val actions = target.actions
-            LazyColumn(
-                modifier = modifier.fillMaxWidth()
-            ) {
-                item {
-                    Column {
-                        MessageSummary(
-                            event = target.event,
-                            sentTimeFull = target.sentTimeFull,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp)
-                                .clearAndSetSemantics {},
-                        )
-                        if (target.event.messageShield != null) {
-                            MessageShieldView(
-                                shield = target.event.messageShield,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                            )
-                        } else {
-                            Spacer(modifier = Modifier.height(14.dp))
-                        }
-                        HorizontalDivider()
-                    }
-                }
+            Column(modifier = modifier.fillMaxWidth()) {
                 if (target.verifiedUserSendFailure != None) {
-                    item {
-                        VerifiedUserSendFailureView(
-                            sendFailure = target.verifiedUserSendFailure,
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = onVerifiedUserSendFailureClick
-                        )
-                        HorizontalDivider()
-                    }
+                    VerifiedUserSendFailureView(
+                        sendFailure = target.verifiedUserSendFailure,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = onVerifiedUserSendFailureClick,
+                    )
                 }
+                CompactActionGrid(
+                    actions = target.actions,
+                    onActionClick = onActionClick,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 if (target.displayEmojiReactions) {
-                    item {
-                        EmojiReactionsRow(
-                            recentEmojis = target.recentEmojis,
-                            highlightedEmojis = target.event.reactionsState.highlightedKeys,
-                            onEmojiReactionClick = onEmojiReactionClick,
-                            onCustomReactionClick = onCustomReactionClick,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        HorizontalDivider()
-                    }
-                }
-                items(
-                    items = actions,
-                ) { action ->
-                    ListItem(
-                        modifier = Modifier.clickable {
-                            onActionClick(action)
-                        },
-                        headlineContent = {
-                            Text(text = stringResource(id = action.titleRes))
-                        },
-                        leadingContent = ListItemContent.Icon(IconSource.Resource(action.icon)),
-                        style = when {
-                            action.destructive -> ListItemStyle.Destructive
-                            else -> ListItemStyle.Default
-                        }
+                    EmojiReactionsRow(
+                        recentEmojis = target.recentEmojis,
+                        highlightedEmojis = target.event.reactionsState.highlightedKeys,
+                        onEmojiReactionClick = onEmojiReactionClick,
+                        onCustomReactionClick = onCustomReactionClick,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
         }
     }
 }
+
+@Composable
+private fun CompactActionGrid(
+    actions: ImmutableList<TimelineItemAction>,
+    onActionClick: (TimelineItemAction) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        actions.chunked(ACTION_GRID_COLUMN_COUNT).forEach { rowActions ->
+            Row(modifier = Modifier.fillMaxWidth()) {
+                rowActions.forEach { action ->
+                    val contentColor = if (action.destructive) {
+                        ElementTheme.colors.textCriticalPrimary
+                    } else {
+                        ElementTheme.colors.textPrimary
+                    }
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 1.dp, vertical = 2.dp)
+                            .background(
+                                color = ElementTheme.colors.bgSubtleSecondary,
+                                shape = RoundedCornerShape(9.dp),
+                            )
+                            .clickable { onActionClick(action) }
+                            .padding(horizontal = 2.dp, vertical = 7.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Icon(
+                            resourceId = action.icon,
+                            contentDescription = null,
+                            tint = contentColor,
+                            modifier = Modifier.size(22.dp),
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            text = stringResource(id = action.titleRes),
+                            style = ElementTheme.typography.fontBodySmRegular,
+                            color = contentColor,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                repeat(ACTION_GRID_COLUMN_COUNT - rowActions.size) {
+                    Spacer(modifier = Modifier.weight(1f).padding(3.dp))
+                }
+            }
+        }
+    }
+}
+
+private const val ACTION_GRID_COLUMN_COUNT = 5
 
 @Suppress("MultipleEmitters") // False positive
 @Composable
@@ -359,67 +389,45 @@ private fun EmojiReactionsRow(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.padding(end = 16.dp, top = 16.dp, bottom = 16.dp),
+        modifier = modifier.padding(top = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        val backgroundColor = ElementTheme.colors.bgCanvasDefault
-
-        LazyRow(
-            modifier = Modifier
-                .weight(1f, fill = true)
-                .drawWithContent {
-                    val gradientWidth = 24.dp.toPx()
-                    val width = size.width
-                    drawContent()
-
-                    drawRect(
-                        brush = Brush.horizontalGradient(
-                            0.0f to Color.Transparent,
-                            1.0f to backgroundColor,
-                            startX = width - gradientWidth,
-                            endX = width,
-                        ),
-                        topLeft = Offset(width - gradientWidth, 0f),
-                        size = Size(gradientWidth, size.height)
-                    )
-                },
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(recentEmojis) { emoji ->
-                val isHighlighted = highlightedEmojis.contains(emoji)
+        recentEmojis.take(QUICK_REACTION_COUNT).forEach { emoji ->
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.Center,
+            ) {
                 EmojiButton(
                     modifier = Modifier
-                        // Make it appear after the more useful actions for the accessibility service
+                        .fillMaxWidth()
+                        .height(44.dp)
                         .semantics {
                             traversalIndex = 1f
                         },
                     emoji = emoji,
-                    isHighlighted = isHighlighted,
-                    onClick = onEmojiReactionClick
+                    isHighlighted = highlightedEmojis.contains(emoji),
+                    onClick = onEmojiReactionClick,
                 )
             }
         }
-
         Box(
-            modifier = Modifier.padding(end = 10.dp).requiredSize(48.dp),
-            contentAlignment = Alignment.CenterEnd,
+            modifier = Modifier
+                .weight(1f)
+                .height(44.dp)
+                .clickable(
+                    enabled = true,
+                    onClick = onCustomReactionClick,
+                    indication = ripple(bounded = false, radius = emojiRippleRadius),
+                    interactionSource = remember { MutableInteractionSource() },
+                )
+                .semantics { traversalIndex = 1f },
+            contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = CompoundIcons.ReactionAdd(),
                 contentDescription = stringResource(id = CommonStrings.a11y_react_with_other_emojis),
                 tint = ElementTheme.colors.iconSecondary,
-                modifier = Modifier
-                    .size(24.dp)
-                    .clickable(
-                        enabled = true,
-                        onClick = onCustomReactionClick,
-                        indication = ripple(bounded = false, radius = emojiRippleRadius),
-                        interactionSource = remember { MutableInteractionSource() }
-                    )
-                    // Make it appear after the more useful actions for the accessibility service
-                    .semantics {
-                        traversalIndex = 1f
-                    }
+                modifier = Modifier.size(24.dp),
             )
         }
     }
@@ -481,7 +489,6 @@ private fun EmojiButton(
     )
     Box(
         modifier = modifier
-            .size(48.dp)
             .background(backgroundColor, CircleShape)
             .clickable(
                 onClickLabel = a11yClickLabel,
@@ -497,6 +504,8 @@ private fun EmojiButton(
         )
     }
 }
+
+private const val QUICK_REACTION_COUNT = 4
 
 @PreviewsDayNight
 @Composable

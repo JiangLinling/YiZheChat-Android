@@ -39,6 +39,7 @@ dependencies {
     implementation(projects.libraries.uiStrings)
     implementation(projects.libraries.preferences.api)
     implementation(projects.services.toolbox.api)
+    implementation(projects.security.dataProtection.api)
     api(projects.libraries.permissions.api)
 
     testCommonDependencies(libs)
@@ -46,4 +47,5 @@ dependencies {
     testImplementation(projects.libraries.permissions.test)
     testImplementation(projects.libraries.troubleshoot.test)
     testImplementation(projects.services.toolbox.test)
+    testImplementation(projects.security.dataProtection.test)
 }

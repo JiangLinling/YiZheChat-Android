@@ -19,6 +19,7 @@ import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.test.AN_EXCEPTION
 import io.element.android.libraries.matrix.test.A_ROOM_ID
+import io.element.android.libraries.matrix.test.AN_EVENT_ID
 import io.element.android.libraries.testtags.TestTags
 import io.element.android.tests.testutils.EnsureNeverCalledWithParam
 import io.element.android.tests.testutils.EventsRecorder
@@ -40,6 +41,20 @@ class ForwardMessagesViewTest {
         )
         pressTag(TestTags.dialogPositive.value)
         eventsRecorder.assertSingle(ForwardMessagesEvents.ClearError)
+    }
+
+    @Test
+    fun `partial failure offers retry`() = runAndroidComposeUiTest {
+        val eventsRecorder = EventsRecorder<ForwardMessagesEvents>()
+        setForwardMessagesView(
+            aForwardMessagesState(
+                forwardAction = AsyncAction.Failure(AN_EXCEPTION),
+                pairStates = mapOf(ForwardPair(AN_EVENT_ID, A_ROOM_ID) to ForwardPairState.Failed("denied")),
+                eventSink = eventsRecorder,
+            )
+        )
+        pressTag(TestTags.dialogPositive.value)
+        eventsRecorder.assertSingle(ForwardMessagesEvents.RetryFailed)
     }
 
     @Test

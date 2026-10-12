@@ -32,6 +32,7 @@ import io.element.android.tests.testutils.pressBack
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import io.element.android.features.poll.api.R as PollR
 
 @RunWith(AndroidJUnit4::class)
 class PollHistoryViewTest {
@@ -103,9 +104,8 @@ class PollHistoryViewTest {
         clickOn(CommonStrings.action_end_poll)
         eventsRecorder.assertEmpty()
         clickOn(CommonStrings.action_ok)
-        eventsRecorder.assertSingle(
-            PollHistoryEvents.EndPoll(eventId)
-        )
+        eventsRecorder.assertSize(1)
+        eventsRecorder.assertTrue(0) { it is PollHistoryEvents.EndPoll && it.pollStartId == eventId }
     }
 
     @Config(qualifiers = "h1024dp")
@@ -134,9 +134,10 @@ class PollHistoryViewTest {
             text = answer.text,
             useUnmergedTree = true,
         ).performClick()
-        eventsRecorder.assertSingle(
-            PollHistoryEvents.SelectPollAnswer(eventId, answer.id)
-        )
+        eventsRecorder.assertEmpty()
+        clickOn(PollR.string.screen_poll_change_vote)
+        eventsRecorder.assertSize(1)
+        eventsRecorder.assertTrue(0) { it is PollHistoryEvents.SelectPollAnswer && it.pollStartId == eventId && it.answerId == answer.id }
     }
 
     @Test

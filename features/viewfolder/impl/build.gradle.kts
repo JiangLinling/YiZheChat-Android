@@ -26,6 +26,7 @@ dependencies {
     implementation(projects.libraries.core)
     implementation(projects.libraries.designsystem)
     implementation(projects.libraries.uiStrings)
+    implementation(projects.security.dataProtection.api)
     api(projects.features.viewfolder.api)
 
     testCommonDependencies(libs)

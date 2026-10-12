@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_foreground_history_channel">应用内通知记录</string>
+    <string name="notification_foreground_close">关闭</string>
+    <string name="notification_foreground_send">发送</string>
+    <string name="notification_foreground_incoming_call">来电</string>
+    <string name="notification_foreground_action_unavailable">这条通知已失效，请打开聊天继续操作。</string>
+    <string name="a11y_notification_open_chat_window">打开聊天小窗</string>
+    <string name="notification_floating_history_channel">悬浮消息记录</string>
+</resources>

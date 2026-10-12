@@ -16,6 +16,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
@@ -30,6 +34,7 @@ import io.element.android.libraries.designsystem.theme.components.IconSource
 import io.element.android.libraries.designsystem.theme.components.ListItem
 import io.element.android.libraries.designsystem.theme.components.ListItemStyle
 import io.element.android.libraries.designsystem.theme.components.ModalBottomSheet
+import io.element.android.libraries.designsystem.components.dialogs.ConfirmationDialog
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.ui.strings.CommonStrings
@@ -43,6 +48,7 @@ fun RoomListContextMenu(
     onRoomSettingsClick: (roomId: RoomId) -> Unit,
     onReportRoomClick: (roomId: RoomId) -> Unit
 ) {
+    var confirmDelete by remember(contextMenu.roomId) { mutableStateOf(false) }
     ModalBottomSheet(
         onDismissRequest = { eventSink(RoomListEvent.HideContextMenu) },
         scrollable = false,
@@ -58,25 +64,26 @@ fun RoomListContextMenu(
                 eventSink(RoomListEvent.HideContextMenu)
                 eventSink(RoomListEvent.MarkAsUnread(contextMenu.roomId))
             },
-            onRoomSettingsClick = {
-                eventSink(RoomListEvent.HideContextMenu)
-                onRoomSettingsClick(contextMenu.roomId)
-            },
-            onLeaveRoomClick = {
-                eventSink(RoomListEvent.HideContextMenu)
-                eventSink(RoomListEvent.LeaveRoom(contextMenu.roomId, needsConfirmation = true))
-            },
             onFavoriteChange = { isFavorite ->
                 eventSink(RoomListEvent.SetRoomIsFavorite(contextMenu.roomId, isFavorite))
             },
-            onClearCacheRoomClick = {
-                eventSink(RoomListEvent.HideContextMenu)
-                eventSink(RoomListEvent.ClearCacheOfRoom(contextMenu.roomId))
+            onMutedChange = { isMuted ->
+                eventSink(RoomListEvent.SetRoomMuted(contextMenu.roomId, isMuted))
             },
-            onReportRoomClick = {
+            onDeleteConversationClick = { confirmDelete = true },
+        )
+    }
+    if (confirmDelete) {
+        ConfirmationDialog(
+            content = stringResource(R.string.screen_roomlist_delete_chat_confirmation),
+            submitText = stringResource(R.string.screen_roomlist_delete_chat),
+            destructiveSubmit = true,
+            onSubmitClick = {
+                confirmDelete = false
                 eventSink(RoomListEvent.HideContextMenu)
-                onReportRoomClick(contextMenu.roomId)
+                eventSink(RoomListEvent.DeleteConversation(contextMenu.roomId, contextMenu.latestEventTimestamp))
             },
+            onDismiss = { confirmDelete = false },
         )
     }
 }
@@ -84,14 +91,12 @@ fun RoomListContextMenu(
 @Composable
 private fun RoomListModalBottomSheetContent(
     contextMenu: RoomListState.ContextMenu.Shown,
-    canReportRoom: Boolean,
-    onRoomSettingsClick: () -> Unit,
-    onLeaveRoomClick: () -> Unit,
+    @Suppress("UNUSED_PARAMETER") canReportRoom: Boolean,
     onFavoriteChange: (isFavorite: Boolean) -> Unit,
+    onMutedChange: (isMuted: Boolean) -> Unit,
     onRoomMarkReadClick: () -> Unit,
     onRoomMarkUnreadClick: () -> Unit,
-    onClearCacheRoomClick: () -> Unit,
-    onReportRoomClick: () -> Unit,
+    onDeleteConversationClick: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -135,9 +140,9 @@ private fun RoomListModalBottomSheetContent(
             )
         }
         val (textResId, icon) = if (contextMenu.isFavorite) {
-            CommonStrings.common_favourited to CompoundIcons.FavouriteSolid()
+            R.string.screen_roomlist_unpin to CompoundIcons.PinSolid()
         } else {
-            CommonStrings.common_favourite to CompoundIcons.Favourite()
+            R.string.screen_roomlist_pin to CompoundIcons.Pin()
         }
         ListItem(
             headlineContent = {
@@ -161,54 +166,30 @@ private fun RoomListModalBottomSheetContent(
         ListItem(
             headlineContent = {
                 Text(
-                    text = stringResource(id = CommonStrings.common_settings),
+                    text = stringResource(
+                        if (contextMenu.isMuted) R.string.screen_roomlist_unmute else R.string.screen_roomlist_mute
+                    ),
                     style = MaterialTheme.typography.bodyLarge,
                 )
             },
-            modifier = Modifier.clickable { onRoomSettingsClick() },
             leadingContent = ListItemContent.Icon(
                 iconSource = IconSource.Vector(
-                    CompoundIcons.Settings(),
+                    if (contextMenu.isMuted) CompoundIcons.Notifications() else CompoundIcons.NotificationsOff()
                 )
             ),
+            trailingContent = ListItemContent.Switch(checked = contextMenu.isMuted),
+            onClick = { onMutedChange(!contextMenu.isMuted) },
         )
-        if (canReportRoom) {
-            ListItem(
-                headlineContent = {
-                    Text(text = stringResource(CommonStrings.action_report_room))
-                },
-                modifier = Modifier.clickable { onReportRoomClick() },
-                leadingContent = ListItemContent.Icon(
-                    iconSource = IconSource.Vector(
-                        CompoundIcons.ChatProblem(),
-                    )
-                ),
-                style = ListItemStyle.Destructive,
-            )
-        }
         ListItem(
             headlineContent = {
-                Text(text = stringResource(CommonStrings.action_leave_room))
+                Text(text = stringResource(R.string.screen_roomlist_delete_chat))
             },
-            modifier = Modifier.clickable { onLeaveRoomClick() },
+            modifier = Modifier.clickable { onDeleteConversationClick() },
             leadingContent = ListItemContent.Icon(
-                iconSource = IconSource.Vector(
-                    CompoundIcons.Leave(),
-                )
+                iconSource = IconSource.Vector(CompoundIcons.Delete())
             ),
             style = ListItemStyle.Destructive,
         )
-        if (contextMenu.displayClearRoomCacheAction) {
-            ListItem(
-                headlineContent = {
-                    Text(text = "Clear cache for this room")
-                },
-                modifier = Modifier.clickable { onClearCacheRoomClick() },
-                leadingContent = ListItemContent.Icon(
-                    iconSource = IconSource.Vector(CompoundIcons.Delete())
-                ),
-            )
-        }
     }
 }
 

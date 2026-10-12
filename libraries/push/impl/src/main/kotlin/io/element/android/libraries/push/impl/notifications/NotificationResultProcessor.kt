@@ -18,6 +18,7 @@ import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.exception.NotificationResolverException
 import io.element.android.libraries.matrix.api.notification.CallIntent
+import io.element.android.libraries.push.api.notifications.NotificationCleaner
 import io.element.android.libraries.push.impl.db.PushRequest
 import io.element.android.libraries.push.impl.history.PushHistoryService
 import io.element.android.libraries.push.impl.history.onSuccess
@@ -58,11 +59,14 @@ class DefaultNotificationResultProcessor(
     private val onRedactedEventReceived: OnRedactedEventReceived,
     private val onNotifiableEventReceived: OnNotifiableEventReceived,
     private val elementCallEntryPoint: ElementCallEntryPoint,
+    private val notificationCleaner: NotificationCleaner,
     private val notificationChannels: NotificationChannels,
+    private val foregroundCallInvitations: ForegroundCallInvitationObserver,
     @AppCoroutineScope private val coroutineScope: CoroutineScope,
 ) : NotificationResultProcessor {
     private val resultFlow = MutableSharedFlow<Map<PushRequest, Result<ResolvedPushEvent>>>(extraBufferCapacity = Int.MAX_VALUE)
     private var processJob: Job? = null
+    private var foregroundCallJob: Job? = null
 
     override suspend fun emit(results: Map<PushRequest, Result<ResolvedPushEvent>>) {
         resultFlow.emit(results)
@@ -73,6 +77,9 @@ class DefaultNotificationResultProcessor(
             Timber.tag(TAG).w("Is already processing, not starting again")
             return
         }
+        foregroundCallJob = foregroundCallInvitations.invitations()
+            .onEach(::handleRingingCallEvent)
+            .launchIn(coroutineScope)
         processJob = resultFlow
             .onEach(::processResults)
             .launchIn(coroutineScope)
@@ -84,6 +91,8 @@ class DefaultNotificationResultProcessor(
             return
         }
 
+        foregroundCallJob?.cancel()
+        foregroundCallJob = null
         processJob?.cancel()
         processJob = null
     }
@@ -214,6 +223,9 @@ class DefaultNotificationResultProcessor(
 
     private suspend fun handleRingingCallEvent(notifiableEvent: NotifiableRingingCallEvent) {
         Timber.i("## handleInternal() : Incoming call.")
+        // A delayed RING push can arrive after the SDK has already rendered the same RTC event as a normal
+        // room message. Remove that lower-priority duplicate before posting the native call notification.
+        notificationCleaner.clearMessagesForRoom(notifiableEvent.sessionId, notifiableEvent.roomId)
         elementCallEntryPoint.handleIncomingCall(
             callData = CallData(
                 sessionId = notifiableEvent.sessionId,

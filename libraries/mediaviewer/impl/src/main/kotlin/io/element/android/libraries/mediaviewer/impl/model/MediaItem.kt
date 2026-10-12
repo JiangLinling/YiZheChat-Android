@@ -12,6 +12,7 @@ import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.UniqueId
 import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.matrix.api.timeline.Timeline
+import io.element.android.libraries.matrix.api.timeline.item.event.SegmentedVideoCandidate
 import io.element.android.libraries.matrix.ui.media.MediaRequestData
 import io.element.android.libraries.mediaviewer.api.MediaInfo
 
@@ -46,6 +47,7 @@ sealed interface MediaItem {
         val mediaInfo: MediaInfo,
         val mediaSource: MediaSource,
         val thumbnailSource: MediaSource?,
+        val segmentedVideo: SegmentedVideoCandidate? = null,
     ) : Event {
         val thumbnailMediaRequestData: MediaRequestData
             get() = MediaRequestData(thumbnailSource ?: mediaSource, MediaRequestData.Kind.Thumbnail(100))

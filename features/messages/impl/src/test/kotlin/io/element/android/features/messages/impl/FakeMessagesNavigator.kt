@@ -29,6 +29,8 @@ class FakeMessagesNavigator(
     private val onOpenThreadLambda: (threadRootId: ThreadId, focusedEventId: EventId?) -> Unit = { _, _ -> lambdaError() },
     private val closeLambda: () -> Unit = { lambdaError() },
     private val navigateToCurrentLiveLocationLambda: () -> Unit = { lambdaError() },
+    private val navigateToRoomCallLambda: (RoomId, Boolean) -> Unit = { _, _ -> lambdaError() },
+    private val navigateToChatSecurityLambda: () -> Unit = {},
 ) : MessagesNavigator {
     override fun navigateToEventDebugInfo(eventId: EventId?, debugInfo: TimelineItemDebugInfo) {
         onShowEventDebugInfoClickLambda(eventId, debugInfo)
@@ -46,7 +48,7 @@ class FakeMessagesNavigator(
         onEditPollClickLambda(eventId)
     }
 
-    override fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?) {
+    override fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?, burnAfterRead: Boolean) {
         onPreviewAttachmentLambda(attachments, inReplyToEventId)
     }
 
@@ -68,6 +70,14 @@ class FakeMessagesNavigator(
 
     override fun navigateToCurrentLiveLocation() {
         navigateToCurrentLiveLocationLambda()
+    }
+
+    override fun navigateToRoomCall(roomId: RoomId, isAudioCall: Boolean) {
+        navigateToRoomCallLambda(roomId, isAudioCall)
+    }
+
+    override fun navigateToChatSecurity() {
+        navigateToChatSecurityLambda()
     }
 
     override fun close() {

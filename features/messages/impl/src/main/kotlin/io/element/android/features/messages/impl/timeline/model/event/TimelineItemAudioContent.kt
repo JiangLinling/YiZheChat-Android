@@ -23,6 +23,7 @@ data class TimelineItemAudioContent(
     override val mimeType: String,
     override val formattedFileSize: String,
     override val fileExtension: String,
+    override val isBurnAfterRead: Boolean = false,
 ) : TimelineItemEventContentWithAttachment {
     val fileExtensionAndSize =
         formatFileExtensionAndSize(

@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+  <string name="action_copy_message">"复制"</string>
+  <string name="action_quote_message">"引用"</string>
+  <string name="action_withdraw_message">"撤回"</string>
+  <string name="action_multi_select">"多选"</string>
+  <string name="message_favourited">"已收藏"</string>
+  <string name="message_unfavourited">"已取消收藏"</string>
+  <string name="message_deleted_locally">"已从本机删除"</string>
+  <string name="message_delete_local_confirmation">"仅从本机删除这条消息？对方仍可查看。"</string>
+  <string name="message_withdraw_confirmation">"撤回这条消息？撤回后双方都无法继续查看。"</string>
+  <string name="message_selected_count">"已选择 %1$d 条"</string>
   <string name="crypto_event_authenticity_mismatched_sender">"事件发送者与发送设备的所有者不匹配。"</string>
   <string name="crypto_event_authenticity_not_guaranteed">"此加密消息的真实性无法在此设备上保证。"</string>
   <string name="crypto_event_authenticity_previously_verified">"由先前验证过的用户加密。"</string>
@@ -40,7 +50,7 @@
   <string name="screen_room_attachment_source_camera_photo">"拍摄照片"</string>
   <string name="screen_room_attachment_source_camera_video">"录制视频"</string>
   <string name="screen_room_attachment_source_files">"附件"</string>
-  <string name="screen_room_attachment_source_gallery">"照片和视频库"</string>
+  <string name="screen_room_attachment_source_gallery">"照片/视频"</string>
   <string name="screen_room_attachment_source_location">"共享位置"</string>
   <string name="screen_room_attachment_source_poll">"投票"</string>
   <string name="screen_room_attachment_text_formatting">"文本格式化"</string>
@@ -59,6 +69,19 @@
   <string name="screen_room_timeline_less_reactions">"折叠"</string>
   <string name="screen_room_timeline_message_copied">"消息已复制"</string>
   <string name="screen_room_timeline_no_permission_to_post">"你无权在此房间发言"</string>
+  <string name="screen_room_history_recovery_matrix_required">"需要恢复密钥才能查看此设备之前可恢复的历史"</string>
+  <string name="screen_room_history_recovery_matrix_verification_required">"请先验证当前 Matrix 设备，再恢复符合条件的历史"</string>
+  <string name="screen_room_history_recovery_device_trust_required">"验证此设备后可恢复符合条件的历史"</string>
+  <string name="screen_room_history_recovery_waiting_for_network">"网络恢复后将继续恢复历史"</string>
+  <string name="screen_room_history_recovery_authorizing">"正在验证此设备的历史访问权限…"</string>
+  <string name="screen_room_history_recovery_waiting_for_approval">"历史恢复正在等待可信设备确认"</string>
+  <string name="screen_room_history_recovery_waiting_for_old_device">"请在可信旧设备上确认本次历史恢复"</string>
+  <string name="screen_room_history_recovery_waiting_for_admin">"普通聊天历史已恢复；保密聊天仍需管理员批准"</string>
+  <string name="screen_room_history_recovery_retrying">"历史恢复服务暂不可用，正在重试…"</string>
+  <string name="screen_room_history_recovery_request_expired">"历史恢复申请已过期，点击重新申请"</string>
+  <string name="screen_room_history_recovery_kms_unavailable">"历史恢复服务暂不可用，点击查看或重试"</string>
+  <string name="screen_room_history_recovery_partial">"可恢复的历史已恢复，较早消息可能已到期或无法恢复"</string>
+  <string name="screen_room_history_recovery_failed_closed">"部分历史暂时无法恢复，内容仍保持安全保护"</string>
   <plurals name="screen_room_timeline_reaction_a11y">
     <item quantity="other">"%1$d 个成员使用 %2$s 反应"</item>
   </plurals>

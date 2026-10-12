@@ -30,6 +30,13 @@ sealed interface VoiceRecorderState {
         val levels: List<Float>,
     ) : VoiceRecorderState
 
+    /** Encoder and scratch-file output are being closed before protected handoff. */
+    data class Finalizing(
+        val elapsedTime: Duration,
+        val levels: List<Float>,
+        val stopReason: VoiceRecorderStopReason,
+    ) : VoiceRecorderState
+
     /**
      * The recorder has finished recording.
      *
@@ -43,5 +50,23 @@ sealed interface VoiceRecorderState {
         val mimeType: String,
         val waveform: List<Float>,
         val duration: Duration,
+        val stopReason: VoiceRecorderStopReason = VoiceRecorderStopReason.USER_STOP,
     ) : VoiceRecorderState
+
+
+    /** A terminal local capture failure. No file from this attempt may be sent. */
+    data class Failed(val reason: VoiceRecorderFailure) : VoiceRecorderState
+}
+
+enum class VoiceRecorderStopReason {
+    USER_STOP,
+    CANCELLED,
+    INTERRUPTED,
+    MAX_DURATION,
+}
+
+enum class VoiceRecorderFailure {
+    TOO_SHORT,
+    STORAGE_UNAVAILABLE,
+    ENCODER_FAILURE,
 }

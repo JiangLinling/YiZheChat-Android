@@ -12,12 +12,12 @@ import android.content.ClipData
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.Uri
+import android.view.Gravity
 import android.text.Editable
 import android.text.InputType
 import android.text.Selection
 import android.view.View
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
@@ -82,7 +82,6 @@ fun MarkdownTextInput(
 
     AndroidView(
         modifier = Modifier
-            .padding(top = 5.dp, bottom = 6.dp)
             .fillMaxWidth(),
         factory = { context ->
             MarkdownEditText(context).apply {
@@ -93,6 +92,7 @@ fun MarkdownTextInput(
                 setText(text)
                 setHint(placeholder)
                 setHintTextColor(ColorStateList.valueOf(placeholderColor.toArgb()))
+                gravity = Gravity.CENTER_VERTICAL or Gravity.START
                 inputType = InputType.TYPE_CLASS_TEXT or
                     InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
                     InputType.TYPE_TEXT_FLAG_MULTI_LINE or

@@ -11,6 +11,7 @@ package io.element.android.features.messages.impl.timeline.factories.event
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
+import io.element.android.features.messages.impl.timeline.factories.TimelineEventNeighbours
 import io.element.android.features.messages.impl.timeline.factories.TimelineItemsFactoryConfig
 import io.element.android.features.messages.impl.timeline.groups.canBeDisplayedInBubbleBlock
 import io.element.android.features.messages.impl.timeline.model.AggregatedReaction
@@ -32,6 +33,8 @@ import io.element.android.libraries.matrix.api.permalink.PermalinkParser
 import io.element.android.libraries.matrix.api.room.RoomMember
 import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
 import io.element.android.libraries.matrix.api.timeline.item.EventThreadInfo
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
+import io.element.android.libraries.matrix.api.timeline.item.event.ProfileDetails
 import io.element.android.libraries.matrix.api.timeline.item.event.getAvatarUrl
 import io.element.android.libraries.matrix.api.timeline.item.event.getDisambiguatedDisplayName
 import io.element.android.libraries.matrix.ui.messages.reply.map
@@ -54,14 +57,18 @@ class TimelineItemEventFactory(
 
     suspend fun create(
         currentTimelineItem: MatrixTimelineItem.Event,
-        index: Int,
-        timelineItems: List<MatrixTimelineItem>,
+        neighbours: TimelineEventNeighbours,
         roomMembers: List<RoomMember>,
     ): TimelineItem.Event {
         val currentSender = currentTimelineItem.event.sender
-        val groupPosition =
-            computeGroupPosition(currentTimelineItem, timelineItems, index)
-        val senderProfile = currentTimelineItem.event.senderProfile
+        val groupPosition = computeGroupPosition(currentTimelineItem, neighbours)
+        val senderProfile = currentTimelineItem.event.senderProfile.let { profile ->
+            if (profile is ProfileDetails.Ready) profile else {
+                roomMembers.firstOrNull { it.userId == currentSender }?.let { member ->
+                    ProfileDetails.Ready(member.displayName, member.isNameAmbiguous, member.avatarUrl)
+                } ?: profile
+            }
+        }
         val sentTime = dateFormatter.format(
             timestamp = currentTimelineItem.event.timestamp,
             mode = DateFormatterMode.TimeOnly,
@@ -126,16 +133,23 @@ class TimelineItemEventFactory(
             sendHandleProvider = currentTimelineItem.event.sendHandleProvider,
             forwarder = currentTimelineItem.event.forwarder,
             forwarderProfile = currentTimelineItem.event.forwarderProfile,
+            displayId = currentTimelineItem.displayUniqueId,
+            clipboardSource = (currentTimelineItem.event.content as? MessageContent)
+                ?.toTimelineItemClipboardSource(currentTimelineItem.eventId),
         )
     }
 
-    fun update(
+    suspend fun update(
         timelineItem: TimelineItem.Event,
         receivedMatrixTimelineItem: MatrixTimelineItem.Event,
         roomMembers: List<RoomMember>,
+        neighbours: TimelineEventNeighbours,
     ): TimelineItem.Event {
-        return timelineItem.copy(
-            readReceiptState = receivedMatrixTimelineItem.computeReadReceiptState(roomMembers)
+        return create(receivedMatrixTimelineItem, neighbours, roomMembers).copy(
+            // Acknowledgement mutates the existing row. The remote eventId is updated by create(), while
+            // the row identity remains the one allocated before send.
+            id = timelineItem.id,
+            displayId = timelineItem.displayId,
         )
     }
 
@@ -207,13 +221,10 @@ class TimelineItemEventFactory(
 
     private fun computeGroupPosition(
         currentTimelineItem: MatrixTimelineItem.Event,
-        timelineItems: List<MatrixTimelineItem>,
-        index: Int
+        neighbours: TimelineEventNeighbours,
     ): TimelineItemGroupPosition {
-        val prevTimelineItem =
-            timelineItems.getOrNull(index - 1) as? MatrixTimelineItem.Event
-        val nextTimelineItem =
-            timelineItems.getOrNull(index + 1) as? MatrixTimelineItem.Event
+        val prevTimelineItem = neighbours.previous
+        val nextTimelineItem = neighbours.next
         val currentSender = currentTimelineItem.event.sender
         val previousSender = prevTimelineItem?.event?.sender
         val nextSender = nextTimelineItem?.event?.sender

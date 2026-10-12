@@ -39,21 +39,27 @@ import io.element.android.libraries.designsystem.theme.components.TopAppBar
 fun PreferencePage(
     title: String,
     onBackClick: () -> Unit,
+    showBackButton: Boolean = true,
+    showTopBar: Boolean = true,
+    applySystemBarsPadding: Boolean = true,
     modifier: Modifier = Modifier,
     snackbarHost: @Composable () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val pageModifier = if (applySystemBarsPadding) modifier.systemBarsPadding() else modifier
     Scaffold(
-        modifier = modifier
+        modifier = pageModifier
             .fillMaxSize()
-            .systemBarsPadding()
             .imePadding(),
-        contentWindowInsets = WindowInsets.statusBars,
+        contentWindowInsets = if (applySystemBarsPadding) WindowInsets.statusBars else WindowInsets(0),
         topBar = {
-            PreferenceTopAppBar(
-                title = title,
-                onBackClick = onBackClick,
-            )
+            if (showTopBar) {
+                PreferenceTopAppBar(
+                    title = title,
+                    onBackClick = onBackClick,
+                    showBackButton = showBackButton,
+                )
+            }
         },
         snackbarHost = snackbarHost,
         content = {
@@ -74,10 +80,13 @@ fun PreferencePage(
 private fun PreferenceTopAppBar(
     title: String,
     onBackClick: () -> Unit,
+    showBackButton: Boolean,
 ) {
     TopAppBar(
-        navigationIcon = {
-            BackButton(onClick = onBackClick)
+        navigationIcon = if (showBackButton) {
+            { BackButton(onClick = onBackClick) }
+        } else {
+            {}
         },
         title = {
             Text(

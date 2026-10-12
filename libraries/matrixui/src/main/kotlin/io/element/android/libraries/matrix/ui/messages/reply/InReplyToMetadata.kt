@@ -23,6 +23,7 @@ import io.element.android.libraries.matrix.api.timeline.item.event.LocationMessa
 import io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
 import io.element.android.libraries.matrix.api.timeline.item.event.PollContent
 import io.element.android.libraries.matrix.api.timeline.item.event.ProfileChangeContent
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedOperationContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RedactedContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RoomMembershipContent
 import io.element.android.libraries.matrix.api.timeline.item.event.StateContent
@@ -31,6 +32,7 @@ import io.element.android.libraries.matrix.api.timeline.item.event.UnableToDecry
 import io.element.android.libraries.matrix.api.timeline.item.event.UnknownContent
 import io.element.android.libraries.matrix.api.timeline.item.event.VideoMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.VoiceMessageType
+import io.element.android.libraries.matrix.api.timeline.item.event.isAuthorizedForUserDisplay
 import io.element.android.libraries.matrix.ui.components.AttachmentThumbnailInfo
 import io.element.android.libraries.matrix.ui.components.AttachmentThumbnailType
 import io.element.android.libraries.matrix.ui.messages.reply.InReplyToMetadata.Text
@@ -53,6 +55,7 @@ internal sealed interface InReplyToMetadata {
 
     data object Redacted : Informative
     data object UnableToDecrypt : Informative
+    data object Unavailable : Informative
 }
 
 /**
@@ -61,75 +64,90 @@ internal sealed interface InReplyToMetadata {
  * Metadata can be either a thumbnail with a text OR just a text.
  */
 @Composable
-internal fun InReplyToDetails.Ready.metadata(hideImage: Boolean): InReplyToMetadata? = when (eventContent) {
-    is MessageContent -> when (val type = eventContent.type) {
-        is ImageMessageType -> Thumbnail(
+internal fun InReplyToDetails.Ready.metadata(hideImage: Boolean): InReplyToMetadata? {
+    // This summary comes only from the same currently authorized timeline projection. Never render
+    // the SDK carrier body or media from it, and do not authorize revoked/expired failure shells.
+    if (isTextContentAuthorizedProjection) {
+        if (!supportsAuthorizedTextProjection()) return InReplyToMetadata.Unavailable
+        return textContent?.takeIf(String::isNotBlank)?.let(::Text) ?: InReplyToMetadata.Unavailable
+    }
+    if (eventContent is UnableToDecryptContent) return InReplyToMetadata.Unavailable
+    if (eventContent != null && !eventContent.isAuthorizedForUserDisplay()) return InReplyToMetadata.Unavailable
+    return when (eventContent) {
+        is MessageContent -> when (val type = eventContent.type) {
+            is ImageMessageType -> Thumbnail(
+                AttachmentThumbnailInfo(
+                    thumbnailSource = (type.info?.thumbnailSource ?: type.source).takeUnless { hideImage },
+                    textContent = eventContent.body,
+                    type = AttachmentThumbnailType.Image,
+                    blurHash = type.info?.blurhash,
+                )
+            )
+            is VideoMessageType -> Thumbnail(
+                AttachmentThumbnailInfo(
+                    thumbnailSource = type.info?.thumbnailSource?.takeUnless { hideImage },
+                    textContent = eventContent.body,
+                    type = AttachmentThumbnailType.Video,
+                    blurHash = type.info?.blurhash,
+                )
+            )
+            is FileMessageType -> Thumbnail(
+                AttachmentThumbnailInfo(
+                    thumbnailSource = type.info?.thumbnailSource?.takeUnless { hideImage },
+                    textContent = eventContent.body,
+                    type = AttachmentThumbnailType.File,
+                )
+            )
+            is LocationMessageType -> Thumbnail(
+                AttachmentThumbnailInfo(
+                    textContent = stringResource(CommonStrings.common_shared_location),
+                    type = AttachmentThumbnailType.Location,
+                )
+            )
+            is AudioMessageType -> Thumbnail(
+                AttachmentThumbnailInfo(
+                    textContent = eventContent.body,
+                    type = AttachmentThumbnailType.Audio,
+                )
+            )
+            is VoiceMessageType -> Thumbnail(
+                AttachmentThumbnailInfo(
+                    textContent = stringResource(CommonStrings.common_voice_message),
+                    type = AttachmentThumbnailType.Voice,
+                )
+            )
+            else -> Text(textContent ?: eventContent.body)
+        }
+        is StickerContent -> Thumbnail(
             AttachmentThumbnailInfo(
-                thumbnailSource = (type.info?.thumbnailSource ?: type.source).takeUnless { hideImage },
+                thumbnailSource = eventContent.source.takeUnless { hideImage },
                 textContent = eventContent.body,
                 type = AttachmentThumbnailType.Image,
-                blurHash = type.info?.blurhash,
+                blurHash = eventContent.info.blurhash,
             )
         )
-        is VideoMessageType -> Thumbnail(
+        is PollContent -> Thumbnail(
             AttachmentThumbnailInfo(
-                thumbnailSource = type.info?.thumbnailSource?.takeUnless { hideImage },
-                textContent = eventContent.body,
-                type = AttachmentThumbnailType.Video,
-                blurHash = type.info?.blurhash,
+                textContent = eventContent.question,
+                type = AttachmentThumbnailType.Poll,
             )
         )
-        is FileMessageType -> Thumbnail(
-            AttachmentThumbnailInfo(
-                thumbnailSource = type.info?.thumbnailSource?.takeUnless { hideImage },
-                textContent = eventContent.body,
-                type = AttachmentThumbnailType.File,
-            )
-        )
-        is LocationMessageType -> Thumbnail(
-            AttachmentThumbnailInfo(
-                textContent = stringResource(CommonStrings.common_shared_location),
-                type = AttachmentThumbnailType.Location,
-            )
-        )
-        is AudioMessageType -> Thumbnail(
-            AttachmentThumbnailInfo(
-                textContent = eventContent.body,
-                type = AttachmentThumbnailType.Audio,
-            )
-        )
-        is VoiceMessageType -> Thumbnail(
-            AttachmentThumbnailInfo(
-                textContent = stringResource(CommonStrings.common_voice_message),
-                type = AttachmentThumbnailType.Voice,
-            )
-        )
-        else -> Text(textContent ?: eventContent.body)
+        is RedactedContent -> InReplyToMetadata.Redacted
+        is UnableToDecryptContent -> InReplyToMetadata.Unavailable
+        is CallNotifyContent -> Text(stringResource(CommonStrings.common_call_started))
+        is LiveLocationContent -> Text(stringResource(CommonStrings.common_shared_live_location))
+        is ProtectedOperationContent -> if (isTextContentAuthorizedProjection) {
+            textContent?.takeIf(String::isNotBlank)?.let(::Text) ?: InReplyToMetadata.Unavailable
+        } else {
+            InReplyToMetadata.Unavailable
+        }
+        is LegacyCallInviteContent -> Text(stringResource(CommonStrings.common_unsupported_call))
+        is FailedToParseMessageLikeContent,
+        is FailedToParseStateContent,
+        is ProfileChangeContent,
+        is RoomMembershipContent,
+        is StateContent,
+        UnknownContent -> null
+        null -> InReplyToMetadata.Unavailable
     }
-    is StickerContent -> Thumbnail(
-        AttachmentThumbnailInfo(
-            thumbnailSource = eventContent.source.takeUnless { hideImage },
-            textContent = eventContent.body,
-            type = AttachmentThumbnailType.Image,
-            blurHash = eventContent.info.blurhash,
-        )
-    )
-    is PollContent -> Thumbnail(
-        AttachmentThumbnailInfo(
-            textContent = eventContent.question,
-            type = AttachmentThumbnailType.Poll,
-        )
-    )
-    is RedactedContent -> InReplyToMetadata.Redacted
-    is UnableToDecryptContent -> InReplyToMetadata.UnableToDecrypt
-    is FailedToParseMessageLikeContent,
-    is FailedToParseStateContent,
-    is ProfileChangeContent,
-    is RoomMembershipContent,
-    is StateContent,
-    UnknownContent,
-    is LegacyCallInviteContent,
-    is CallNotifyContent,
-    is LiveLocationContent,
-    null -> null
 }

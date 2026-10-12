@@ -8,31 +8,27 @@
 
 package io.element.android.libraries.designsystem.atomic.atoms
 
-import android.content.ClipData
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.Clipboard
-import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.toClipEntry
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
+import io.element.android.libraries.androidutils.system.copyToClipboard
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.designsystem.text.toDp
 import io.element.android.libraries.designsystem.theme.components.Icon
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.ui.strings.CommonStrings
-import kotlinx.coroutines.launch
 
 @Composable
 fun RoomPreviewAliasAtom(
@@ -40,15 +36,11 @@ fun RoomPreviewAliasAtom(
     modifier: Modifier = Modifier,
     copiable: Boolean = true
 ) {
-    val clipboard: Clipboard = LocalClipboard.current
-    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
     Row(
         modifier = modifier
             .clickable(enabled = copiable) {
-                coroutineScope.launch {
-                    val clipData = ClipData.newPlainText(alias, alias)
-                    clipboard.setClipEntry(clipData.toClipEntry())
-                }
+                context.copyToClipboard(alias)
             },
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,

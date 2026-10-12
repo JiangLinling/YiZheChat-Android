@@ -18,6 +18,10 @@ import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import io.element.android.libraries.audio.api.AudioFocus
 import io.element.android.libraries.audio.api.AudioFocusRequester
+import io.element.android.libraries.audio.api.AudioSessionLossReason
+import io.element.android.libraries.audio.api.AudioSessionOwner
+import io.element.android.libraries.audio.api.AudioSessionRequest
+import io.element.android.libraries.audio.api.AudioSessionRole
 import io.element.android.libraries.di.annotations.ApplicationContext
 import timber.log.Timber
 
@@ -29,33 +33,65 @@ class DefaultAudioFocus(
 
     private var audioFocusRequest: AudioFocusRequest? = null
     private var audioFocusChangeListener: AudioManager.OnAudioFocusChangeListener? = null
+    private val ownership = AudioOwnershipArbiter()
+
+    @Synchronized
+    override fun acquire(request: AudioSessionRequest): Boolean {
+        val decision = ownership.planAcquire(request)
+        if (decision is AudioOwnershipArbiter.AcquireDecision.Denied) return false
+
+        val granted = requestSystemAudioFocus(request.role) { change ->
+            when (change) {
+                AudioManager.AUDIOFOCUS_LOSS -> ownership.loseCurrent(AudioSessionLossReason.SYSTEM_FOCUS_LOST)
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK ->
+                    ownership.loseCurrent(AudioSessionLossReason.SYSTEM_FOCUS_LOST_TRANSIENT)
+                AudioManager.AUDIOFOCUS_GAIN -> Timber.d("AudioFocus: AUDIOFOCUS_GAIN")
+            }
+        }
+        if (!granted) return false
+
+        ownership.commitAcquire((decision as AudioOwnershipArbiter.AcquireDecision.Granted).request)
+        return true
+    }
+
+    @Synchronized
+    override fun release(ownerId: String) {
+        if (ownership.release(ownerId)) {
+            abandonSystemAudioFocus()
+        }
+    }
+
+    override fun currentOwner(): AudioSessionOwner? = ownership.currentOwner()
 
     @Suppress("DEPRECATION")
     override fun requestAudioFocus(
         requester: AudioFocusRequester,
         onFocusLost: () -> Unit,
     ) {
-        val listener = AudioManager.OnAudioFocusChangeListener {
-            when (it) {
-                AudioManager.AUDIOFOCUS_GAIN -> {
-                    // Do nothing
-                    Timber.d("AudioFocus: AUDIOFOCUS_GAIN")
-                }
-                AudioManager.AUDIOFOCUS_LOSS -> {
-                    // Permanent focus loss (e.g., phone call) — always stop/pause.
-                    Timber.d("AudioFocus: AUDIOFOCUS_LOSS")
-                    onFocusLost()
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                    // For recording, ignore transient focus losses (e.g., notification sounds).
-                    // The AudioRecord API keeps capturing regardless.
-                    if (requester != AudioFocusRequester.RecordVoiceMessage) {
-                        onFocusLost()
-                    }
-                }
-            }
-        }
+        acquire(
+            AudioSessionRequest(
+                ownerId = requester.legacyOwnerId(),
+                role = requester.toSessionRole(),
+                operationId = requester.legacyOwnerId(),
+                onOwnershipLost = { onFocusLost() },
+            )
+        )
+    }
+
+    override fun releaseAudioFocus() {
+        ownership.currentOwner()
+            ?.takeIf { it.ownerId.startsWith(LEGACY_OWNER_PREFIX) }
+            ?.let { release(it.ownerId) }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun requestSystemAudioFocus(
+        role: AudioSessionRole,
+        onFocusChange: (Int) -> Unit,
+    ): Boolean {
+        val listener = AudioManager.OnAudioFocusChangeListener(onFocusChange)
+        val requester = role.toRequester()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val audioAttributes = AudioAttributes.Builder()
@@ -71,25 +107,84 @@ class DefaultAudioFocus(
                 .setOnAudioFocusChangeListener(listener)
                 .setWillPauseWhenDucked(requester.willPausedWhenDucked())
                 .build()
-            audioManager.requestAudioFocus(request)
+            val result = audioManager.requestAudioFocus(request)
+            if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return false
             audioFocusRequest = request
         } else {
-            audioManager.requestAudioFocus(
+            val result = audioManager.requestAudioFocus(
                 listener,
                 requester.toAudioStream(),
                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE,
             )
+            if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return false
             audioFocusChangeListener = listener
         }
+        return true
     }
 
     @Suppress("DEPRECATION")
-    override fun releaseAudioFocus() {
+    private fun abandonSystemAudioFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         } else {
             audioFocusChangeListener?.let { audioManager.abandonAudioFocus(it) }
         }
+        audioFocusRequest = null
+        audioFocusChangeListener = null
+    }
+
+    private companion object {
+        const val LEGACY_OWNER_PREFIX = "legacy-audio:"
+    }
+}
+
+internal class AudioOwnershipArbiter {
+    private var activeRequest: AudioSessionRequest? = null
+
+    sealed interface AcquireDecision {
+        data class Granted(val request: AudioSessionRequest) : AcquireDecision
+        data object Denied : AcquireDecision
+    }
+
+    @Synchronized
+    fun planAcquire(request: AudioSessionRequest): AcquireDecision {
+        require(request.ownerId.isNotBlank())
+        require(request.operationId.isNotBlank())
+        val active = activeRequest
+        return when {
+            active == null -> AcquireDecision.Granted(request)
+            active.ownerId == request.ownerId -> AcquireDecision.Granted(request)
+            request.role.priority >= active.role.priority -> AcquireDecision.Granted(request)
+            else -> AcquireDecision.Denied
+        }
+    }
+
+    fun commitAcquire(request: AudioSessionRequest) {
+        val previous = synchronized(this) {
+            val old = activeRequest
+            activeRequest = request
+            old?.takeUnless { it.ownerId == request.ownerId }
+        }
+        previous?.onOwnershipLost?.invoke(AudioSessionLossReason.PREEMPTED)
+    }
+
+    fun loseCurrent(reason: AudioSessionLossReason) {
+        val lost = synchronized(this) {
+            activeRequest.also { activeRequest = null }
+        }
+        lost?.onOwnershipLost?.invoke(reason)
+    }
+
+    @Synchronized
+    fun release(ownerId: String): Boolean {
+        if (activeRequest?.ownerId != ownerId) return false
+        activeRequest = null
+        return true
+    }
+
+    @Synchronized
+    fun currentOwner(): AudioSessionOwner? = activeRequest?.let {
+        AudioSessionOwner(it.ownerId, it.role, it.operationId)
     }
 }
 
@@ -101,6 +196,22 @@ private fun AudioFocusRequester.toAudioUsage(): Int {
         AudioFocusRequester.MediaViewer -> AudioAttributes.USAGE_MEDIA
     }
 }
+
+private fun AudioFocusRequester.toSessionRole(): AudioSessionRole = when (this) {
+    AudioFocusRequester.ElementCall -> AudioSessionRole.RtcCall
+    AudioFocusRequester.RecordVoiceMessage -> AudioSessionRole.VoiceMessageCapture
+    AudioFocusRequester.VoiceMessage -> AudioSessionRole.VoiceMessagePlayback
+    AudioFocusRequester.MediaViewer -> AudioSessionRole.MediaPlayback
+}
+
+private fun AudioSessionRole.toRequester(): AudioFocusRequester = when (this) {
+    AudioSessionRole.RtcCall -> AudioFocusRequester.ElementCall
+    AudioSessionRole.VoiceMessageCapture -> AudioFocusRequester.RecordVoiceMessage
+    AudioSessionRole.VoiceMessagePlayback -> AudioFocusRequester.VoiceMessage
+    AudioSessionRole.MediaPlayback -> AudioFocusRequester.MediaViewer
+}
+
+private fun AudioFocusRequester.legacyOwnerId(): String = "legacy-audio:$name"
 
 private fun AudioFocusRequester.toAudioStream(): Int {
     return when (this) {

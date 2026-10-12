@@ -27,7 +27,6 @@ import io.element.android.libraries.push.impl.notifications.factories.DefaultNot
 import io.element.android.libraries.push.impl.notifications.fake.FakeActiveNotificationsProvider
 import io.element.android.libraries.push.impl.notifications.fake.FakeNotificationDisplayer
 import io.element.android.libraries.push.impl.notifications.model.ResolvedPushEvent
-import io.element.android.services.toolbox.test.strings.FakeStringProvider
 import io.element.android.tests.testutils.lambda.lambdaError
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import io.mockk.every
@@ -65,20 +64,22 @@ class DefaultOnRedactedEventReceivedTest {
     @Test
     fun `when no notifications are found, nothing happen`() = runTest {
         val showNotificationLambda = lambdaRecorder<String?, Int, Notification, Boolean> { _, _, _ -> true }
+        val cancelNotificationLambda = lambdaRecorder<String?, Int, Unit> { _, _ -> }
         val sut = createDefaultOnRedactedEventReceived(
             getAllMessageNotificationsForRoomResult = { _, _ -> emptyList() },
-            displayer = FakeNotificationDisplayer(showNotificationLambda),
+            displayer = FakeNotificationDisplayer(showNotificationLambda, cancelNotificationLambda),
         )
         sut.onRedactedEventsReceived(listOf(ResolvedPushEvent.Redaction(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, null)))
         showNotificationLambda.assertions().isNeverCalled()
+        cancelNotificationLambda.assertions().isNeverCalled()
     }
 
     @Test
-    fun `when a notification is found, try to retrieve the message`() = runTest {
-        val showNotificationLambda = lambdaRecorder<String?, Int, Notification, Boolean> { tag, id, _ ->
+    fun `single redacted message cancels its notification`() = runTest {
+        val showNotificationLambda = lambdaRecorder<String?, Int, Notification, Boolean> { _, _, _ -> true }
+        val cancelNotificationLambda = lambdaRecorder<String?, Int, Unit> { tag, id ->
             assertThat(tag).isEqualTo(A_ROOM_ID.value)
             assertThat(id).isEqualTo(1)
-            true
         }
         val sut = createDefaultOnRedactedEventReceived(
             getAllMessageNotificationsForRoomResult = { _, _ ->
@@ -95,39 +96,47 @@ class DefaultOnRedactedEventReceivedTest {
                     }
                 )
             },
-            displayer = FakeNotificationDisplayer(showNotificationLambda),
+            displayer = FakeNotificationDisplayer(showNotificationLambda, cancelNotificationLambda),
         )
         sut.onRedactedEventsReceived(listOf(ResolvedPushEvent.Redaction(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, null)))
-        showNotificationLambda.assertions().isCalledOnce()
+        showNotificationLambda.assertions().isNeverCalled()
+        cancelNotificationLambda.assertions().isCalledOnce()
     }
 
     @Test
-    fun `when thread notifications are found, try to retrieve the message`() = runTest {
-        val showNotificationLambda = lambdaRecorder<String?, Int, Notification, Boolean> { tag, id, _ ->
+    fun `redacted message is removed from a multi-message notification`() = runTest {
+        val multiMessageNotification = NotificationCompat.Builder(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+            "aChannel",
+        )
+            .setGroup(A_SESSION_ID.value)
+            .setStyle(NotificationCompat.MessagingStyle(fakePerson).addMessage(fakeMessage).addMessage(fakeIncorrectMessage))
+            .build()
+        val showNotificationLambda = lambdaRecorder<String?, Int, Notification, Boolean> { tag, id, notification ->
             assertThat(tag).isEqualTo("$A_ROOM_ID|$A_THREAD_ID")
             assertThat(id).isEqualTo(1)
+            val messages = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification)?.messages.orEmpty()
+            assertThat(messages).hasSize(1)
+            assertThat(messages.single().text.toString()).isEqualTo("The wrong message")
             true
         }
+        val cancelNotificationLambda = lambdaRecorder<String?, Int, Unit> { _, _ -> }
         val sut = createDefaultOnRedactedEventReceived(
             getAllMessageNotificationsForRoomResult = { _, _ ->
                 listOf(
                     mockk {
                         every { id } returns 1
-                        every { notification } returns fakeNotification
+                        every { notification } returns multiMessageNotification
                         every { tag } returns "$A_ROOM_ID|$A_THREAD_ID"
-                    },
-                    mockk {
-                        every { id } returns 2
-                        every { notification } returns fakeIncorrectNotification
-                        every { tag } returns A_ROOM_ID.value
                     }
                 )
             },
-            displayer = FakeNotificationDisplayer(showNotificationResult = showNotificationLambda),
+            displayer = FakeNotificationDisplayer(showNotificationLambda, cancelNotificationLambda),
         )
         sut.onRedactedEventsReceived(listOf(ResolvedPushEvent.Redaction(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, null)))
 
         showNotificationLambda.assertions().isCalledOnce()
+        cancelNotificationLambda.assertions().isNeverCalled()
     }
 
     private fun createDefaultOnRedactedEventReceived(
@@ -147,7 +156,6 @@ class DefaultOnRedactedEventReceivedTest {
             ),
             notificationDisplayer = displayer,
             context = context,
-            stringProvider = FakeStringProvider(),
         )
     }
 }

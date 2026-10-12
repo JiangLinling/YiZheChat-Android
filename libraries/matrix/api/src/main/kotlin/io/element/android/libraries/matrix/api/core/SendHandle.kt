@@ -10,4 +10,6 @@ package io.element.android.libraries.matrix.api.core
 
 fun interface SendHandle {
     suspend fun retry(): Result<Unit>
+
+    suspend fun abort(): Result<Boolean> = Result.failure(UnsupportedOperationException("Queue cancellation is unavailable."))
 }

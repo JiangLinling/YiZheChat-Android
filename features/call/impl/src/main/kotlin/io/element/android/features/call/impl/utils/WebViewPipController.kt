@@ -21,7 +21,7 @@ class WebViewPipController(
 ) : PipController {
     override suspend fun canEnterPip(): Boolean {
         return suspendCoroutine { continuation ->
-            webView.evaluateJavascript("controls.canEnterPip()") { result ->
+            webView.evaluateJavascript("window.controls.canEnterPip()") { result ->
                 // Note if the method is not available, it will return "null"
                 continuation.resume(result == "true" || result == "null")
             }
@@ -29,10 +29,10 @@ class WebViewPipController(
     }
 
     override fun enterPip() {
-        webView.evaluateJavascript("controls.enablePip()", null)
+        webView.evaluateJavascript("window.controls.enablePip()", null)
     }
 
     override fun exitPip() {
-        webView.evaluateJavascript("controls.disablePip()", null)
+        webView.evaluateJavascript("window.controls.disablePip()", null)
     }
 }

@@ -15,7 +15,9 @@ import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
 import io.element.android.libraries.di.annotations.ApplicationContext
+import io.element.android.libraries.sessionstorage.impl.DeviceRootDatabaseSecretProvider
 import io.element.android.libraries.sessionstorage.impl.SessionDatabase
+import io.element.android.security.securestorage.api.DeviceRootKeyService
 import io.element.encrypteddb.SqlCipherDriverFactory
 import io.element.encrypteddb.passphrase.RandomDatabaseSecretProvider
 import io.element.encrypteddb.utils.ReplaceDatabaseKey
@@ -28,6 +30,7 @@ object SessionStorageModule {
     @SingleIn(AppScope::class)
     fun provideMatrixDatabase(
         @ApplicationContext context: Context,
+        deviceRootKeyService: DeviceRootKeyService,
     ): SessionDatabase {
         val name = "session_database"
         val secretFile = context.getDatabasePath("$name.key")
@@ -39,7 +42,13 @@ object SessionStorageModule {
         }
 
         val rekeyMigrationVersion = 11L
-        val passphraseProvider = RandomDatabaseSecretProvider(context, secretFile)
+        val passphraseProvider = DeviceRootDatabaseSecretProvider(
+            deviceRootKeyService = deviceRootKeyService,
+            envelopeFile = context.getDatabasePath("$name.yzdbk"),
+            legacyProvider = RandomDatabaseSecretProvider(context, secretFile),
+            legacySecretFile = secretFile,
+            databaseName = name,
+        )
         val driver = SqlCipherDriverFactory(passphraseProvider)
             .create(
                 schema = SessionDatabase.Schema,

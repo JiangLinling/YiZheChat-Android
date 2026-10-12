@@ -14,7 +14,7 @@ import com.bumble.appyx.testing.junit4.util.MainDispatcherRule
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.share.api.ShareEntryPoint
 import io.element.android.features.share.api.ShareIntentData
-import io.element.android.libraries.matrix.api.core.RoomId
+import io.element.android.features.share.api.ShareResult
 import io.element.android.libraries.matrix.test.A_MESSAGE
 import io.element.android.libraries.roomselect.test.FakeRoomSelectEntryPoint
 import io.element.android.tests.testutils.lambda.lambdaError
@@ -42,7 +42,7 @@ class DefaultShareEntryPointTest {
             )
         }
         val callback = object : ShareEntryPoint.Callback {
-            override fun onDone(roomIds: List<RoomId>) = lambdaError()
+            override fun onDone(result: ShareResult) = lambdaError()
         }
         val params = ShareEntryPoint.Params(
             shareIntentData = ShareIntentData.PlainText(A_MESSAGE),

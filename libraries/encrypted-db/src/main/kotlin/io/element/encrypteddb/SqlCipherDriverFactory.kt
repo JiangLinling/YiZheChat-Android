@@ -15,6 +15,7 @@ import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.SqlSchema
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import io.element.android.libraries.androidutils.crypto.ClientSecret
+import io.element.android.libraries.androidutils.startup.StartupTrace
 import io.element.encrypteddb.passphrase.DatabaseSecretProvider
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
@@ -44,6 +45,7 @@ class SqlCipherDriverFactory(
         context: Context,
         onUpgradeCallback: ((driver: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) -> Unit)? = null,
     ): SqlDriver {
+        StartupTrace.mark("SQLCipher.driver.create name=$name")
         val key = when (val secret = databaseSecretProvider.getSecret()) {
             // For a raw key, we need the blob representation (`x'...'`) as bytes
             is ClientSecret.RawKey -> secret.formattedAsString().toByteArray()
@@ -56,6 +58,13 @@ class SqlCipherDriverFactory(
             ) {
             override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
                 onUpgradeCallback?.invoke(db, oldVersion, newVersion)
+            }
+
+            override fun onOpen(db: SupportSQLiteDatabase) {
+                super.onOpen(db)
+                StartupTrace.measure("SQLCipher.open name=$name") {
+                    OpenDatabaseSecurityRegistry.registerAndHarden(name, db)
+                }
             }
         })
     }

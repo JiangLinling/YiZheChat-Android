@@ -8,6 +8,16 @@
 package io.element.android.features.createroom.impl
 
 import android.net.Uri
+import io.element.android.libraries.matrix.api.core.UserId
+import io.element.android.libraries.matrix.api.createroom.CreateRoomParameters
+import io.element.android.libraries.matrix.api.roomlist.RoomList
+import io.element.android.libraries.matrix.api.user.MatrixUser
+import io.element.android.libraries.matrix.test.room.FakeBaseRoom
+import io.element.android.libraries.matrix.test.room.aRoomSummary
+import io.element.android.libraries.matrix.test.roomlist.FakeDynamicRoomList
+import io.element.android.libraries.matrix.test.roomlist.FakeRoomListService
+import io.element.android.security.securestorage.api.accountIdHash
+import kotlinx.collections.immutable.persistentListOf
 import androidx.core.net.toUri
 import app.cash.turbine.TurbineTestContext
 import com.google.common.truth.Truth.assertThat
@@ -54,6 +64,15 @@ import io.element.android.libraries.permissions.test.FakePermissionsPresenterFac
 import io.element.android.libraries.previewutils.room.aSpaceRoom
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.analytics.test.FakeAnalyticsService
+import io.element.android.security.contentprotection.api.ContentProtectionService
+import io.element.android.security.contentprotection.test.FakeContentProtectionService
+import io.element.android.security.dataprotection.test.FakeDeletedIdentityProjection
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.ManagedRoomCreationRequest
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.LifecycleClientReceipt
+import io.element.android.security.dataprotection.api.LifecycleOperation
+import io.element.android.security.dataprotection.api.ManagementControlService
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import io.element.android.tests.testutils.test
@@ -402,7 +421,8 @@ class ConfigureRoomPresenterTest {
             assertThat(awaitItem().createRoomAction).isInstanceOf(AsyncAction.Loading::class.java)
             val stateAfterCreateRoom = awaitItem()
             assertThat(stateAfterCreateRoom.createRoomAction).isInstanceOf(AsyncAction.Failure::class.java)
-            assertThat((stateAfterCreateRoom.createRoomAction as? AsyncAction.Failure)?.error).isEqualTo(createRoomResult.exceptionOrNull())
+            assertThat((stateAfterCreateRoom.createRoomAction as? AsyncAction.Failure)?.error?.message)
+                .isEqualTo(createRoomResult.exceptionOrNull()?.message)
 
             // Retry
             stateAfterCreateRoom.eventSink(ConfigureRoomEvents.CreateRoom)
@@ -410,7 +430,8 @@ class ConfigureRoomPresenterTest {
             assertThat(awaitItem().createRoomAction).isInstanceOf(AsyncAction.Loading::class.java)
             val stateAfterRetry = awaitItem()
             assertThat(stateAfterRetry.createRoomAction).isInstanceOf(AsyncAction.Failure::class.java)
-            assertThat((stateAfterRetry.createRoomAction as? AsyncAction.Failure)?.error).isEqualTo(createRoomResult.exceptionOrNull())
+            assertThat((stateAfterRetry.createRoomAction as? AsyncAction.Failure)?.error?.message)
+                .isEqualTo(createRoomResult.exceptionOrNull()?.message)
 
             // Cancel
             stateAfterRetry.eventSink(ConfigureRoomEvents.CancelCreateRoom)
@@ -519,6 +540,204 @@ class ConfigureRoomPresenterTest {
         }
     }
 
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `group picker only offers accepted contacts and removes deleted selections`() = runTest {
+        val friend = MatrixUser(UserId("@friend:matrix.org"), "Friend")
+        val pending = MatrixUser(UserId("@pending:matrix.org"), "Pending")
+        val acceptedInfo = aRoomInfo(isDm = true, isDirect = true, activeMembersCount = 2, joinedMembersCount = 2,
+            invitedMembersCount = 0, heroes = listOf(friend))
+        val pendingInfo = acceptedInfo.copy(id = RoomId("!pending:matrix.org"), joinedMembersCount = 1,
+            invitedMembersCount = 1, heroes = persistentListOf(pending))
+        val rooms = FakeDynamicRoomList(
+            summaries = MutableStateFlow(listOf(aRoomSummary(acceptedInfo), aRoomSummary(pendingInfo))),
+            loadingState = MutableStateFlow(RoomList.LoadingState.Loaded(2)),
+        )
+        val deleted = FakeDeletedIdentityProjection()
+        val presenter = createConfigureRoomPresenter(
+            matrixClient = FakeMatrixClient(userIdServerNameLambda = { "matrix.org" }, roomListService = FakeRoomListService(allRooms = rooms),
+                spaceService = FakeSpaceService(editableSpacesResult = { Result.success(emptyList()) })),
+            deletedIdentityProjection = deleted,
+        )
+        presenter.test {
+            advanceUntilIdle()
+            var state = expectMostRecentItem()
+            assertThat(state.contacts).containsExactly(friend)
+            state.eventSink(ConfigureRoomEvents.ToggleInvite(pending))
+            advanceUntilIdle()
+            expectNoEvents()
+            state.eventSink(ConfigureRoomEvents.ToggleInvite(friend))
+            advanceUntilIdle()
+            state = expectMostRecentItem()
+            assertThat(state.config.invites).containsExactly(friend)
+            assertThat(state.isValid).isTrue()
+            assertThat(state.createRoomAction).isInstanceOf(AsyncAction.Uninitialized::class.java)
+            state.eventSink(ConfigureRoomEvents.RoomNameChanged("Team"))
+            advanceUntilIdle()
+            state = expectMostRecentItem()
+            deleted.markDeleted(accountIdHash(friend.userId.value))
+            advanceUntilIdle()
+            state = expectMostRecentItem()
+            assertThat(state.contacts).isEmpty()
+            assertThat(state.config.invites).isEmpty()
+            assertThat(state.config.roomName).isEqualTo("Team")
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `selected contacts are invited by room creation with generated name and confidential policy`() = runTest {
+        val friend = MatrixUser(UserId("@friend:matrix.org"), "Friend")
+        val info = aRoomInfo(isDm = true, isDirect = true, activeMembersCount = 2, joinedMembersCount = 2,
+            invitedMembersCount = 0, heroes = listOf(friend))
+        val fake = FakeMatrixClient(userIdServerNameLambda = { "matrix.org" },
+            spaceService = FakeSpaceService(editableSpacesResult = { Result.success(emptyList()) }))
+        fake.givenGetRoomResult(A_ROOM_ID, FakeBaseRoom(initialRoomInfo = info))
+        var parameters: CreateRoomParameters? = null
+        var creates = 0
+        val client = object : MatrixClient by fake {
+            override suspend fun createRoom(createRoomParams: CreateRoomParameters): Result<RoomId> {
+                parameters = createRoomParams
+                creates++
+                return Result.success(A_ROOM_ID)
+            }
+        }
+        val store = CreateRoomConfigStore(FakeRoomAliasHelper())
+        store.setInvites(listOf(friend, friend))
+        val protection = FakeContentProtectionService()
+        val presenter = createConfigureRoomPresenter(dataStore = store, matrixClient = client, contentProtectionService = protection)
+        presenter.test {
+            advanceUntilIdle()
+            val state = expectMostRecentItem()
+            state.eventSink(ConfigureRoomEvents.CreateRoom)
+            advanceUntilIdle()
+            assertThat(expectMostRecentItem().createRoomAction).isInstanceOf(AsyncAction.Success::class.java)
+            assertThat(creates).isEqualTo(1)
+            assertThat(parameters?.invite).containsExactly(friend.userId)
+            assertThat(parameters?.name).isEqualTo("Friend")
+            assertThat(parameters?.isEncrypted).isTrue()
+            assertThat(protection.assignedRoomLifecycles).hasSize(1)
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a revoked friendship fails before room creation`() = runTest {
+        val friend = MatrixUser(UserId("@friend:matrix.org"), "Friend")
+        val fake = FakeMatrixClient(userIdServerNameLambda = { "matrix.org" },
+            spaceService = FakeSpaceService(editableSpacesResult = { Result.success(emptyList()) }))
+        fake.givenFindDmResult(Result.success(null))
+        var creates = 0
+        val client = object : MatrixClient by fake {
+            override suspend fun createRoom(createRoomParams: CreateRoomParameters): Result<RoomId> {
+                creates++
+                return Result.success(A_ROOM_ID)
+            }
+        }
+        val store = CreateRoomConfigStore(FakeRoomAliasHelper())
+        store.setInvites(listOf(friend))
+        val presenter = createConfigureRoomPresenter(dataStore = store, matrixClient = client)
+        presenter.test {
+            advanceUntilIdle()
+            expectMostRecentItem().eventSink(ConfigureRoomEvents.CreateRoom)
+            advanceUntilIdle()
+            assertThat(expectMostRecentItem().createRoomAction).isInstanceOf(AsyncAction.Failure::class.java)
+            assertThat(creates).isEqualTo(0)
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `managed response loss reuses operation and original request without SDK creation`() = runTest {
+        val friend = MatrixUser(UserId("@friend:matrix.org"), "Friend")
+        val fake = createMatrixClient()
+        fake.givenGetRoomResult(A_ROOM_ID, FakeBaseRoom(initialRoomInfo = aRoomInfo(
+            isDm = true, isDirect = true, activeMembersCount = 2, joinedMembersCount = 2,
+            invitedMembersCount = 0, heroes = listOf(friend),
+        )))
+        var sdkCreates = 0
+        val client = object : MatrixClient by fake {
+            override suspend fun createRoom(createRoomParams: CreateRoomParameters): Result<RoomId> {
+                sdkCreates++
+                return Result.success(A_ROOM_ID)
+            }
+        }
+        val requests = mutableListOf<ManagedRoomCreationRequest>()
+        val management = object : ManagementControlService by mockk<ManagementControlService>(relaxed = true) {
+            override val supportsManagedRoomCreation = true
+            override suspend fun createManagedRoom(request: ManagedRoomCreationRequest): String {
+                requests += request
+                if (requests.size == 1) error("Lost response after dispatch")
+                return A_ROOM_ID.value
+            }
+        }
+        val store = CreateRoomConfigStore(FakeRoomAliasHelper()).apply { setInvites(listOf(friend)) }
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val presenter = createConfigureRoomPresenter(dataStore = store, matrixClient = client,
+            managementControlService = management, coordinator = coordinator)
+        presenter.test {
+            advanceUntilIdle()
+            expectMostRecentItem().eventSink(ConfigureRoomEvents.CreateRoom)
+            advanceUntilIdle()
+            val failed = expectMostRecentItem()
+            assertThat(failed.createRoomAction).isInstanceOf(AsyncAction.Failure::class.java)
+            assertThat(failed.isConfigurationLocked).isTrue()
+            failed.eventSink(ConfigureRoomEvents.RoomNameChanged("Changed during retry"))
+            failed.eventSink(ConfigureRoomEvents.CreateRoom)
+            advanceUntilIdle()
+            assertThat(expectMostRecentItem().createRoomAction).isInstanceOf(AsyncAction.Success::class.java)
+            assertThat(requests).hasSize(2)
+            assertThat(requests[0]).isEqualTo(requests[1])
+            assertThat(requests[0].invitees).containsExactly(friend.userId.value)
+            assertThat(coordinator.startedRequests.map { it.operationId }.distinct()).hasSize(1)
+            assertThat(coordinator.startedRequests.map { it.roomCreationProtocol }.distinct()).containsExactly("managed-v1")
+            assertThat(sdkCreates).isEqualTo(0)
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `client receipt failure retains original room and configuration until retry succeeds`() = runTest {
+        val store = CreateRoomConfigStore(FakeRoomAliasHelper()).apply { setRoomName("Team") }
+        var creates = 0
+        val management = object : ManagementControlService by mockk<ManagementControlService>(relaxed = true) {
+            override val supportsManagedRoomCreation = true
+            override suspend fun createManagedRoom(request: ManagedRoomCreationRequest): String {
+                creates++
+                return A_ROOM_ID.value
+            }
+        }
+        val fakeCoordinator = FakeAppOperationalStateCoordinator()
+        var failReceipts = true
+        val coordinator = object : AppOperationalStateCoordinator by fakeCoordinator {
+            override suspend fun recordClientReceipt(receipt: LifecycleClientReceipt): LifecycleOperation {
+                if (failReceipts) error("Receipt transport unavailable")
+                return fakeCoordinator.recordClientReceipt(receipt)
+            }
+        }
+        val presenter = createConfigureRoomPresenter(dataStore = store,
+            managementControlService = management, coordinator = coordinator)
+        presenter.test {
+            advanceUntilIdle()
+            expectMostRecentItem().eventSink(ConfigureRoomEvents.CreateRoom)
+            advanceUntilIdle()
+            val failed = expectMostRecentItem()
+            assertThat(failed.createRoomAction).isInstanceOf(AsyncAction.Failure::class.java)
+            assertThat(failed.config.roomName).isEqualTo("Team")
+            assertThat(failed.isConfigurationLocked).isTrue()
+            failReceipts = false
+            failed.eventSink(ConfigureRoomEvents.CreateRoom)
+            advanceUntilIdle()
+            val completed = expectMostRecentItem()
+            assertThat(completed.createRoomAction).isInstanceOf(AsyncAction.Success::class.java)
+            assertThat(completed.config.roomName).isEqualTo("Team")
+            assertThat(completed.isConfigurationLocked).isFalse()
+            assertThat(creates).isEqualTo(1)
+            assertThat(fakeCoordinator.startedRequests.map { it.operationId }.distinct()).hasSize(1)
+        }
+    }
+
     private suspend fun TurbineTestContext<ConfigureRoomState>.initialState(): ConfigureRoomState {
         skipItems(1)
         return awaitItem()
@@ -554,6 +773,10 @@ class ConfigureRoomPresenterTest {
         permissionsPresenter: PermissionsPresenter = FakePermissionsPresenter(),
         isKnockFeatureEnabled: Boolean = true,
         mediaOptimizationConfigProvider: FakeMediaOptimizationConfigProvider = FakeMediaOptimizationConfigProvider(),
+        contentProtectionService: ContentProtectionService = FakeContentProtectionService(),
+        deletedIdentityProjection: FakeDeletedIdentityProjection = FakeDeletedIdentityProjection(),
+        managementControlService: ManagementControlService = mockk<ManagementControlService>(relaxed = true),
+        coordinator: AppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
     ) = ConfigureRoomPresenter(
         isSpace = isSpace,
         initialParentSpaceId = initialParenSpaceId,
@@ -568,5 +791,9 @@ class ConfigureRoomPresenterTest {
             mapOf(FeatureFlags.Knock.key to isKnockFeatureEnabled)
         ),
         mediaOptimizationConfigProvider = mediaOptimizationConfigProvider,
+        contentProtectionService = contentProtectionService,
+        appOperationalStateCoordinator = coordinator,
+        deletedIdentityProjection = deletedIdentityProjection,
+        managementControlService = managementControlService,
     )
 }

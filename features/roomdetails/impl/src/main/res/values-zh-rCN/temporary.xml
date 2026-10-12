@@ -1,0 +1,12 @@
+<resources>
+    <string name="screen_group_share_title">分享群聊</string>
+    <string name="screen_group_share_card">发送群名片</string>
+    <string name="screen_group_share_link">分享链接</string>
+    <string name="screen_group_share_qr">群二维码（7天有效）</string>
+    <string name="screen_group_share_valid_until">7天有效，截止 %1$s</string>
+    <string name="screen_group_share_error">无法分享，请检查网络和邀请成员权限</string>
+    <string name="screen_group_share_permission_required">你没有邀请成员的权限，请群主或管理员分享入群邀请</string>
+    <string name="screen_group_share_save">保存二维码</string>
+    <string name="screen_group_share_saved">二维码已保存</string>
+    <string name="screen_group_share_save_error">二维码保存失败</string>
+</resources>

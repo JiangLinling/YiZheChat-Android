@@ -20,7 +20,7 @@ import androidx.compose.ui.graphics.toArgb
 import dev.zacsweers.metro.Inject
 import io.element.android.features.enterprise.api.EnterpriseService
 import io.element.android.features.preferences.impl.developer.appsettings.AppDeveloperSettingsState
-import io.element.android.features.preferences.impl.tasks.ClearCacheUseCase
+import io.element.android.features.preferences.api.ClearCacheUseCase
 import io.element.android.features.preferences.impl.tasks.ComputeCacheSizeUseCase
 import io.element.android.features.preferences.impl.tasks.VacuumStoresUseCase
 import io.element.android.libraries.androidutils.filesize.FileSizeFormatter

@@ -76,7 +76,11 @@ sealed interface NotificationContent {
         data object RoomEncrypted : MessageLike
         data class RoomMessage(
             val senderId: UserId,
-            val messageType: MessageType
+            val messageType: MessageType,
+            /** Set only after the YiZhe protected-envelope authorization path succeeds in memory. */
+            val isContentProtectionAuthorized: Boolean = false,
+            /** Authenticated lifecycle marker. It must never be inferred from the untrusted Matrix carrier. */
+            val isBurnAfterRead: Boolean = false,
         ) : MessageLike
 
         data class RoomRedaction(
@@ -132,3 +136,10 @@ enum class CallIntent {
     AUDIO,
     VIDEO
 }
+
+/** Exact decrypted RTC protocol metadata owned by the authenticated Matrix room. */
+data class RtcNotificationAuthority(
+    val eventId: EventId,
+    val timestamp: Long,
+    val content: NotificationContent.MessageLike.RtcNotification,
+)

@@ -53,6 +53,33 @@ class ShowLocationPresenterTest {
     private val fakeDateFormatter = FakeDateFormatter()
     private val location = Location(1.23, 4.56, 7.8f)
 
+    @Test
+    fun `grant recovery preserves pause and original own beacon projection without resuming`() = runTest {
+        val own = io.element.android.libraries.matrix.test.room.location.aLiveLocationShare(userId = A_USER_ID)
+        val other = io.element.android.libraries.matrix.test.room.location.aLiveLocationShare(userId = UserId("@other:matrix.org"))
+        val room = FakeJoinedRoom(liveLocationSharesFlow = MutableStateFlow(listOf(own, other)))
+        var resumes = 0
+        val manager = FakeActiveLiveLocationShareManager(resumeShareLambda = { resumes++; Result.success(Unit) })
+        manager.givenPausedShare(room.roomId, io.element.android.features.location.api.live.PausedLiveLocationShare.RECOVERABLE, own.beaconId)
+        fakePermissionsPresenter.givenState(aPermissionsState(permissions = PermissionsState.Permissions.NoneGranted))
+        createShowLocationPresenter(mode = ShowLocationMode.Live(A_USER_ID), joinedRoom = room, liveLocationShareManager = manager).test {
+            var state = awaitItem()
+            while (state.locationShares.isEmpty()) state = awaitItem()
+            assertThat(state.pausedLiveLocationShare).isEqualTo(io.element.android.features.location.api.live.PausedLiveLocationShare.RECOVERABLE)
+            assertThat(state.locationShares.first { it.isOwnUser }.pausedState).isNotNull()
+            assertThat(state.locationShares.first { !it.isOwnUser }.pausedState).isNull()
+        }
+        fakePermissionsPresenter.givenState(aPermissionsState(permissions = PermissionsState.Permissions.AllGranted))
+        createShowLocationPresenter(mode = ShowLocationMode.Live(A_USER_ID), joinedRoom = room, liveLocationShareManager = manager).test {
+            var state = awaitItem()
+            while (state.locationShares.isEmpty()) state = awaitItem()
+            assertThat(state.hasLocationPermission).isTrue()
+            assertThat(state.pausedLiveLocationShare).isNotNull()
+            assertThat(resumes).isEqualTo(0)
+            assertThat(manager.sharingRoomIds.value).isEmpty()
+        }
+    }
+
     private fun createShowLocationPresenter(
         mode: ShowLocationMode = ShowLocationMode.Static(
             location = location,
@@ -304,7 +331,8 @@ class ShowLocationPresenterTest {
             val settingsOpenedState = awaitItem()
 
             assertThat(settingsOpenedState.dialogState).isEqualTo(LocationConstraintsDialogState.None)
-            assertThat(fakeLocationActions.openSettingsInvocationsCount).isEqualTo(1)
+            assertThat(fakePermissionsPresenter.events.last()).isEqualTo(PermissionsEvents.OpenAppSettings)
+            assertThat(fakeLocationActions.openSettingsInvocationsCount).isEqualTo(0)
         }
     }
 

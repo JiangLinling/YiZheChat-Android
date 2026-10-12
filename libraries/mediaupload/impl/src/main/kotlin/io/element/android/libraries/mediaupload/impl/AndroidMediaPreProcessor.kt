@@ -8,17 +8,19 @@
 
 package io.element.android.libraries.mediaupload.impl
 
+import android.content.ContentResolver
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import io.element.android.libraries.androidutils.file.TemporaryUriDeleter
 import io.element.android.libraries.androidutils.file.createTmpFile
 import io.element.android.libraries.androidutils.file.getFileName
-import io.element.android.libraries.androidutils.file.safeRenameTo
+import io.element.android.libraries.androidutils.file.safeDelete
 import io.element.android.libraries.androidutils.hash.hash
 import io.element.android.libraries.androidutils.media.runAndRelease
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
@@ -33,15 +35,21 @@ import io.element.android.libraries.di.annotations.ApplicationContext
 import io.element.android.libraries.matrix.api.media.AudioInfo
 import io.element.android.libraries.matrix.api.media.FileInfo
 import io.element.android.libraries.matrix.api.media.ImageInfo
+import io.element.android.libraries.matrix.api.media.ProtectedMediaSource
 import io.element.android.libraries.matrix.api.media.VideoInfo
 import io.element.android.libraries.mediaupload.api.MediaOptimizationConfig
 import io.element.android.libraries.mediaupload.api.MediaPreProcessor
 import io.element.android.libraries.mediaupload.api.MediaUploadInfo
+import io.element.android.libraries.mediaupload.api.ProtectedVoiceUploadInfo
+import io.element.android.libraries.mediaupload.api.allFiles
 import io.element.android.libraries.preferences.api.store.VideoCompressionPreset
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import timber.log.Timber
 import java.io.File
 import java.io.InputStream
@@ -57,6 +65,7 @@ class AndroidMediaPreProcessor(
     private val videoCompressor: VideoCompressor,
     private val coroutineDispatchers: CoroutineDispatchers,
     private val temporaryUriDeleter: TemporaryUriDeleter,
+    private val featureFlagService: io.element.android.libraries.featureflag.api.FeatureFlagService,
 ) : MediaPreProcessor {
     companion object {
         /**
@@ -66,6 +75,8 @@ class AndroidMediaPreProcessor(
          * values may surpass this limit. (i.e.: an image of `480x3000px` would have `inSampleSize=1` and be sent as is).
          */
         private const val IMAGE_SCALE_REF_SIZE = 640
+        private const val SECURE_MEDIA_AUTHORITY_SUFFIX = "securemedia"
+        private const val SECURE_MEDIA_PATH_VERSION = "v1"
 
         private val notCompressibleImageTypes = listOf(MimeTypes.Gif, MimeTypes.WebP, MimeTypes.Svg)
     }
@@ -74,66 +85,125 @@ class AndroidMediaPreProcessor(
 
     private val cacheDir = context.cacheDir
     private val baseTmpFileDir = File(cacheDir, "uploads")
+    private val protectedTmpFileDir = File(cacheDir, "protected-uploads")
 
     override suspend fun process(
         uri: Uri,
         mimeType: String,
         deleteOriginal: Boolean,
         mediaOptimizationConfig: MediaOptimizationConfig,
-    ): Result<MediaUploadInfo> = withContext(coroutineDispatchers.computation) {
-        runCatchingExceptions {
-            val result = when {
-                // Special case for SVG, since Android can't read its metadata or create a thumbnail, it must be sent as a file
-                mimeType == MimeTypes.Svg -> {
-                    processFile(uri, mimeType)
+        onProgress: (Float) -> Unit,
+    ): Result<MediaUploadInfo> {
+        val outputFiles = MediaUploadFileOwnership(emptyList())
+        var ownershipTransferred = false
+        return try {
+            val result = withContext(coroutineDispatchers.computation) {
+                runCatchingExceptions {
+                    onProgress(0f)
+                    val processed = when {
+                        // Special case for SVG, since Android can't read its metadata or create a thumbnail, it must be sent as a file
+                        mimeType == MimeTypes.Svg -> {
+                            processFile(uri, mimeType, onProgress, outputFiles)
+                        }
+                        mimeType.isMimeTypeImage() -> {
+                            val shouldBeCompressed = mediaOptimizationConfig.compressImages && mimeType !in notCompressibleImageTypes
+                            processImage(uri, mimeType, shouldBeCompressed, onProgress, outputFiles)
+                        }
+                        mimeType.isMimeTypeVideo() -> processVideo(
+                            uri,
+                            mimeType,
+                            mediaOptimizationConfig.videoCompressionPreset,
+                            mediaOptimizationConfig,
+                            onProgress,
+                            outputFiles
+                        )
+                        mimeType.isMimeTypeAudio() -> processAudio(uri, mimeType, onProgress, outputFiles)
+                        else -> processFile(uri, mimeType, onProgress, outputFiles)
+                    }
+                    outputFiles.track(processed.allFiles())
+                    val postProcessed = processed.postProcess(uri)
+                    outputFiles.track(postProcessed.allFiles())
+                    onProgress(1f)
+                    postProcessed
                 }
-                mimeType.isMimeTypeImage() -> {
-                    val shouldBeCompressed = mediaOptimizationConfig.compressImages && mimeType !in notCompressibleImageTypes
-                    processImage(uri, mimeType, shouldBeCompressed)
-                }
-                mimeType.isMimeTypeVideo() -> processVideo(uri, mimeType, mediaOptimizationConfig.videoCompressionPreset)
-                mimeType.isMimeTypeAudio() -> processAudio(uri, mimeType)
-                else -> processFile(uri, mimeType)
-            }
-            if (deleteOriginal) {
+            }.mapFailure { MediaPreProcessor.Failure(it) }
+            result.onSuccess {
                 tryOrNull {
-                    Timber.w("Deleting original uri $uri")
-                    contentResolver.delete(uri, null, null)
+                    if (deleteOriginal) {
+                        Timber.w("Deleting original uri $uri")
+                        contentResolver.delete(uri, null, null)
+                    } else {
+                        temporaryUriDeleter.delete(uri)
+                    }
                 }
-            } else {
-                temporaryUriDeleter.delete(uri)
+                outputFiles.transferOwnership()
+                ownershipTransferred = true
             }
-            result.postProcess(uri)
+            result
+        } finally {
+            if (!ownershipTransferred) {
+                outputFiles.cleanUpUnlessTransferred()
+            }
+        }
+    }
+
+    override suspend fun processProtectedVoice(
+        uri: Uri,
+        mimeType: String,
+        onProgress: (Float) -> Unit,
+    ): Result<ProtectedVoiceUploadInfo> = withContext(coroutineDispatchers.computation) {
+        runCatchingExceptions {
+            require(uri.scheme == ContentResolver.SCHEME_CONTENT) { "Protected voice source must be a content URI." }
+            require(uri.authority == "${context.packageName}.$SECURE_MEDIA_AUTHORITY_SUFFIX") {
+                "Protected voice source must be issued by the in-app secure media provider."
+            }
+            require(uri.pathSegments.size == 2 && uri.pathSegments.first() == SECURE_MEDIA_PATH_VERSION) {
+                "Protected voice source has an invalid lease path."
+            }
+            onProgress(0.1f)
+            val plaintextSize = queryPlaintextSize(uri)
+            val audioInfo = MediaMetadataRetriever().runAndRelease {
+                setDataSource(context, uri)
+                AudioInfo(
+                    duration = extractDuration(),
+                    size = plaintextSize,
+                    mimetype = mimeType,
+                )
+            }
+            onProgress(0.6f)
+            check(protectedTmpFileDir.isDirectory || protectedTmpFileDir.mkdirs()) {
+                "Unable to create the encrypted voice upload directory."
+            }
+            protectedTmpFileDir.restrictToOwner()
+            ProtectedVoiceUploadInfo(
+                source = ProtectedMediaSource(
+                    plaintextSize = plaintextSize,
+                    encryptedWorkingDirectory = protectedTmpFileDir,
+                    inputStreamFactory = {
+                        contentResolver.openInputStream(uri)
+                            ?: error("Protected voice lease is unavailable.")
+                    },
+                ),
+                audioInfo = audioInfo,
+            ).also { onProgress(1f) }
         }
     }.mapFailure { MediaPreProcessor.Failure(it) }
 
     override fun cleanUp() {
         Timber.d("Cleaning up temporary media files")
 
-        // Clear temporary files created in older versions of the app
-        cacheDir.listFiles()?.onEach { file ->
-            if (file.isFile) {
-                val nameWithoutExtension = file.nameWithoutExtension
-                // UUIDs are 36 characters long, so we check if we can take those 36 characters
-                val nameWithoutExtensionAndRandom = if (nameWithoutExtension.length > 36) {
-                    nameWithoutExtension.substring(0, 36)
-                } else {
-                    // Not a temp file
-                    return@onEach
-                }
-                val isUUID = tryOrNull { UUID.fromString(nameWithoutExtensionAndRandom) } != null
-                if (isUUID && file.extension.isNotEmpty()) {
-                    file.delete()
-                }
-            }
-        }
+        cleanLegacyMediaCacheRoot(cacheDir)
         // Clear temporary files created by this pre-processor in the separate uploads directory
         baseTmpFileDir.listFiles()?.onEach { it.delete() }
+        // Protected uploads contain only encrypted transport artifacts. Remove crash leftovers.
+        protectedTmpFileDir.listFiles()?.onEach { it.delete() }
     }
 
-    private suspend fun processFile(uri: Uri, mimeType: String): MediaUploadInfo {
+    private suspend fun processFile(uri: Uri, mimeType: String, onProgress: (Float) -> Unit, files: MediaUploadFileOwnership): MediaUploadInfo {
         Timber.d("Processing file ${uri.path.orEmpty().hash()}")
-        val file = copyToTmpFile(uri)
+        onProgress(0.1f)
+        val file = copyToTmpFile(uri, files)
+        onProgress(0.9f)
         val info = FileInfo(
             mimetype = mimeType,
             size = file.length(),
@@ -146,19 +216,32 @@ class AndroidMediaPreProcessor(
     private fun MediaUploadInfo.postProcess(uri: Uri): MediaUploadInfo {
         Timber.d("Finished processing, post-processing ${uri.path.orEmpty().hash()}")
         val name = context.getFileName(uri) ?: return this
-        val renamedFile = File(context.cacheDir, name).also {
-            file.safeRenameTo(it)
+        val destination = File(context.cacheDir, name)
+        val postProcessedFile = when {
+            file.absolutePath == destination.absolutePath -> file
+            destination.exists() -> file
+            file.renameTo(destination) -> destination
+            else -> {
+                Timber.w("Unable to rename processed media; retaining its owned temporary file")
+                file
+            }
         }
         return when (this) {
-            is MediaUploadInfo.AnyFile -> copy(file = renamedFile)
-            is MediaUploadInfo.Audio -> copy(file = renamedFile)
-            is MediaUploadInfo.Image -> copy(file = renamedFile)
-            is MediaUploadInfo.Video -> copy(file = renamedFile)
-            is MediaUploadInfo.VoiceMessage -> copy(file = renamedFile)
+            is MediaUploadInfo.AnyFile -> copy(file = postProcessedFile)
+            is MediaUploadInfo.Audio -> copy(file = postProcessedFile)
+            is MediaUploadInfo.Image -> copy(file = postProcessedFile)
+            is MediaUploadInfo.Video -> copy(file = postProcessedFile)
+            is MediaUploadInfo.VoiceMessage -> copy(file = postProcessedFile)
         }
     }
 
-    private suspend fun processImage(uri: Uri, mimeType: String, shouldBeCompressed: Boolean): MediaUploadInfo {
+    private suspend fun processImage(
+        uri: Uri,
+        mimeType: String,
+        shouldBeCompressed: Boolean,
+        onProgress: (Float) -> Unit,
+        files: MediaUploadFileOwnership,
+    ): MediaUploadInfo {
         Timber.d("Processing image ${uri.path.orEmpty().hash()}")
         suspend fun processImageWithCompression(): MediaUploadInfo {
             // Read the orientation metadata from its own stream. Trying to reuse this stream for compression will fail.
@@ -166,17 +249,22 @@ class AndroidMediaPreProcessor(
                 val exifInterface = input?.let { ExifInterface(it) }
                 exifInterface?.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_UNDEFINED)
             } ?: ExifInterface.ORIENTATION_UNDEFINED
+            onProgress(0.15f)
 
             val compressionResult = imageCompressor.compressToTmpFile(
                 inputStreamProvider = { contentResolver.openInputStream(uri)!! },
                 resizeMode = ResizeMode.Approximate(IMAGE_SCALE_REF_SIZE, IMAGE_SCALE_REF_SIZE),
                 mimeType = mimeType,
                 orientation = orientation,
+                onTemporaryFile = files::track,
             ).getOrThrow()
+            onProgress(0.7f)
             val thumbnailResult = thumbnailFactory.createImageThumbnail(
                 file = compressionResult.file,
                 mimeType = mimeType,
+                onTemporaryFile = files::track,
             )
+            onProgress(0.9f)
             val imageInfo = compressionResult.toImageInfo(
                 mimeType = mimeType,
                 thumbnailResult = thumbnailResult
@@ -190,11 +278,14 @@ class AndroidMediaPreProcessor(
         }
 
         suspend fun processImageWithoutCompression(): MediaUploadInfo {
-            val file = copyToTmpFile(uri)
+            val file = copyToTmpFile(uri, files)
+            onProgress(0.65f)
             val thumbnailResult = thumbnailFactory.createImageThumbnail(
                 file = file,
                 mimeType = mimeType,
+                onTemporaryFile = files::track,
             )
+            onProgress(0.9f)
             val (width, height) = extractOrientedImageDimensions(file)
             val imageInfo = ImageInfo(
                 width = width,
@@ -220,44 +311,66 @@ class AndroidMediaPreProcessor(
         }
     }
 
-    private suspend fun processVideo(uri: Uri, mimeType: String?, videoCompressionPreset: VideoCompressionPreset): MediaUploadInfo {
+    private suspend fun processVideo(
+        uri: Uri,
+        mimeType: String?,
+        videoCompressionPreset: VideoCompressionPreset,
+        edits: MediaOptimizationConfig,
+        onProgress: (Float) -> Unit,
+        outputFiles: MediaUploadFileOwnership,
+    ): MediaUploadInfo {
         Timber.d("Processing video ${uri.path.orEmpty().hash()}")
+        onProgress(0.05f)
         val resultFile = runCatchingExceptions {
-            videoCompressor.compress(uri, videoCompressionPreset)
+            videoCompressor.compress(uri, videoCompressionPreset, edits)
                 .onEach {
                     if (it is VideoTranscodingEvent.Progress) {
                         Timber.d("Video compression progress: ${it.value}%")
-                    } else if (it is VideoTranscodingEvent.Completed) {
-                        Timber.d("Video compression completed: ${it.file.path}")
+                        onProgress(0.05f + it.value.coerceIn(0f, 100f) / 100f * 0.8f)
                     }
                 }
                 .filterIsInstance<VideoTranscodingEvent.Completed>()
+                .map { completion ->
+                    completion.claimFile().also { file ->
+                        Timber.d("Video compression completed: ${file.path}")
+                    }
+                }
                 .first()
-                .file
         }
             .onFailure {
                 Timber.e(it, "Failed to compress video: $uri")
             }
-            .getOrNull()
+            .getOrThrow()
 
-        if (resultFile != null) {
-            val thumbnailInfo = thumbnailFactory.createVideoThumbnail(resultFile)
+        val files = VideoPostProcessFiles(resultFile)
+        try {
+            if (featureFlagService.isFeatureEnabled(io.element.android.libraries.featureflag.api.FeatureFlags.ProgressiveProtectedVideoPlayback)) {
+                withContext(coroutineDispatchers.io) {
+                    val operationContext = currentCoroutineContext()
+                    ensureStreamableMp4(resultFile) { operationContext.ensureActive() }
+                }
+            }
+            val thumbnailInfo = thumbnailFactory.createVideoThumbnail(resultFile, outputFiles::track)
+            files.registerThumbnail(thumbnailInfo?.file)
+            onProgress(0.93f)
             val videoInfo = extractVideoMetadata(resultFile, mimeType, thumbnailInfo)
             return MediaUploadInfo.Video(
                 file = resultFile,
                 videoInfo = videoInfo,
                 thumbnailFile = thumbnailInfo?.file
-            )
-        } else {
-            Timber.d("Could not transcode video ${uri.path.orEmpty().hash()}, sending original file as plain file")
-            // If the video could not be compressed, just use the original one, but send it as a file
-            return processFile(uri, MimeTypes.OctetStream)
+            ).also {
+                files.transferOwnership()
+            }
+        } finally {
+            files.cleanUpUnlessTransferred()
         }
     }
 
-    private suspend fun processAudio(uri: Uri, mimeType: String?): MediaUploadInfo {
+    private suspend fun processAudio(uri: Uri, mimeType: String?, onProgress: (Float) -> Unit, files: MediaUploadFileOwnership): MediaUploadInfo {
         Timber.d("Processing audio ${uri.path.orEmpty().hash()}")
-        val file = copyToTmpFile(uri)
+        onProgress(0.1f)
+        val file = copyToTmpFile(uri, files)
+        onProgress(0.85f)
         return MediaMetadataRetriever().runAndRelease {
             setDataSource(context, Uri.fromFile(file))
             val info = AudioInfo(
@@ -312,13 +425,14 @@ class AndroidMediaPreProcessor(
         }
     }
 
-    private suspend fun createTmpFileWithInput(inputStream: InputStream): File? {
+    private suspend fun createTmpFileWithInput(inputStream: InputStream, files: MediaUploadFileOwnership): File? {
         return withContext(coroutineDispatchers.io) {
             tryOrNull {
                 if (!baseTmpFileDir.exists()) {
                     baseTmpFileDir.mkdirs()
                 }
                 val tmpFile = context.createTmpFile(baseTmpFileDir)
+                files.track(tmpFile)
                 tmpFile.outputStream().use { inputStream.copyTo(it) }
                 tmpFile
             }
@@ -348,9 +462,25 @@ class AndroidMediaPreProcessor(
             )
         }
 
-    private suspend fun copyToTmpFile(uri: Uri): File {
-        return contentResolver.openInputStream(uri)?.use { createTmpFileWithInput(it) }
+    private suspend fun copyToTmpFile(uri: Uri, files: MediaUploadFileOwnership): File {
+        return contentResolver.openInputStream(uri)?.use { createTmpFileWithInput(it, files) }
             ?: error("Could not copy the contents of $uri to a temporary file")
+    }
+
+    private fun queryPlaintextSize(uri: Uri): Long {
+        val size = contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (!cursor.moveToFirst()) null else cursor.getLong(cursor.getColumnIndexOrThrow(OpenableColumns.SIZE))
+        }
+        return requireNotNull(size).also { require(it >= 0L) { "Protected voice source has an invalid size." } }
+    }
+
+    private fun File.restrictToOwner() {
+        setReadable(false, false)
+        setWritable(false, false)
+        setExecutable(false, false)
+        setReadable(true, true)
+        setWritable(true, true)
+        setExecutable(true, true)
     }
 
     private fun extractOrientedImageDimensions(file: File): Pair<Long, Long> {
@@ -368,6 +498,72 @@ class AndroidMediaPreProcessor(
             rawHeight = rawHeight,
             orientation = orientation,
         )
+    }
+}
+
+internal fun cleanLegacyMediaCacheRoot(cacheDir: File) {
+    cacheDir.listFiles()?.onEach { file ->
+        if (!file.isFile || isLegacyRootCameraCaptureFileName(file.name)) return@onEach
+        val nameWithoutExtension = file.nameWithoutExtension
+        val uuidPrefix = nameWithoutExtension.takeIf { it.length > 36 }?.substring(0, 36) ?: return@onEach
+        val isUuidPrefixed = tryOrNull { UUID.fromString(uuidPrefix) } != null
+        if (isUuidPrefixed && file.extension.isNotEmpty()) {
+            file.safeDelete()
+        }
+    }
+}
+
+internal fun isLegacyRootCameraCaptureFileName(fileName: String): Boolean {
+    val suffix = "-video.mp4"
+    if (!fileName.endsWith(suffix)) return false
+    val id = fileName.removeSuffix(suffix)
+    return tryOrNull { UUID.fromString(id).toString() == id } == true
+}
+
+internal class MediaUploadFileOwnership(
+    files: Iterable<File>,
+) {
+    private val ownedFiles = files.toMutableSet()
+    private var ownershipTransferred = false
+
+    fun track(file: File) {
+        ownedFiles.add(file)
+    }
+
+    fun track(files: Iterable<File>) {
+        ownedFiles.addAll(files)
+    }
+
+    fun transferOwnership() {
+        ownershipTransferred = true
+    }
+
+    fun cleanUpUnlessTransferred() {
+        if (!ownershipTransferred) {
+            ownedFiles.forEach { it.safeDelete() }
+        }
+    }
+}
+
+internal class VideoPostProcessFiles(
+    private val videoFile: File,
+) {
+    private var thumbnailFile: File? = null
+    private var ownershipTransferred = false
+
+    fun registerThumbnail(file: File?) {
+        thumbnailFile = file
+    }
+
+    fun transferOwnership() {
+        ownershipTransferred = true
+    }
+
+    fun cleanUpUnlessTransferred() {
+        if (!ownershipTransferred) {
+            videoFile.safeDelete()
+            thumbnailFile?.safeDelete()
+        }
     }
 }
 

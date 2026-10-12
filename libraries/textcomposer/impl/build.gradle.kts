@@ -46,5 +46,6 @@ dependencies {
     }
 
     testCommonDependencies(libs, true)
+    testImplementation(projects.security.dataProtection.api)
     testImplementation(projects.libraries.matrix.test)
 }

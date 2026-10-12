@@ -13,12 +13,9 @@ import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
 import dev.zacsweers.metro.ContributesBinding
-import io.element.android.libraries.core.extensions.mapCatchingExceptions
-import io.element.android.libraries.di.CacheDirectory
 import io.element.android.libraries.matrix.api.MatrixClient
+import io.element.android.libraries.matrix.api.media.MediaFile
 import io.element.android.libraries.matrix.api.media.MediaSource
-import io.element.android.libraries.matrix.api.mxc.MxcTools
-import java.io.File
 
 /**
  * Fetches the media file for a notification.
@@ -50,19 +47,17 @@ interface NotificationMediaRepo {
      * @param mediaSource the media source of the media.
      * @param mimeType the mime type of the media.
      * @param filename optional String which will be used to name the file.
-     * @return A [Result] holding either the media [File] from the cache directory or an [Exception].
+     * @return A [Result] holding a revocable media handle or an [Exception].
      */
     suspend fun getMediaFile(
         mediaSource: MediaSource,
         mimeType: String?,
         filename: String?,
-    ): Result<File>
+    ): Result<MediaFile>
 }
 
 @AssistedInject
 class DefaultNotificationMediaRepo(
-    @CacheDirectory private val cacheDir: File,
-    private val mxcTools: MxcTools,
     @Assisted private val client: MatrixClient,
 ) : NotificationMediaRepo {
     @ContributesBinding(AppScope::class)
@@ -79,34 +74,10 @@ class DefaultNotificationMediaRepo(
         mediaSource: MediaSource,
         mimeType: String?,
         filename: String?,
-    ): Result<File> {
-        val cachedFile = mediaSource.cachedFile()
-        return when {
-            cachedFile == null -> Result.failure(IllegalStateException("Invalid mxcUri."))
-            cachedFile.exists() -> Result.success(cachedFile)
-            else -> matrixMediaLoader.downloadMediaFile(
-                source = mediaSource,
-                mimeType = mimeType,
-                filename = filename,
-            ).mapCatchingExceptions {
-                it.use { mediaFile ->
-                    val dest = cachedFile.apply { parentFile?.mkdirs() }
-                    if (mediaFile.persist(dest.path)) {
-                        dest
-                    } else {
-                        error("Failed to move file to cache.")
-                    }
-                }
-            }
-        }
-    }
-
-    private fun MediaSource.cachedFile(): File? = mxcTools.mxcUri2FilePath(safeUrl)?.let {
-        File("${cacheDir.path}/$CACHE_NOTIFICATION_SUBDIR/$it")
-    }
+    ): Result<MediaFile> = matrixMediaLoader.downloadMediaFile(
+        source = mediaSource,
+        mimeType = mimeType,
+        filename = filename,
+        useCache = false,
+    )
 }
-
-/**
- * Subdirectory of the application's cache directory where file are stored.
- */
-private const val CACHE_NOTIFICATION_SUBDIR = "temp/notif"

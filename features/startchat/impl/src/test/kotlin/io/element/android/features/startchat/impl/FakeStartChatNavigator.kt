@@ -10,6 +10,7 @@ package io.element.android.features.startchat.impl
 
 import io.element.android.features.startchat.StartChatNavigator
 import io.element.android.libraries.matrix.api.core.RoomIdOrAlias
+import io.element.android.libraries.matrix.api.core.UserId
 
 class FakeStartChatNavigator(
     private val openRoomLambda: (roomIdOrAlias: RoomIdOrAlias, serverNames: List<String>) -> Unit = { _, _ -> },
@@ -37,4 +38,8 @@ class FakeStartChatNavigator(
     override fun onOpenRoomDirectory() {
         openRoomDirectoryLambda()
     }
+
+    override fun onShowFriendScanner() = Unit
+    override fun onShowMyQrCode() = Unit
+    override fun onOpenUserProfile(userId: UserId) = Unit
 }

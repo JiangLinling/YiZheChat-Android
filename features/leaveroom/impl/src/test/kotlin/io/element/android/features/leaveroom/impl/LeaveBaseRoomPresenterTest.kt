@@ -13,8 +13,10 @@ import app.cash.molecule.moleculeFlow
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.leaveroom.api.LeaveRoomEvent
+import io.element.android.features.preferences.api.ClearCacheUseCase
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.matrix.api.MatrixClient
+import io.element.android.libraries.matrix.api.room.RoomAlreadyRemovedException
 import io.element.android.libraries.matrix.test.A_ROOM_ID
 import io.element.android.libraries.matrix.test.FakeMatrixClient
 import io.element.android.libraries.matrix.test.room.FakeBaseRoom
@@ -176,6 +178,31 @@ class LeaveBaseRoomPresenterTest {
     }
 
     @Test
+    fun `present - rebuilds session cache when homeserver already purged the room`() = runTest {
+        var cacheCleared = false
+        val presenter = createLeaveRoomPresenter(
+            client = FakeMatrixClient().apply {
+                givenGetRoomResult(
+                    roomId = A_ROOM_ID,
+                    result = FakeBaseRoom(
+                        leaveRoomLambda = {
+                            Result.failure(RoomAlreadyRemovedException(A_ROOM_ID, RuntimeException("wrong room state")))
+                        }
+                    ),
+                )
+            },
+            clearCacheUseCase = ClearCacheUseCase { cacheCleared = true },
+        )
+        presenter.stateFlow().test {
+            val initialState = awaitItem()
+            initialState.eventSink(LeaveRoomEvent.LeaveRoom(A_ROOM_ID, needsConfirmation = false))
+            advanceUntilIdle()
+            assertThat(cacheCleared).isTrue()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `present - reset state after error`() = runTest {
         val presenter = createLeaveRoomPresenter(
             client = FakeMatrixClient().apply {
@@ -208,8 +235,10 @@ class LeaveBaseRoomPresenterTest {
 
 private fun TestScope.createLeaveRoomPresenter(
     client: MatrixClient = FakeMatrixClient(),
+    clearCacheUseCase: ClearCacheUseCase = ClearCacheUseCase {},
 ): LeaveRoomPresenter = LeaveRoomPresenter(
     client = client,
     dispatchers = testCoroutineDispatchers(false),
     notificationConversationService = FakeNotificationConversationService(),
+    clearCacheUseCase = clearCacheUseCase,
 )

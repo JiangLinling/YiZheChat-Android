@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Overridden by each Huawei-enabled application variant. The App ID is public configuration. -->
+    <string name="huawei_push_app_id" translatable="false"></string>
+    <string name="huawei_push_project_id" translatable="false"></string>
+    <string name="troubleshoot_notifications_huawei_push_title">Huawei Push status</string>
+    <string name="troubleshoot_notifications_huawei_push_pending">Checks device routing and Huawei Push registration.</string>
+</resources>

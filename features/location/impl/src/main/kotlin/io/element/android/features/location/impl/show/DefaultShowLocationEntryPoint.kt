@@ -21,7 +21,8 @@ class DefaultShowLocationEntryPoint : ShowLocationEntryPoint {
         parentNode: Node,
         buildContext: BuildContext,
         inputs: ShowLocationEntryPoint.Inputs,
+        callback: ShowLocationEntryPoint.Callback,
     ): Node {
-        return parentNode.createNode<ShowLocationNode>(buildContext, listOf(inputs))
+        return parentNode.createNode<ShowLocationNode>(buildContext, listOf(inputs, callback))
     }
 }

@@ -35,5 +35,7 @@ fun aBugReportState() = BugReportState(
     screenshotUri = null,
     sendingProgress = 0F,
     sending = AsyncAction.Uninitialized,
+    attachments = emptyList(),
+    attachmentNotice = null,
     eventSink = {}
 )

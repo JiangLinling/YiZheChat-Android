@@ -18,6 +18,7 @@ import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.matrix.test.A_SESSION_ID
+import io.element.android.libraries.matrix.test.FakeMatrixClient
 import io.element.android.libraries.matrix.test.media.FakeMatrixMediaLoader
 import io.element.android.libraries.mediaplayer.test.FakeAudioFocus
 import io.element.android.libraries.mediaviewer.api.MediaInfo
@@ -29,6 +30,7 @@ import io.element.android.libraries.mediaviewer.impl.viewer.createMediaViewerEnt
 import io.element.android.libraries.mediaviewer.impl.viewer.createMediaViewerPresenter
 import io.element.android.libraries.mediaviewer.test.FakeLocalMediaFactory
 import io.element.android.services.toolbox.test.systemclock.FakeSystemClock
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.tests.testutils.lambda.lambdaError
 import io.element.android.tests.testutils.node.TestParentNode
 import io.element.android.tests.testutils.testCoroutineDispatchers
@@ -72,7 +74,12 @@ class DefaultMediaViewerEntryPointTest {
                 textFileViewer = { _, _ -> lambdaError() },
                 audioFocus = FakeAudioFocus(),
                 sessionId = A_SESSION_ID,
+                matrixClient = FakeMatrixClient(),
+                room = io.element.android.libraries.matrix.test.room.FakeJoinedRoom(),
                 enterpriseService = FakeEnterpriseService(),
+                officePreviewService = mockk(relaxed = true),
+                appOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
+                segmentedVideoPlaybackOwnerFactory = mockk(relaxed = true),
             )
         }
         val callback = object : MediaViewerEntryPoint.Callback {
@@ -119,7 +126,12 @@ class DefaultMediaViewerEntryPointTest {
                 textFileViewer = { _, _ -> lambdaError() },
                 audioFocus = FakeAudioFocus(),
                 sessionId = A_SESSION_ID,
+                matrixClient = FakeMatrixClient(),
+                room = io.element.android.libraries.matrix.test.room.FakeJoinedRoom(),
                 enterpriseService = FakeEnterpriseService(),
+                officePreviewService = mockk(relaxed = true),
+                appOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
+                segmentedVideoPlaybackOwnerFactory = mockk(relaxed = true),
             )
         }
         val callback = object : MediaViewerEntryPoint.Callback {

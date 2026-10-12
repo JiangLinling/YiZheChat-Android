@@ -12,4 +12,6 @@ sealed interface PermissionsEvent {
     data object RequestPermissions : PermissionsEvent
     data object CloseDialog : PermissionsEvent
     data object OpenSystemSettingAndCloseDialog : PermissionsEvent
+    /** Launch from the requesting Activity after its existing LC-03 intent is persisted. */
+    data class OpenSystemSettingsUsingActivity(val launchSettings: () -> Unit) : PermissionsEvent
 }

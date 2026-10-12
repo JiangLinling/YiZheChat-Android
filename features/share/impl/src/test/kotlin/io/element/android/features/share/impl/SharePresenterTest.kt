@@ -15,6 +15,7 @@ import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.share.api.OnSharedData
 import io.element.android.features.share.api.ShareIntentData
+import io.element.android.features.share.api.ShareResult
 import io.element.android.features.share.api.UriToShare
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.core.mimetype.MimeTypes
@@ -30,7 +31,12 @@ import io.element.android.libraries.mediaupload.test.FakeMediaOptimizationConfig
 import io.element.android.libraries.mediaupload.test.FakeMediaSender
 import io.element.android.services.appnavstate.api.ActiveRoomsHolder
 import io.element.android.services.appnavstate.impl.DefaultActiveRoomsHolder
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.tests.testutils.WarmUpRule
+import io.element.android.security.contentprotection.api.ContentProtectionException
+import java.security.MessageDigest
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -95,7 +101,7 @@ class SharePresenterTest {
             assertThat(awaitItem().shareAction.isLoading()).isTrue()
             val success = awaitItem()
             assertThat(success.shareAction.isSuccess()).isTrue()
-            assertThat(success.shareAction).isEqualTo(AsyncAction.Success(listOf(A_ROOM_ID)))
+            assertThat(success.shareAction).isEqualTo(AsyncAction.Success(ShareResult(listOf(A_ROOM_ID))))
         }
     }
 
@@ -122,13 +128,62 @@ class SharePresenterTest {
             assertThat(awaitItem().shareAction.isLoading()).isTrue()
             val success = awaitItem()
             assertThat(success.shareAction.isSuccess()).isTrue()
-            assertThat(success.shareAction).isEqualTo(AsyncAction.Success(listOf(A_ROOM_ID)))
+            assertThat(success.shareAction).isEqualTo(AsyncAction.Success(ShareResult(listOf(A_ROOM_ID))))
         }
     }
 
     @Test
+    fun `share binds the current account device and room before sending`() = runTest {
+        val matrixClient = FakeMatrixClient()
+        var sends = 0
+        matrixClient.givenGetRoomResult(A_ROOM_ID, FakeJoinedRoom(liveTimeline = FakeTimeline().apply {
+            sendMessageLambda = { _, _, _, _, _ -> sends++; Result.success(Unit) }
+        }))
+        val coordinator = FakeAppOperationalStateCoordinator(startFailure = { request ->
+            if (request.accountIdHash != matrixClient.sessionId.value.sha256Hex() ||
+                request.matrixDeviceIdHash != matrixClient.deviceId.value.sha256Hex() ||
+                request.roomIdHash != A_ROOM_ID.value.sha256Hex()) SecurityException("Wrong share subject") else null
+        })
+        val presenter = createSharePresenter(matrixClient = matrixClient, appOperationalStateCoordinator = coordinator)
+        moleculeFlow(RecompositionMode.Immediate) { presenter.present() }.test {
+            awaitItem()
+            presenter.onRoomSelected(listOf(A_ROOM_ID))
+            assertThat(awaitItem().shareAction.isLoading()).isTrue()
+            assertThat(awaitItem().shareAction.isSuccess()).isTrue()
+            assertThat(sends).isEqualTo(1)
+            assertThat(coordinator.startedRequests.single().lifecycleId).isEqualTo(FullAppLifecycleId.LC_13)
+        }
+    }
+
+    @Test
+    fun `recipient failure keeps its classification and does not consume incoming share`() = runTest {
+        val failure = ContentProtectionException.RecipientDeviceUnavailable()
+        var consumed = false
+        val matrixClient = FakeMatrixClient().apply {
+            givenGetRoomResult(A_ROOM_ID, FakeJoinedRoom(liveTimeline = FakeTimeline().apply {
+                sendMessageLambda = { _, _, _, _, _ -> Result.failure(failure) }
+            }))
+        }
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val presenter = createSharePresenter(matrixClient = matrixClient, appOperationalStateCoordinator = coordinator,
+            onSharedData = OnSharedData { consumed = true })
+        moleculeFlow(RecompositionMode.Immediate) { presenter.present() }.test {
+            awaitItem()
+            presenter.onRoomSelected(listOf(A_ROOM_ID))
+            assertThat(awaitItem().shareAction.isLoading()).isTrue()
+            assertThat((awaitItem().shareAction as AsyncAction.Failure).error).isSameInstanceAs(failure)
+            assertThat(consumed).isFalse()
+            assertThat(coordinator.clientReceipts).isEmpty()
+        }
+    }
+
+    private fun String.sha256Hex(): String = MessageDigest.getInstance("SHA-256")
+        .digest(encodeToByteArray()).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+    @Test
     fun `present - send media ok`() = runTest {
         val sendMediaResult = lambdaRecorder<Result<Unit>> { Result.success(Unit) }
+        val lifecycleCoordinator = FakeAppOperationalStateCoordinator()
         val joinedRoom = FakeJoinedRoom(
             liveTimeline = FakeTimeline(),
         )
@@ -150,6 +205,7 @@ class SharePresenterTest {
                 )
             ),
             mediaSenderRoomFactory = MediaSenderRoomFactory { mediaSender },
+            appOperationalStateCoordinator = lifecycleCoordinator,
         )
         moleculeFlow(RecompositionMode.Immediate) {
             presenter.present()
@@ -160,8 +216,15 @@ class SharePresenterTest {
             assertThat(awaitItem().shareAction.isLoading()).isTrue()
             val success = awaitItem()
             assertThat(success.shareAction.isSuccess()).isTrue()
-            assertThat(success.shareAction).isEqualTo(AsyncAction.Success(listOf(A_ROOM_ID)))
+            assertThat(success.shareAction).isEqualTo(
+                AsyncAction.Success(ShareResult(listOf(A_ROOM_ID), roomToHandoff = joinedRoom))
+            )
             sendMediaResult.assertions().isCalledOnce()
+            assertThat(lifecycleCoordinator.startedRequests.single().lifecycleId).isEqualTo(FullAppLifecycleId.LC_16)
+            assertThat(lifecycleCoordinator.startedRequests.single().trigger).isEqualTo("upload")
+            assertThat(lifecycleCoordinator.startedRequests.single().accountIdHash).isEqualTo(matrixClient.sessionId.value.sha256Hex())
+            assertThat(lifecycleCoordinator.startedRequests.single().matrixDeviceIdHash).isEqualTo(matrixClient.deviceId.value.sha256Hex())
+            assertThat(lifecycleCoordinator.startedRequests.single().roomIdHash).isEqualTo(A_ROOM_ID.value.sha256Hex())
         }
     }
 }
@@ -173,6 +236,7 @@ internal fun TestScope.createSharePresenter(
     mediaSenderRoomFactory: MediaSenderRoomFactory = MediaSenderRoomFactory { FakeMediaSender() },
     mediaOptimizationConfigProvider: MediaOptimizationConfigProvider = FakeMediaOptimizationConfigProvider(),
     onSharedData: OnSharedData = OnSharedData {},
+    appOperationalStateCoordinator: AppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
 ): SharePresenter {
     return SharePresenter(
         shareIntentData = shareIntentData,
@@ -182,5 +246,6 @@ internal fun TestScope.createSharePresenter(
         mediaSenderRoomFactory = mediaSenderRoomFactory,
         mediaOptimizationConfigProvider = mediaOptimizationConfigProvider,
         onSharedData = onSharedData,
+        appOperationalStateCoordinator = appOperationalStateCoordinator,
     )
 }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +45,8 @@ import io.element.android.libraries.matrix.api.encryption.identity.IdentityState
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.api.room.RoomMember
 import io.element.android.libraries.matrix.api.room.RoomMembershipState
+import io.element.android.libraries.matrix.api.room.DirectRoomRelationState
+import io.element.android.libraries.matrix.api.room.directRoomRelationState
 import io.element.android.libraries.matrix.api.room.filterMembers
 import io.element.android.libraries.matrix.api.room.history.RoomHistoryVisibility
 import io.element.android.libraries.matrix.api.room.join.JoinRule
@@ -53,6 +56,8 @@ import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.libraries.usersearch.api.UserRepository
 import io.element.android.services.apperror.api.AppErrorStateService
+import io.element.android.security.dataprotection.api.DeletedIdentityProjection
+import io.element.android.security.dataprotection.api.isDeletedMatrixUserId
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -77,6 +82,7 @@ class DefaultInvitePeoplePresenter(
     @SessionCoroutineScope private val sessionCoroutineScope: CoroutineScope,
     private val appErrorStateService: AppErrorStateService,
     private val matrixClient: MatrixClient,
+    private val deletedIdentityProjection: DeletedIdentityProjection,
 ) : InvitePeoplePresenter {
     @AssistedFactory
     @ContributesBinding(SessionScope::class)
@@ -86,6 +92,7 @@ class DefaultInvitePeoplePresenter(
 
     @Composable
     override fun present(): InvitePeopleState {
+        val deletedIdentityRevision by deletedIdentityProjection.revision.collectAsState()
         val roomMembers = remember { mutableStateOf<AsyncData<ImmutableList<RoomMember>>>(AsyncData.Loading()) }
         val selectedUsers = remember { mutableStateOf<ImmutableList<MatrixUser>>(persistentListOf()) }
         val searchResults = remember { mutableStateOf<SearchBarResultState<ImmutableList<InvitableUser>>>(SearchBarResultState.Initial()) }
@@ -95,7 +102,7 @@ class DefaultInvitePeoplePresenter(
         val sendInvitesAction = remember { mutableStateOf<AsyncAction<Unit>>(AsyncAction.Uninitialized) }
         val createRoomFromDmAction = remember { mutableStateOf<AsyncAction<RoomId>>(AsyncAction.Uninitialized) }
 
-        val recentDirectRooms by produceState(emptyList(), roomMembers.value) {
+        val recentDirectRooms by produceState(emptyList(), roomMembers.value, deletedIdentityRevision) {
             if (roomMembers.value.isSuccess()) {
                 val activeMemberIds = roomMembers.value.dataOrNull().orEmpty()
                     .filter { it.membership.isActive() }
@@ -103,6 +110,7 @@ class DefaultInvitePeoplePresenter(
 
                 value = matrixClient.getRecentDirectRooms()
                     .filterNot { it.matrixUser.userId in activeMemberIds }
+                    .filterNot { deletedIdentityProjection.isDeletedMatrixUserId(it.matrixUser.userId.value) }
                     .take(MAX_SUGGESTIONS_COUNT)
                     .toList()
             }
@@ -169,7 +177,12 @@ class DefaultInvitePeoplePresenter(
             }
         }
         val searchQuery = queryState.text.toString()
-        LaunchedEffect(searchQuery, roomMembers) {
+        LaunchedEffect(deletedIdentityRevision) {
+            selectedUsers.value = selectedUsers.value
+                .filterNot { deletedIdentityProjection.isDeletedMatrixUserId(it.userId.value) }
+                .toImmutableList()
+        }
+        LaunchedEffect(searchQuery, roomMembers, deletedIdentityRevision) {
             performSearch(
                 searchResults = searchResults,
                 roomMembers = roomMembers,
@@ -191,6 +204,7 @@ class DefaultInvitePeoplePresenter(
                     }
 
                     is DefaultInvitePeopleEvents.ToggleUser -> {
+                        if (deletedIdentityProjection.isDeletedMatrixUserId(event.user.userId.value)) return
                         selectedUsers.toggleUser(event.user)
                         searchResults.toggleUser(event.user)
                         // suggestions will automatically update via derivedStateOf when selectedUsers changes
@@ -215,6 +229,13 @@ class DefaultInvitePeoplePresenter(
                     } else {
                         room.dataOrNull()?.let {
                             sessionCoroutineScope.launch {
+                                if (!allHaveAcceptedDirectRelationship(selectedUsers.value)) {
+                                    appErrorStateService.showError(
+                                        titleRes = CommonStrings.common_unable_to_invite_title,
+                                        bodyRes = R.string.screen_invite_people_friends_only,
+                                    )
+                                    return@launch
+                                }
                                 if (it.isDm()) {
                                     createRoomFromDm(it, selectedUsers.value, createRoomFromDmAction)
                                 } else {
@@ -269,6 +290,19 @@ class DefaultInvitePeoplePresenter(
 
             Result.success(Unit)
         }
+    }
+
+    private suspend fun hasAcceptedDirectRelationship(user: MatrixUser): Boolean {
+        val roomId = matrixClient.findDM(user.userId).getOrNull() ?: return false
+        val roomInfo = matrixClient.getRoom(roomId)?.info() ?: return false
+        return roomInfo.directRoomRelationState() == DirectRoomRelationState.ACCEPTED
+    }
+
+    private suspend fun allHaveAcceptedDirectRelationship(users: List<MatrixUser>): Boolean {
+        for (user in users) {
+            if (!hasAcceptedDirectRelationship(user)) return false
+        }
+        return true
     }
 
     private fun CoroutineScope.createRoomFromDm(
@@ -341,7 +375,9 @@ class DefaultInvitePeoplePresenter(
             searchResults.value = when {
                 state.results.isEmpty() && state.isSearching -> SearchBarResultState.Initial()
                 state.results.isEmpty() && !state.isSearching -> SearchBarResultState.NoResultsFound()
-                else -> SearchBarResultState.Results(state.results.map { result ->
+                else -> SearchBarResultState.Results(state.results
+                    .filterNot { deletedIdentityProjection.isDeletedMatrixUserId(it.matrixUser.userId.value) }
+                    .map { result ->
                     val existingMembership = joinedMembers.firstOrNull { j -> j.userId == result.matrixUser.userId }?.membership
                     val isJoined = existingMembership == RoomMembershipState.JOIN
                     val isInvited = existingMembership == RoomMembershipState.INVITE
@@ -352,7 +388,8 @@ class DefaultInvitePeoplePresenter(
                         isAlreadyInvited = isInvited,
                         isUnresolved = result.isUnresolved,
                     )
-                }.toImmutableList())
+                    }.toImmutableList()
+                ).takeIf { it.results.isNotEmpty() } ?: SearchBarResultState.NoResultsFound()
             }
         }.launchIn(this)
     }

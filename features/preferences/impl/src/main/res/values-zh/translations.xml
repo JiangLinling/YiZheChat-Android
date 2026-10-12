@@ -133,4 +133,6 @@
   <string name="troubleshoot_notifications_entry_point_push_history_title">"推送历史"</string>
   <string name="troubleshoot_notifications_entry_point_section">"排查问题"</string>
   <string name="troubleshoot_notifications_entry_point_title">"排查通知问题"</string>
+  <string name="screen_preferences_problem_feedback">"问题反馈"</string>
+  <string name="screen_preferences_problem_feedback_summary">"提交问题描述、图片或录屏"</string>
 </resources>

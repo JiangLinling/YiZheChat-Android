@@ -26,6 +26,8 @@ dependencies {
     implementation(projects.libraries.di)
 
     implementation(projects.libraries.core)
+    implementation(projects.security.contentProtection.api)
+    implementation(projects.security.dataProtection.api)
     implementation(projects.services.toolbox.api)
     implementation(libs.timber)
     implementation(libs.androidx.corektx)

@@ -28,4 +28,6 @@ dependencies {
     implementation(projects.services.analytics.test)
     implementation(projects.tests.testutils)
     implementation(projects.libraries.mediaupload.api)
+    implementation(projects.security.dataProtection.test)
+    implementation(projects.security.secureStorage.api)
 }

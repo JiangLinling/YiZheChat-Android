@@ -23,7 +23,7 @@ class AndroidPermissionActions(
     override fun openSettings(permission: String) {
         when (permission) {
             Manifest.permission.POST_NOTIFICATIONS -> context.startNotificationSettingsIntent()
-            else -> context.openAppSettingsPage()
+            else -> context.openAppSettingsPage(resetToAppDetails = true)
         }
     }
 }

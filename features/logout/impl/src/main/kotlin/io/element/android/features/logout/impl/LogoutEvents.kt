@@ -10,5 +10,6 @@ package io.element.android.features.logout.impl
 
 sealed interface LogoutEvents {
     data class Logout(val ignoreSdkError: Boolean) : LogoutEvents
+    data object ConfirmLogoutWithoutBackup : LogoutEvents
     data object CloseDialogs : LogoutEvents
 }

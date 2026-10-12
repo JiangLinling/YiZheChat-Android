@@ -21,6 +21,7 @@ import io.element.android.libraries.pushproviders.unifiedpush.network.DiscoveryR
 import io.element.android.libraries.troubleshoot.api.test.NotificationTroubleshootTestState
 import io.element.android.libraries.troubleshoot.api.test.TestFilterData
 import io.element.android.libraries.troubleshoot.test.runAndTestState
+import io.element.android.services.toolbox.test.strings.FakeStringProvider
 import io.element.android.tests.testutils.testCoroutineDispatchers
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -30,7 +31,7 @@ class UnifiedPushMatrixGatewayTestTest {
     @Test
     fun `test UnifiedPushMatrixGatewayTest success`() = runTest {
         val sut = createUnifiedPushMatrixGatewayTest(
-            config = aSessionPushConfig(),
+            config = aValidSessionPushConfig(),
             discoveryResponse = matrixDiscoveryResponse,
         )
         sut.runAndTestState {
@@ -38,6 +39,55 @@ class UnifiedPushMatrixGatewayTestTest {
             assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.InProgress)
             val lastItem = awaitItem()
             assertThat(lastItem.status).isEqualTo(NotificationTroubleshootTestState.Status.Success)
+        }
+    }
+
+    @Test
+    fun `gateway endpoint with provider query uses origin as Retrofit base URL`() = runTest {
+        val apiFactory = FakeUnifiedPushApiFactory(matrixDiscoveryResponse)
+        val sut = createUnifiedPushMatrixGatewayTest(
+            config = aSessionPushConfig(
+                url = "https://push.yizhesy.cn/_matrix/push/v1/notify?provider=coordinator"
+            ),
+            apiFactory = apiFactory,
+        )
+
+        sut.runAndTestState {
+            assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.Idle(false))
+            assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.InProgress)
+            assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.Success)
+        }
+        assertThat(apiFactory.baseUrlParameter).isEqualTo("https://push.yizhesy.cn/")
+    }
+
+    @Test
+    fun `gateway endpoint behind a public proxy keeps its path prefix`() = runTest {
+        val apiFactory = FakeUnifiedPushApiFactory(matrixDiscoveryResponse)
+        val sut = createUnifiedPushMatrixGatewayTest(
+            config = aSessionPushConfig(
+                url = "https://next.example.org/push/registrar/_matrix/push/v1/notify?provider=coordinator"
+            ),
+            apiFactory = apiFactory,
+        )
+
+        sut.runAndTestState {
+            assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.Idle(false))
+            assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.InProgress)
+            assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.Success)
+        }
+        assertThat(apiFactory.baseUrlParameter).isEqualTo("https://next.example.org/push/registrar/")
+    }
+
+    @Test
+    fun `invalid gateway endpoint is reported without crashing`() = runTest {
+        val sut = createUnifiedPushMatrixGatewayTest(
+            config = aSessionPushConfig(url = "not a gateway URL"),
+        )
+
+        sut.runAndTestState {
+            assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.Idle(false))
+            assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.InProgress)
+            assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.Failure())
         }
     }
 
@@ -58,7 +108,7 @@ class UnifiedPushMatrixGatewayTestTest {
     @Test
     fun `test UnifiedPushMatrixGatewayTest not valid gateway`() = runTest {
         val sut = createUnifiedPushMatrixGatewayTest(
-            config = aSessionPushConfig(),
+            config = aValidSessionPushConfig(),
             discoveryResponse = invalidDiscoveryResponse,
         )
         sut.runAndTestState {
@@ -75,7 +125,7 @@ class UnifiedPushMatrixGatewayTestTest {
     @Test
     fun `test UnifiedPushMatrixGatewayTest network error`() = runTest {
         val sut = createUnifiedPushMatrixGatewayTest(
-            config = aSessionPushConfig(),
+            config = aValidSessionPushConfig(),
             discoveryResponse = { error("Network error") },
         )
         sut.runAndTestState {
@@ -97,14 +147,20 @@ class UnifiedPushMatrixGatewayTestTest {
         sessionId: SessionId = A_SESSION_ID,
         config: Config? = null,
         discoveryResponse: () -> DiscoveryResponse = matrixDiscoveryResponse,
+        apiFactory: FakeUnifiedPushApiFactory = FakeUnifiedPushApiFactory(discoveryResponse),
     ): UnifiedPushMatrixGatewayTest {
         return UnifiedPushMatrixGatewayTest(
             sessionId = sessionId,
-            unifiedPushApiFactory = FakeUnifiedPushApiFactory(discoveryResponse),
+            unifiedPushApiFactory = apiFactory,
             coroutineDispatchers = testCoroutineDispatchers(),
             unifiedPushSessionPushConfigProvider = FakeUnifiedPushSessionPushConfigProvider(
                 config = { config }
             ),
+            stringProvider = FakeStringProvider(),
         )
     }
+
+    private fun aValidSessionPushConfig(): Config = aSessionPushConfig(
+        url = "https://push.example.org/_matrix/push/v1/notify"
+    )
 }

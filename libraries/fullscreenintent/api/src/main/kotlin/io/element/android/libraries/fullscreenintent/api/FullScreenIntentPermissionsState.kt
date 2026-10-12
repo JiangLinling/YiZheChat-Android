@@ -8,8 +8,16 @@
 
 package io.element.android.libraries.fullscreenintent.api
 
+enum class MissingCallPermission {
+    FullScreenIntent,
+    BackgroundActivity,
+    DoNotDisturbAccess,
+}
+
 data class FullScreenIntentPermissionsState(
     val permissionGranted: Boolean,
+    val doNotDisturbAccessGranted: Boolean,
+    val missingPermission: MissingCallPermission?,
     val shouldDisplayBanner: Boolean,
     val eventSink: (FullScreenIntentPermissionsEvents) -> Unit,
 )

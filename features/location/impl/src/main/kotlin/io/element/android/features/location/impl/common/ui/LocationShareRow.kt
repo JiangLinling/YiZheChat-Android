@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.location.api.Location
+import io.element.android.features.location.api.messageResource
 import io.element.android.features.location.impl.show.LocationShareItem
 import io.element.android.libraries.designsystem.components.avatar.Avatar
 import io.element.android.libraries.designsystem.components.avatar.AvatarData
@@ -95,7 +96,11 @@ fun LocationShareRow(
                     )
                 }
                 Text(
-                    text = if (item.isLive) stringResource(CommonStrings.screen_room_live_location_banner) else item.formattedTimestamp,
+                    text = when {
+                        item.isLive && item.pausedState != null -> stringResource(item.pausedState.messageResource())
+                        item.isLive -> stringResource(CommonStrings.screen_room_live_location_banner)
+                        else -> item.formattedTimestamp
+                    },
                     style = ElementTheme.typography.fontBodySmRegular,
                     color = if (item.isLive) ElementTheme.colors.textPrimary else ElementTheme.colors.textSecondary,
                     maxLines = 1,

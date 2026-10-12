@@ -18,6 +18,7 @@ import io.element.android.features.home.impl.datasource.aRoomListRoomSummaryFact
 import io.element.android.features.home.impl.filters.RoomListFiltersState
 import io.element.android.features.home.impl.filters.aRoomListFiltersState
 import io.element.android.features.home.impl.model.createRoomListRoomSummary
+import io.element.android.features.home.impl.model.LatestEvent
 import io.element.android.features.home.impl.search.RoomListSearchEvent
 import io.element.android.features.home.impl.search.RoomListSearchState
 import io.element.android.features.home.impl.search.aRoomListSearchState
@@ -30,6 +31,12 @@ import io.element.android.features.invite.api.acceptdecline.anAcceptDeclineInvit
 import io.element.android.features.invite.test.InMemorySeenInvitesStore
 import io.element.android.features.leaveroom.api.LeaveRoomEvent
 import io.element.android.features.leaveroom.api.LeaveRoomState
+import io.element.android.features.messages.api.draft.ComposerDraftPreviewService
+import io.element.android.features.messages.api.MessageReferenceState
+import io.element.android.features.messages.api.MessageReferenceStore
+import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleaner
+import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleanupResult
+import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleanupTarget
 import io.element.android.features.rageshake.test.logs.FakeAnnouncementService
 import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.dateformatter.api.DateFormatter
@@ -41,9 +48,11 @@ import io.element.android.libraries.featureflag.test.FakeFeatureFlagService
 import io.element.android.libraries.fullscreenintent.api.aFullScreenIntentPermissionsState
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.core.RoomId
+import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.encryption.RecoveryState
 import io.element.android.libraries.matrix.api.room.CurrentUserMembership
+import io.element.android.libraries.matrix.api.room.draft.ComposerDraft
 import io.element.android.libraries.matrix.api.room.RoomNotificationMode
 import io.element.android.libraries.matrix.api.roomlist.RoomList
 import io.element.android.libraries.matrix.api.sync.SyncState
@@ -72,6 +81,8 @@ import io.element.android.libraries.push.api.notifications.NotificationCleaner
 import io.element.android.libraries.push.test.notifications.FakeNotificationCleaner
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.analytics.test.FakeAnalyticsService
+import io.element.android.security.dataprotection.test.FakeProtectedPreviewAuthorizationGate
+import io.element.android.security.dataprotection.test.FakeDeletedIdentityProjection
 import io.element.android.services.analytics.test.watchers.FakeAnalyticsColdStartWatcher
 import io.element.android.tests.testutils.EventsRecorder
 import io.element.android.tests.testutils.WarmUpRule
@@ -95,6 +106,32 @@ import kotlin.time.Duration.Companion.seconds
 class RoomListPresenterTest {
     @get:Rule
     val warmUpRule = WarmUpRule()
+
+    @Test
+    fun `contacts remain present when filtered chats are empty and the conversation was locally removed`() = runTest {
+        val allRooms = FakeDynamicRoomList(loadingState = MutableStateFlow(RoomList.LoadingState.Loaded(1)))
+        val filteredRooms = FakeDynamicRoomList(loadingState = MutableStateFlow(RoomList.LoadingState.Loaded(0)))
+        val service = FakeRoomListService(createRoomListLambda = { filteredRooms }, allRooms = allRooms)
+        val references = object : MessageReferenceStore {
+            override val state = MutableStateFlow(MessageReferenceState(conversationCutoffs = mapOf(A_ROOM_ID.value to 9999L)))
+            override suspend fun load() = Unit
+            override suspend fun toggleFavourite(roomId: RoomId, eventId: EventId) = false
+            override suspend fun addFavourites(roomId: RoomId, eventIds: Collection<EventId>) = Unit
+            override suspend fun removeFavourite(roomId: RoomId, eventId: EventId) = Unit
+            override suspend fun deleteLocally(roomId: RoomId, eventIds: Collection<EventId>) = Unit
+            override suspend fun deleteConversation(roomId: RoomId, cutoffTimestamp: Long) = Unit
+        }
+        val presenter = createRoomListPresenter(client = FakeMatrixClient(roomListService = service), messageReferenceStore = references)
+        presenter.test {
+            allRooms.summaries.emit(listOf(aRoomSummary(info = aRoomInfo(isDm = true, activeMembersCount = 2, joinedMembersCount = 2, invitedMembersCount = 0))))
+            val state = consumeItemsUntilPredicate {
+                it.contactsSummaries.dataOrNull()?.size == 1 && it.contentState is RoomListContentState.Empty
+            }.last()
+            assertThat(state.contactsSummaries.dataOrNull()!!.single().roomId).isEqualTo(A_ROOM_ID)
+            assertThat(state.contactsSummaries.dataOrNull()!!.single().latestEvent).isEqualTo(LatestEvent.None)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
 
     @Test
     fun `present - load 1 room with success`() = runTest {
@@ -129,7 +166,9 @@ class RoomListPresenterTest {
                     numberOfUnreadMentions = 1,
                     numberOfUnreadMessages = 2,
                     timestamp = "0 TimeOrDate true",
-                )
+                    latestEvent = LatestEvent.Protected,
+                ).copy(activeMembersCount = 1, joinedMembersCount = 1, isEncrypted = false,
+                    historyVisibility = io.element.android.libraries.matrix.api.room.history.RoomHistoryVisibility.Joined)
             )
             assertThat(withRoomsState.contentAsRooms().seenRoomInvites).containsExactly(A_ROOM_ID, A_ROOM_ID_2, A_ROOM_ID_3)
             cancelAndIgnoreRemainingEvents()
@@ -221,7 +260,7 @@ class RoomListPresenterTest {
             val summary = createRoomListRoomSummary()
             initialState.eventSink(RoomListEvent.ShowContextMenu(summary))
 
-            awaitItem().also { state ->
+            consumeItemsUntilPredicate { it.contextMenu is RoomListState.ContextMenu.Shown }.last().also { state ->
                 assertThat(state.contextMenu)
                     .isEqualTo(
                         RoomListState.ContextMenu.Shown(
@@ -230,7 +269,6 @@ class RoomListPresenterTest {
                             isDm = false,
                             isFavorite = false,
                             hasNewContent = false,
-                            displayClearRoomCacheAction = false,
                         )
                     )
             }
@@ -238,7 +276,9 @@ class RoomListPresenterTest {
             room.givenRoomInfo(
                 aRoomInfo(isFavorite = true)
             )
-            awaitItem().also { state ->
+            consumeItemsUntilPredicate {
+                (it.contextMenu as? RoomListState.ContextMenu.Shown)?.isFavorite == true
+            }.last().also { state ->
                 assertThat(state.contextMenu)
                     .isEqualTo(
                         RoomListState.ContextMenu.Shown(
@@ -247,7 +287,6 @@ class RoomListPresenterTest {
                             isDm = false,
                             isFavorite = true,
                             hasNewContent = false,
-                            displayClearRoomCacheAction = false,
                         )
                     )
             }
@@ -265,7 +304,7 @@ class RoomListPresenterTest {
             val initialState = awaitItem()
             val summary = createRoomListRoomSummary()
             initialState.eventSink(RoomListEvent.ShowContextMenu(summary))
-            awaitItem().also { state ->
+            consumeItemsUntilPredicate { it.contextMenu is RoomListState.ContextMenu.Shown }.last().also { state ->
                 assertThat(state.contextMenu)
                     .isEqualTo(
                         RoomListState.ContextMenu.Shown(
@@ -273,9 +312,7 @@ class RoomListPresenterTest {
                             roomName = summary.name,
                             isDm = false,
                             isFavorite = false,
-                            // true here.
                             hasNewContent = false,
-                            displayClearRoomCacheAction = true,
                         )
                     )
             }
@@ -294,7 +331,7 @@ class RoomListPresenterTest {
             val summary = createRoomListRoomSummary()
             initialState.eventSink(RoomListEvent.ShowContextMenu(summary))
 
-            val shownState = awaitItem()
+            val shownState = consumeItemsUntilPredicate { it.contextMenu is RoomListState.ContextMenu.Shown }.last()
             assertThat(shownState.contextMenu)
                 .isEqualTo(
                     RoomListState.ContextMenu.Shown(
@@ -303,13 +340,12 @@ class RoomListPresenterTest {
                         isDm = false,
                         isFavorite = false,
                         hasNewContent = false,
-                        displayClearRoomCacheAction = false,
                     )
                 )
 
             shownState.eventSink(RoomListEvent.HideContextMenu)
 
-            val hiddenState = awaitItem()
+            val hiddenState = consumeItemsUntilPredicate { it.contextMenu is RoomListState.ContextMenu.Hidden }.last()
             assertThat(hiddenState.contextMenu).isEqualTo(RoomListState.ContextMenu.Hidden)
         }
     }
@@ -353,6 +389,7 @@ class RoomListPresenterTest {
                     RoomListSearchEvent.ToggleSearchVisibility
                 )
             )
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
@@ -430,7 +467,9 @@ class RoomListPresenterTest {
             client = matrixClient,
         )
         presenter.test {
-            assertThat(awaitItem().contentState).isInstanceOf(RoomListContentState.Empty::class.java)
+            val state = consumeItemsUntilPredicate { it.contentState is RoomListContentState.Empty }.last()
+            assertThat(state.contentState).isInstanceOf(RoomListContentState.Empty::class.java)
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
@@ -642,11 +681,15 @@ class RoomListPresenterTest {
         )
         presenter.test {
             assertThat(announcementService.announcementsToShowFlow().first()).isEmpty()
-            skipItems(1)
-            val state = awaitItem()
+            val state = consumeItemsUntilPredicate {
+                it.contentState is RoomListContentState.Rooms
+            }.last()
             assertThat(state.contentAsRooms().showNewNotificationSoundBanner).isFalse()
             announcementService.emitAnnouncementsToShow(listOf(Announcement.NewNotificationSound))
-            assertThat(awaitItem().contentAsRooms().showNewNotificationSoundBanner).isTrue()
+            val announcementState = consumeItemsUntilPredicate {
+                (it.contentState as? RoomListContentState.Rooms)?.showNewNotificationSoundBanner == true
+            }.last()
+            assertThat(announcementState.contentAsRooms().showNewNotificationSoundBanner).isTrue()
             state.eventSink(RoomListEvent.DismissNewNotificationSoundBanner)
             onAnnouncementDismissedResult.assertions().isCalledOnce()
                 .with(value(Announcement.NewNotificationSound))
@@ -672,6 +715,21 @@ class RoomListPresenterTest {
         seenInvitesStore: SeenInvitesStore = InMemorySeenInvitesStore(),
         announcementService: AnnouncementService = FakeAnnouncementService(),
         featureFlagService: FeatureFlagService = FakeFeatureFlagService(),
+        notificationSettingsService: FakeNotificationSettingsService = FakeNotificationSettingsService(),
+        draftPreviewService: ComposerDraftPreviewService = object : ComposerDraftPreviewService {
+            override val previews = MutableStateFlow<Map<RoomId, String>>(emptyMap())
+            override suspend fun refresh(roomIds: Collection<RoomId>) = Unit
+            override fun update(roomId: RoomId, draft: ComposerDraft?) = Unit
+        },
+        messageReferenceStore: MessageReferenceStore = object : MessageReferenceStore {
+            override val state = MutableStateFlow(MessageReferenceState())
+            override suspend fun load() = Unit
+            override suspend fun toggleFavourite(roomId: RoomId, eventId: EventId) = false
+            override suspend fun addFavourites(roomId: RoomId, eventIds: Collection<EventId>) = Unit
+            override suspend fun removeFavourite(roomId: RoomId, eventId: EventId) = Unit
+            override suspend fun deleteLocally(roomId: RoomId, eventIds: Collection<EventId>) = Unit
+            override suspend fun deleteConversation(roomId: RoomId, cutoffTimestamp: Long) = Unit
+        },
     ) = RoomListPresenter(
         client = client,
         leaveRoomPresenter = { leaveRoomState },
@@ -686,6 +744,12 @@ class RoomListPresenterTest {
             sessionCoroutineScope = backgroundScope,
             dateTimeObserver = FakeDateTimeObserver(),
             analyticsService = FakeAnalyticsService(),
+            protectedPreviewAuthorizationGate = FakeProtectedPreviewAuthorizationGate(),
+            deletedIdentityProjection = FakeDeletedIdentityProjection(),
+            deletedIdentityProjectionCleaner = object : DeletedIdentityProjectionCleaner {
+                override suspend fun clear(target: DeletedIdentityProjectionCleanupTarget) =
+                    DeletedIdentityProjectionCleanupResult(target.roomIds, emptySet())
+            },
         ),
         searchPresenter = searchPresenter,
         sessionPreferencesStore = sessionPreferencesStore,
@@ -701,5 +765,13 @@ class RoomListPresenterTest {
         announcementService = announcementService,
         coldStartWatcher = FakeAnalyticsColdStartWatcher(),
         featureFlagService = featureFlagService,
+        notificationSettingsService = notificationSettingsService,
+        draftPreviewService = draftPreviewService,
+        messageReferenceStore = messageReferenceStore,
+        staleRoomReconciler = StaleRoomReconciler(
+            client = client,
+            notificationCleaner = notificationCleaner,
+            clearCacheUseCase = { },
+        ),
     )
 }

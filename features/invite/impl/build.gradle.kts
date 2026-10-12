@@ -38,10 +38,17 @@ dependencies {
     implementation(projects.libraries.uiStrings)
     implementation(projects.services.analytics.api)
     implementation(projects.libraries.push.api)
+    implementation(projects.security.secureStorage.api)
 
     testCommonDependencies(libs, true)
     testImplementation(projects.features.invite.test)
     testImplementation(projects.libraries.matrix.test)
     testImplementation(projects.libraries.push.test)
     testImplementation(projects.services.analytics.test)
+    testImplementation(projects.security.secureStorage.test)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.test.core)
+    androidTestImplementation(libs.test.runner)
+    androidTestImplementation(libs.test.truth)
+    androidTestImplementation(projects.security.secureStorage.test)
 }

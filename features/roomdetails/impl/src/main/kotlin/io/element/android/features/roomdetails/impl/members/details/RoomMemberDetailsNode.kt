@@ -59,9 +59,10 @@ class RoomMemberDetailsNode(
     @Composable
     override fun View(modifier: Modifier) {
         val context = LocalContext.current
+        val state = presenter.present()
 
         fun onShareUser() {
-            userProfileNodeHelper.onShareUser(context, permalinkBuilder)
+            userProfileNodeHelper.onShareUser(context, permalinkBuilder, state.userName)
         }
 
         fun navigateToRoom(roomId: RoomId) {
@@ -71,8 +72,6 @@ class RoomMemberDetailsNode(
         fun onStartCall(roomId: RoomId, callIntent: CallIntent) {
             callback.startCall(roomId, callIntent)
         }
-
-        val state = presenter.present()
 
         UserProfileView(
             state = state,

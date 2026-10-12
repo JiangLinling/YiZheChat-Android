@@ -8,10 +8,31 @@
 
 package io.element.android.features.messages.impl.attachments.preview
 
+import io.element.android.features.messages.impl.attachments.Attachment
+import io.element.android.features.messages.impl.attachments.preview.imageeditor.ImageAnnotation
 import io.element.android.features.messages.impl.attachments.preview.imageeditor.NormalizedCropRect
+import io.element.android.libraries.preferences.api.store.VideoCompressionPreset
 
 sealed interface AttachmentsPreviewEvent {
+    data class UpdateGallerySelection(val items: List<Attachment.Media>, val originalPhotos: Boolean, val send: Boolean) : AttachmentsPreviewEvent
+    data class FocusAttachment(val index: Int) : AttachmentsPreviewEvent
+    data class ToggleAttachment(val index: Int) : AttachmentsPreviewEvent
+    data class SetOriginalPhotos(val value: Boolean) : AttachmentsPreviewEvent
+    data class SetVideoQuality(val preset: VideoCompressionPreset) : AttachmentsPreviewEvent
+    data object OpenVideoEditor : AttachmentsPreviewEvent
+    data object CloseVideoEditor : AttachmentsPreviewEvent
+    data class ApplyVideoEdits(val startMs: Long, val endMs: Long?, val mute: Boolean) : AttachmentsPreviewEvent
+    data class AddImageAnnotation(val annotation: ImageAnnotation) : AttachmentsPreviewEvent
+    data class ReplaceImageAnnotations(val annotations: List<ImageAnnotation>) : AttachmentsPreviewEvent
+    data object UndoImageEdit : AttachmentsPreviewEvent
+    data object RedoImageEdit : AttachmentsPreviewEvent
+    data object ConfirmSubmission : AttachmentsPreviewEvent
+    data object ShowRecoveryDetails : AttachmentsPreviewEvent
+    data object DismissRecoveryDetails : AttachmentsPreviewEvent
+    data object RetryAttachment : AttachmentsPreviewEvent
     data object SendAttachment : AttachmentsPreviewEvent
+    data object SendFlashReadAttachment : AttachmentsPreviewEvent
+    data object DismissPreservingDraft : AttachmentsPreviewEvent
     data object CancelAndDismiss : AttachmentsPreviewEvent
     data object CancelAndClearSendState : AttachmentsPreviewEvent
     data object OpenImageEditor : AttachmentsPreviewEvent

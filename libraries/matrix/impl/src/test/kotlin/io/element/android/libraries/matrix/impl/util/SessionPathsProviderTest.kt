@@ -14,6 +14,7 @@ import io.element.android.libraries.sessionstorage.test.InMemorySessionStore
 import io.element.android.libraries.sessionstorage.test.aSessionData
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
+import java.io.File
 
 class SessionPathsProviderTest {
     @Test
@@ -28,14 +29,14 @@ class SessionPathsProviderTest {
         val store = InMemorySessionStore(
             initialList = listOf(
                 aSessionData(
-                    sessionPath = "/a/path/to/a/session",
-                    cachePath = "/a/path/to/a/cache",
+                    sessionPath = File("/a/path/to/a/session").absolutePath,
+                    cachePath = File("/a/path/to/a/cache").absolutePath,
                 )
             )
         )
         val sut = SessionPathsProvider(store)
         val result = sut.provides(A_SESSION_ID)!!
-        assertThat(result.fileDirectory.absolutePath).isEqualTo("/a/path/to/a/session")
-        assertThat(result.cacheDirectory.absolutePath).isEqualTo("/a/path/to/a/cache")
+        assertThat(result.fileDirectory.absolutePath).isEqualTo(File("/a/path/to/a/session").absolutePath)
+        assertThat(result.cacheDirectory.absolutePath).isEqualTo(File("/a/path/to/a/cache").absolutePath)
     }
 }

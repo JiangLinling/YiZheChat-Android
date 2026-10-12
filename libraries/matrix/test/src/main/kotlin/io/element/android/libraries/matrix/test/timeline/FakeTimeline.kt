@@ -11,10 +11,12 @@ package io.element.android.libraries.matrix.test.timeline
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.TransactionId
+import io.element.android.libraries.matrix.api.core.UniqueId
 import io.element.android.libraries.matrix.api.media.AudioInfo
 import io.element.android.libraries.matrix.api.media.FileInfo
 import io.element.android.libraries.matrix.api.media.ImageInfo
 import io.element.android.libraries.matrix.api.media.MediaUploadHandler
+import io.element.android.libraries.matrix.api.media.ProtectedMediaSource
 import io.element.android.libraries.matrix.api.media.VideoInfo
 import io.element.android.libraries.matrix.api.poll.PollKind
 import io.element.android.libraries.matrix.api.room.IntentionalMention
@@ -23,8 +25,11 @@ import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
 import io.element.android.libraries.matrix.api.timeline.MsgType
 import io.element.android.libraries.matrix.api.timeline.ReceiptType
 import io.element.android.libraries.matrix.api.timeline.Timeline
+import io.element.android.libraries.matrix.api.timeline.ForwardEventPairResult
 import io.element.android.libraries.matrix.api.timeline.item.event.EventOrTransactionId
+import io.element.android.libraries.matrix.api.timeline.item.event.CallLifecycleState
 import io.element.android.libraries.matrix.api.timeline.item.event.InReplyTo
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedMediaAlbum
 import io.element.android.libraries.matrix.test.media.FakeMediaUploadHandler
 import io.element.android.tests.testutils.lambda.lambdaError
 import io.element.android.tests.testutils.simulateLongTask
@@ -61,6 +66,12 @@ class FakeTimeline(
         lambdaError()
     }
 ) : Timeline {
+    val viewportUpdates = mutableListOf<List<UniqueId>>()
+
+    override fun updateViewport(visibleItemIds: List<UniqueId>) {
+        viewportUpdates += visibleItemIds.toList()
+    }
+
     var sendMessageLambda: (
         body: String,
         htmlBody: String?,
@@ -84,6 +95,26 @@ class FakeTimeline(
     ): Result<Unit> = simulateLongTask {
         sendMessageLambda(body, htmlBody, intentionalMentions, msgType, asPlainText)
     }
+
+    var openBurnAfterReadLambda: suspend (EventId) -> Result<Unit> = { lambdaError() }
+
+    var sendCallLifecycleLambda: suspend (EventId, CallLifecycleState, Long?) -> Result<Unit> = { _, _, _ -> lambdaError() }
+
+    override suspend fun sendCallLifecycle(
+        notificationEventId: EventId,
+        state: CallLifecycleState,
+        durationMillis: Long?,
+    ): Result<Unit> = sendCallLifecycleLambda(notificationEventId, state, durationMillis)
+
+    override suspend fun openBurnAfterRead(eventId: EventId): Result<Unit> =
+        openBurnAfterReadLambda(eventId)
+
+    var endBurnAfterReadLambda: (EventId, Timeline.BurnAfterReadEndReason) -> Result<Unit> = { _, _ -> lambdaError() }
+
+    override suspend fun endBurnAfterRead(
+        eventId: EventId,
+        reason: Timeline.BurnAfterReadEndReason,
+    ): Result<Unit> = endBurnAfterReadLambda(eventId, reason)
 
     var redactEventLambda: (eventOrTransactionId: EventOrTransactionId, reason: String?) -> Result<Unit> = { _, _ ->
         lambdaError()
@@ -170,6 +201,8 @@ class FakeTimeline(
     ) -> Result<MediaUploadHandler> = { _, _, _, _, _, _ ->
         Result.success(FakeMediaUploadHandler())
     }
+    var lastSendImageBurnAfterRead: Boolean? = null
+    var lastSendImageMediaAlbum: ProtectedMediaAlbum? = null
 
     override suspend fun sendImage(
         file: File,
@@ -178,7 +211,11 @@ class FakeTimeline(
         caption: String?,
         formattedCaption: String?,
         inReplyToEventId: EventId?,
+        burnAfterRead: Boolean,
+        mediaAlbum: ProtectedMediaAlbum?,
     ): Result<MediaUploadHandler> = simulateLongTask {
+        lastSendImageBurnAfterRead = burnAfterRead
+        lastSendImageMediaAlbum = mediaAlbum
         sendImageLambda(
             file,
             thumbnailFile,
@@ -199,6 +236,8 @@ class FakeTimeline(
     ) -> Result<MediaUploadHandler> = { _, _, _, _, _, _ ->
         Result.success(FakeMediaUploadHandler())
     }
+    var lastSendVideoBurnAfterRead: Boolean? = null
+    var lastSendVideoMediaAlbum: ProtectedMediaAlbum? = null
 
     override suspend fun sendVideo(
         file: File,
@@ -207,7 +246,11 @@ class FakeTimeline(
         caption: String?,
         formattedCaption: String?,
         inReplyToEventId: EventId?,
+        burnAfterRead: Boolean,
+        mediaAlbum: ProtectedMediaAlbum?,
     ): Result<MediaUploadHandler> = simulateLongTask {
+        lastSendVideoBurnAfterRead = burnAfterRead
+        lastSendVideoMediaAlbum = mediaAlbum
         sendVideoLambda(
             file,
             thumbnailFile,
@@ -234,6 +277,7 @@ class FakeTimeline(
         caption: String?,
         formattedCaption: String?,
         inReplyToEventId: EventId?,
+        burnAfterRead: Boolean,
     ): Result<MediaUploadHandler> = simulateLongTask {
         sendAudioLambda(
             file,
@@ -260,6 +304,7 @@ class FakeTimeline(
         caption: String?,
         formattedCaption: String?,
         inReplyToEventId: EventId?,
+        burnAfterRead: Boolean,
     ): Result<MediaUploadHandler> = simulateLongTask {
         sendFileLambda(
             file,
@@ -284,6 +329,7 @@ class FakeTimeline(
         audioInfo: AudioInfo,
         waveform: List<Float>,
         inReplyToEventId: EventId?,
+        burnAfterRead: Boolean,
     ): Result<MediaUploadHandler> = simulateLongTask {
         sendVoiceMessageLambda(
             file,
@@ -293,6 +339,26 @@ class FakeTimeline(
         )
     }
 
+    var sendProtectedVoiceMessageLambda: (
+        source: ProtectedMediaSource,
+        audioInfo: AudioInfo,
+        waveform: List<Float>,
+        inReplyToEventId: EventId?,
+        burnAfterRead: Boolean,
+    ) -> Result<MediaUploadHandler> = { _, _, _, _, _ ->
+        Result.success(FakeMediaUploadHandler())
+    }
+
+    override suspend fun sendProtectedVoiceMessage(
+        source: ProtectedMediaSource,
+        audioInfo: AudioInfo,
+        waveform: List<Float>,
+        inReplyToEventId: EventId?,
+        burnAfterRead: Boolean,
+    ): Result<MediaUploadHandler> = simulateLongTask {
+        sendProtectedVoiceMessageLambda(source, audioInfo, waveform, inReplyToEventId, burnAfterRead)
+    }
+
     var sendLocationLambda: (
         body: String,
         geoUri: String,
@@ -300,7 +366,8 @@ class FakeTimeline(
         zoomLevel: Int?,
         assetType: AssetType?,
         inReplyToEventId: EventId?,
-    ) -> Result<Unit> = { _, _, _, _, _, _ ->
+        burnAfterRead: Boolean,
+    ) -> Result<Unit> = { _, _, _, _, _, _, _ ->
         lambdaError()
     }
 
@@ -311,6 +378,7 @@ class FakeTimeline(
         zoomLevel: Int?,
         assetType: AssetType?,
         inReplyToEventId: EventId?,
+        burnAfterRead: Boolean,
     ): Result<Unit> = simulateLongTask {
         sendLocationLambda(
             body,
@@ -319,6 +387,7 @@ class FakeTimeline(
             zoomLevel,
             assetType,
             inReplyToEventId,
+            burnAfterRead,
         )
     }
 
@@ -335,6 +404,15 @@ class FakeTimeline(
 
     override suspend fun forwardEvent(eventId: EventId, roomIds: List<RoomId>): Result<Unit> = simulateLongTask {
         forwardEventLambda(eventId, roomIds)
+    }
+
+    var forwardEventPairLambda: (EventId, RoomId, String) -> ForwardEventPairResult = { _, _, _ -> lambdaError() }
+    var forwardEventPairSuspendingLambda: (suspend (EventId, RoomId, String) -> ForwardEventPairResult)? = null
+
+    override suspend fun forwardEventPair(eventId: EventId, roomId: RoomId, operationId: String): ForwardEventPairResult {
+        simulateLongTask { Unit }
+        return forwardEventPairSuspendingLambda?.invoke(eventId, roomId, operationId)
+            ?: forwardEventPairLambda(eventId, roomId, operationId)
     }
 
     var createPollLambda: (
@@ -370,7 +448,8 @@ class FakeTimeline(
         question: String,
         answers: List<String>,
         maxSelections: Int,
-        pollKind: PollKind
+        pollKind: PollKind,
+        answerIds: List<String>?,
     ): Result<Unit> = simulateLongTask {
         editPollLambda(
             pollStartId,
@@ -448,6 +527,23 @@ class FakeTimeline(
 
     override suspend fun getLatestEventId(): Result<EventId?> {
         return getLatestEventIdResult()
+    }
+
+    private val pendingRelayEdits = mutableMapOf<String, io.element.android.libraries.matrix.api.timeline.RelayEditRecovery>()
+
+    override suspend fun retainRelayEditRecovery(recovery: io.element.android.libraries.matrix.api.timeline.RelayEditRecovery): Result<Unit> =
+        runCatching {
+            require(pendingRelayEdits[recovery.targetEventId].let { it == null || it == recovery })
+            pendingRelayEdits[recovery.targetEventId] = recovery
+        }
+
+    override suspend fun pendingRelayEditRecovery(eventId: EventId): Result<io.element.android.libraries.matrix.api.timeline.RelayEditRecovery?> =
+        Result.success(pendingRelayEdits[eventId.value])
+
+    override suspend fun resolveRelayEditRecovery(eventId: EventId, operationId: String): Result<Unit> = runCatching {
+        require(pendingRelayEdits[eventId.value].let { it == null || it.operationId == operationId })
+        pendingRelayEdits.remove(eventId.value)
+        Unit
     }
 
     var closeCounter = 0

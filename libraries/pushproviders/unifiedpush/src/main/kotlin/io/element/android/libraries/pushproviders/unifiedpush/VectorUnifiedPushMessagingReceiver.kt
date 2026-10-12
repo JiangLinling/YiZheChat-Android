@@ -15,7 +15,7 @@ import io.element.android.libraries.architecture.bindings
 import io.element.android.libraries.core.log.logger.LoggerTag
 import io.element.android.libraries.di.annotations.AppCoroutineScope
 import io.element.android.libraries.push.api.push.FetchPushForegroundServiceManager
-import io.element.android.libraries.pushproviders.api.PushHandler
+import io.element.android.libraries.pushproviders.unifiedpush.embedded.EmbeddedNtfyMessageHandler
 import io.element.android.libraries.pushproviders.unifiedpush.registration.EndpointRegistrationHandler
 import io.element.android.libraries.pushproviders.unifiedpush.registration.RegistrationResult
 import kotlinx.coroutines.CoroutineScope
@@ -29,8 +29,7 @@ import timber.log.Timber
 private val loggerTag = LoggerTag("VectorUnifiedPushMessagingReceiver", LoggerTag.PushLoggerTag)
 
 class VectorUnifiedPushMessagingReceiver : MessagingReceiver() {
-    @Inject lateinit var pushParser: UnifiedPushParser
-    @Inject lateinit var pushHandler: PushHandler
+    @Inject lateinit var messageHandler: EmbeddedNtfyMessageHandler
     @Inject lateinit var guardServiceStarter: GuardServiceStarter
     @Inject lateinit var unifiedPushStore: UnifiedPushStore
     @Inject lateinit var unifiedPushGatewayResolver: UnifiedPushGatewayResolver
@@ -39,13 +38,12 @@ class VectorUnifiedPushMessagingReceiver : MessagingReceiver() {
     @Inject lateinit var removedGatewayHandler: UnifiedPushRemovedGatewayHandler
     @Inject lateinit var endpointRegistrationHandler: EndpointRegistrationHandler
     @Inject lateinit var fetchPushForegroundServiceManager: FetchPushForegroundServiceManager
-
     @AppCoroutineScope
     @Inject lateinit var coroutineScope: CoroutineScope
 
     override fun onReceive(context: Context, intent: Intent) {
         // We only need to inject this object once
-        if (!this::pushParser.isInitialized) {
+        if (!this::messageHandler.isInitialized) {
             context.bindings<VectorUnifiedPushMessagingReceiverBindings>().inject(this)
         }
         super.onReceive(context, intent)
@@ -59,30 +57,19 @@ class VectorUnifiedPushMessagingReceiver : MessagingReceiver() {
      * @param instance connection, for multi-account
      */
     override fun onMessage(context: Context, message: PushMessage, instance: String) {
-        // Start the foreground service to ensure the device stays awake while we handle the push and schedule and run the work.
+        // A push is also a low-cost signal to refresh the signed YiZheChat management channel.
+        // The receiver is package-scoped and carries no message or account data.
+        context.sendBroadcast(
+            Intent(MANAGEMENT_SYNC_ACTION).setPackage(context.packageName)
+        )
         fetchPushForegroundServiceManager.start()
-
-        Timber.tag(loggerTag.value).d("New message, decrypted: ${message.decrypted}")
         coroutineScope.launch {
-            val pushData = pushParser.parse(message.content, instance)
-            if (pushData == null) {
-                Timber.tag(loggerTag.value).w("Invalid data received from UnifiedPush")
-                pushHandler.handleInvalid(
-                    providerInfo = "${UnifiedPushConfig.NAME} - $instance",
-                    data = String(message.content),
-                )
-                fetchPushForegroundServiceManager.stop()
-            } else {
-                val handled = pushHandler.handle(
-                    pushData = pushData,
-                    providerInfo = "${UnifiedPushConfig.NAME} - $instance",
-                )
-
-                // If we failed to handle the push, we should stop the foreground service early to avoid keeping the device awake for too long.
-                if (!handled) {
-                    fetchPushForegroundServiceManager.stop()
-                }
-            }
+            messageHandler.handle(
+                content = message.content,
+                clientSecret = instance,
+                providerInfo = "${UnifiedPushConfig.NAME} - external distributor",
+                startForegroundService = false,
+            )
         }
     }
 
@@ -91,7 +78,7 @@ class VectorUnifiedPushMessagingReceiver : MessagingReceiver() {
      * You should send the endpoint to your application server and sync for missing notifications.
      */
     override fun onNewEndpoint(context: Context, endpoint: PushEndpoint, instance: String) {
-        Timber.tag(loggerTag.value).w("onNewEndpoint: $endpoint")
+        Timber.tag(loggerTag.value).d("Received a new UnifiedPush endpoint")
         coroutineScope.launch {
             val gateway = unifiedPushGatewayResolver.getGateway(endpoint.url)
                 .let { gatewayResult ->
@@ -119,7 +106,7 @@ class VectorUnifiedPushMessagingReceiver : MessagingReceiver() {
      * Called when the registration is not possible, eg. no network.
      */
     override fun onRegistrationFailed(context: Context, reason: FailedReason, instance: String) {
-        Timber.tag(loggerTag.value).e("onRegistrationFailed for $instance, reason: $reason")
+        Timber.tag(loggerTag.value).e("UnifiedPush registration failed, reason: $reason")
         coroutineScope.launch {
             endpointRegistrationHandler.registrationDone(
                 RegistrationResult(
@@ -134,9 +121,13 @@ class VectorUnifiedPushMessagingReceiver : MessagingReceiver() {
      * Called when this application is unregistered from receiving push messages.
      */
     override fun onUnregistered(context: Context, instance: String) {
-        Timber.tag(loggerTag.value).w("onUnregistered $instance")
+        Timber.tag(loggerTag.value).d("UnifiedPush registration removed")
         coroutineScope.launch {
             removedGatewayHandler.handle(instance)
         }
+    }
+
+    private companion object {
+        const val MANAGEMENT_SYNC_ACTION = "io.element.android.yizhe.MANAGEMENT_SYNC"
     }
 }

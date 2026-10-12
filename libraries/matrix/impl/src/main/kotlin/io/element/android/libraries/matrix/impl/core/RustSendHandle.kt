@@ -14,6 +14,8 @@ import io.element.android.libraries.matrix.api.core.SendHandle
 class RustSendHandle(
     val inner: org.matrix.rustcomponents.sdk.SendHandle,
 ) : SendHandle {
+    override suspend fun abort(): Result<Boolean> = runCatchingExceptions { inner.abort() }
+
     override suspend fun retry(): Result<Unit> {
         return runCatchingExceptions {
             inner.tryResend()

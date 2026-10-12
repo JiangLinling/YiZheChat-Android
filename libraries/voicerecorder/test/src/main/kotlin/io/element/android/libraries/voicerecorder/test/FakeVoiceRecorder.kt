@@ -12,6 +12,7 @@ import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.voicerecorder.api.VoiceRecorder
 import io.element.android.libraries.voicerecorder.api.VoiceRecorderState
+import io.element.android.libraries.voicerecorder.api.VoiceRecorderStopReason
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.yield
@@ -23,7 +24,8 @@ import kotlin.time.TestTimeSource
 class FakeVoiceRecorder(
     private val timeSource: TestTimeSource = TestTimeSource(),
     private val recordingDuration: Duration = 0.seconds,
-    private val levels: List<Float> = listOf(0.1f, 0.2f)
+    private val levels: List<Float> = listOf(0.1f, 0.2f),
+    private val deleteOnStopWhenNotRecording: Boolean = false,
 ) : VoiceRecorder {
     private val _state = MutableStateFlow<VoiceRecorderState>(VoiceRecorderState.Idle)
     override val state: StateFlow<VoiceRecorderState> = _state
@@ -43,9 +45,9 @@ class FakeVoiceRecorder(
         securityException?.let { throw it }
 
         if (curRecording != null) {
-            error("Previous recording was not cleared")
+            deleteRecording()
         }
-        curRecording = File("file.ogg")
+        curRecording = File("file-$startedCount.ogg")
 
         timeSource += recordingDuration
         for (i in 1..levels.size) {
@@ -54,13 +56,17 @@ class FakeVoiceRecorder(
         }
     }
 
-    override suspend fun stopRecord(
-        cancelled: Boolean
-    ) {
+    override suspend fun stopRecord(reason: VoiceRecorderStopReason) {
         stoppedCount++
 
-        if (cancelled) {
+        if (deleteOnStopWhenNotRecording && state.value !is VoiceRecorderState.Recording) {
             deleteRecording()
+            return
+        }
+
+        if (reason == VoiceRecorderStopReason.CANCELLED) {
+            deleteRecording()
+            return
         }
 
         _state.emit(
@@ -71,6 +77,7 @@ class FakeVoiceRecorder(
                     mimeType = MimeTypes.Ogg,
                     duration = recordingDuration,
                     waveform = waveform,
+                    stopReason = reason,
                 )
             }
         )
@@ -83,6 +90,14 @@ class FakeVoiceRecorder(
         _state.emit(
             VoiceRecorderState.Idle
         )
+    }
+
+    override suspend fun deleteRecording(recording: VoiceRecorderState.Finished) {
+        deletedCount++
+        if (curRecording?.absoluteFile == recording.file.absoluteFile) {
+            curRecording = null
+            _state.emit(VoiceRecorderState.Idle)
+        }
     }
 
     fun assertCalls(

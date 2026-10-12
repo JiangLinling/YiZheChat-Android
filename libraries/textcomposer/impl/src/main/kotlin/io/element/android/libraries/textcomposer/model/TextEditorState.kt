@@ -74,6 +74,36 @@ sealed interface TextEditorState {
         }
     }
 
+    /** Inserts user-selected text without bypassing the normal composer send path. */
+    suspend fun appendText(text: String) {
+        when (this) {
+            is Markdown -> {
+                val updated = state.text.value().toString() + text
+                state.text.update(updated, true)
+                state.selection = updated.length..updated.length
+            }
+            is Rich -> richTextEditorState.setMarkdown(richTextEditorState.messageMarkdown + text)
+        }
+    }
+
+    /** Removes one Unicode code point from the end of the current draft. */
+    suspend fun deleteBackward() {
+        val markdown = when (this) {
+            is Markdown -> state.text.value().toString()
+            is Rich -> richTextEditorState.messageMarkdown
+        }
+        if (markdown.isEmpty()) return
+        val characterCount = Character.charCount(Character.codePointBefore(markdown, markdown.length))
+        val updated = markdown.dropLast(characterCount)
+        when (this) {
+            is Markdown -> {
+                state.text.update(updated, true)
+                state.selection = updated.length..updated.length
+            }
+            is Rich -> richTextEditorState.setMarkdown(updated)
+        }
+    }
+
     val lineCount: Int get() = when (this) {
         is Markdown -> state.lineCount
         is Rich -> richTextEditorState.lineCount

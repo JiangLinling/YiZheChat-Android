@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="local_office_session_expired">本次预览已超时，请返回文件列表重新打开。</string>
+    <string name="local_office_session_ended">本次预览已结束，请返回文件列表重新打开。</string>
+    <string name="local_office_validating">正在完整验证文档…</string>
+    <string name="local_office_unsupported">这种文件暂不支持本地查看。</string>
+    <string name="local_office_security_blocked">文件未通过本地安全检查，已停止打开。</string>
+    <string name="local_office_validation_failed">文件未能在本地完成校验，读取源已关闭；可在不上传文件的情况下重试。</string>
+    <string name="local_office_render_failed">本地显示失败，文件没有上传。</string>
+    <string name="local_office_render_timeout">本地解析超时，已停止处理；文件没有上传。</string>
+    <string name="local_office_session_locked">应用锁定或离开前台后，本地查看会话已结束。请重新打开文件并授权。</string>
+    <string name="local_office_retry">仅在本地重试</string>
+    <string name="local_office_input_size_limit">这个文档超过64MB本地预览上限，请返回文件列表继续操作。</string>
+    <string name="local_office_complexity_limit">这个文档解压后的内容或表格规模超出本地预览能力，暂时无法显示。</string>
+    <string name="local_office_memory_unavailable">手机当前内存不足，无法打开这个文档，请退出预览后重试。</string>
+    <string name="local_office_validation_timeout">这个文档校验时间较长，已停止打开，可以重新尝试本地预览。</string>
+    <string name="local_office_legacy_fidelity_warning">旧版文件的预览可能缺少排版、图片或页面，原文件保持完整。</string>
+</resources>

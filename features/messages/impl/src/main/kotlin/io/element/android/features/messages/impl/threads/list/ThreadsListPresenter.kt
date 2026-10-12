@@ -21,6 +21,7 @@ import io.element.android.libraries.dateformatter.api.DateFormatterMode
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.api.room.threads.ThreadListPaginationStatus
+import io.element.android.libraries.matrix.api.timeline.item.event.isAuthorizedForUserDisplay
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -45,8 +46,10 @@ class ThreadsListPresenter(
                 .onStart { threadsListService.paginate() }
                 .collect { items ->
                     Timber.d("Received thread list update with ${items.size} items")
-                    value = items.map { item ->
-                        val rootTimelineEvent = item.rootEvent.content?.let {
+                    value = items.mapNotNull { item ->
+                        val rootContent = item.rootEvent.content
+                        if (rootContent == null || !rootContent.isAuthorizedForUserDisplay()) return@mapNotNull null
+                        val rootTimelineEvent = rootContent.let {
                             timelineItemContentFactory.create(
                                 itemContent = it,
                                 eventId = item.rootEvent.eventId,
@@ -55,21 +58,24 @@ class ThreadsListPresenter(
                                 senderProfile = item.rootEvent.senderProfile,
                             )
                         }
-                        val rootEventText = rootTimelineEvent?.let { messageSummaryFormatter.format(it) }
+                        val rootEventText = messageSummaryFormatter.format(rootTimelineEvent)
 
-                        val latestTimelineEvent = item.latestEvent?.content?.let {
-                            timelineItemContentFactory.create(
-                                itemContent = it,
-                                eventId = item.latestEvent!!.eventId,
-                                isEditable = false,
-                                sender = item.latestEvent!!.senderId,
-                                senderProfile = item.latestEvent!!.senderProfile,
-                            )
-                        }
+                        val authorizedLatestEvent = item.latestEvent
+                            ?.takeIf { it.content?.isAuthorizedForUserDisplay() == true }
+                        val latestTimelineEvent = authorizedLatestEvent?.content
+                            ?.let {
+                                timelineItemContentFactory.create(
+                                    itemContent = it,
+                                    eventId = authorizedLatestEvent.eventId,
+                                    isEditable = false,
+                                    sender = authorizedLatestEvent.senderId,
+                                    senderProfile = authorizedLatestEvent.senderProfile,
+                                )
+                            }
                         val latestEventText = latestTimelineEvent?.let { messageSummaryFormatter.format(it) }
 
                         val formattedTimestamp = dateFormatter.format(
-                            timestamp = item.latestEvent?.timestamp ?: item.rootEvent.timestamp,
+                            timestamp = authorizedLatestEvent?.timestamp ?: item.rootEvent.timestamp,
                             mode = DateFormatterMode.TimeOrDate,
                             useRelative = true,
                         )

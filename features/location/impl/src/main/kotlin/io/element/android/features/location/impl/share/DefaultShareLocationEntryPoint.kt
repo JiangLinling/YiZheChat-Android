@@ -22,10 +22,11 @@ class DefaultShareLocationEntryPoint : ShareLocationEntryPoint {
         parentNode: Node,
         buildContext: BuildContext,
         timelineMode: Timeline.Mode,
+        burnAfterRead: Boolean,
     ): Node {
         return parentNode.createNode<ShareLocationNode>(
             buildContext = buildContext,
-            plugins = listOf(ShareLocationNode.Inputs(timelineMode))
+            plugins = listOf(ShareLocationNode.Inputs(timelineMode, burnAfterRead))
         )
     }
 }

@@ -22,6 +22,7 @@ import io.element.android.libraries.matrix.test.FakeMatrixClient
 import io.element.android.libraries.matrix.test.core.aBuildMeta
 import io.element.android.libraries.matrix.test.room.FakeJoinedRoom
 import io.element.android.libraries.preferences.test.FakePreferenceDataStoreFactory
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.services.analytics.test.FakeAnalyticsService
 import io.element.android.tests.testutils.node.TestParentNode
 import kotlinx.coroutines.test.runTest
@@ -40,11 +41,12 @@ class DefaultShareLocationEntryPointTest {
             ShareLocationNode(
                 buildContext = buildContext,
                 plugins = plugins,
-                presenterFactory = { timelineMode: Timeline.Mode ->
+                presenterFactory = { timelineMode: Timeline.Mode, burnAfterRead: Boolean ->
                     ShareLocationPresenter(
                         permissionsPresenterFactory = { FakePermissionsPresenter() },
                         room = room,
                         timelineMode = timelineMode,
+                        burnAfterRead = burnAfterRead,
                         analyticsService = FakeAnalyticsService(),
                         messageComposerContext = FakeMessageComposerContext(),
                         locationActions = FakeLocationActions(),
@@ -56,6 +58,10 @@ class DefaultShareLocationEntryPointTest {
                             preferenceDataStoreFactory = FakePreferenceDataStoreFactory(),
                             sessionId = room.sessionId,
                         ),
+                        appOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
+        mapProviderConfigurationService = object : io.element.android.security.dataprotection.api.MapProviderConfigurationService {
+            override suspend fun fetch() = Result.success(io.element.android.security.dataprotection.api.MapProviderConfiguration())
+        },
                     )
                 },
                 analyticsService = FakeAnalyticsService(),
@@ -66,8 +72,9 @@ class DefaultShareLocationEntryPointTest {
             parentNode = parentNode,
             buildContext = BuildContext.root(null),
             timelineMode = timelineMode,
+            burnAfterRead = true,
         )
         assertThat(result).isInstanceOf(ShareLocationNode::class.java)
-        assertThat(result.plugins).contains(ShareLocationNode.Inputs(timelineMode))
+        assertThat(result.plugins).contains(ShareLocationNode.Inputs(timelineMode, burnAfterRead = true))
     }
 }

@@ -48,6 +48,7 @@ import io.element.android.libraries.ui.strings.CommonStrings
 fun ReportMessageView(
     state: ReportMessageState,
     onBackClick: () -> Unit,
+    onReportSuccess: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val focusManager = LocalFocusManager.current
@@ -55,7 +56,7 @@ fun ReportMessageView(
     AsyncActionView(
         async = state.result,
         progressDialog = {},
-        onSuccess = { onBackClick() },
+        onSuccess = { onReportSuccess() },
         errorMessage = { stringResource(CommonStrings.error_unknown) },
         onErrorDismiss = { state.eventSink(ReportMessageEvent.ClearError) }
     )
@@ -87,7 +88,7 @@ fun ReportMessageView(
                 onValueChange = { state.eventSink(ReportMessageEvent.UpdateReason(it)) },
                 placeholder = stringResource(R.string.screen_report_content_hint),
                 minLines = 3,
-                enabled = !isSending,
+                enabled = !isSending && !state.reportSubmitted,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 90.dp),
@@ -111,7 +112,7 @@ fun ReportMessageView(
                     )
                 }
                 Switch(
-                    enabled = !isSending,
+                    enabled = !isSending && !state.reportSubmitted,
                     checked = state.blockUser,
                     onCheckedChange = { state.eventSink(ReportMessageEvent.ToggleBlockUser) },
                 )
@@ -119,8 +120,17 @@ fun ReportMessageView(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            if (state.reportSubmitted) {
+                Text(
+                    text = stringResource(CommonStrings.common_report_submitted),
+                    style = ElementTheme.typography.fontBodyMdRegular,
+                    color = ElementTheme.colors.textSecondary,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                )
+            }
+
             Button(
-                text = stringResource(CommonStrings.action_send),
+                text = stringResource(if (state.reportSubmitted) CommonStrings.action_retry else CommonStrings.action_send),
                 enabled = state.reason.isNotBlank() && !isSending,
                 showProgress = isSending,
                 onClick = {
@@ -140,6 +150,7 @@ fun ReportMessageView(
 internal fun ReportMessageViewPreview(@PreviewParameter(ReportMessageStateProvider::class) state: ReportMessageState) = ElementPreview {
     ReportMessageView(
         onBackClick = {},
+        onReportSuccess = {},
         state = state,
     )
 }

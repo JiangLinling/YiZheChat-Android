@@ -11,6 +11,7 @@ package io.element.android.features.preferences.impl.notifications
 import io.element.android.libraries.preferences.api.store.NotificationSound
 
 sealed interface NotificationSettingsEvents {
+    data class OpenSystemNotificationSettings(val launchSettings: () -> Unit) : NotificationSettingsEvents
     data object RefreshSystemNotificationsEnabled : NotificationSettingsEvents
     data class SetNotificationsEnabled(val enabled: Boolean) : NotificationSettingsEvents
     data class SetAtRoomNotificationsEnabled(val enabled: Boolean) : NotificationSettingsEvents

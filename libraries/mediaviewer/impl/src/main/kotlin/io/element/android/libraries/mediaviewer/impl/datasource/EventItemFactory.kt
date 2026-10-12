@@ -29,6 +29,7 @@ import io.element.android.libraries.matrix.api.timeline.item.event.NoticeMessage
 import io.element.android.libraries.matrix.api.timeline.item.event.OtherMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.PollContent
 import io.element.android.libraries.matrix.api.timeline.item.event.ProfileChangeContent
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedOperationContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RedactedContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RoomMembershipContent
 import io.element.android.libraries.matrix.api.timeline.item.event.StateContent
@@ -71,6 +72,7 @@ class EventItemFactory(
             LegacyCallInviteContent,
             is PollContent,
             is ProfileChangeContent,
+            is ProtectedOperationContent,
             RedactedContent,
             is RoomMembershipContent,
             is StateContent,
@@ -117,7 +119,9 @@ class EventItemFactory(
                         eventId = currentTimelineItem.eventId,
                         mediaInfo = MediaInfo(
                             filename = type.filename,
-                            fileSize = type.info?.size,
+                            fileSize = if (type.info?.mimetype?.startsWith("video/") == true) {
+                                type.info?.protectedWireSize ?: type.info?.size
+                            } else type.info?.size,
                             caption = type.caption,
                             formattedCaption = type.formattedCaption?.body,
                             mimeType = type.info?.mimetype.orEmpty(),
@@ -199,6 +203,7 @@ class EventItemFactory(
                         ),
                         mediaSource = type.source,
                         thumbnailSource = type.info?.thumbnailSource,
+                        segmentedVideo = type.segmentedVideo,
                     )
                     is VoiceMessageType -> MediaItem.Voice(
                         id = currentTimelineItem.uniqueId,

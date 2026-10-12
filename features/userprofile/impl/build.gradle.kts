@@ -42,6 +42,9 @@ dependencies {
     api(projects.features.userprofile.shared)
     implementation(libs.coil.compose)
     implementation(projects.features.startchat.api)
+    implementation(projects.security.secureStorage.api)
+    implementation(projects.security.contentProtection.api)
+    implementation(projects.security.dataProtection.api)
     implementation(projects.services.analytics.api)
 
     testCommonDependencies(libs, true)
@@ -52,4 +55,6 @@ dependencies {
     testImplementation(projects.features.verifysession.test)
     testImplementation(projects.features.startchat.test)
     testImplementation(projects.features.enterprise.test)
+    testImplementation(projects.features.userprofile.test)
+    testImplementation(projects.security.dataProtection.test)
 }

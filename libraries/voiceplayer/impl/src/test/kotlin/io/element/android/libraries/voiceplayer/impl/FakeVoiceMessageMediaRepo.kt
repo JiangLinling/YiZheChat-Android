@@ -8,20 +8,22 @@
 
 package io.element.android.libraries.voiceplayer.impl
 
+import io.element.android.libraries.matrix.api.media.MediaFile
+import io.element.android.libraries.matrix.test.media.FakeMediaFile
 import io.element.android.tests.testutils.simulateLongTask
-import java.io.File
 
 /**
  * A fake implementation of [VoiceMessageMediaRepo] for testing purposes.
  */
 class FakeVoiceMessageMediaRepo : VoiceMessageMediaRepo {
     var shouldFail = false
+    var mediaFile: MediaFile = FakeMediaFile("")
 
-    override suspend fun getMediaFile(): Result<File> = simulateLongTask {
+    override suspend fun getMediaFile(): Result<MediaFile> = simulateLongTask {
         if (shouldFail) {
             Result.failure(IllegalStateException("Failed to get media file"))
         } else {
-            Result.success(File(""))
+            Result.success(mediaFile)
         }
     }
 }

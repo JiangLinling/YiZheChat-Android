@@ -50,12 +50,16 @@ import kotlin.random.Random
 
 fun aTimelineState(
     timelineItems: ImmutableList<TimelineItem> = persistentListOf(),
+    pendingMediaSendPresentations: ImmutableList<PendingMediaSendPresentation> = persistentListOf(),
     timelineMode: Timeline.Mode = Timeline.Mode.Live,
     renderReadReceipts: Boolean = false,
     timelineRoomInfo: TimelineRoomInfo = aTimelineRoomInfo(),
     focusedEventIndex: Int = -1,
     isLive: Boolean = true,
     messageShield: MessageShield? = null,
+    activeBurnAfterReadEventId: EventId? = null,
+    openingBurnAfterReadEventId: EventId? = null,
+    burnAfterReadOpenRejectedEventId: EventId? = null,
     resolveVerifiedUserSendFailureState: ResolveVerifiedUserSendFailureState = aResolveVerifiedUserSendFailureState(),
     displayThreadSummaries: Boolean = false,
     eventSink: (TimelineEvent) -> Unit = {},
@@ -68,6 +72,7 @@ fun aTimelineState(
     }
     return TimelineState(
         timelineItems = timelineItems,
+        pendingMediaSendPresentations = pendingMediaSendPresentations,
         timelineMode = timelineMode,
         timelineRoomInfo = timelineRoomInfo,
         renderReadReceipts = renderReadReceipts,
@@ -75,6 +80,9 @@ fun aTimelineState(
         isLive = isLive,
         focusRequestState = focusRequestState,
         messageShieldDialogData = messageShield?.let { MessageShieldData(it) },
+        activeBurnAfterReadEventId = activeBurnAfterReadEventId,
+        openingBurnAfterReadEventId = openingBurnAfterReadEventId,
+        burnAfterReadOpenRejectedEventId = burnAfterReadOpenRejectedEventId,
         resolveVerifiedUserSendFailureState = resolveVerifiedUserSendFailureState,
         displayThreadSummaries = displayThreadSummaries,
         eventSink = eventSink,

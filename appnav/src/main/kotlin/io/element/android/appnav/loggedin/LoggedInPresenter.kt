@@ -40,9 +40,10 @@ import io.element.android.libraries.push.api.PushService
 import io.element.android.libraries.push.api.PusherRegistrationFailure
 import io.element.android.services.analytics.api.AnalyticsService
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -66,15 +67,21 @@ class LoggedInPresenter(
             pushService.ignoreRegistrationError(matrixClient.sessionId)
         }.collectAsState(initial = false)
         val pusherRegistrationState = remember<MutableState<AsyncData<Unit>>> { mutableStateOf(AsyncData.Uninitialized) }
+        var pushRetryGeneration by remember { mutableStateOf(0) }
         LaunchedEffect(Unit) { preloadAccountManagementUrl() }
-        LaunchedEffect(Unit) {
-            sessionVerificationService.sessionVerifiedStatus
-                .onEach { sessionVerifiedStatus ->
-                    when (sessionVerifiedStatus) {
-                        SessionVerifiedStatus.Unknown -> Unit
-                        SessionVerifiedStatus.Verified -> {
+        LaunchedEffect(pushRetryGeneration) {
+            combine(sessionVerificationService.sessionVerifiedStatus, networkMonitor.connectivity) { verified, connectivity ->
+                verified to connectivity
+            }.collectLatest { (sessionVerifiedStatus, connectivity) ->
+                when (sessionVerifiedStatus) {
+                    SessionVerifiedStatus.Unknown -> Unit
+                    SessionVerifiedStatus.Verified -> {
+                        if (connectivity != NetworkStatus.Connected) return@collectLatest
+                        val retryDelays = listOf(1_000L, 2_000L, 5_000L, 10_000L, 30_000L)
+                        for (attempt in 0..retryDelays.size) {
                             Timber.tag(pusherTag.value).d("Ensure pusher is registered")
-                            pushService.ensurePusherIsRegistered(matrixClient).fold(
+                            val result = pushService.ensurePusherIsRegistered(matrixClient)
+                            result.fold(
                                 onSuccess = {
                                     Timber.tag(pusherTag.value).d("Pusher registered")
                                     pusherRegistrationState.value = AsyncData.Success(Unit)
@@ -84,13 +91,15 @@ class LoggedInPresenter(
                                     pusherRegistrationState.value = AsyncData.Failure(it)
                                 },
                             )
-                        }
-                        SessionVerifiedStatus.NotVerified -> {
-                            pusherRegistrationState.value = AsyncData.Failure(PusherRegistrationFailure.AccountNotVerified())
+                            if (result.isSuccess || attempt == retryDelays.size) break
+                            delay(retryDelays[attempt])
                         }
                     }
+                    SessionVerifiedStatus.NotVerified -> {
+                        pusherRegistrationState.value = AsyncData.Failure(PusherRegistrationFailure.AccountNotVerified())
+                    }
                 }
-                .launchIn(this)
+            }
         }
         val syncIndicator by matrixClient.roomListService.syncIndicator.collectAsState()
         val isOnline by syncService.isOnline.collectAsState()
@@ -119,6 +128,10 @@ class LoggedInPresenter(
 
         fun handleEvent(event: LoggedInEvents) {
             when (event) {
+                LoggedInEvents.RetryPushRegistration -> {
+                    pusherRegistrationState.value = AsyncData.Uninitialized
+                    pushRetryGeneration += 1
+                }
                 is LoggedInEvents.CloseErrorDialog -> {
                     pusherRegistrationState.value = AsyncData.Uninitialized
                     if (event.doNotShowAgain) {

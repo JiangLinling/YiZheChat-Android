@@ -19,6 +19,7 @@ import io.element.android.libraries.matrix.api.encryption.BackupState
 import io.element.android.libraries.matrix.api.encryption.BackupUploadState
 import io.element.android.libraries.matrix.api.encryption.EnableRecoveryProgress
 import io.element.android.libraries.matrix.api.encryption.EncryptionService
+import io.element.android.libraries.matrix.api.encryption.IdentityResetCompletionState
 import io.element.android.libraries.matrix.api.encryption.IdentityResetHandle
 import io.element.android.libraries.matrix.api.encryption.RecoveryState
 import io.element.android.libraries.matrix.api.encryption.identity.IdentityState
@@ -44,6 +45,7 @@ import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.EnableRecoveryProgressListener
 import org.matrix.rustcomponents.sdk.Encryption
 import org.matrix.rustcomponents.sdk.UserIdentity
+import org.matrix.rustcomponents.sdk.VerificationState
 import timber.log.Timber
 import org.matrix.rustcomponents.sdk.BackupUploadState as RustBackupUploadState
 import org.matrix.rustcomponents.sdk.EnableRecoveryProgress as RustEnableRecoveryProgress
@@ -62,6 +64,8 @@ class RustEncryptionService(
     private val enableRecoveryProgressMapper = EnableRecoveryProgressMapper()
     private val backupUploadStateMapper = BackupUploadStateMapper()
     private val steadyStateExceptionMapper = SteadyStateExceptionMapper()
+    private val backupStateMapper = BackupStateMapper()
+    private val recoveryStateMapper = RecoveryStateMapper()
 
     override val backupStateStateFlow = combine(
         service.backupStateFlow(),
@@ -152,6 +156,25 @@ class RustEncryptionService(
     override suspend fun doesBackupExistOnServer(): Result<Boolean> = withContext(dispatchers.io) {
         runCatchingExceptions {
             service.backupExistsOnServer()
+        }
+    }
+
+    override suspend fun getIdentityResetCompletionState(): Result<IdentityResetCompletionState> = withContext(dispatchers.io) {
+        runCatchingExceptions {
+            val backupState = backupStateMapper.map(service.backupState())
+            val recoveryState = recoveryStateMapper.map(service.recoveryState())
+            val isCurrentSessionVerified = service.verificationState() == VerificationState.VERIFIED
+            val backupExistsOnServer = if (backupState == BackupState.ENABLED && isCurrentSessionVerified) {
+                service.backupExistsOnServer()
+            } else {
+                false
+            }
+            IdentityResetCompletionState(
+                backupState = backupState,
+                recoveryState = recoveryState,
+                isCurrentSessionVerified = isCurrentSessionVerified,
+                backupExistsOnServer = backupExistsOnServer,
+            )
         }
     }
 

@@ -8,12 +8,19 @@
 
 package io.element.android.features.preferences.impl.notifications
 
+import android.Manifest
+import androidx.compose.runtime.Composable
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.fullscreenintent.api.FullScreenIntentPermissionsState
 import io.element.android.libraries.fullscreenintent.api.aFullScreenIntentPermissionsState
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.room.RoomNotificationMode
+import io.element.android.libraries.permissions.api.PermissionsPresenter
+import io.element.android.libraries.permissions.api.PermissionsEvent
+import io.element.android.libraries.permissions.api.PermissionsState
+import io.element.android.libraries.permissions.api.aPermissionsState
+import io.element.android.libraries.permissions.test.FakePermissionsPresenterFactory
 import io.element.android.libraries.matrix.test.AN_EXCEPTION
 import io.element.android.libraries.matrix.test.FakeMatrixClient
 import io.element.android.libraries.matrix.test.notificationsettings.FakeNotificationSettingsService
@@ -47,6 +54,37 @@ import kotlin.time.Duration.Companion.milliseconds
 
 @Suppress("LargeClass")
 class NotificationSettingsPresenterTest {
+    @Test
+    fun `system settings uses notification permission lifecycle without changing app notification enablement`() = runTest {
+        val permissions = mutableListOf<String>()
+        val events = mutableListOf<PermissionsEvent>()
+        val permissionPresenter = object : PermissionsPresenter {
+            @Composable
+            override fun present(): PermissionsState = aPermissionsState(showDialog = false, permissionGranted = false)
+                .copy(eventSink = { events.add(it) })
+        }
+        val factory = object : PermissionsPresenter.Factory {
+            override fun create(permission: String): PermissionsPresenter {
+                permissions.add(permission)
+                return permissionPresenter
+            }
+        }
+        val presenter = createNotificationSettingsPresenter(permissionsPresenterFactory = factory)
+        presenter.test {
+            val state = consumeItemsUntilPredicate { it.matrixSettings is NotificationSettingsState.MatrixSettings.Valid }.last()
+            assertThat(state.appSettings.appNotificationsEnabled).isTrue()
+            assertThat(events).isEmpty()
+            assertThat(permissions).containsExactly(Manifest.permission.POST_NOTIFICATIONS)
+            var launched = false
+            val launchSettings = { launched = true }
+            state.eventSink(NotificationSettingsEvents.OpenSystemNotificationSettings(launchSettings))
+            advanceUntilIdle()
+            assertThat(events).containsExactly(PermissionsEvent.OpenSystemSettingsUsingActivity(launchSettings))
+            assertThat(launched).isFalse()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     @Test
     fun `present - ensures initial state is correct`() = runTest {
         val presenter = createNotificationSettingsPresenter()
@@ -397,7 +435,7 @@ class NotificationSettingsPresenterTest {
     @Test
     fun `present - SetCallRingtone with Silent atomically persists and recreates channel`() = runTest {
         val recreateRecorder = lambdaRecorder<NotificationSound, Int, Unit> { _, _ -> }
-        val appPreferencesStore = InMemoryAppPreferencesStore()
+        val appPreferencesStore = InMemoryAppPreferencesStore(callRingtone = NotificationSound.SystemDefault)
         val presenter = createNotificationSettingsPresenter(
             appPreferencesStore = appPreferencesStore,
             notificationSoundUpdater = FakeNotificationSoundUpdater(
@@ -1117,6 +1155,7 @@ class NotificationSettingsPresenterTest {
             NotificationSoundCopier.CopyResult.Success(source, source)
         }),
         soundDisplayNameResolver: FakeSoundDisplayNameResolver = FakeSoundDisplayNameResolver(),
+        permissionsPresenterFactory: PermissionsPresenter.Factory = FakePermissionsPresenterFactory(),
     ): NotificationSettingsPresenter {
         val matrixClient = FakeMatrixClient(notificationSettingsService = notificationSettingsService)
         return NotificationSettingsPresenter(
@@ -1126,6 +1165,7 @@ class NotificationSettingsPresenterTest {
             pushService = pushService,
             systemNotificationsEnabledProvider = FakeSystemNotificationsEnabledProvider(),
             fullScreenIntentPermissionsPresenter = { fullScreenIntentPermissionsStateLambda() },
+            permissionsPresenterFactory = permissionsPresenterFactory,
             appPreferencesStore = appPreferencesStore,
             notificationSoundUpdater = notificationSoundUpdater,
             notificationSoundCopier = notificationSoundCopier,

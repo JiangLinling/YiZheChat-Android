@@ -13,6 +13,7 @@ import dev.zacsweers.metro.Inject
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.eventformatter.api.PinnedMessagesBannerFormatter
 import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
+import io.element.android.libraries.matrix.api.timeline.item.event.isAuthorizedForUserDisplay
 import kotlinx.coroutines.withContext
 
 @Inject
@@ -24,6 +25,7 @@ class PinnedMessagesBannerItemFactory(
         when (timelineItem) {
             is MatrixTimelineItem.Event -> {
                 val eventId = timelineItem.eventId ?: return@withContext null
+                if (!timelineItem.event.content.isAuthorizedForUserDisplay()) return@withContext null
                 val formatted = formatter.format(timelineItem.event)
                 PinnedMessagesBannerItem(
                     eventId = eventId,

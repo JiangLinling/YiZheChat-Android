@@ -32,6 +32,7 @@ import io.element.android.libraries.matrix.api.timeline.item.event.MessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.NoticeMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.OtherMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.PollContent
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedOperationContent
 import io.element.android.libraries.matrix.api.timeline.item.event.ProfileChangeContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RedactedContent
 import io.element.android.libraries.matrix.api.timeline.item.event.RoomMembershipContent
@@ -44,6 +45,7 @@ import io.element.android.libraries.matrix.api.timeline.item.event.UnknownConten
 import io.element.android.libraries.matrix.api.timeline.item.event.VideoMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.VoiceMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.getDisambiguatedDisplayName
+import io.element.android.libraries.matrix.api.timeline.item.event.isAuthorizedForUserDisplay
 import io.element.android.libraries.matrix.ui.messages.toPlainText
 import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.services.toolbox.api.strings.StringProvider
@@ -86,6 +88,7 @@ class DefaultRoomLatestEventFormatter(
         senderId: UserId,
         senderDisambiguatedDisplayName: String
     ): CharSequence? {
+        if (!content.isAuthorizedForUserDisplay()) return null
         return when (content) {
             is MessageContent -> content.process(senderDisambiguatedDisplayName, isDmRoom, isOutgoing)
             RedactedContent -> {
@@ -96,10 +99,8 @@ class DefaultRoomLatestEventFormatter(
                 content.bestDescription.prefixWith(sp.getString(CommonStrings.common_sticker))
                     .prefixIfNeeded(senderDisambiguatedDisplayName, isDmRoom, isOutgoing)
             }
-            is UnableToDecryptContent -> {
-                val message = sp.getString(CommonStrings.common_waiting_for_decryption_key)
-                message.prefixIfNeeded(senderDisambiguatedDisplayName, isDmRoom, isOutgoing)
-            }
+            is UnableToDecryptContent -> null
+            is ProtectedOperationContent -> null
             is RoomMembershipContent -> {
                 roomMembershipContentFormatter.format(content, senderDisambiguatedDisplayName, isOutgoing)
             }
@@ -130,14 +131,25 @@ class DefaultRoomLatestEventFormatter(
         senderDisambiguatedDisplayName: String,
         isDmRoom: Boolean,
         isOutgoing: Boolean
-    ): CharSequence {
+    ): CharSequence? {
+        protectedPreviewOperation?.let { operation ->
+            if (!isContentProtectionAuthorized || protectedMessageStatus != null) return null
+            return when (operation) {
+                ProtectedOperationContent.Operation.RELAY_CLOSE -> sp.getString(CommonStrings.common_relay_ended_preview)
+                else -> null
+            }?.prefixIfNeeded(senderDisambiguatedDisplayName, isDmRoom, isOutgoing)
+        }
         val message = when (val messageType: MessageType = type) {
             // Doesn't need a prefix
             is EmoteMessageType -> {
                 return "* $senderDisambiguatedDisplayName ${messageType.body}"
             }
             is TextMessageType -> {
-                messageType.toPlainText(permalinkParser)
+                if (messageType.body.startsWith(PROTECTED_TEXT_CARRIER_PREFIX)) {
+                    sp.getString(CommonStrings.common_message)
+                } else {
+                    messageType.toPlainText(permalinkParser)
+                }
             }
             is VideoMessageType -> {
                 messageType.toPlainText(permalinkParser).prefixWith(sp.getString(CommonStrings.common_video))
@@ -171,7 +183,11 @@ class DefaultRoomLatestEventFormatter(
                 messageType.body
             }
         }
-        return message.prefixIfNeeded(senderDisambiguatedDisplayName, isDmRoom, isOutgoing)
+        return message.takeIf { it.isNotBlank() }?.prefixIfNeeded(senderDisambiguatedDisplayName, isDmRoom, isOutgoing)
+    }
+
+    private companion object {
+        const val PROTECTED_TEXT_CARRIER_PREFIX = "yizhe-secure-v1:"
     }
 
     private fun CharSequence.prefixIfNeeded(

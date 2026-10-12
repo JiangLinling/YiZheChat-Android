@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="yizhe_voice_change_speed">Playback speed %1$s×</string>
+    <string name="yizhe_voice_forward">Forward 5 seconds</string>
+    <string name="yizhe_voice_backward">Back 5 seconds</string>
+</resources>

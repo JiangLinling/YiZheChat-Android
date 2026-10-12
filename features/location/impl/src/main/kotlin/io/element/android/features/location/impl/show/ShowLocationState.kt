@@ -8,6 +8,7 @@
 
 package io.element.android.features.location.impl.show
 
+import io.element.android.features.location.api.live.PausedLiveLocationShare
 import io.element.android.features.location.api.Location
 import io.element.android.features.location.impl.common.ui.LocationConstraintsDialogState
 import io.element.android.features.location.impl.common.ui.LocationMarkerData
@@ -28,6 +29,7 @@ data class ShowLocationState(
     val isTrackMyLocation: Boolean,
     val appName: String,
     val eventSink: (ShowLocationEvent) -> Unit,
+    val pausedLiveLocationShare: PausedLiveLocationShare? = null,
 ) {
     val isSheetDraggable = isLive && locationShares.isNotEmpty()
 }
@@ -40,7 +42,8 @@ data class LocationShareItem(
     val location: Location,
     val isLive: Boolean,
     val assetType: AssetType?,
-    val isOwnUser: Boolean
+    val isOwnUser: Boolean,
+    val pausedState: PausedLiveLocationShare? = null,
 ) {
     val canStopSharing = isLive && isOwnUser
 }
@@ -51,7 +54,7 @@ fun LocationShareItem.toMarkerData(): LocationMarkerData {
     } else {
         PinVariant.UserLocation(
             avatarData = avatarData,
-            isLive = isLive,
+            isLive = isLive && pausedState == null,
         )
     }
     return LocationMarkerData(

@@ -13,12 +13,15 @@ import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.matrix.api.media.AudioInfo
 import io.element.android.libraries.matrix.api.media.FileInfo
 import io.element.android.libraries.matrix.api.media.ImageInfo
+import io.element.android.libraries.matrix.api.media.ProtectedMediaSource
 import io.element.android.libraries.matrix.api.media.VideoInfo
 import io.element.android.libraries.mediaupload.api.MediaOptimizationConfig
 import io.element.android.libraries.mediaupload.api.MediaPreProcessor
 import io.element.android.libraries.mediaupload.api.MediaUploadInfo
+import io.element.android.libraries.mediaupload.api.ProtectedVoiceUploadInfo
 import io.element.android.tests.testutils.simulateLongTask
 import kotlinx.coroutines.CompletableDeferred
+import java.io.ByteArrayInputStream
 import java.io.File
 import kotlin.time.Duration.Companion.seconds
 
@@ -26,6 +29,9 @@ class FakeMediaPreProcessor(
     private val processLatch: CompletableDeferred<Unit>? = null,
 ) : MediaPreProcessor {
     var processCallCount = 0
+        private set
+
+    var processProtectedVoiceCallCount = 0
         private set
 
     var cleanUpCallCount = 0
@@ -46,21 +52,38 @@ class FakeMediaPreProcessor(
             )
         )
     )
+    private var protectedVoiceResult: Result<ProtectedVoiceUploadInfo> = Result.failure(
+        UnsupportedOperationException("No fake protected voice result configured.")
+    )
 
     override suspend fun process(
         uri: Uri,
         mimeType: String,
         deleteOriginal: Boolean,
         mediaOptimizationConfig: MediaOptimizationConfig,
+        onProgress: (Float) -> Unit,
     ): Result<MediaUploadInfo> = simulateLongTask {
         processLatch?.await()
         processCallCount++
         lastMediaOptimizationConfig = mediaOptimizationConfig
+        onProgress(1f)
         result
+    }
+
+    override suspend fun processProtectedVoice(
+        uri: Uri,
+        mimeType: String,
+        onProgress: (Float) -> Unit,
+    ): Result<ProtectedVoiceUploadInfo> = simulateLongTask {
+        processLatch?.await()
+        processProtectedVoiceCallCount++
+        onProgress(1f)
+        protectedVoiceResult
     }
 
     fun givenResult(value: Result<MediaUploadInfo>) {
         this.result = value
+        value.exceptionOrNull()?.let { protectedVoiceResult = Result.failure(it) }
     }
 
     fun givenAudioResult() {
@@ -76,6 +99,28 @@ class FakeMediaPreProcessor(
                 )
             )
         )
+        givenProtectedVoiceResult()
+    }
+
+    fun givenProtectedVoiceResult(bytes: ByteArray = "voice".encodeToByteArray()) {
+        protectedVoiceResult = Result.success(
+            ProtectedVoiceUploadInfo(
+                source = ProtectedMediaSource(
+                    plaintextSize = bytes.size.toLong(),
+                    encryptedWorkingDirectory = File(System.getProperty("java.io.tmpdir")),
+                    inputStreamFactory = { ByteArrayInputStream(bytes) },
+                ),
+                audioInfo = AudioInfo(
+                    duration = 1.seconds,
+                    size = bytes.size.toLong(),
+                    mimetype = MimeTypes.Ogg,
+                ),
+            )
+        )
+    }
+
+    fun givenProtectedVoiceFailure(failure: Throwable) {
+        protectedVoiceResult = Result.failure(failure)
     }
 
     fun givenImageResult() {

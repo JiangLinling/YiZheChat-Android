@@ -21,7 +21,21 @@ interface MediaPreProcessor {
         mimeType: String,
         deleteOriginal: Boolean,
         mediaOptimizationConfig: MediaOptimizationConfig,
+        onProgress: (Float) -> Unit = {},
     ): Result<MediaUploadInfo>
+
+    /**
+     * Inspects an authorized protected voice source without creating a plaintext staging file.
+     * The returned source remains authorization-bound and is opened only by protected-content
+     * encryption during the send operation.
+     */
+    suspend fun processProtectedVoice(
+        uri: Uri,
+        mimeType: String,
+        onProgress: (Float) -> Unit = {},
+    ): Result<ProtectedVoiceUploadInfo> = Result.failure(
+        UnsupportedOperationException("Protected voice preprocessing is unavailable.")
+    )
 
     /**
      * Clean up any temporary files or resources used during the media processing.

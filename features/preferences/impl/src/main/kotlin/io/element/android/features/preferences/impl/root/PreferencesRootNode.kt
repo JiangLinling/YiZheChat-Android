@@ -42,12 +42,15 @@ class PreferencesRootNode(
         fun navigateToAbout()
         fun navigateToDeveloperSettings()
         fun navigateToNotificationSettings()
+        fun navigateToChatSecurity()
         fun navigateToLockScreenSettings()
         fun navigateToAdvancedSettings()
         fun navigateToLabs()
         fun navigateToLinkNewDevice()
         fun navigateToUserProfile(matrixUser: MatrixUser)
+        fun navigateToMyQrCode()
         fun navigateToBlockedUsers()
+        fun navigateToMessageFavourites()
         fun startSignOutFlow()
         fun startAccountDeactivationFlow()
     }
@@ -88,9 +91,12 @@ class PreferencesRootNode(
             onLinkNewDeviceClick = callback::navigateToLinkNewDevice,
             onManageAccountClick = { onManageAccountClick(activity, it, isDark) },
             onOpenNotificationSettings = callback::navigateToNotificationSettings,
+            onOpenChatSecurity = callback::navigateToChatSecurity,
             onOpenLockScreenSettings = callback::navigateToLockScreenSettings,
             onOpenUserProfile = callback::navigateToUserProfile,
+            onMyQrCodeClick = callback::navigateToMyQrCode,
             onOpenBlockedUsers = callback::navigateToBlockedUsers,
+            onOpenMessageFavourites = callback::navigateToMessageFavourites,
             onSignOutClick = {
                 if (state.directLogoutState.canDoDirectSignOut) {
                     state.directLogoutState.eventSink(DirectLogoutEvents.Logout(ignoreSdkError = false))

@@ -56,6 +56,12 @@ interface PushProvider {
     suspend fun unregister(matrixClient: MatrixClient): Result<Unit>
 
     /**
+     * Revoke every registration belonging to this account. This is reserved for permanent
+     * account deletion; a normal logout must revoke only the current device registration.
+     */
+    suspend fun unregisterAllForAccount(matrixClient: MatrixClient): Result<Unit> = unregister(matrixClient)
+
+    /**
      * To invoke when the session is deleted.
      */
     suspend fun onSessionDeleted(sessionId: SessionId)

@@ -38,13 +38,18 @@ import io.element.android.libraries.mediaviewer.api.local.LocalMedia
 import io.element.android.libraries.mediaviewer.impl.R
 import io.element.android.libraries.mediaviewer.impl.details.MediaBottomSheetState
 import io.element.android.libraries.mediaviewer.impl.local.LocalMediaActions
+import io.element.android.libraries.mediaviewer.impl.local.ProtectedMediaReadUnavailableException
 import io.element.android.libraries.mediaviewer.impl.model.MediaPermissions
 import io.element.android.libraries.mediaviewer.impl.model.mediaPermissions
 import io.element.android.libraries.ui.strings.CommonStrings
+import io.element.android.security.dataprotection.api.DataProtectionActionDeniedException
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 import io.element.android.libraries.androidutils.R as UtilsR
 
 @AssistedInject
@@ -65,11 +70,12 @@ class MediaViewerPresenter(
     }
 
     // Use a local snackbarDispatcher because this presenter is used in an Overlay Node
-    private val snackbarDispatcher = SnackbarDispatcher()
+    internal val snackbarDispatcher = SnackbarDispatcher()
 
     @Composable
     override fun present(): MediaViewerState {
         val coroutineScope = rememberCoroutineScope()
+        val mediaLoadJobs = remember { ConcurrentHashMap<MediaLoadIdentity, Job>() }
         val currentIndex = remember { mutableIntStateOf(dataSource.findEventIndex(inputs.eventId) ?: 0) }
         val data = dataSource.produceState { flow ->
             flow.collectLatest { new ->
@@ -100,6 +106,8 @@ class MediaViewerPresenter(
         DisposableEffect(Unit) {
             dataSource.setup(coroutineScope)
             onDispose {
+                mediaLoadJobs.values.toList().forEach(Job::cancel)
+                mediaLoadJobs.clear()
                 dataSource.dispose()
             }
         }
@@ -108,9 +116,10 @@ class MediaViewerPresenter(
         fun handleEvent(event: MediaViewerEvent) {
             when (event) {
                 is MediaViewerEvent.LoadMedia -> {
-                    coroutineScope.downloadMedia(data = event.data)
+                    coroutineScope.downloadMedia(data = event.data, jobs = mediaLoadJobs)
                 }
                 is MediaViewerEvent.CancelLoadingMedia -> {
+                    mediaLoadJobs.remove(event.data.mediaLoadIdentity)?.cancel()
                     dataSource.cancelLoadingMedia(event.data)
                 }
                 is MediaViewerEvent.ClearLoadingError -> {
@@ -235,8 +244,19 @@ class MediaViewerPresenter(
 
     private fun CoroutineScope.downloadMedia(
         data: MediaViewerPageData.MediaViewerData,
-    ) = launch {
-        dataSource.loadMedia(data)
+        jobs: ConcurrentHashMap<MediaLoadIdentity, Job>,
+    ) {
+        val mediaLoadIdentity = data.mediaLoadIdentity
+        val job = launch(start = CoroutineStart.LAZY) {
+            dataSource.loadMedia(data)
+        }
+        val existing = jobs.putIfAbsent(mediaLoadIdentity, job)
+        if (existing == null) {
+            job.invokeOnCompletion { jobs.remove(mediaLoadIdentity, job) }
+            job.start()
+        } else {
+            job.cancel()
+        }
     }
 
     private fun CoroutineScope.saveOnDisk(localMedia: AsyncData<LocalMedia>) = launch {
@@ -285,10 +305,12 @@ class MediaViewerPresenter(
     }
 
     private fun mediaActionsError(throwable: Throwable): Int {
-        return if (throwable is ActivityNotFoundException) {
-            UtilsR.string.error_no_compatible_app_found
-        } else {
-            CommonStrings.error_unknown
+        return when (throwable) {
+            is ActivityNotFoundException -> UtilsR.string.error_no_compatible_app_found
+            is DataProtectionActionDeniedException.ContentExport -> R.string.error_content_export_disabled_by_policy
+            is DataProtectionActionDeniedException.ExternalShare -> R.string.error_external_share_disabled_by_policy
+            is ProtectedMediaReadUnavailableException -> R.string.error_protected_media_read_unavailable
+            else -> CommonStrings.error_unknown
         }
     }
 }

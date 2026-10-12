@@ -18,9 +18,10 @@ import io.element.android.libraries.matrix.api.sync.SyncService
 import io.element.android.libraries.matrix.api.sync.SyncState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
 import timber.log.Timber
 
@@ -39,10 +40,10 @@ class SendQueues(
      */
     @OptIn(FlowPreview::class)
     fun launchIn(coroutineScope: CoroutineScope) {
-        combine(
+        merge(
             syncService.syncState,
-            matrixClient.sendQueueDisabledFlow(),
-        ) { syncState, _ -> syncState }
+            matrixClient.sendQueueDisabledFlow().map { syncService.syncState.value },
+        )
             .debounce(SEND_QUEUES_RETRY_DELAY_MILLIS)
             .onEach { syncState ->
                 Timber.tag("SendQueues").d("Sync state changed: $syncState")

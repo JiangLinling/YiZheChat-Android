@@ -47,6 +47,7 @@ import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.designsystem.theme.components.Icon
+import io.element.android.libraries.designsystem.theme.components.IconButton
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.designsystem.theme.components.TextButton
 import io.element.android.libraries.designsystem.theme.pinnedMessageBannerBorder
@@ -62,6 +63,7 @@ fun PinnedMessagesBannerView(
     state: PinnedMessagesBannerState,
     onClick: (EventId) -> Unit,
     onViewAllClick: () -> Unit,
+    onUnpinClick: ((EventId) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     when (state) {
@@ -71,6 +73,7 @@ fun PinnedMessagesBannerView(
                 state = state,
                 onClick = onClick,
                 onViewAllClick = onViewAllClick,
+                onUnpinClick = onUnpinClick,
                 modifier = modifier,
             )
         }
@@ -82,6 +85,7 @@ private fun PinnedMessagesBannerRow(
     state: PinnedMessagesBannerState.Visible,
     onClick: (EventId) -> Unit,
     onViewAllClick: () -> Unit,
+    onUnpinClick: ((EventId) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val analyticsService = LocalAnalyticsService.current
@@ -106,14 +110,28 @@ private fun PinnedMessagesBannerRow(
             pinIndex = state.currentPinnedMessageIndex(),
             pinsCount = state.pinnedMessagesCount(),
         )
-        Icon(
-            imageVector = CompoundIcons.PinSolid(),
-            contentDescription = null,
-            tint = ElementTheme.colors.iconSecondary,
-            modifier = Modifier
-                .padding(horizontal = 10.dp)
-                .size(20.dp)
-        )
+        if (state is PinnedMessagesBannerState.Loaded && onUnpinClick != null) {
+            IconButton(
+                onClick = { onUnpinClick(state.currentPinnedMessage.eventId) },
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    imageVector = CompoundIcons.Unpin(),
+                    contentDescription = stringResource(CommonStrings.action_unpin),
+                    tint = ElementTheme.colors.iconSecondary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        } else {
+            Icon(
+                imageVector = CompoundIcons.PinSolid(),
+                contentDescription = null,
+                tint = ElementTheme.colors.iconSecondary,
+                modifier = Modifier
+                    .padding(horizontal = 10.dp)
+                    .size(20.dp)
+            )
+        }
         PinnedMessageItem(
             index = state.currentPinnedMessageIndex(),
             totalCount = state.pinnedMessagesCount(),

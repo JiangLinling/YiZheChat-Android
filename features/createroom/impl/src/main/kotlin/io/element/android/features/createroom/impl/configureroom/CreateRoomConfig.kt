@@ -12,6 +12,7 @@ import io.element.android.libraries.matrix.api.spaces.SpaceRoom
 import io.element.android.libraries.matrix.api.user.MatrixUser
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
+import io.element.android.security.contentprotection.api.RoomLifecycleProfileKind
 
 data class CreateRoomConfig(
     val roomName: String? = null,
@@ -20,4 +21,9 @@ data class CreateRoomConfig(
     val invites: ImmutableList<MatrixUser> = persistentListOf(),
     val visibilityState: RoomVisibilityState = RoomVisibilityState.Private(JoinRuleItem.PrivateVisibility.Private),
     val parentSpace: SpaceRoom? = null,
-)
+    val lifecycleProfileKind: RoomLifecycleProfileKind = RoomLifecycleProfileKind.CONFIDENTIAL,
+) {
+    val effectiveRoomName: String?
+        get() = roomName?.trim()?.takeIf { it.isNotEmpty() }
+            ?: invites.takeIf { it.isNotEmpty() }?.take(3)?.joinToString("、") { it.displayName ?: it.userId.value }
+}

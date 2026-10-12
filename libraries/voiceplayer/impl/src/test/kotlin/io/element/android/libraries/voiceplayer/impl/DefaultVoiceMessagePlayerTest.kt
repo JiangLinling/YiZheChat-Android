@@ -15,8 +15,20 @@ import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.matrix.test.AN_EVENT_ID
+import io.element.android.libraries.matrix.test.media.FakeMediaFile
 import io.element.android.libraries.mediaplayer.api.MediaPlayer
 import io.element.android.libraries.mediaplayer.test.FakeMediaPlayer
+import io.element.android.tests.testutils.consumeItemsUntilPredicate
+import io.mockk.coEvery
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.spyk
+import io.mockk.verify
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
@@ -79,11 +91,13 @@ class DefaultVoiceMessagePlayerTest {
 
     @Test
     fun `play reaches end of media`() = runTest {
+        val mediaFile = spyk(FakeMediaFile(""))
         val player = createDefaultVoiceMessagePlayer(
             mediaPlayer = FakeMediaPlayer(
                 fakeTotalDurationMs = 1000,
                 fakePlayedDurationMs = 1000
-            )
+            ),
+            voiceMessageMediaRepo = FakeVoiceMessageMediaRepo().apply { this.mediaFile = mediaFile },
         )
         player.state.test {
             matchInitialState()
@@ -97,6 +111,7 @@ class DefaultVoiceMessagePlayerTest {
                 assertThat(it.currentPosition).isEqualTo(1000)
                 assertThat(it.duration).isEqualTo(1000)
             }
+            verify(exactly = 1) { mediaFile.close() }
         }
     }
 
@@ -129,22 +144,6 @@ class DefaultVoiceMessagePlayerTest {
         player2.state.test {
             matchInitialState()
             assertThat(player2.prepare().isSuccess).isTrue()
-            awaitItem().let {
-                // Additional spurious state due to MediaPlayer owner change.
-                assertThat(it.isReady).isFalse()
-                assertThat(it.isPlaying).isFalse()
-                assertThat(it.isEnded).isTrue()
-                assertThat(it.currentPosition).isEqualTo(1000)
-                assertThat(it.duration).isEqualTo(1000)
-            }
-            awaitItem().let {
-                // Additional spurious state due to MediaPlayer owner change.
-                assertThat(it.isReady).isFalse()
-                assertThat(it.isPlaying).isFalse()
-                assertThat(it.isEnded).isFalse()
-                assertThat(it.currentPosition).isEqualTo(0)
-                assertThat(it.duration).isNull()
-            }
             matchReadyState(1_000L)
             player2.play()
             awaitItem().let {
@@ -168,14 +167,6 @@ class DefaultVoiceMessagePlayerTest {
                 assertThat(it.duration).isEqualTo(1000)
             }
             assertThat(player1.prepare().isSuccess).isTrue()
-            awaitItem().let {
-                // Additional spurious state due to MediaPlayer owner change.
-                assertThat(it.isReady).isFalse()
-                assertThat(it.isPlaying).isFalse()
-                assertThat(it.isEnded).isFalse()
-                assertThat(it.currentPosition).isEqualTo(0)
-                assertThat(it.duration).isNull()
-            }
             matchReadyState(1_000L)
             player1.play()
             awaitItem().let {
@@ -242,7 +233,7 @@ class DefaultVoiceMessagePlayerTest {
                 assertThat(it.duration).isNull()
             }
             assertThat(player.prepare().isSuccess).isTrue()
-            awaitItem().let {
+            consumeItemsUntilPredicate { it.isReady }.last().let {
                 assertThat(it.isReady).isTrue()
                 assertThat(it.isPlaying).isFalse()
                 assertThat(it.isEnded).isFalse()
@@ -268,6 +259,79 @@ class DefaultVoiceMessagePlayerTest {
                 assertThat(it.duration).isEqualTo(FAKE_TOTAL_DURATION_MS)
             }
         }
+    }
+
+    @Test
+    fun `close revokes active media handle`() = runTest {
+        val mediaFile = spyk(FakeMediaFile(""))
+        val repo = FakeVoiceMessageMediaRepo().apply { this.mediaFile = mediaFile }
+        val player = createDefaultVoiceMessagePlayer(voiceMessageMediaRepo = repo)
+        assertThat(player.prepare().isSuccess).isTrue()
+
+        player.close()
+
+        verify(exactly = 1) { mediaFile.close() }
+    }
+
+    @Test
+    fun `pause retains bounded media handle until close`() = runTest {
+        val mediaFile = spyk(FakeMediaFile(""))
+        val repo = FakeVoiceMessageMediaRepo().apply { this.mediaFile = mediaFile }
+        val player = createDefaultVoiceMessagePlayer(voiceMessageMediaRepo = repo)
+        assertThat(player.prepare().isSuccess).isTrue()
+
+        player.play()
+        player.pause()
+        verify(exactly = 0) { mediaFile.close() }
+
+        player.close()
+        verify(exactly = 1) { mediaFile.close() }
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun `close rejects and revokes a late media load`() = runTest {
+        val mediaFile = spyk(FakeMediaFile(""))
+        val repo = FakeVoiceMessageMediaRepo().apply { this.mediaFile = mediaFile }
+        val player = createDefaultVoiceMessagePlayer(voiceMessageMediaRepo = repo)
+
+        val preparation = async(start = CoroutineStart.UNDISPATCHED) { player.prepare() }
+        player.close()
+        advanceUntilIdle()
+
+        assertThat(preparation.await().isFailure).isTrue()
+        verify(exactly = 1) { mediaFile.close() }
+    }
+
+    @Test
+    fun `close during setMedia rejects the transfer and closes the unowned file exactly once`() = runTest {
+        val mediaFile = spyk(FakeMediaFile(""))
+        val repo = FakeVoiceMessageMediaRepo().apply { this.mediaFile = mediaFile }
+        val mediaPlayer = mockk<MediaPlayer>(relaxed = true)
+        val mediaState = MutableStateFlow(
+            MediaPlayer.State(
+                isReady = false,
+                isPlaying = false,
+                isEnded = false,
+                mediaId = null,
+                currentPosition = 0L,
+                duration = null,
+            )
+        )
+        every { mediaPlayer.state } returns mediaState
+        lateinit var player: VoiceMessagePlayer
+        coEvery { mediaPlayer.setMedia(any(), any(), any(), any(), any()) } coAnswers {
+            player.close()
+            mediaState.value
+        }
+        player = createDefaultVoiceMessagePlayer(
+            mediaPlayer = mediaPlayer,
+            voiceMessageMediaRepo = repo,
+        )
+
+        assertThat(player.prepare().isFailure).isTrue()
+
+        verify(exactly = 1) { mediaFile.close() }
     }
 }
 
@@ -308,7 +372,7 @@ private suspend fun TurbineTestContext<VoiceMessagePlayer.State>.matchInitialSta
 private suspend fun TurbineTestContext<VoiceMessagePlayer.State>.matchReadyState(
     fakeTotalDurationMs: Long = FAKE_TOTAL_DURATION_MS,
 ) {
-    awaitItem().let {
+    consumeItemsUntilPredicate { it.isReady }.last().let {
         assertThat(it.isReady).isTrue()
         assertThat(it.isPlaying).isFalse()
         assertThat(it.isEnded).isFalse()

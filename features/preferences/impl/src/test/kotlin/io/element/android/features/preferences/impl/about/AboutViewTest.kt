@@ -66,6 +66,7 @@ private fun AndroidComposeUiTest<ComponentActivity>.setAboutView(
     state: AboutState,
     onElementLegalClick: (ElementLegal) -> Unit = EnsureNeverCalledWithParam(),
     onOpenSourceLicensesClick: () -> Unit = EnsureNeverCalled(),
+    onInstallUpdate: () -> Unit = EnsureNeverCalled(),
     onBackClick: () -> Unit = EnsureNeverCalled(),
 ) {
     setContent {
@@ -73,6 +74,7 @@ private fun AndroidComposeUiTest<ComponentActivity>.setAboutView(
             state = state,
             onElementLegalClick = onElementLegalClick,
             onOpenSourceLicensesClick = onOpenSourceLicensesClick,
+            onInstallUpdate = onInstallUpdate,
             onBackClick = onBackClick,
         )
     }

@@ -40,22 +40,30 @@ class ImageCompressor(
         mimeType: String,
         orientation: Int = ExifInterface.ORIENTATION_UNDEFINED,
         desiredQuality: Int = 78,
+        onTemporaryFile: (File) -> Unit = {},
     ): Result<ImageCompressionResult> = withContext(dispatchers.io) {
         runCatchingExceptions {
             val format = mimeTypeToCompressFormat(mimeType)
             val extension = mimeTypeToCompressFileExtension(mimeType)
             val compressedBitmap = compressToBitmap(inputStreamProvider, resizeMode, orientation).getOrThrow()
-            // Encode bitmap to the destination temporary file
-            val tmpFile = context.createTmpFile(extension = extension)
-            tmpFile.outputStream().use {
-                compressedBitmap.compress(format, desiredQuality, it)
+            try {
+                // Encode bitmap to the destination temporary file
+                val tmpFile = context.createTmpFile(extension = extension)
+                onTemporaryFile(tmpFile)
+                tmpFile.outputStream().use {
+                    compressedBitmap.compress(format, desiredQuality, it)
+                }
+                ImageCompressionResult(
+                    file = tmpFile,
+                    width = compressedBitmap.width,
+                    height = compressedBitmap.height,
+                    size = tmpFile.length()
+                )
+            } finally {
+                // Bitmap pixel buffers are large allocations. Releasing them deterministically avoids
+                // carrying the preprocessing bitmap into the attachment upload and forcing a later GC.
+                compressedBitmap.recycle()
             }
-            ImageCompressionResult(
-                file = tmpFile,
-                width = compressedBitmap.width,
-                height = compressedBitmap.height,
-                size = tmpFile.length()
-            )
         }
     }
 
@@ -80,11 +88,14 @@ class ImageCompressor(
             options.inJustDecodeBounds = false
             val decodedBitmap = BitmapFactory.decodeStream(input, null, options)
                 ?: error("Decoding Bitmap from InputStream failed")
-            val rotatedBitmap = decodedBitmap.rotateToExifMetadataOrientation(orientation)
-            if (resizeMode is ResizeMode.Strict) {
-                rotatedBitmap.resizeToMax(resizeMode.maxWidth, resizeMode.maxHeight)
-            } else {
-                rotatedBitmap
+            val rotatedBitmap = decodedBitmap.transformAndRecycleSource {
+                rotateToExifMetadataOrientation(orientation)
+            }
+            if (resizeMode !is ResizeMode.Strict) {
+                return@use rotatedBitmap
+            }
+            rotatedBitmap.transformAndRecycleSource {
+                resizeToMax(resizeMode.maxWidth, resizeMode.maxHeight)
             }
         }
     }
@@ -104,6 +115,23 @@ class ImageCompressor(
         BitmapFactory.decodeStream(inputStream, null, options)
         // Set sample size based on the outWidth and outHeight
         options.inSampleSize = options.calculateInSampleSize(width, height)
+    }
+}
+
+/**
+ * Applies a bitmap transformation and releases the source when the transformation allocates a replacement.
+ * The source is also released if the transformation fails; ownership of the returned bitmap belongs to the caller.
+ */
+internal inline fun Bitmap.transformAndRecycleSource(transform: Bitmap.() -> Bitmap): Bitmap {
+    return try {
+        transform().also { transformed ->
+            if (transformed !== this) {
+                recycle()
+            }
+        }
+    } catch (failure: Throwable) {
+        recycle()
+        throw failure
     }
 }
 

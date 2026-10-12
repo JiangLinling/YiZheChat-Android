@@ -38,9 +38,13 @@ dependencies {
     implementation(projects.libraries.oauth.api)
     implementation(projects.libraries.uiStrings)
     implementation(projects.libraries.testtags)
+    implementation(projects.security.contentProtection.api)
+    implementation(projects.security.dataProtection.api)
+    implementation(projects.security.secureStorage.api)
     api(libs.statemachine)
     api(projects.features.securebackup.api)
 
     testCommonDependencies(libs, true)
     testImplementation(projects.libraries.matrix.test)
+    testImplementation(projects.security.dataProtection.test)
 }

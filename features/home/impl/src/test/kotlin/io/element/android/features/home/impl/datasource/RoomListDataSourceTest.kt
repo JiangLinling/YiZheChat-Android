@@ -14,22 +14,156 @@ import io.element.android.features.home.impl.FakeDateTimeObserver
 import io.element.android.libraries.androidutils.system.DateTimeObserver
 import io.element.android.libraries.dateformatter.test.FakeDateFormatter
 import io.element.android.libraries.matrix.api.roomlist.RoomListService
+import io.element.android.libraries.matrix.api.core.RoomId
+import io.element.android.libraries.matrix.api.core.UserId
+import io.element.android.libraries.matrix.api.room.CurrentUserMembership
+import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.test.A_ROOM_ID
 import io.element.android.libraries.matrix.test.A_ROOM_ID_2
 import io.element.android.libraries.matrix.test.A_ROOM_ID_3
 import io.element.android.libraries.matrix.test.notificationsettings.FakeNotificationSettingsService
 import io.element.android.libraries.matrix.test.room.aRoomSummary
+import io.element.android.libraries.matrix.test.room.aRoomInfo
+import io.element.android.libraries.matrix.test.room.aRoomMember
 import io.element.android.libraries.matrix.test.roomlist.FakeDynamicRoomList
 import io.element.android.libraries.matrix.test.roomlist.FakeRoomListService
 import io.element.android.services.analytics.test.FakeAnalyticsService
+import io.element.android.security.dataprotection.test.FakeProtectedPreviewAuthorizationGate
+import io.element.android.security.dataprotection.test.FakeDeletedIdentityProjection
+import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleaner
+import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleanupResult
+import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleanupTarget
 import io.element.android.tests.testutils.testCoroutineDispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import java.time.Instant
+import java.security.MessageDigest
 
 class RoomListDataSourceTest {
+    @Test
+    fun `account tombstone removes only deleted peer direct rooms and keeps shared group and unrelated DM`() = runTest {
+        val deletedUserId = UserId("@deleted:server.org")
+        val otherUserId = UserId("@other:server.org")
+        val deletedDmId = RoomId("!deleted-dm:server.org")
+        val deletedInviteId = RoomId("!deleted-invite:server.org")
+        val sharedGroupId = RoomId("!shared-group:server.org")
+        val unrelatedDmId = RoomId("!unrelated-dm:server.org")
+        val source = MutableStateFlow(
+            listOf(
+                aRoomSummary(info = aRoomInfo(
+                    id = deletedDmId,
+                    isDm = true,
+                    heroes = listOf(MatrixUser(deletedUserId)),
+                    numUnreadMessages = 7,
+                )),
+                aRoomSummary(info = aRoomInfo(
+                    id = deletedInviteId,
+                    isDm = true,
+                    currentUserMembership = CurrentUserMembership.INVITED,
+                    inviter = aRoomMember(userId = deletedUserId),
+                    heroes = listOf(MatrixUser(deletedUserId)),
+                    numUnreadMentions = 2,
+                )),
+                aRoomSummary(info = aRoomInfo(
+                    id = sharedGroupId,
+                    name = "Shared group",
+                    isDm = false,
+                    heroes = listOf(MatrixUser(deletedUserId)),
+                    numUnreadMessages = 3,
+                )),
+                aRoomSummary(info = aRoomInfo(
+                    id = unrelatedDmId,
+                    isDm = true,
+                    heroes = listOf(MatrixUser(otherUserId)),
+                    numUnreadMessages = 5,
+                )),
+            )
+        )
+        val roomList = FakeDynamicRoomList(summaries = source)
+        val projection = FakeDeletedIdentityProjection()
+        val cleanedTargets = mutableListOf<DeletedIdentityProjectionCleanupTarget>()
+        val dataSource = createRoomListDataSource(
+            roomListService = FakeRoomListService(createRoomListLambda = { roomList }),
+            deletedIdentityProjection = projection,
+            deletedIdentityProjectionCleaner = object : DeletedIdentityProjectionCleaner {
+                override suspend fun clear(target: DeletedIdentityProjectionCleanupTarget): DeletedIdentityProjectionCleanupResult {
+                    cleanedTargets += target
+                    return DeletedIdentityProjectionCleanupResult(target.roomIds, emptySet())
+                }
+            },
+        )
+
+        dataSource.roomSummariesFlow.test {
+            dataSource.launchIn(backgroundScope)
+            val before = awaitItem()
+            assertThat(before.map { it.roomId }).containsExactly(
+                deletedDmId,
+                deletedInviteId,
+                sharedGroupId,
+                unrelatedDmId,
+            ).inOrder()
+            projection.markDeleted(hash(deletedUserId.value))
+            val after = awaitItem()
+            assertThat(after.map { it.roomId }).containsExactly(sharedGroupId, unrelatedDmId).inOrder()
+            assertThat(after.first { it.roomId == sharedGroupId }.numberOfUnreadMessages).isEqualTo(3)
+            assertThat(after.first { it.roomId == unrelatedDmId }.numberOfUnreadMessages).isEqualTo(5)
+            assertThat(cleanedTargets.flatMap { it.roomIds }).containsExactly(
+                deletedDmId.value,
+                deletedInviteId.value,
+            )
+            assertThat(cleanedTargets.single().deletedIdentity.generation).isEqualTo(1)
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `authorized protected preview is retried after the initial SDK projection`() = runTest {
+        var rebuildCount = 0
+        val roomList = FakeDynamicRoomList(
+            summaries = MutableStateFlow(listOf(aRoomSummary())),
+            rebuildSummariesLambda = { rebuildCount += 1 },
+        )
+        val roomListDataSource = createRoomListDataSource(
+            roomListService = FakeRoomListService(createRoomListLambda = { roomList }),
+            protectedPreviewAuthorizationGate = FakeProtectedPreviewAuthorizationGate(allowsPreview = true),
+        )
+        roomListDataSource.launchIn(backgroundScope)
+        runCurrent()
+        val rebuildCountBeforeRetry = rebuildCount
+
+        advanceTimeBy(501L)
+        runCurrent()
+
+        assertThat(rebuildCount).isGreaterThan(rebuildCountBeforeRetry)
+    }
+
+    @Test
+    fun `when protected authorization revision changes room summaries are rebuilt`() = runTest {
+        var rebuildCount = 0
+        val roomList = FakeDynamicRoomList(
+            rebuildSummariesLambda = { rebuildCount += 1 },
+        )
+        val roomListService = FakeRoomListService(createRoomListLambda = { roomList })
+        val authorizationGate = FakeProtectedPreviewAuthorizationGate(allowsPreview = true)
+
+        createRoomListDataSource(
+            roomListService = roomListService,
+            protectedPreviewAuthorizationGate = authorizationGate,
+        )
+        runCurrent()
+        val rebuildCountBeforeRevision = rebuildCount
+
+        authorizationGate.requestAuthorizationRefresh()
+        runCurrent()
+
+        assertThat(rebuildCount).isGreaterThan(rebuildCountBeforeRevision)
+    }
+
     @Test
     fun `when DateTimeObserver gets a date change, the room summaries are refreshed`() = runTest {
         val roomList = FakeDynamicRoomList().apply {
@@ -266,6 +400,9 @@ class RoomListDataSourceTest {
         notificationSettingsService: FakeNotificationSettingsService = FakeNotificationSettingsService(),
         dateTimeObserver: FakeDateTimeObserver = FakeDateTimeObserver(),
         analyticsService: FakeAnalyticsService = FakeAnalyticsService(),
+        protectedPreviewAuthorizationGate: FakeProtectedPreviewAuthorizationGate = FakeProtectedPreviewAuthorizationGate(),
+        deletedIdentityProjection: FakeDeletedIdentityProjection = FakeDeletedIdentityProjection(),
+        deletedIdentityProjectionCleaner: DeletedIdentityProjectionCleaner = NoopDeletedIdentityProjectionCleaner,
     ) = RoomListDataSource(
         roomListService = roomListService,
         roomListRoomSummaryFactory = roomListRoomSummaryFactory,
@@ -274,5 +411,17 @@ class RoomListDataSourceTest {
         sessionCoroutineScope = backgroundScope,
         dateTimeObserver = dateTimeObserver,
         analyticsService = analyticsService,
+        protectedPreviewAuthorizationGate = protectedPreviewAuthorizationGate,
+        deletedIdentityProjection = deletedIdentityProjection,
+        deletedIdentityProjectionCleaner = deletedIdentityProjectionCleaner,
     )
 }
+
+private object NoopDeletedIdentityProjectionCleaner : DeletedIdentityProjectionCleaner {
+    override suspend fun clear(target: DeletedIdentityProjectionCleanupTarget) =
+        DeletedIdentityProjectionCleanupResult(target.roomIds, emptySet())
+}
+
+private fun hash(value: String): String = MessageDigest.getInstance("SHA-256")
+    .digest(value.encodeToByteArray())
+    .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }

@@ -46,7 +46,7 @@ class DefaultMessageSummaryFormatter(
                 is TimelineItemLocationContent.Mode.Live -> context.getString(CommonStrings.common_shared_live_location)
                 is TimelineItemLocationContent.Mode.Static -> context.getString(CommonStrings.common_shared_location)
             }
-            is TimelineItemEncryptedContent -> context.getString(CommonStrings.common_unable_to_decrypt)
+            is TimelineItemEncryptedContent -> ""
             is TimelineItemRedactedContent -> context.getString(CommonStrings.common_message_removed)
             is TimelineItemPollContent -> content.question
             is TimelineItemVoiceContent -> context.getString(CommonStrings.common_voice_message)
@@ -65,6 +65,10 @@ class DefaultMessageSummaryFormatter(
                         context.getString(CommonStrings.common_call_declined)
                     }
                 }
+                is RtcNotificationState.Cancelled -> context.getString(CommonStrings.common_call_cancelled)
+                is RtcNotificationState.Missed -> context.getString(CommonStrings.common_call_missed)
+                is RtcNotificationState.Ended -> context.getString(CommonStrings.common_call_ended)
+                RtcNotificationState.Connected -> context.getString(CommonStrings.common_call_connected)
                 RtcNotificationState.Started -> context.getString(CommonStrings.common_call_started)
             }
         }

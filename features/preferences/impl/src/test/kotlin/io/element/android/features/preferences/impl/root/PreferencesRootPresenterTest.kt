@@ -40,6 +40,8 @@ import io.element.android.libraries.sessionstorage.api.SessionStore
 import io.element.android.libraries.sessionstorage.test.InMemorySessionStore
 import io.element.android.libraries.sessionstorage.test.aSessionData
 import io.element.android.services.analytics.test.FakeAnalyticsService
+import io.element.android.security.dataprotection.api.ManagementControlService
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.tests.testutils.WarmUpRule
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import io.element.android.tests.testutils.lambda.value
@@ -49,6 +51,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import io.mockk.mockk
 import org.junit.Rule
 import org.junit.Test
 
@@ -333,6 +336,7 @@ class PreferencesRootPresenterTest {
         featureFlagService: FeatureFlagService = FakeFeatureFlagService(),
         sessionStore: SessionStore = InMemorySessionStore(),
         sessionEnterpriseService: SessionEnterpriseService = FakeSessionEnterpriseService(),
+        managementControlService: ManagementControlService = mockk(relaxed = true),
     ) = PreferencesRootPresenter(
         matrixClient = matrixClient,
         sessionVerificationService = sessionVerificationService,
@@ -346,5 +350,7 @@ class PreferencesRootPresenterTest {
         featureFlagService = featureFlagService,
         sessionStore = sessionStore,
         sessionEnterpriseService = sessionEnterpriseService,
+        managementControlService = managementControlService,
+        appOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
     )
 }

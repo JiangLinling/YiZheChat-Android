@@ -35,6 +35,13 @@ import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.api.verification.SessionVerificationService
 import io.element.android.libraries.sessionstorage.api.SessionStore
 import io.element.android.services.analytics.api.AnalyticsService
+import io.element.android.security.dataprotection.api.ManagedAppRelease
+import io.element.android.security.dataprotection.api.ManagementControlService
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
+import io.element.android.security.securestorage.api.accountIdHash
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
@@ -57,12 +64,29 @@ class PreferencesRootPresenter(
     private val featureFlagService: FeatureFlagService,
     private val sessionStore: SessionStore,
     private val sessionEnterpriseService: SessionEnterpriseService,
+    private val managementControlService: ManagementControlService,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
 ) : Presenter<PreferencesRootState> {
     @Composable
     override fun present(): PreferencesRootState {
         val coroutineScope = rememberCoroutineScope()
         val matrixUser = matrixClient.userProfile.collectAsState()
         LaunchedEffect(Unit) {
+            runCatching {
+                appOperationalStateCoordinator.perform(
+                    lifecycleOperationRequest(
+                        lifecycleId = FullAppLifecycleId.LC_23,
+                        trigger = "settings_open",
+                        accountIdHash = accountIdHash(matrixClient.sessionId.value),
+                        matrixDeviceIdHash = accountIdHash(matrixClient.deviceId.value),
+                    )
+                ) {
+                    appOperationalStateCoordinator.refresh(
+                        accountIdHash(matrixClient.sessionId.value),
+                        accountIdHash(matrixClient.deviceId.value),
+                    )
+                }
+            }
             // Force a refresh of the profile
             matrixClient.getUserProfile()
         }
@@ -123,6 +147,12 @@ class PreferencesRootPresenter(
         }
 
         val showDeveloperSettings by showDeveloperSettingsProvider.showDeveloperSettings.collectAsState()
+        var availableUpdate by remember { mutableStateOf<ManagedAppRelease?>(null) }
+        LaunchedEffect(Unit) {
+            availableUpdate = runCatching { managementControlService.cachedAppRelease() }.getOrNull()
+            runCatching { managementControlService.latestAppRelease() }
+                .onSuccess { availableUpdate = it }
+        }
 
         fun handleEvent(event: PreferencesRootEvent) {
             when (event) {
@@ -153,6 +183,7 @@ class PreferencesRootPresenter(
             showLabsItem = showLabsItem,
             directLogoutState = directLogoutState,
             snackbarMessage = snackbarMessage,
+            availableUpdate = availableUpdate,
             eventSink = ::handleEvent,
         )
     }

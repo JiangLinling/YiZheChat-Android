@@ -18,5 +18,9 @@ import kotlinx.parcelize.Parcelize
 data class CallData(
     val sessionId: SessionId,
     val roomId: RoomId,
-    val isAudioCall: Boolean
+    val isAudioCall: Boolean,
+    /** Present when this screen was opened from a concrete incoming call notification. */
+    val notificationEventId: String? = null,
+    /** Local entry generation, preserved through this call's navigation and cleanup. */
+    val attemptId: String? = notificationEventId,
 ) : NodeInputs, Parcelable

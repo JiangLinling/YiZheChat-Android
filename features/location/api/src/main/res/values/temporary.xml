@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_room_live_location_paused">Location updates paused. Check location permission.</string>
+    <string name="screen_room_live_location_paused_checking">Location updates paused. Checking the original share…</string>
+    <string name="screen_room_live_location_unrecoverable">Location updates paused. End this share to continue.</string>
+    <string name="action_resume_live_location">Resume</string>
+</resources>

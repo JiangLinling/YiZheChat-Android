@@ -214,6 +214,10 @@
   <string name="common_blocked_users">"Blocked users"</string>
   <string name="common_bubbles">"Bubbles"</string>
   <string name="common_call_declined">"Call declined"</string>
+  <string name="common_call_cancelled">"Call cancelled"</string>
+  <string name="common_call_connected">"Call connected"</string>
+  <string name="common_call_ended">"Call ended"</string>
+  <string name="common_call_missed">"Missed call"</string>
   <string name="common_call_started">"Call started"</string>
   <string name="common_call_you_declined">"You declined a call"</string>
   <string name="common_chat_backup">"Chat backup"</string>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="attachment_title">选择文件</string>
+    <string name="attachment_back">返回</string>
+    <string name="attachment_cancel">取消</string>
+    <string name="attachment_preview">文件预览</string>
+    <string name="attachment_back_list">返回列表</string>
+    <string name="attachment_select">选择此文件</string>
+    <string name="attachment_deselect">取消选择</string>
+    <string name="attachment_search">搜索文件名，如合同、发票</string>
+    <string name="attachment_latest">最近</string>
+    <string name="attachment_folders">文件夹</string>
+    <string name="attachment_refresh">刷新</string>
+    <string name="attachment_sources_unavailable">部分文件夹已失效，请重新添加或恢复授权</string>
+    <string name="attachment_partial_index">文件数量较多，当前仅显示部分结果，可进入更小的目录查看</string>
+    <string name="attachment_authorized_folder">已授权文件夹</string>
+    <string name="attachment_folder_help">添加常用文件夹后，新文件会自动出现在这里。Android 11及以上无法授权整个Download根目录</string>
+    <string name="attachment_folder_back">全部文件 · %1$s</string>
+    <string name="attachment_selected_count">已选 %1$d 个</string>
+    <string name="attachment_file_count">%1$d 个文件</string>
+    <string name="attachment_first_use">添加文件或常用文件夹，即可开始浏览</string>
+    <string name="attachment_no_results">没有找到匹配文件</string>
+    <string name="attachment_access_scope">仅搜索已添加文件和授权文件夹；其他位置请用“添加文件”</string>
+    <string name="attachment_time_unknown">时间未知</string>
+    <string name="attachment_size_unknown">大小未知</string>
+    <string name="attachment_add_files">添加文件</string>
+    <string name="attachment_add_folder">添加文件夹</string>
+    <string name="attachment_continue">继续(%1$d)</string>
+    <string name="attachment_sort_hint">按最近修改时间排序 · 最多9个 · 点击文件可预览</string>
+    <string name="attachment_access_error">暂时无法访问文件或位置，请重试或重新添加</string>
+    <string name="attachment_all">全部</string>
+    <string name="attachment_word">Word</string>
+    <string name="attachment_excel">XLS</string>
+    <string name="attachment_pdf">PDF</string>
+    <string name="attachment_ppt">PPT</string>
+    <string name="attachment_text">TXT</string>
+    <string name="attachment_archive">压缩包</string>
+    <string name="attachment_other">其他</string>
+    <string name="attachment_added_file">已添加文件</string>
+
+<string name="gallery_title">图片和视频</string>
+    
+<string name="gallery_close">关闭</string>
+    
+<string name="gallery_back">返回</string>
+    
+<string name="gallery_select">选择</string>
+    
+<string name="gallery_deselect">取消选择</string>
+    
+<string name="gallery_partial">当前仅能访问部分照片和视频 · 选择更多</string>
+    
+<string name="gallery_permission">允许访问照片和视频后，可浏览相册</string>
+    
+<string name="gallery_allow">允许访问</string>
+    
+<string name="gallery_system_picker">使用系统选择器</string>
+    
+<string name="gallery_empty">没有可访问的照片或视频</string>
+    
+<string name="gallery_original">原图</string>
+    
+<string name="gallery_preview">预览(%1$d)</string>
+    
+<string name="gallery_send">发送(%1$d)</string>
+    
+<string name="gallery_limit">最多选择 %1$d 项</string>
+    
+    <string name="gallery_edit">编辑</string>
+    <string name="gallery_preview_empty">预览</string>
+    <string name="gallery_send_empty">发送</string>
+    <string name="attachment_search_short">搜索文件</string>
+    <string name="attachment_shared_permission">开启文件访问，查看手机最新文件</string>
+    <string name="attachment_shared_empty">暂未读取到文件</string>
+    <string name="attachment_shared_scope">手机共享目录中的文件</string>
+    <string name="attachment_enable">开启</string>
+    <string name="attachment_create_folder">新建文件夹</string>
+    <string name="attachment_create_file">新建文件</string>
+    <string name="attachment_my_folder">自己的文件夹</string>
+    <string name="attachment_folders_empty">添加常用文件夹，或新建自己的文件夹</string>
+    <string name="attachment_move_short">移入</string>
+    <string name="attachment_move_target">移入自己的文件夹</string>
+    <string name="attachment_name">名称</string>
+    <string name="attachment_file_content">文件内容</string>
+    <string name="attachment_save">保存</string>
+    <string name="attachment_create_folder_first">先新建自己的文件夹</string>
+    <string name="attachment_management_error">未能完成，请检查名称、同名文件和访问权限。原有文件不会被覆盖。</string>
+    <string name="attachment_management_pending">文件整理尚未完成</string>
+    <string name="attachment_resume">继续</string>
+    <string name="attachment_stop">停止</string>
+    <string name="attachment_default_filename">新建文件.txt</string>
+    <string name="attachment_search_folders">搜索文件夹</string>
+    <string name="attachment_search_directory">搜索此文件夹</string>
+    <string name="attachment_directory_empty">此文件夹为空</string>
+    <string name="attachment_move_action">移动</string>
+    <string name="attachment_choose_move_folder">将「%1$s」移动到…</string>
+    <string name="attachment_move_unavailable">暂不支持移入此文件夹</string>
+    <string name="attachment_moved">已移入</string>
+    <string name="attachment_rename_collision">重名，请改名</string>
+    <string name="attachment_collision_help">目标文件夹已有同名文件，请改名后重试。原有文件保留。</string>
+    <string name="attachment_move_here">移到这里</string>
+    <string name="attachment_open_folder">打开文件夹</string>
+    <string name="attachment_preview_size_limit">这个文件超过%1$s本地预览上限，仍可在列表中选择；发送会按现有上传规则处理。</string>
+</resources>

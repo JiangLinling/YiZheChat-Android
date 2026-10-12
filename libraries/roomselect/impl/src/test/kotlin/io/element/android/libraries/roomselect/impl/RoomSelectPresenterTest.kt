@@ -13,9 +13,12 @@ import app.cash.molecule.RecompositionMode
 import app.cash.molecule.moleculeFlow
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
+import io.element.android.features.userprofile.test.FakeFriendProfileRepository
 import io.element.android.libraries.designsystem.theme.components.SearchBarResultState
+import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.roomlist.RoomListFilter
 import io.element.android.libraries.matrix.api.roomlist.RoomListService
+import io.element.android.libraries.matrix.test.room.aRoomInfo
 import io.element.android.libraries.matrix.test.room.aRoomSummary
 import io.element.android.libraries.matrix.test.roomlist.FakeDynamicRoomList
 import io.element.android.libraries.matrix.test.roomlist.FakeRoomListService
@@ -101,6 +104,47 @@ class RoomSelectPresenterTest {
     }
 
     @Test
+    fun `present - pending direct room is not a forward destination`() = runTest {
+        val acceptedRoomId = RoomId("!accepted:example.org")
+        val pendingRoomId = RoomId("!pending:example.org")
+        val groupRoomId = RoomId("!group:example.org")
+        val roomList = FakeDynamicRoomList(
+            summaries = MutableStateFlow(
+                listOf(
+                    aRoomSummary(
+                        info = aRoomInfo(
+                            id = acceptedRoomId,
+                            isDm = true,
+                            activeMembersCount = 2,
+                            invitedMembersCount = 0,
+                            joinedMembersCount = 2,
+                        )
+                    ),
+                    aRoomSummary(
+                        info = aRoomInfo(
+                            id = pendingRoomId,
+                            isDm = true,
+                            activeMembersCount = 2,
+                            invitedMembersCount = 1,
+                            joinedMembersCount = 1,
+                        )
+                    ),
+                    aRoomSummary(info = aRoomInfo(id = groupRoomId)),
+                )
+            )
+        )
+        val presenter = createRoomSelectPresenter(
+            roomListService = FakeRoomListService(createRoomListLambda = { roomList })
+        )
+
+        moleculeFlow(RecompositionMode.Immediate) { presenter.present() }.test {
+            awaitItem()
+            val results = (awaitItem().resultState as SearchBarResultState.Results).results
+            assertThat(results.map { it.roomId }).containsExactly(acceptedRoomId, groupRoomId)
+        }
+    }
+
+    @Test
     fun `present - select and remove a room`() = runTest {
         val roomSummary = aRoomSummary()
         val roomList = FakeDynamicRoomList(
@@ -165,6 +209,7 @@ internal fun TestScope.createRoomSelectPresenter(
             return RoomSelectSearchDataSource(
                 coroutineScope = coroutineScope,
                 roomListService = roomListService,
+                friendProfileRepository = FakeFriendProfileRepository(),
                 coroutineDispatchers = testCoroutineDispatchers(),
             )
         }

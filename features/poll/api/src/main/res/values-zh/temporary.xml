@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_poll_card_title">群投票</string>
+    <string name="screen_poll_ended">已结束</string>
+    <string name="screen_poll_open">进行中</string>
+    <string name="screen_poll_single_choice">单选 · 选择一个选项</string>
+    <string name="screen_poll_submit_failed">提交失败，已保留你的选择，请重试。</string>
+    <string name="screen_poll_submitting">正在提交…</string>
+    <string name="screen_poll_pending">已提交，正在确认结果，请勿重复提交。</string>
+    <string name="screen_poll_voted">已投票</string>
+    <string name="screen_poll_vote">确认投票</string>
+    <string name="screen_poll_change_vote">确认改票</string>
+    <string name="screen_poll_disclosed_hint">单选 · 结果实时显示</string>
+    <string name="screen_poll_undisclosed_hint">结束后显示结果</string>
+    <string name="screen_poll_view_results">查看结果</string>
+    <string name="screen_poll_go_vote">去投票</string>
+    <string name="screen_interaction_discard_title">放弃本次填写？</string>
+    <string name="screen_interaction_discard_content">内容尚未提交，退出后本次填写将丢失。</string>
+    <string name="screen_interaction_continue">继续填写</string>
+    <string name="screen_interaction_discard">放弃并退出</string>
+    <string name="screen_poll_selection_hint">已选择：%1$s，点击下方确认提交。</string>
+    <string name="screen_poll_more_options">查看其余 %1$d 个选项</string>
+    <string name="screen_poll_collapse_options">收起选项</string>
+</resources>

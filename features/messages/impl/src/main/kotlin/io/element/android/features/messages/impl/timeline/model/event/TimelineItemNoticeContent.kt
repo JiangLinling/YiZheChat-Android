@@ -16,6 +16,7 @@ data class TimelineItemNoticeContent(
     override val htmlDocument: Document?,
     override val formattedBody: CharSequence,
     override val isEdited: Boolean,
+    override val isBurnAfterRead: Boolean = false,
 ) : TimelineItemTextBasedContent {
     override val type: String = "TimelineItemNoticeContent"
     override val plainText: String = htmlDocument?.toPlainText() ?: body

@@ -9,6 +9,7 @@
 package io.element.android.features.location.impl.show
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -50,6 +51,7 @@ import io.element.android.services.toolbox.api.strings.StringProvider
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @AssistedInject
@@ -75,6 +77,7 @@ class ShowLocationPresenter(
     override fun present(): ShowLocationState {
         val coroutineScope = rememberCoroutineScope()
         val permissionsState: PermissionsState = permissionsPresenter.present()
+        val pausedShares by liveLocationShareManager.pausedShares.collectAsState()
         var isTrackMyLocation by remember { mutableStateOf(false) }
         val appName by remember { derivedStateOf { buildMeta.applicationName } }
         var dialogState: LocationConstraintsDialogState by remember {
@@ -108,7 +111,7 @@ class ShowLocationPresenter(
                 }
                 ShowLocationEvent.DismissDialog -> dialogState = LocationConstraintsDialogState.None
                 ShowLocationEvent.OpenAppSettings -> {
-                    locationActions.openAppSettings()
+                    permissionsState.eventSink(PermissionsEvents.OpenAppSettings)
                     dialogState = LocationConstraintsDialogState.None
                 }
                 ShowLocationEvent.OpenLocationSettings -> {
@@ -154,7 +157,7 @@ class ShowLocationPresenter(
                     val comparator = LiveLocationShareComparator(currentUser = joinedRoom.sessionId)
                     val liveLocationSharesFlow = joinedRoom.subscribeToLiveLocationShares()
                     val membersStateFlow = joinedRoom.membersStateFlow.mapState { it.joinedRoomMembers() }
-                    combine(liveLocationSharesFlow, membersStateFlow) { liveShares, members ->
+                    combine(liveLocationSharesFlow, membersStateFlow, liveLocationShareManager.pausedShares) { liveShares, members, _ ->
                         liveShares
                             .sortedWith(comparator)
                             .mapNotNull { share ->
@@ -181,7 +184,10 @@ class ShowLocationPresenter(
                                     location = location,
                                     isLive = true,
                                     assetType = lastLocation.assetType,
-                                    isOwnUser = share.userId == joinedRoom.sessionId
+                                    isOwnUser = share.userId == joinedRoom.sessionId,
+                                    pausedState = if (share.userId == joinedRoom.sessionId) {
+                                        liveLocationShareManager.pausedShare(joinedRoom.roomId, share.beaconId).first()
+                                    } else null,
                                 )
                             }
                             .toImmutableList()
@@ -205,6 +211,7 @@ class ShowLocationPresenter(
             isLive = mode is ShowLocationMode.Live,
             appName = appName,
             eventSink = ::handleEvent,
+            pausedLiveLocationShare = if (mode is ShowLocationMode.Live) pausedShares[joinedRoom.roomId] else null,
         )
     }
 }

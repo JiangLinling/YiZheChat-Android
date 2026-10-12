@@ -1,0 +1,5 @@
+<resources>
+    <string name="screen_identity_share_title">分享联系人</string>
+    <string name="screen_identity_share_card">发送联系人名片</string>
+    <string name="screen_identity_share_link">分享链接</string>
+</resources>

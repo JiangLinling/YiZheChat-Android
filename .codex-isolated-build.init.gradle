@@ -1,0 +1,4 @@
+gradle.beforeProject { project ->
+    def safeProjectPath = project.path == ':' ? 'root' : project.path.substring(1).replace(':', '/')
+    project.layout.buildDirectory.set(new File(project.rootDir, ".codex-build/${safeProjectPath}"))
+}

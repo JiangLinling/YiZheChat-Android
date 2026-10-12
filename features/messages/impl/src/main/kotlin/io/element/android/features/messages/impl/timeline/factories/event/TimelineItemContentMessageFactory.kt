@@ -14,6 +14,7 @@ import androidx.core.text.toSpannable
 import dev.zacsweers.metro.Inject
 import io.element.android.features.location.api.Location
 import io.element.android.features.messages.api.timeline.HtmlConverterProvider
+import io.element.android.features.messages.impl.R
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemAudioContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemEmoteContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemEventContent
@@ -25,6 +26,7 @@ import io.element.android.features.messages.impl.timeline.model.event.TimelineIt
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemTextContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemVideoContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemVoiceContent
+import io.element.android.features.messages.impl.timeline.model.event.parseProtectedRelayBody
 import io.element.android.features.messages.impl.utils.TextPillificationHelper
 import io.element.android.libraries.androidutils.filesize.FileSizeFormatter
 import io.element.android.libraries.androidutils.text.safeLinkify
@@ -37,10 +39,12 @@ import io.element.android.libraries.matrix.api.timeline.item.event.EmoteMessageT
 import io.element.android.libraries.matrix.api.timeline.item.event.FileMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.ImageMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.LocationMessageType
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageClipboardSource
 import io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
 import io.element.android.libraries.matrix.api.timeline.item.event.NoticeMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.OtherMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.ProfileDetails
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedMessageStatus
 import io.element.android.libraries.matrix.api.timeline.item.event.StickerMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.TextMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.VideoMessageType
@@ -48,6 +52,7 @@ import io.element.android.libraries.matrix.api.timeline.item.event.VoiceMessageT
 import io.element.android.libraries.matrix.api.timeline.item.event.getDisambiguatedDisplayName
 import io.element.android.libraries.matrix.ui.messages.toHtmlDocument
 import io.element.android.libraries.mediaviewer.api.util.FileExtensionExtractor
+import io.element.android.services.toolbox.api.strings.StringProvider
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import org.jsoup.nodes.Document
@@ -65,6 +70,7 @@ class TimelineItemContentMessageFactory(
     private val htmlConverterProvider: HtmlConverterProvider,
     private val permalinkParser: PermalinkParser,
     private val textPillificationHelper: TextPillificationHelper,
+    private val stringProvider: StringProvider,
 ) {
     fun create(
         content: MessageContent,
@@ -72,6 +78,20 @@ class TimelineItemContentMessageFactory(
         senderProfile: ProfileDetails,
         eventId: EventId?,
     ): TimelineItemEventContent {
+        val protectedStatusLabel = content.protectedMessageStatus?.userVisibleLabelRes()?.let(stringProvider::getString)
+        if (protectedStatusLabel != null) {
+            return TimelineItemTextContent(
+                body = protectedStatusLabel,
+                htmlDocument = null,
+                formattedBody = protectedStatusLabel,
+                isEdited = false,
+                isBurnAfterRead = content.protectedMessageStatus == ProtectedMessageStatus.BURN_AFTER_READ_UNOPENED,
+                isBurnAfterReadUnopened = content.protectedMessageStatus == ProtectedMessageStatus.BURN_AFTER_READ_UNOPENED,
+                isProtectedContentShell = true,
+                isTerminalProtectedContentShell = content.protectedMessageStatus == ProtectedMessageStatus.REVOKED ||
+                    content.protectedMessageStatus == ProtectedMessageStatus.EXPIRED,
+            )
+        }
         return when (val messageType = content.type) {
             is EmoteMessageType -> {
                 val senderDisambiguatedDisplayName = senderProfile.getDisambiguatedDisplayName(senderId)
@@ -113,7 +133,11 @@ class TimelineItemContentMessageFactory(
                     thumbnailHeight = messageType.info?.thumbnailInfo?.height?.coerceIn(MIN_IMAGE_SIZE, MAX_IMAGE_SIZE)?.toInt(),
                     aspectRatio = aspectRatio,
                     formattedFileSize = fileSizeFormatter.format(messageType.info?.size ?: 0),
-                    fileExtension = fileExtensionExtractor.extractFromName(messageType.filename)
+                    fileExtension = fileExtensionExtractor.extractFromName(messageType.filename),
+                    isBurnAfterRead = content.isBurnAfterRead,
+                    mediaAlbum = content.protectedMediaAlbum,
+                    localMediaProgress = content.localMediaProgress,
+                    localPreviewUri = messageType.source.safeUrl.takeIf(::isLocalPreviewUri),
                 )
             }
             is StickerMessageType -> {
@@ -147,6 +171,7 @@ class TimelineItemContentMessageFactory(
                         htmlDocument = null,
                         formattedBody = body,
                         isEdited = content.isEdited,
+                        isBurnAfterRead = content.isBurnAfterRead,
                     )
                 } else {
                     TimelineItemLocationContent(
@@ -154,7 +179,8 @@ class TimelineItemContentMessageFactory(
                         senderId = senderId,
                         senderProfile = senderProfile,
                         assetType = messageType.assetType,
-                        mode = TimelineItemLocationContent.Mode.Static(location = location)
+                        mode = TimelineItemLocationContent.Mode.Static(location = location),
+                        isBurnAfterRead = content.isBurnAfterRead,
                     )
                 }
             }
@@ -181,6 +207,10 @@ class TimelineItemContentMessageFactory(
                     aspectRatio = aspectRatio,
                     formattedFileSize = fileSizeFormatter.format(messageType.info?.size ?: 0),
                     fileExtension = fileExtensionExtractor.extractFromName(messageType.filename),
+                    isBurnAfterRead = content.isBurnAfterRead,
+                    mediaAlbum = content.protectedMediaAlbum,
+                    localMediaProgress = content.localMediaProgress,
+                    localPreviewUri = messageType.source.safeUrl.takeIf(::isLocalPreviewUri),
                 )
             }
             is AudioMessageType -> {
@@ -198,6 +228,7 @@ class TimelineItemContentMessageFactory(
                     mimeType = messageType.info?.mimetype ?: MimeTypes.OctetStream,
                     formattedFileSize = fileSizeFormatter.format(messageType.info?.size ?: 0),
                     fileExtension = fileExtensionExtractor.extractFromName(messageType.filename),
+                    isBurnAfterRead = content.isBurnAfterRead,
                 )
             }
             is VoiceMessageType -> {
@@ -216,7 +247,8 @@ class TimelineItemContentMessageFactory(
                     mimeType = messageType.info?.mimetype ?: MimeTypes.OctetStream,
                     waveform = messageType.details?.waveform?.toImmutableList() ?: persistentListOf(),
                     formattedFileSize = fileSizeFormatter.format(messageType.info?.size ?: 0),
-                    fileExtension = fileExtensionExtractor.extractFromName(messageType.filename)
+                    fileExtension = fileExtensionExtractor.extractFromName(messageType.filename),
+                    isBurnAfterRead = content.isBurnAfterRead,
                 )
             }
             is FileMessageType -> {
@@ -234,7 +266,8 @@ class TimelineItemContentMessageFactory(
                     mediaSource = messageType.source,
                     mimeType = messageType.info?.mimetype ?: MimeTypes.fromFileExtension(fileExtension),
                     formattedFileSize = fileSizeFormatter.format(messageType.info?.size ?: 0),
-                    fileExtension = fileExtension
+                    fileExtension = fileExtension,
+                    isBurnAfterRead = content.isBurnAfterRead,
                 )
             }
             is NoticeMessageType -> {
@@ -248,10 +281,14 @@ class TimelineItemContentMessageFactory(
                     htmlDocument = htmlDocument,
                     formattedBody = formattedBody,
                     isEdited = content.isEdited,
+                    isBurnAfterRead = content.isBurnAfterRead,
                 )
             }
             is TextMessageType -> {
                 val body = messageType.body.trimEnd()
+                if (content.isContentProtectionAuthorized) {
+                    parseProtectedRelayBody(body, content.isEdited, content.protectedRelayEntries)?.let { return it }
+                }
                 val dom = messageType.formatted?.toHtmlDocument(permalinkParser = permalinkParser)
                 val formattedBody = dom?.let(::parseHtml)
                     ?: textPillificationHelper.pillify(body).safeLinkify()
@@ -261,6 +298,7 @@ class TimelineItemContentMessageFactory(
                     htmlDocument = htmlDocument,
                     formattedBody = formattedBody,
                     isEdited = content.isEdited,
+                    isBurnAfterRead = content.isBurnAfterRead,
                 )
             }
             is OtherMessageType -> {
@@ -270,6 +308,7 @@ class TimelineItemContentMessageFactory(
                     htmlDocument = null,
                     formattedBody = textPillificationHelper.pillify(body).safeLinkify(),
                     isEdited = content.isEdited,
+                    isBurnAfterRead = content.isBurnAfterRead,
                 )
             }
         }
@@ -291,6 +330,36 @@ class TimelineItemContentMessageFactory(
             .let { textPillificationHelper.pillify(it) }
             .safeLinkify()
     }
+}
+
+internal fun MessageContent.toTimelineItemClipboardSource(eventId: EventId?): MessageClipboardSource? {
+    if (isBurnAfterRead || protectedMessageStatus != null) return null
+    val source = clipboardSource
+    return when {
+        source is MessageClipboardSource.Protected &&
+            isContentProtectionAuthorized &&
+            eventId?.value == source.eventId -> source
+        source is MessageClipboardSource.Unprotected && !isContentProtectionAuthorized -> source
+        else -> null
+    }
+}
+
+private fun isLocalPreviewUri(value: String): Boolean = value.startsWith("content:") || value.startsWith("file:")
+
+private fun ProtectedMessageStatus.userVisibleLabelRes(): Int? = when (this) {
+    ProtectedMessageStatus.BURN_AFTER_READ_UNOPENED -> R.string.screen_room_burn_after_read_unopened
+    ProtectedMessageStatus.REVOKED -> R.string.screen_room_burn_after_read_viewed
+    ProtectedMessageStatus.EXPIRED -> R.string.screen_room_burn_after_read_expired
+    ProtectedMessageStatus.LEGACY_BLOCKED -> R.string.screen_room_protected_legacy_blocked
+    ProtectedMessageStatus.TEMPORARILY_UNAVAILABLE -> R.string.screen_room_protected_temporarily_unavailable
+    ProtectedMessageStatus.SEND_BINDING_PENDING -> io.element.android.features.messages.impl.R.string.screen_room_send_binding_pending
+    ProtectedMessageStatus.LICENSE_AUTHORIZATION_FAILED -> R.string.screen_room_protected_authorization_failed
+    ProtectedMessageStatus.VAULT_LOCKED -> R.string.screen_room_protected_vault_locked
+    ProtectedMessageStatus.DEVICE_SECURITY_UNAVAILABLE -> R.string.screen_room_protected_device_security_unavailable
+    ProtectedMessageStatus.ACCESS_DENIED -> R.string.screen_room_protected_access_denied
+    ProtectedMessageStatus.INTEGRITY_REJECTED -> R.string.screen_room_protected_integrity_rejected
+    ProtectedMessageStatus.ATTACHMENT_DECRYPTING -> R.string.screen_room_protected_attachment_decrypting
+    ProtectedMessageStatus.DECRYPTING -> null
 }
 
 @Suppress("USELESS_ELVIS")

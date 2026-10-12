@@ -13,8 +13,10 @@ import androidx.compose.runtime.State
 import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.matrix.api.core.EventId
+import io.element.android.libraries.matrix.api.core.UniqueId
 import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.matrix.api.timeline.Timeline
+import io.element.android.libraries.matrix.api.timeline.item.event.SegmentedVideoCandidate
 import io.element.android.libraries.mediaviewer.api.MediaInfo
 import io.element.android.libraries.mediaviewer.api.local.LocalMedia
 import io.element.android.libraries.mediaviewer.impl.details.MediaBottomSheetState
@@ -52,5 +54,35 @@ sealed interface MediaViewerPageData {
         val thumbnailSource: MediaSource?,
         val downloadedMedia: State<AsyncData<LocalMedia>>,
         override val pagerKey: Long,
+        val segmentedVideo: SegmentedVideoCandidate? = null,
+        val mediaItemId: UniqueId = UniqueId("media-viewer-data"),
     ) : MediaViewerPageData
 }
+
+/**
+ * One owner/load slot in the viewer.
+ *
+ * All media bind the original event (or local item) as well as [MediaSource]. Segmented media additionally bind the
+ * authenticated candidate and exact Matrix event, falling back to the timeline item identity before confirmation.
+ */
+internal data class MediaLoadIdentity(
+    val mediaSource: MediaSource,
+    val segmentedVideoEventId: EventId?,
+    val segmentedVideoItemId: UniqueId?,
+    val segmentedVideo: SegmentedVideoCandidate?,
+)
+
+internal val MediaViewerPageData.MediaViewerData.mediaLoadIdentity: MediaLoadIdentity
+    get() = mediaLoadIdentity(mediaSource, eventId, mediaItemId, segmentedVideo)
+
+internal fun mediaLoadIdentity(
+    mediaSource: MediaSource,
+    eventId: EventId?,
+    mediaItemId: UniqueId,
+    segmentedVideo: SegmentedVideoCandidate?,
+): MediaLoadIdentity = MediaLoadIdentity(
+    mediaSource = mediaSource,
+    segmentedVideoEventId = eventId,
+    segmentedVideoItemId = mediaItemId.takeIf { eventId == null },
+    segmentedVideo = segmentedVideo,
+)

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+  <string name="notification_channel_call">"通话"</string>
+  <string name="notification_channel_ringing_calls">"响铃通话"</string>
+  <string name="notification_channel_noisy">"消息通知"</string>
+  <string name="notification_channel_silent">"静默通知"</string>
+  <string name="notification_incoming_audio_call">"📞 来电"</string>
+  <string name="notification_incoming_call">"📹 来电"</string>
+  <string name="notification_test_push_notification_content">"你正在查看通知！点击我！"</string>
+</resources>

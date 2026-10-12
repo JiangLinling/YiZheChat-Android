@@ -28,6 +28,10 @@ open class LogoutStateProvider : PreviewParameterProvider<LogoutState> {
             aLogoutState(backupUploadState = BackupUploadState.SteadyException(SteadyStateException.Connection("No network"))),
             // Last session no recovery
             aLogoutState(isLastDevice = true, recoveryState = RecoveryState.DISABLED),
+            // Recovery actions remain available even when another device exists.
+            aLogoutState(isLastDevice = false, recoveryState = RecoveryState.DISABLED),
+            aLogoutState(isLastDevice = false, recoveryState = RecoveryState.INCOMPLETE),
+            aLogoutState(isLastDevice = false, recoveryState = RecoveryState.UNKNOWN),
             // Last session no backup
             aLogoutState(isLastDevice = true, backupState = BackupState.UNKNOWN, doesBackupExistOnServer = false),
             aLogoutState(

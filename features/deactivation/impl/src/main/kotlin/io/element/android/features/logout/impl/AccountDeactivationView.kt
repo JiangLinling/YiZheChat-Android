@@ -154,7 +154,6 @@ private fun Content(
             state.accountDeactivationAction is AsyncAction.Loading
         }
     }
-    val eraseData = state.deactivateFormState.eraseData
     var passwordFieldState by textFieldState(stateValue = state.deactivateFormState.password)
 
     val focusManager = LocalFocusManager.current
@@ -237,11 +236,9 @@ private fun Content(
         Column {
             SwitchListItem(
                 headline = stringResource(R.string.screen_deactivate_account_delete_all_messages),
-                value = eraseData,
-                onChange = {
-                    eventSink(AccountDeactivationEvents.SetEraseData(it))
-                },
-                enabled = !isLoading,
+                value = true,
+                onChange = {},
+                enabled = false,
             )
             Text(
                 modifier = Modifier.padding(start = 16.dp),
@@ -290,7 +287,7 @@ private fun Content(
                     }
                 },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Password,
+                    keyboardType = KeyboardType.Text,
                     imeAction = ImeAction.Done,
                 ),
                 keyboardActions = KeyboardActions(

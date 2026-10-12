@@ -26,9 +26,107 @@ import io.element.android.services.appnavstate.api.AppForegroundStateService
 import io.element.android.services.appnavstate.test.FakeAppForegroundStateService
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import io.element.android.features.lockscreen.api.LockScreenLockState
 import org.junit.Test
 
 class DefaultLockScreenServiceTest {
+    @Test
+    fun `actual background timeout locks before emitting once and does not repeat an already locked state`() = runTest {
+        val foreground = FakeAppForegroundStateService()
+        val keys = SimpleSecretKeyRepository()
+        val store = InMemoryLockScreenStore()
+        val pin = createDefaultPinCodeManager(lockScreenStore = store, secretKeyRepository = keys)
+        pin.createPinCode("1234")
+        val sut = createDefaultLockScreenService(secretKeyRepository = keys, lockScreenStore = store, pinCodeManager = pin,
+            appForegroundStateService = foreground)
+        runCurrent()
+        sut.backgroundLockTimeouts.test {
+            expectNoEvents() // startup Locked is not a timeout
+            assertThat(pin.verifyPinCode("1234")).isTrue()
+            foreground.givenIsInForeground(false)
+            runCurrent()
+            advanceTimeBy(2_999)
+            expectNoEvents()
+            assertThat(sut.lockState.value).isEqualTo(LockScreenLockState.Unlocked)
+            advanceTimeBy(1)
+            runCurrent()
+            awaitItem()
+            assertThat(sut.lockState.value).isEqualTo(LockScreenLockState.Locked)
+            foreground.givenIsInForeground(true)
+            runCurrent()
+            foreground.givenIsInForeground(false)
+            runCurrent()
+            advanceTimeBy(3_001)
+            runCurrent()
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `return before grace deadline cancels timeout event and leaves PIN unlocked`() = runTest {
+        val foreground = FakeAppForegroundStateService()
+        val keys = SimpleSecretKeyRepository()
+        val store = InMemoryLockScreenStore()
+        val pin = createDefaultPinCodeManager(lockScreenStore = store, secretKeyRepository = keys)
+        pin.createPinCode("1234")
+        val sut = createDefaultLockScreenService(secretKeyRepository = keys, lockScreenStore = store, pinCodeManager = pin,
+            appForegroundStateService = foreground)
+        runCurrent()
+        assertThat(pin.verifyPinCode("1234")).isTrue()
+        sut.backgroundLockTimeouts.test {
+            foreground.givenIsInForeground(false)
+            runCurrent()
+            advanceTimeBy(2_000)
+            foreground.givenIsInForeground(true)
+            runCurrent()
+            advanceTimeBy(4_000)
+            runCurrent()
+            expectNoEvents()
+            assertThat(sut.lockState.value).isEqualTo(LockScreenLockState.Unlocked)
+        }
+    }
+
+    @Test
+    fun `no configured PIN does not emit a background timeout`() = runTest {
+        val foreground = FakeAppForegroundStateService()
+        val sut = createDefaultLockScreenService(appForegroundStateService = foreground)
+        runCurrent()
+        sut.backgroundLockTimeouts.test {
+            foreground.givenIsInForeground(false)
+            runCurrent()
+            advanceTimeBy(3_001)
+            runCurrent()
+            expectNoEvents()
+            assertThat(sut.lockState.value).isEqualTo(LockScreenLockState.Unlocked)
+        }
+    }
+
+    @Test
+    fun `Next startup is locked before PIN discovery and stays locked for configured PIN`() = runTest {
+        org.junit.Assume.assumeTrue(io.element.android.appconfig.NextDeploymentConfig.isNextDeployment)
+        val keys = SimpleSecretKeyRepository()
+        val store = InMemoryLockScreenStore()
+        val pin = createDefaultPinCodeManager(lockScreenStore = store, secretKeyRepository = keys)
+        pin.createPinCode("1234")
+        val sut = createDefaultLockScreenService(secretKeyRepository = keys, lockScreenStore = store, pinCodeManager = pin)
+        assertThat(sut.lockState.value).isEqualTo(io.element.android.features.lockscreen.api.LockScreenLockState.Locked)
+        testScheduler.runCurrent()
+        assertThat(sut.lockState.value).isEqualTo(io.element.android.features.lockscreen.api.LockScreenLockState.Locked)
+        assertThat(pin.verifyPinCode("1234")).isTrue()
+        assertThat(sut.lockState.value).isEqualTo(io.element.android.features.lockscreen.api.LockScreenLockState.Unlocked)
+    }
+
+    @Test
+    fun `Next startup unlocks only after confirming that no PIN is configured`() = runTest {
+        org.junit.Assume.assumeTrue(io.element.android.appconfig.NextDeploymentConfig.isNextDeployment)
+        val sut = createDefaultLockScreenService()
+        assertThat(sut.lockState.value).isEqualTo(io.element.android.features.lockscreen.api.LockScreenLockState.Locked)
+        testScheduler.runCurrent()
+        assertThat(sut.lockState.value).isEqualTo(io.element.android.features.lockscreen.api.LockScreenLockState.Unlocked)
+    }
+
     @Test
     fun `when the pin is not mandatory and no pin is configured isSetupRequired emits false`() = runTest {
         val sut = createDefaultLockScreenService(

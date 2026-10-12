@@ -31,11 +31,12 @@ import kotlinx.coroutines.flow.map
 
 @ContributesBinding(AppScope::class)
 class DefaultPushDataStore(
-    private val pushDatabase: PushDatabase,
+    pushDatabase: Lazy<PushDatabase>,
     private val dateFormatter: DateFormatter,
     private val dispatchers: CoroutineDispatchers,
     preferencesFactory: PreferenceDataStoreFactory,
 ) : PushDataStore {
+    private val database by pushDatabase
     private val pushCounter = intPreferencesKey("push_counter")
 
     private val dataStore = preferencesFactory.create("push_store")
@@ -78,7 +79,7 @@ class DefaultPushDataStore(
     }
 
     override fun getPushHistoryItemsFlow(): Flow<List<PushHistoryItem>> {
-        return pushDatabase.pushHistoryQueries.selectAll()
+        return database.pushHistoryQueries.selectAll()
             .asFlow()
             .mapToList(dispatchers.io)
             .map { items ->
@@ -102,7 +103,7 @@ class DefaultPushDataStore(
     }
 
     override suspend fun reset() {
-        pushDatabase.pushHistoryQueries.removeAll()
+        database.pushHistoryQueries.removeAll()
         dataStore.edit {
             it.clear()
         }

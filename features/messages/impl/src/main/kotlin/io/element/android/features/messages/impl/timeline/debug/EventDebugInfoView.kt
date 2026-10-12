@@ -8,8 +8,6 @@
 
 package io.element.android.features.messages.impl.timeline.debug
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -39,9 +37,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.core.content.getSystemService
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
+import io.element.android.libraries.androidutils.system.copyToClipboard
 import io.element.android.libraries.designsystem.components.button.BackButton
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
@@ -152,13 +150,12 @@ private fun CopyableText(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val clipboardManager = remember { requireNotNull(context.getSystemService<ClipboardManager>()) }
     Box(
         modifier
             .clip(RoundedCornerShape(4.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(6.dp)
-            .clickable { clipboardManager.setPrimaryClip(ClipData.newPlainText("JSON", text)) }
+            .clickable { context.copyToClipboard(text) }
     ) {
         Text(
             text = text,

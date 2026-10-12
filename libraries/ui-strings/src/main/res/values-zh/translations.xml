@@ -211,6 +211,10 @@
   <string name="common_blocked_users">"已屏蔽用户"</string>
   <string name="common_bubbles">"气泡"</string>
   <string name="common_call_declined">"来电被拒接"</string>
+  <string name="common_call_cancelled">"通话已取消"</string>
+  <string name="common_call_connected">"通话已接通"</string>
+  <string name="common_call_ended">"通话已结束"</string>
+  <string name="common_call_missed">"未接来电"</string>
   <string name="common_call_started">"通话已开始"</string>
   <string name="common_call_you_declined">"你已拒接来电"</string>
   <string name="common_chat_backup">"聊天记录备份"</string>

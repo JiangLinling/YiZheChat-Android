@@ -9,32 +9,26 @@
 package io.element.android.features.messages.impl.messagecomposer
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
+import io.element.android.features.messages.impl.R
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.designsystem.theme.components.Icon
-import io.element.android.libraries.designsystem.theme.components.IconButton
-import io.element.android.libraries.designsystem.theme.components.IconColorButton
-import io.element.android.libraries.designsystem.theme.components.IconColorButtonStyle
+import io.element.android.libraries.designsystem.theme.components.Text
 
 @Composable
 internal fun DisabledComposerView(
@@ -42,45 +36,26 @@ internal fun DisabledComposerView(
 ) {
     Row(
         modifier = modifier
-            .padding(3.dp)
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .background(ElementTheme.colors.bgSubtleSecondary)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconColorButton(
-            onClick = {},
-            imageVector = CompoundIcons.Plus(),
+        Icon(
+            imageVector = CompoundIcons.Shield(),
             contentDescription = null,
-            iconColorButtonStyle = IconColorButtonStyle.Disabled,
+            modifier = Modifier.size(20.dp),
+            tint = ElementTheme.colors.iconCriticalPrimary,
         )
-
-        val bgColor = ElementTheme.colors.bgCanvasDisabled
-        val borderColor = ElementTheme.colors.borderDisabled
-
-        Box(
+        Text(
+            text = stringResource(R.string.screen_room_composer_security_blocked),
+            style = ElementTheme.typography.fontBodySmRegular,
+            color = ElementTheme.colors.textSecondary,
+            textAlign = TextAlign.Start,
             modifier = Modifier
-                .clip(RoundedCornerShape(21.dp))
-                .border(0.5.dp, borderColor, RoundedCornerShape(21.dp))
-                .background(color = bgColor)
-                .size(42.dp)
-                .requiredHeightIn(min = 42.dp)
-                .weight(1f),
+                .weight(1f)
+                .padding(start = 10.dp),
         )
-
-        Spacer(modifier = Modifier.width(8.dp))
-        IconButton(
-            modifier = Modifier
-                .padding(start = 2.dp)
-                .size(48.dp),
-            enabled = false,
-            onClick = {},
-        ) {
-            Icon(
-                modifier = Modifier.size(30.dp),
-                imageVector = CompoundIcons.SendSolid(),
-                contentDescription = "",
-                tint = ElementTheme.colors.iconQuaternary
-            )
-        }
     }
 }
 

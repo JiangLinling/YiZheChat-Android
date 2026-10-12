@@ -50,6 +50,9 @@ fun TimelineItemPollView(
         onEditPoll = ::onEditPoll,
         onEndPoll = ::onEndPoll,
         modifier = modifier,
+        compact = true,
+        onSubmitAnswer = { id, answer, complete -> eventSink(TimelineEvent.SelectPollAnswer(id, answer, complete)) },
+        onSubmitEnd = { id, complete -> eventSink(TimelineEvent.EndPoll(id, complete)) },
     )
 }
 

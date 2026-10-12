@@ -44,7 +44,7 @@ class AndroidLocationActions(
     }
 
     override fun openAppSettings() {
-        context.openAppSettingsPage()
+        context.openAppSettingsPage(resetToAppDetails = true)
     }
 
     override fun isLocationEnabled(): Boolean {

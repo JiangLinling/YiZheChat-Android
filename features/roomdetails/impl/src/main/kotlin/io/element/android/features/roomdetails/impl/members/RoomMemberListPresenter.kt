@@ -35,6 +35,7 @@ import io.element.android.libraries.matrix.api.room.RoomMembershipState
 import io.element.android.libraries.matrix.api.room.powerlevels.permissionsAsState
 import io.element.android.libraries.matrix.api.room.roomMembers
 import io.element.android.libraries.matrix.api.room.toMatrixUser
+import io.element.android.libraries.matrix.ui.model.powerLevelOf
 import io.element.android.libraries.matrix.ui.room.PowerLevelRoomMemberComparator
 import io.element.android.libraries.matrix.ui.room.roomMemberIdentityStateChange
 import kotlinx.collections.immutable.ImmutableMap
@@ -58,6 +59,7 @@ class RoomMemberListPresenter(
     override fun present(): RoomMemberListState {
         val searchQuery = rememberTextFieldState()
         val membersState by room.membersStateFlow.collectAsState()
+        val roomInfo by room.roomInfoFlow.collectAsState()
         val canInvite by room.permissionsAsState(false) { perms -> perms.canOwnUserInvite() }
         val roomModerationState = roomMembersModerationPresenter.present()
 
@@ -141,6 +143,7 @@ class RoomMemberListPresenter(
             moderationState = roomModerationState,
             selectedSection = selectedSection,
             eventSink = ::handleEvent,
+            ownPowerLevel = roomInfo.powerLevelOf(room.sessionId),
         )
         if (!state.showBannedSection && selectedSection == SelectedSection.BANNED) {
             SideEffect {

@@ -62,6 +62,8 @@ dependencies {
     implementation(projects.features.enterprise.api)
     implementation(projects.features.lockscreen.api)
     implementation(projects.libraries.featureflag.api)
+    implementation(projects.security.dataProtection.api)
+    implementation(projects.security.contentProtection.api)
     api(projects.libraries.pushproviders.api)
     api(projects.libraries.pushstore.api)
     api(projects.libraries.push.api)
@@ -72,6 +74,8 @@ dependencies {
 
     testCommonDependencies(libs)
     testImplementation(libs.coil.test)
+    testImplementation(libs.network.mockwebserver)
+    testImplementation(libs.network.retrofit.converter.serialization)
     testImplementation(projects.libraries.matrix.test)
     testImplementation(projects.libraries.matrixmedia.test)
     testImplementation(projects.libraries.preferences.test)
@@ -92,6 +96,8 @@ dependencies {
     testImplementation(projects.services.toolbox.impl)
     testImplementation(projects.services.toolbox.test)
     testImplementation(projects.libraries.featureflag.test)
+    testImplementation(projects.security.dataProtection.test)
+    testImplementation(projects.security.contentProtection.test)
     testImplementation(libs.kotlinx.collections.immutable)
 }
 

@@ -1,0 +1,4 @@
+Microsoft Fluent Emoji: MIT, see LICENSE-Microsoft.txt.
+angel.svga, kingset.svga, posche.svga, rose.svga: Copyright YY Inc., non-commercial learning use only.
+Included for the owner-authorized personal, non-commercial development build. Sources and transformations are recorded in catalog.json.
+Chinese thanks and fortune artwork generated for YiZheChat with the built-in image_gen tool.

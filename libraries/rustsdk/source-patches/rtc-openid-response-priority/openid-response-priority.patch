@@ -1,0 +1,173 @@
+--- a/crates/matrix-sdk/src/widget/mod.rs
++++ b/crates/matrix-sdk/src/widget/mod.rs
+@@ -15,15 +15,13 @@
+ #![allow(rustdoc::private_intra_doc_links)]
+ #![doc = include_str!("README.md")]
+ 
+-use std::{fmt, time::Duration};
++use std::{collections::VecDeque, fmt, time::Duration};
+ 
+ use async_channel::{Receiver, Sender};
+-use futures_util::StreamExt;
+ use matrix_sdk_common::executor::spawn;
+ use ruma::api::client::delayed_events::DelayParameters;
+ use serde::de::{self, Deserialize, Deserializer, Visitor};
+ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+-use tokio_stream::wrappers::UnboundedReceiverStream;
+ use tokio_util::sync::{CancellationToken, DropGuard};
+ 
+ use self::{
+@@ -141,7 +139,7 @@
+         // - all incoming messages from the widget
+         // - all responses from the Matrix driver
+         // - all events from the Matrix driver, if subscribed
+-        let (incoming_msg_tx, incoming_msg_rx) = unbounded_channel();
++        let (incoming_msg_tx, mut incoming_msg_rx) = unbounded_channel();
+ 
+         // Forward all of the incoming messages from the widget.
+         // TODO: This spawns a detached task, it would be nice to have an owner for this
+@@ -171,17 +169,27 @@
+ 
+         let matrix_driver = MatrixDriver::new(room.clone());
+ 
+-        // Convert the incoming message receiver into a stream of actions.
+-        let stream = UnboundedReceiverStream::new(incoming_msg_rx)
+-            .flat_map(|message| tokio_stream::iter(widget_machine.process(message)));
+-
+-        // Let's combine our set of initial actions with the stream of received actions.
+-        let mut combined = tokio_stream::iter(initial_actions).chain(stream);
+-
+-        // Let's now process all actions we receive forever.
+-        while let Some(action) = combined.next().await {
+-            self.process_action(&matrix_driver, &incoming_msg_tx, &capabilities_provider, action)
+-                .await?;
++        let mut pending = VecDeque::from(initial_actions);
++        loop {
++            if pending.is_empty() {
++                let Some(message) = incoming_msg_rx.recv().await else { break };
++                pending.extend(widget_machine.process(message));
++            }
++            let Some(action) = pending.pop_front() else { continue };
++            if let Some(completed) = self
++                .process_action(&matrix_driver, &incoming_msg_tx, &capabilities_provider, action)
++                .await?
++            {
++                // Completed OpenID must reach the widget before another
++                // queued HTTP request can block it. The same capability/pending
++                // state machine still validates and formats every response.
++                // HTTP mutations remain serial; no detached send or duplicate
++                // transaction is introduced, and driver cancellation still owns
++                // the current network operation.
++                for action in widget_machine.process(completed).into_iter().rev() {
++                    pending.push_front(action);
++                }
++            }
+         }
+ 
+         Ok(())
+@@ -194,13 +202,16 @@
+         incoming_msg_tx: &UnboundedSender<IncomingMessage>,
+         capabilities_provider: &impl CapabilitiesProvider,
+         action: Action,
+-    ) -> Result<(), ()> {
++    ) -> Result<Option<IncomingMessage>, ()> {
+         match action {
+             Action::SendToWidget(msg) => {
+                 self.to_widget_tx.send(msg).await.map_err(|_| ())?;
+             }
+ 
+             Action::MatrixDriverRequest { request_id, data } => {
++                // Only OpenID has no generated subscription/snapshot actions
++                // whose ordering depends on the existing response queue.
++                let deliver_immediately = matches!(&data, MatrixDriverRequestData::GetOpenId);
+                 let response = match data {
+                     MatrixDriverRequestData::AcquireCapabilities(cmd) => {
+                         let obtained = capabilities_provider
+@@ -280,16 +291,19 @@
+                         }),
+                 };
+ 
+-                // Forward the Matrix driver response to the incoming message stream.
+-                incoming_msg_tx
+-                    .send(IncomingMessage::MatrixDriverResponse { request_id, response })
+-                    .map_err(|_| ())?;
++                let completed = IncomingMessage::MatrixDriverResponse { request_id, response };
++                if deliver_immediately {
++                    return Ok(Some(completed));
++                }
++                // Preserve capability notification and initial snapshot ordering
++                // for every other request.
++                incoming_msg_tx.send(completed).map_err(|_| ())?;
+             }
+ 
+             Action::Subscribe => {
+                 // Only subscribe if we are not already subscribed.
+                 if self.event_forwarding_guard.is_some() {
+-                    return Ok(());
++                    return Ok(None);
+                 }
+ 
+                 let (stop_forwarding, guard) = {
+@@ -336,7 +350,7 @@
+             }
+         }
+ 
+-        Ok(())
++        Ok(None)
+     }
+ }
+ 
+--- a/crates/matrix-sdk/tests/integration/widget.rs
++++ b/crates/matrix-sdk/tests/integration/widget.rs
+@@ -2505,3 +2505,51 @@
+     mock_server.verify().await;
+ }
+ 
++
++
++#[async_test]
++async fn test_completed_openid_reply_is_not_queued_behind_slow_request() {
++    let (_, mock_server, handle) = run_test_driver(false, false).await;
++    negotiate_capabilities(
++        &handle,
++        json!(["org.matrix.msc3819.send.to_device:my.custom.to_device_type"]),
++    ).await;
++
++    Mock::given(method("POST"))
++        .and(path_regex(r"^/_matrix/client/(r0|v3)/user/.*/openid/request_token$"))
++        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(100))
++            .set_body_json(json!({"access_token":"fixture-openid", "token_type":"Bearer",
++                "matrix_server_name":"example.org", "expires_in":3600})))
++        .expect(1).mount(&mock_server).await;
++    Mock::given(method("PUT"))
++        .and(path_regex(r"^/_matrix/client/(r0|v3)/sendToDevice/my\.custom\.to_device_type/.*$"))
++        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(2))
++            .set_body_json(json!({})))
++        .expect(1).mount(&mock_server).await;
++
++    send_request(&handle, "fast-openid", "get_openid", json!({})).await;
++    send_request(&handle, "slow-to-device", "send_to_device", json!({
++        "type":"my.custom.to_device_type", "encrypted":false,
++        "messages":{"@username:test.org":{"DEVICEID":{"fixture":true}}}
++    })).await;
++    let pending=recv_message(&handle).await;
++    assert_eq!(pending["action"],"get_openid");
++    assert_eq!(pending["response"]["state"],"request");
++    let credentials_result=timeout(recv_message(&handle),Duration::from_millis(750)).await;
++    if credentials_result.is_err() {
++        for request in mock_server.received_requests().await.unwrap() {
++            eprintln!("R27 fixture request {} {}",request.method,request.url.path());
++        }
++    }
++    let credentials=credentials_result.expect("completed OpenID response waited behind a later slow request");
++    assert_eq!(credentials["action"],"openid_credentials");
++    assert_eq!(credentials["data"]["original_request_id"],"fast-openid");
++    assert_eq!(credentials["data"]["state"],"allowed");
++    // The authorized mutation must still execute exactly once, in its original
++    // order. Optimizing response delivery never duplicates or cancels it.
++    let sent=recv_message(&handle).await;
++    assert_eq!(sent["action"],"send_to_device");
++    assert_eq!(sent["requestId"],"slow-to-device");
++    assert_eq!(sent["response"],json!({}));
++    mock_server.verify().await;
++}

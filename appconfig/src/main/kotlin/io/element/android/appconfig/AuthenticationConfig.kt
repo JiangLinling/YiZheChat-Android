@@ -10,6 +10,8 @@ package io.element.android.appconfig
 
 object AuthenticationConfig {
     const val MATRIX_ORG_URL = "https://matrix.org"
+    val YIZHECHAT_HOMESERVER_URL: String = BuildConfig.YIZHECHAT_HOMESERVER_URL
+    val YIZHECHAT_USER_PREFIX: String = BuildConfig.YIZHECHAT_USER_PREFIX
 
     /**
      * URL with some docs that explain what's sliding sync and how to add it to your home server.

@@ -14,11 +14,7 @@ object RageshakeConfig {
      */
     const val BUG_REPORT_URL = BuildConfig.BUG_REPORT_URL
 
-    /**
-     * As per https://github.com/matrix-org/rageshake:
-     * Identifier for the application (eg 'riot-web').
-     * Should correspond to a mapping configured in the configuration file for github issue reporting to work.
-     */
+    /** Identifier used by the YiZheChat management service to validate Android reports. */
     const val BUG_REPORT_APP_NAME = BuildConfig.BUG_REPORT_APP_NAME
 
     /**

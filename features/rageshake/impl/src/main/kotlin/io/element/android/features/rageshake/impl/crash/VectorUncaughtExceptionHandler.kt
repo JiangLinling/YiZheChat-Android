@@ -17,7 +17,8 @@ import java.io.PrintWriter
 import java.io.StringWriter
 
 class VectorUncaughtExceptionHandler(
-    private val preferencesCrashDataStore: PreferencesCrashDataStore,
+    private val crashDataStore: CrashDataStore,
+    private val persistCrashDetails: Boolean = true,
 ) : Thread.UncaughtExceptionHandler {
     private var previousHandler: Thread.UncaughtExceptionHandler? = null
 
@@ -37,6 +38,12 @@ class VectorUncaughtExceptionHandler(
      */
     @Suppress("PrintStackTrace")
     override fun uncaughtException(thread: Thread, throwable: Throwable) {
+        if (!persistCrashDetails) {
+            Timber.e("Fatal exception; diagnostic details disabled by production security policy")
+            crashDataStore.setCrashData("")
+            previousHandler?.uncaughtException(thread, throwable)
+            return
+        }
         Timber.v("Uncaught exception: $throwable")
         val bugDescription = buildString {
             val appName = "ElementX"
@@ -73,7 +80,7 @@ class VectorUncaughtExceptionHandler(
             append(sw.buffer.toString())
         }
         Timber.e("FATAL EXCEPTION $bugDescription")
-        preferencesCrashDataStore.setCrashData(bugDescription)
+        crashDataStore.setCrashData(bugDescription)
         // Show the classical system popup
         previousHandler?.uncaughtException(thread, throwable)
     }

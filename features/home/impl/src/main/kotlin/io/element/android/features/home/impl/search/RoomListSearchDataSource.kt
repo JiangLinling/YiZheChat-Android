@@ -13,18 +13,21 @@ import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
 import io.element.android.features.home.impl.datasource.RoomListRoomSummaryFactory
 import io.element.android.features.home.impl.model.RoomListRoomSummary
+import io.element.android.features.home.impl.model.referencesDeletedDirectPeer
+import io.element.android.libraries.matrix.api.room.DirectRoomRelationState
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.matrix.api.roomlist.RoomList
 import io.element.android.libraries.matrix.api.roomlist.RoomListFilter
 import io.element.android.libraries.matrix.api.roomlist.RoomListService
 import io.element.android.libraries.matrix.api.roomlist.updateVisibleRange
+import io.element.android.security.dataprotection.api.DeletedIdentityProjection
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
 
 private const val PAGE_SIZE = 30
 
@@ -34,6 +37,7 @@ class RoomListSearchDataSource(
     roomListService: RoomListService,
     coroutineDispatchers: CoroutineDispatchers,
     private val roomSummaryFactory: RoomListRoomSummaryFactory,
+    private val deletedIdentityProjection: DeletedIdentityProjection,
 ) {
     @AssistedFactory
     interface Factory {
@@ -47,9 +51,21 @@ class RoomListSearchDataSource(
     )
 
     val roomSummaries: Flow<ImmutableList<RoomListRoomSummary>> = roomList.summaries
-        .map { roomSummaries ->
+        .combine(deletedIdentityProjection.revision) { roomSummaries, _ ->
             roomSummaries
                 .map(roomSummaryFactory::create)
+                .filterNot { it.referencesDeletedDirectPeer(deletedIdentityProjection) }
+                .filter { room ->
+                    when (room.directRoomRelationState()) {
+                        DirectRoomRelationState.NOT_DIRECT,
+                        DirectRoomRelationState.ACCEPTED,
+                        DirectRoomRelationState.INVALID -> true
+                        DirectRoomRelationState.INCOMING_REQUEST,
+                        DirectRoomRelationState.OUTGOING_REQUEST,
+                        DirectRoomRelationState.STALE,
+                        DirectRoomRelationState.RESOLVING -> false
+                    }
+                }
                 .toImmutableList()
         }
         .flowOn(coroutineDispatchers.computation)

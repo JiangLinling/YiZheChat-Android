@@ -24,10 +24,14 @@ class FakeFfiRoom(
     private val getMembers: () -> RoomMembersIterator = { lambdaError() },
     private val getMembersNoSync: () -> RoomMembersIterator = { lambdaError() },
     private val leaveLambda: () -> Unit = { lambdaError() },
+    private val forgetLambda: () -> Unit = { lambdaError() },
     private val latestEventLambda: () -> LatestEventValue = { lambdaError() },
     private val suggestedRoleForUserLambda: (String) -> RoomMemberRole = { lambdaError() },
     private val roomInfo: RoomInfo = aRustRoomInfo(id = roomId.value),
+    private val timelineLambda: (org.matrix.rustcomponents.sdk.TimelineConfiguration) -> org.matrix.rustcomponents.sdk.Timeline = { lambdaError() },
 ) : Room(NoHandle) {
+    override suspend fun timelineWithConfiguration(configuration: org.matrix.rustcomponents.sdk.TimelineConfiguration): org.matrix.rustcomponents.sdk.Timeline =
+        timelineLambda(configuration)
     override fun id(): String {
         return roomId.value
     }
@@ -42,6 +46,10 @@ class FakeFfiRoom(
 
     override suspend fun leave() {
         leaveLambda()
+    }
+
+    override suspend fun forget() {
+        forgetLambda()
     }
 
     override suspend fun roomInfo(): RoomInfo {

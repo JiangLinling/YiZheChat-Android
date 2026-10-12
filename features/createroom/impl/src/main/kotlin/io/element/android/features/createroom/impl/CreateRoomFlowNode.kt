@@ -58,7 +58,11 @@ class CreateRoomFlowNode(
                 val inputs = ConfigureRoomNode.Inputs(isSpace = navTarget.isSpace, parentSpaceId = navTarget.parentSpaceId)
                 val callback = object : ConfigureRoomNode.Callback {
                     override fun onCreateRoomSuccess(roomId: RoomId) {
-                        backstack.replace(NavTarget.AddPeople(roomId))
+                        if (navTarget.isSpace) {
+                            backstack.replace(NavTarget.AddPeople(roomId))
+                        } else {
+                            callback.onRoomCreated(roomId)
+                        }
                     }
                 }
                 createNode<ConfigureRoomNode>(buildContext, plugins = listOf(inputs, callback))

@@ -8,6 +8,7 @@
 
 package io.element.android.features.invite.test
 
+import io.element.android.features.invite.api.InviteNotification
 import io.element.android.features.invite.api.SeenInvitesStore
 import io.element.android.libraries.matrix.api.core.RoomId
 import kotlinx.coroutines.flow.Flow
@@ -28,7 +29,22 @@ class InMemorySeenInvitesStore(
         roomIds.value -= roomId
     }
 
+    private val records = MutableStateFlow<List<InviteNotification>>(emptyList())
+    override fun notifications(): Flow<List<InviteNotification>> = records
+    override suspend fun observeNotifications(notifications: List<InviteNotification>, completeSnapshot: Boolean) {
+        records.value = (records.value + notifications).distinctBy { it.roomId }
+    }
+    override suspend fun recordOutcome(roomId: RoomId, outcome: InviteNotification.Outcome, seen: Boolean, expectedSequence: Long?) {
+        if (expectedSequence != null && records.value.firstOrNull { it.roomId == roomId }?.sequence != expectedSequence) return
+        records.value = records.value.map { if (it.roomId == roomId) it.copy(outcome = outcome, seen = seen) else it }
+        if (seen) roomIds.value += roomId else roomIds.value -= roomId
+    }
+    override suspend fun markNotificationSeen(roomId: RoomId) {
+        records.value = records.value.map { if (it.roomId == roomId) it.copy(seen = true) else it }
+        markAsSeen(roomId)
+    }
     override suspend fun clear() {
         roomIds.value = emptySet()
+        records.value = emptyList()
     }
 }

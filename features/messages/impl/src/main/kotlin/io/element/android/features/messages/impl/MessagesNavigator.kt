@@ -19,13 +19,23 @@ import kotlinx.collections.immutable.ImmutableList
 interface MessagesNavigator {
     fun navigateToEventDebugInfo(eventId: EventId?, debugInfo: TimelineItemDebugInfo)
     fun forwardEvent(eventId: EventId)
+    fun forwardEvents(eventIds: List<EventId>) {
+        require(eventIds.isNotEmpty())
+        if (eventIds.size == 1) {
+            forwardEvent(eventIds.single())
+        } else {
+            error("Multi-event forwarding is not implemented by this navigator")
+        }
+    }
     fun navigateToReportMessage(eventId: EventId, senderId: UserId)
     fun navigateToEditPoll(eventId: EventId)
-    fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?)
+    fun navigateToPreviewAttachments(attachments: ImmutableList<Attachment>, inReplyToEventId: EventId?, burnAfterRead: Boolean = false)
     fun navigateToRoom(roomId: RoomId, eventId: EventId?, serverNames: List<String>)
     fun navigateToMember(userId: UserId)
     fun navigateToThread(threadRootId: ThreadId, focusedEventId: EventId?)
     fun navigateToDeveloperSettings()
     fun navigateToCurrentLiveLocation()
+    fun navigateToChatSecurity() = Unit
+    fun navigateToRoomCall(roomId: RoomId, isAudioCall: Boolean)
     fun close()
 }

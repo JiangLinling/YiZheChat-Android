@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -37,11 +38,12 @@ fun LoadingRoomNodeView(
     state: LoadingRoomState,
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier,
+    roomName: String? = null,
 ) {
     Scaffold(
         modifier = modifier,
         topBar = {
-            LoadingRoomTopBar(onBackClick)
+            LoadingRoomTopBar(onBackClick, roomName, state is LoadingRoomState.Loading)
         },
         content = { padding ->
             Box(
@@ -58,10 +60,6 @@ fun LoadingRoomNodeView(
                         color = ElementTheme.colors.textSecondary,
                         style = ElementTheme.typography.fontBodyMdRegular,
                     )
-                } else {
-                    DelayedVisibility {
-                        CircularProgressIndicator()
-                    }
                 }
             }
         },
@@ -72,12 +70,22 @@ fun LoadingRoomNodeView(
 @Composable
 private fun LoadingRoomTopBar(
     onBackClick: () -> Unit,
+    roomName: String?,
+    isLoading: Boolean,
 ) {
     TopAppBar(
         navigationIcon = {
             BackButton(onClick = onBackClick)
         },
         title = {
+            roomName?.let { Text(it) }
+        },
+        actions = {
+            if (isLoading) {
+                DelayedVisibility {
+                    CircularProgressIndicator(modifier = Modifier.padding(16.dp).size(20.dp))
+                }
+            }
         },
     )
 }

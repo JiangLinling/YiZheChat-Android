@@ -10,11 +10,13 @@ package io.element.android.features.home.impl.search
 
 import androidx.compose.foundation.text.input.TextFieldState
 import io.element.android.features.home.impl.model.RoomListRoomSummary
+import io.element.android.features.userprofile.api.FriendPrivateProfile
 import kotlinx.collections.immutable.ImmutableList
 
 data class RoomListSearchState(
     val isSearchActive: Boolean,
     val query: TextFieldState,
     val results: ImmutableList<RoomListRoomSummary>,
+    val contactResults: ImmutableList<FriendPrivateProfile>,
     val eventSink: (RoomListSearchEvent) -> Unit
 )

@@ -10,6 +10,7 @@ package io.element.android.features.invite.impl
 
 import com.google.common.truth.Truth.assertThat
 import im.vector.app.features.analytics.plan.JoinedRoom
+import io.element.android.features.invite.api.InviteNotification
 import io.element.android.features.invite.test.InMemorySeenInvitesStore
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.RoomIdOrAlias
@@ -51,9 +52,11 @@ class DefaultAcceptInviteTest {
             seenInvitesStore = seenInvitesStore
         )
 
+        seenInvitesStore.observeNotifications(listOf(InviteNotification(roomId, InviteNotification.Kind.FRIEND, null, 100)))
         val result = acceptInvite(roomId)
 
         assertThat(result.isSuccess).isTrue()
+        assertThat(seenInvitesStore.notifications().first().single().outcome).isEqualTo(InviteNotification.Outcome.ACCEPTED)
 
         assert(joinRoomLambda)
             .isCalledOnce()
@@ -63,7 +66,7 @@ class DefaultAcceptInviteTest {
             .isCalledOnce()
             .with(value(client.sessionId), value(roomId))
 
-        assertThat(seenInvitesStore.seenRoomIds().first()).isEmpty()
+        assertThat(seenInvitesStore.seenRoomIds().first()).containsExactly(roomId)
     }
 
     @Test
@@ -80,9 +83,11 @@ class DefaultAcceptInviteTest {
             seenInvitesStore = seenInvitesStore
         )
 
+        seenInvitesStore.observeNotifications(listOf(InviteNotification(roomId, InviteNotification.Kind.FRIEND, null, 100)))
         val result = acceptInvite(roomId)
 
         assertThat(result.isFailure).isTrue()
+        assertThat(seenInvitesStore.notifications().first().single().outcome).isEqualTo(InviteNotification.Outcome.PENDING)
 
         assert(joinRoomLambda)
             .isCalledOnce()

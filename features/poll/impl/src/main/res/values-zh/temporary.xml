@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_poll_create_heading">发起投票</string>
+    <string name="screen_poll_publish">发布到群聊</string>
+    <string name="screen_poll_publish_failed">发布失败，内容已保留，请重试。</string>
+    <string name="screen_poll_topic">投票主题</string>
+    <string name="screen_poll_options">投票选项 · 单选</string>
+    <string name="screen_poll_settings">投票设置</string>
+    <string name="screen_poll_hide_results">结束后显示结果</string>
+    <string name="screen_poll_hide_results_hint">开启后，投票结束前不显示结果。</string>
+</resources>

@@ -1,0 +1,38 @@
+{
+  "status": "SOURCE_MERGE_PREVIEW_VERIFIED_NATIVE_ACCEPTANCE_REQUIRED",
+  "upstream": "1c44fb66214667c6d00acaf72ab592493653708b",
+  "base_patch_sha256": "b93639dc15c4023353a194f09cfea80bc89d2187767ce1003193c2a30f730dff",
+  "delta_patch_sha256": "d9708259ea2ef1961e71455a91cb1617568cb8e6a1c834cfeb07e4ddf0d30045",
+  "changed_sources": [
+    {
+      "path": "crates/matrix-sdk/src/widget/mod.rs",
+      "before_sha256": "28d904f957cd0e75bfe2e7d2a8afcab588aa785d97796ae8019e102f95dae0e2",
+      "after_sha256": "b2fb96c10757e7f0f99a23b34249d8c35c6bddaaa03f9225fb6643be138d84e1"
+    },
+    {
+      "path": "crates/matrix-sdk/tests/integration/widget.rs",
+      "before_sha256": "9249aa3231e5860b4e02873b8ec93b4f3a7527bf4ae0c4193cb864e5a1716902",
+      "after_sha256": "99eac25ed2bb4b9d0fd6ca03f80205b7ef061c0be18373902d485ffaa4ae1081"
+    }
+  ],
+  "old_aar_sha256": "11bca3cbbd29dfb51187e9f192dcae4a5009b68688043e76dfb2a736fb18d4f8",
+  "new_aar_sha256": "3b39596671f70f1f1c88a854d23309ca383bde3bc955bdc04410996a4bd2c34a",
+  "new_native_sha256": "985e4a3d0e0fca2a5eed8cf35230ea8f97f49f456f7ac35a9b0dbae82f4bc2e3",
+  "tested_candidate_apk_sha256": "bde40cde7be79c9e89fb6219ffcdea9bf15ec4cc8d9234fdafff5a61e4b3cb0b",
+  "build_profile": "dist",
+  "build_target": "aarch64-linux-android",
+  "build_features": [
+    "sentry"
+  ],
+  "bindings_unchanged": true,
+  "source_manifest_sha256": "3993ac54f908cb7d7e1aae26a2a1d35139b2ba2acd78bb8889501b9d68c7f06c",
+  "main_merge_targets": [
+    "libraries/rustsdk/matrix-rust-sdk-next.aar",
+    "libraries/rustsdk/source-patches/rtc-openid-response-priority/base-sdk.patch",
+    "libraries/rustsdk/source-patches/rtc-openid-response-priority/openid-response-priority.patch",
+    "libraries/rustsdk/source-patches/rtc-openid-response-priority/source-manifest.json",
+    "libraries/rustsdk/source-patches/rtc-openid-response-priority/build-input.json"
+  ],
+  "main_source_modified": false,
+  "main_merge_requires": "Real 13/10S video latency, 13 Recents PiP and continuous frames verified on the exact candidate; release both devices before offline main merge/build"
+}

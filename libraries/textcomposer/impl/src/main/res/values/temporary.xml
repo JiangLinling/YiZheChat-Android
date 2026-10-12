@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="a11y_text_composer_choose_emoji">Choose emoji</string>
+    <string name="a11y_text_composer_switch_to_keyboard">Switch to keyboard</string>
+    <string name="text_composer_hold_to_record">Hold to talk</string>
+    <string name="text_composer_release_to_send_slide_to_cancel">Release to send · slide up to cancel</string>
+    <string name="text_composer_release_to_cancel">Release to cancel</string>
+    <string name="text_composer_slide_up_to_cancel">Slide up to cancel</string>
+    <string name="text_composer_release_to_send">Release to send</string>
+    <string name="text_composer_send">Send</string>
+</resources>

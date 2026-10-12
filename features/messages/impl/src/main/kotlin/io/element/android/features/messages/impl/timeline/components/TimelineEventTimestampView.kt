@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.messages.impl.timeline.TimelineEvent
+import io.element.android.features.messages.impl.timeline.components.receipt.ReadReceiptViewState
+import io.element.android.features.messages.impl.timeline.components.receipt.TimelineItemReadReceiptView
 import io.element.android.features.messages.impl.timeline.model.TimelineItem
 import io.element.android.features.messages.impl.timeline.model.event.isEdited
 import io.element.android.features.messages.impl.timeline.model.event.isRedacted
@@ -42,23 +44,38 @@ import io.element.android.libraries.ui.strings.CommonStrings
 fun TimelineEventTimestampView(
     event: TimelineItem.Event,
     eventSink: (TimelineEvent.TimelineItemEvent) -> Unit,
+    showTime: Boolean = true,
+    showDeliveryState: Boolean = true,
+    readReceiptState: ReadReceiptViewState? = null,
+    renderReadReceipts: Boolean = false,
+    onReadReceiptsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val formattedTime = event.sentTime
-    val hasError = event.failedToSend
+    val pendingError = (event.localSendState as? LocalEventSendState.Failed.Unknown)?.error
+    val pendingLabel = if (pendingError == "MediaCancellationPendingException") CommonStrings.screen_room_media_cancellation_pending
+        else CommonStrings.screen_room_media_submission_pending
+    val cancellationPending = (event.localSendState as? LocalEventSendState.Failed.Unknown)?.error in setOf("MediaCancellationPendingException", "MediaSendOutcomeUnknownException")
+    val hasError = showDeliveryState && event.failedToSend
     val hasEncryptionCritical = event.messageShield?.isCritical.orFalse()
     val isMessageEdited = event.content.isEdited()
     val isMessageRedacted = event.content.isRedacted()
+    val showReadReceipt = showDeliveryState && readReceiptState?.isMine == true && renderReadReceipts
     val tint = if (hasError || hasEncryptionCritical && !isMessageRedacted) ElementTheme.colors.textCriticalPrimary else ElementTheme.colors.textSecondary
-
     val shield = event.messageShield
+
+    if (!showTime && !isMessageEdited && !hasError && !showReadReceipt && (shield == null || isMessageRedacted)) {
+        return
+    }
+
     val isVerifiedUserSendFailure = event.localSendState is LocalEventSendState.Failed.VerifiedUser
     val onClickLabel = when {
         shield != null -> stringResource(CommonStrings.a11y_view_details)
         hasError && isVerifiedUserSendFailure -> stringResource(CommonStrings.action_open_context_menu)
+        hasError && !cancellationPending -> stringResource(CommonStrings.action_retry)
         else -> null
     }
-    val clickableModifier = remember(shield, hasError) {
+    val clickableModifier = remember(shield, hasError, cancellationPending, isVerifiedUserSendFailure, event.id) {
         when {
             shield != null -> {
                 Modifier.clickable(
@@ -67,13 +84,13 @@ fun TimelineEventTimestampView(
                     eventSink(TimelineEvent.ShowShieldDialog(shield))
                 }
             }
-            hasError -> Modifier
-                .clickable(
-                    enabled = isVerifiedUserSendFailure,
-                    onClickLabel = onClickLabel,
-                ) {
+            hasError && !cancellationPending -> Modifier.clickable(onClickLabel = onClickLabel) {
+                if (isVerifiedUserSendFailure) {
                     eventSink(TimelineEvent.ComputeVerifiedUserSendFailure(event))
+                } else {
+                    eventSink(TimelineEvent.RetrySend(event))
                 }
+            }
             else -> Modifier
         }
     }
@@ -92,18 +109,31 @@ fun TimelineEventTimestampView(
                 style = ElementTheme.typography.fontBodyXsRegular,
                 color = tint,
             )
-            Spacer(modifier = Modifier.width(4.dp))
+            if (showTime) Spacer(modifier = Modifier.width(4.dp))
         }
-        Text(
-            formattedTime,
-            style = ElementTheme.typography.fontBodyXsRegular,
-            color = tint,
-        )
+        if (showTime) {
+            Text(
+                formattedTime,
+                style = ElementTheme.typography.fontBodyXsRegular,
+                color = tint,
+            )
+        }
+        if (showReadReceipt) {
+            if (showTime || isMessageEdited) Spacer(modifier = Modifier.width(4.dp))
+            TimelineItemReadReceiptView(
+                state = readReceiptState,
+                renderReadReceipts = renderReadReceipts,
+                onReadReceiptsClick = onReadReceiptsClick,
+            )
+        }
         if (hasError) {
+            if (cancellationPending) {
+                Text(stringResource(pendingLabel), style = ElementTheme.typography.fontBodyXsRegular, color = tint)
+            }
             Spacer(modifier = Modifier.width(2.dp))
             Icon(
                 imageVector = CompoundIcons.ErrorSolid(),
-                contentDescription = stringResource(id = CommonStrings.common_sending_failed),
+                contentDescription = stringResource(id = if (cancellationPending) pendingLabel else CommonStrings.common_sending_failed),
                 tint = tint,
                 modifier = Modifier.size(15.dp, 18.dp),
             )

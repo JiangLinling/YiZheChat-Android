@@ -20,6 +20,7 @@ import im.vector.app.features.analytics.plan.MobileScreen
 import io.element.android.annotations.ContributesNode
 import io.element.android.features.location.api.ShowLocationEntryPoint
 import io.element.android.libraries.architecture.inputs
+import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.di.RoomScope
 import io.element.android.services.analytics.api.AnalyticsService
 
@@ -31,11 +32,15 @@ class ShowLocationNode(
     presenterFactory: ShowLocationPresenter.Factory,
     analyticsService: AnalyticsService,
 ) : Node(buildContext, plugins = plugins) {
+    private val callback: ShowLocationEntryPoint.Callback = callback()
+    private var completed = false
+
     init {
         lifecycle.subscribe(
             onResume = {
                 analyticsService.screen(MobileScreen(screenName = MobileScreen.ScreenName.LocationView))
-            }
+            },
+            onDestroy = ::notifyDone,
         )
     }
 
@@ -47,7 +52,16 @@ class ShowLocationNode(
         ShowLocationView(
             state = presenter.present(),
             modifier = modifier,
-            onBackClick = ::navigateUp
+            onBackClick = {
+                notifyDone()
+                navigateUp()
+            }
         )
+    }
+
+    private fun notifyDone() {
+        if (completed) return
+        completed = true
+        callback.onDone()
     }
 }

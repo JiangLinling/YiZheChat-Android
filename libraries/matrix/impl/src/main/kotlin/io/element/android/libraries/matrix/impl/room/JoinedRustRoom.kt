@@ -23,20 +23,23 @@ import io.element.android.libraries.matrix.api.encryption.identity.IdentityState
 import io.element.android.libraries.matrix.api.notificationsettings.NotificationSettingsService
 import io.element.android.libraries.matrix.api.room.BaseRoom
 import io.element.android.libraries.matrix.api.room.CreateTimelineParams
-import io.element.android.libraries.matrix.api.room.IntentionalMention
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.api.room.RoomNotificationSettingsState
 import io.element.android.libraries.matrix.api.room.SendQueueUpdate
 import io.element.android.libraries.matrix.api.room.history.RoomHistoryVisibility
 import io.element.android.libraries.matrix.api.room.join.JoinRule
 import io.element.android.libraries.matrix.api.room.knock.KnockRequest
+import io.element.android.libraries.matrix.api.room.location.AssetType
+import io.element.android.libraries.matrix.api.room.location.LastLocation
 import io.element.android.libraries.matrix.api.room.location.LiveLocationShare
 import io.element.android.libraries.matrix.api.room.powerlevels.RoomPowerLevelsValues
 import io.element.android.libraries.matrix.api.room.powerlevels.UserRoleChange
 import io.element.android.libraries.matrix.api.room.roomNotificationSettings
 import io.element.android.libraries.matrix.api.room.threads.ThreadsListService
 import io.element.android.libraries.matrix.api.roomdirectory.RoomVisibility
+import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
 import io.element.android.libraries.matrix.api.timeline.Timeline
+import io.element.android.libraries.matrix.api.timeline.item.event.LiveLocationContent
 import io.element.android.libraries.matrix.api.widget.MatrixWidgetDriver
 import io.element.android.libraries.matrix.api.widget.MatrixWidgetSettings
 import io.element.android.libraries.matrix.impl.core.RustSendHandle
@@ -50,16 +53,18 @@ import io.element.android.libraries.matrix.impl.room.location.timedByExpiry
 import io.element.android.libraries.matrix.impl.room.member.RoomMemberListFetcher
 import io.element.android.libraries.matrix.impl.room.threads.RustThreadsListService
 import io.element.android.libraries.matrix.impl.roomdirectory.map
+import io.element.android.libraries.matrix.impl.timeline.MatrixProtectedContentAdapter
 import io.element.android.libraries.matrix.impl.timeline.RustTimeline
 import io.element.android.libraries.matrix.impl.timeline.item.event.TimelineEventContentMapper
-import io.element.android.libraries.matrix.impl.util.MessageEventContent
 import io.element.android.libraries.matrix.impl.util.mxCallbackFlow
 import io.element.android.libraries.matrix.impl.widget.RustWidgetDriver
+import io.element.android.libraries.matrix.impl.widget.RtcWidgetStickyMetadata
 import io.element.android.libraries.matrix.impl.widget.generateWidgetWebViewUrl
 import io.element.android.services.toolbox.api.systemclock.SystemClock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted.Companion.WhileSubscribed
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -70,6 +75,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.matrix.rustcomponents.sdk.DateDividerMode
 import org.matrix.rustcomponents.sdk.IdentityStatusChangeListener
 import org.matrix.rustcomponents.sdk.KnockRequestsListener
@@ -81,12 +88,11 @@ import org.matrix.rustcomponents.sdk.TimelineConfiguration
 import org.matrix.rustcomponents.sdk.TimelineFilter
 import org.matrix.rustcomponents.sdk.TimelineFocus
 import org.matrix.rustcomponents.sdk.TypingNotificationsListener
-import org.matrix.rustcomponents.sdk.UserPowerLevelUpdate
 import org.matrix.rustcomponents.sdk.WidgetCapabilities
 import org.matrix.rustcomponents.sdk.WidgetCapabilitiesProvider
-import org.matrix.rustcomponents.sdk.getElementCallRequiredPermissions
-import org.matrix.rustcomponents.sdk.use
+import io.element.android.libraries.matrix.impl.widget.getElementCallRequiredPermissionsForDeployment
 import timber.log.Timber
+import io.element.android.libraries.matrix.api.timeline.PendingSendLifetime
 import uniffi.matrix_sdk.RoomPowerLevelChanges
 import uniffi.matrix_sdk_ui.TimelineEventFocusThreadMode
 import uniffi.matrix_sdk_ui.TimelineReadReceiptTracking
@@ -103,10 +109,24 @@ class JoinedRustRoom(
     private val systemClock: SystemClock,
     private val roomContentForwarder: RoomContentForwarder,
     private val featureFlagService: FeatureFlagService,
+    private val protectedContentAdapter: MatrixProtectedContentAdapter,
+    private val fetchRtcEvent: (suspend (String) -> kotlinx.serialization.json.JsonObject)? = null,
+    private val updateRawUserPowerLevels: (suspend (Map<String, Long>) -> Unit)? = null,
+    private val powerLevelMutationMutex: Mutex = Mutex(),
 ) : JoinedRoom, BaseRoom by baseRoom {
     // Create a dispatcher for all room methods...
     private val roomDispatcher = coroutineDispatchers.io.limitedParallelism(32)
     private val innerRoom = baseRoom.innerRoom
+    private var protectedLiveLocationAggregateId: String? = null
+
+    override val roomInfoFlow = if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment && fetchRtcEvent != null) {
+        io.element.android.libraries.matrix.impl.widget.roomInfoWithRtc(baseRoom.roomInfoFlow) {
+            io.element.android.libraries.matrix.impl.widget.observeRtcRoomCall(innerRoom, roomId.value, fetchRtcEvent, systemClock::epochMillis)
+        }
+            .stateIn(roomCoroutineScope, SharingStarted.Eagerly, baseRoom.info())
+    } else baseRoom.roomInfoFlow
+
+    override fun info() = roomInfoFlow.value
 
     override val roomTypingMembersFlow: Flow<List<UserId>> = mxCallbackFlow {
         val initial = emptyList<UserId>()
@@ -284,19 +304,6 @@ class JoinedRustRoom(
         }
     }
 
-    override suspend fun editMessage(
-        eventId: EventId,
-        body: String,
-        htmlBody: String?,
-        intentionalMentions: List<IntentionalMention>
-    ): Result<Unit> = withContext(roomDispatcher) {
-        runCatchingExceptions {
-            MessageEventContent.from(body, htmlBody, intentionalMentions).use { newContent ->
-                innerRoom.edit(eventId.value, newContent)
-            }
-        }
-    }
-
     override suspend fun typingNotice(isTyping: Boolean) = withContext(roomDispatcher) {
         runCatchingExceptions {
             innerRoom.typingNotice(isTyping)
@@ -401,10 +408,13 @@ class JoinedRustRoom(
         }
     }
 
-    override suspend fun updateUsersRoles(changes: List<UserRoleChange>): Result<Unit> {
-        return runCatchingExceptions {
-            val powerLevelChanges = changes.map { UserPowerLevelUpdate(it.userId.value, it.powerLevel) }
-            innerRoom.updatePowerLevelsForUsers(powerLevelChanges)
+    override suspend fun updateUsersRoles(changes: List<UserRoleChange>): Result<Unit> = withContext(roomDispatcher) {
+        runCatchingExceptions {
+            if (changes.isNotEmpty()) {
+                require(changes.map { it.userId }.distinct().size == changes.size) { "Duplicate Matrix role targets" }
+                checkNotNull(updateRawUserPowerLevels) { "Fresh Matrix power-level authority is unavailable" }
+                    .invoke(changes.associate { it.userId.value to it.powerLevel })
+            }
         }
     }
 
@@ -424,31 +434,31 @@ class JoinedRustRoom(
                 beacon = roomPowerLevelsValues.beacon,
                 beaconInfo = roomPowerLevelsValues.beaconInfo,
             )
-            innerRoom.applyPowerLevelChanges(changes)
+            powerLevelMutationMutex.withLock { innerRoom.applyPowerLevelChanges(changes) }
         }
     }
 
     override suspend fun resetPowerLevels(): Result<Unit> = withContext(roomDispatcher) {
         runCatchingExceptions {
-            innerRoom.resetPowerLevels().let {}
+            powerLevelMutationMutex.withLock { innerRoom.resetPowerLevels().let {} }
         }
     }
 
     override suspend fun kickUser(userId: UserId, reason: String?): Result<Unit> = withContext(roomDispatcher) {
         runCatchingExceptions {
-            innerRoom.kickUser(userId.value, reason)
+            baseRoom.performMembership(userId.value, "kick", reason) { innerRoom.kickUser(userId.value, reason) }
         }
     }
 
     override suspend fun banUser(userId: UserId, reason: String?): Result<Unit> = withContext(roomDispatcher) {
         runCatchingExceptions {
-            innerRoom.banUser(userId.value, reason)
+            baseRoom.performMembership(userId.value, "ban", reason) { innerRoom.banUser(userId.value, reason) }
         }
     }
 
     override suspend fun unbanUser(userId: UserId, reason: String?): Result<Unit> = withContext(roomDispatcher) {
         runCatchingExceptions {
-            innerRoom.unbanUser(userId.value, reason)
+            baseRoom.performMembership(userId.value, "unban", reason) { innerRoom.unbanUser(userId.value, reason) }
         }
     }
 
@@ -463,15 +473,31 @@ class JoinedRustRoom(
         }
     }
 
+    override fun observeCallInvitationDeparture(notificationEventId: EventId): Flow<Boolean> =
+        io.element.android.libraries.matrix.impl.widget.observeRtcInvitationDeparture(innerRoom, roomId.value, notificationEventId.value)
+
     override fun getWidgetDriver(widgetSettings: MatrixWidgetSettings): Result<MatrixWidgetDriver> {
         return runCatchingExceptions {
+            val stickyMetadata = fetchRtcEvent?.let { RtcWidgetStickyMetadata(roomId.value, it) }
             RustWidgetDriver(
                 widgetSettings = widgetSettings,
                 room = innerRoom,
                 widgetCapabilitiesProvider = object : WidgetCapabilitiesProvider {
                     override fun acquireCapabilities(capabilities: WidgetCapabilities): WidgetCapabilities {
-                        return getElementCallRequiredPermissions(sessionId.value, baseRoom.deviceId.value)
+                        return getElementCallRequiredPermissionsForDeployment(sessionId.value, baseRoom.deviceId.value)
                     }
+                },
+                safeLifecycleDiagnosticsEnabled = io.element.android.appconfig.NextDeploymentConfig.isNextDeployment,
+                restoreStickyMetadata = { message -> stickyMetadata?.restore(message) ?: message },
+                prepareOutgoingMessage = { message ->
+                    if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment && !isDm()) {
+                        io.element.android.libraries.matrix.impl.widget.prepareGroupRingingMessage(message) {
+                            getMembers(Int.MAX_VALUE).getOrThrow().filter {
+                                it.membership == io.element.android.libraries.matrix.api.room.RoomMembershipState.JOIN &&
+                                    it.userId != sessionId && !it.isServiceMember
+                            }.map { it.userId.value }
+                        }
+                    } else message
                 },
             )
         }
@@ -517,16 +543,63 @@ class JoinedRustRoom(
     }
 
     override fun subscribeToLiveLocationShares(): Flow<List<LiveLocationShare>> {
-        return innerRoom.liveLocationSharesFlow().timedByExpiry(systemClock::epochMillis)
+        // The SDK flow may not emit until a native Matrix beacon changes. Seed it so
+        // protected live-location events can reach collectors immediately.
+        val sdkShares = innerRoom.liveLocationSharesFlow().onStart { emit(emptyList()) }
+        val protectedShares = liveTimeline.timelineItems.map { items ->
+            val shares = items.filterIsInstance<MatrixTimelineItem.Event>().mapNotNull { item ->
+                val content = item.event.content as? LiveLocationContent ?: return@mapNotNull null
+                val aggregateId = content.protectedAggregateId ?: return@mapNotNull null
+                if (!content.isLive) return@mapNotNull null
+                val last = content.locations.lastOrNull()
+                LiveLocationShare(
+                    userId = item.event.sender,
+                    lastLocation = last?.let {
+                        LastLocation(
+                            geoUri = it.geoUri,
+                            timestamp = it.timestamp,
+                            assetType = content.assetType ?: AssetType.SENDER,
+                        )
+                    },
+                    startTimestamp = content.startTimestamp,
+                    endTimestamp = content.endTimestamp,
+                    beaconId = item.eventId ?: EventId("\$$aggregateId"),
+                )
+            }
+            shares
+        }
+        return combine(sdkShares, protectedShares) { regular, protected ->
+            (regular + protected).distinctBy { it.beaconId }
+        }.timedByExpiry(systemClock::epochMillis)
     }
 
     override suspend fun startLiveLocationShare(durationMillis: Long): Result<EventId> = withContext(roomDispatcher) {
+        if (protectedContentAdapter.enabled()) {
+            val aggregateId = "yizhe-live-${java.util.UUID.randomUUID()}"
+            return@withContext liveTimeline.startProtectedLiveLocation(
+                aggregateId = aggregateId,
+                durationMillis = durationMillis,
+                startedAtMillis = systemClock.epochMillis(),
+            ).map {
+                protectedLiveLocationAggregateId = aggregateId
+                EventId("\$$aggregateId")
+            }
+        }
         runCatchingExceptions {
             innerRoom.startLiveLocationShare(durationMillis.toULong())
         }.map(::EventId)
     }
 
-    override suspend fun stopLiveLocationShare(): Result<Unit> = withContext(roomDispatcher) {
+    override suspend fun stopLiveLocationShare(protectedAggregateId: String?): Result<Unit> = withContext(roomDispatcher) {
+        if (protectedContentAdapter.enabled()) {
+            val aggregateId = protectedAggregateId
+                ?: protectedLiveLocationAggregateId
+                ?: liveTimeline.activeProtectedLiveLocationAggregateId()
+                ?: return@withContext Result.success(Unit)
+            return@withContext liveTimeline.endProtectedLiveLocation(aggregateId).onSuccess {
+                protectedLiveLocationAggregateId = null
+            }
+        }
         runCatchingExceptions {
             innerRoom.stopLiveLocationShare()
         }.mapFailure { throwable ->
@@ -537,7 +610,17 @@ class JoinedRustRoom(
         }
     }
 
+    override suspend fun releaseLiveLocationProducer(): Result<Unit> = liveTimeline.releaseLiveLocationProducer()
+
     override suspend fun sendLiveLocation(geoUri: String): Result<Unit> = withContext(roomDispatcher) {
+        if (protectedContentAdapter.enabled()) {
+            val aggregateId = protectedLiveLocationAggregateId
+                ?: liveTimeline.activeProtectedLiveLocationAggregateId()?.also { protectedLiveLocationAggregateId = it }
+                ?: return@withContext Result.failure(
+                    io.element.android.libraries.matrix.api.room.location.LiveLocationException.NotLive()
+                )
+            return@withContext liveTimeline.updateProtectedLiveLocation(aggregateId, geoUri, systemClock.epochMillis())
+        }
         runCatchingExceptions {
             innerRoom.sendLiveLocation(geoUri)
         }.mapFailure { throwable ->
@@ -548,13 +631,21 @@ class JoinedRustRoom(
         }
     }
 
-    override fun close() = destroy()
-
-    override fun destroy() {
+    private val pendingSends = PendingSendLifetime {
         baseRoom.destroy()
         liveTimeline.close()
         threadsListService.destroy()
         Timber.d("Room $roomId destroyed")
+    }
+
+    override suspend fun <T> withSendLifetime(block: suspend () -> T): T = pendingSends.withSend(block)
+
+    override fun retainSendLifetime(): AutoCloseable = pendingSends.retain()
+
+    override fun close() = destroy()
+
+    override fun destroy() {
+        pendingSends.close()
     }
 
     private fun InnerTimeline.map(
@@ -569,6 +660,22 @@ class JoinedRustRoom(
             coroutineScope = timelineCoroutineScope,
             dispatcher = roomDispatcher,
             roomContentForwarder = roomContentForwarder,
+            protectedContentAdapter = protectedContentAdapter,
+            protectedCaptionLineageWiring = protectedContentAdapter.captionLineageWiring(),
+            rawMessageSender = { eventType, contentJson ->
+                innerRoom.sendRaw(eventType, contentJson)
+            },
+            sendQueueUpdateSubscriber = { listener ->
+                innerRoom.subscribeToSendQueueUpdates(listener)
+            },
+            serverEventBindingEnabled = io.element.android.appconfig.NextDeploymentConfig.isNextDeployment,
+            queuedRawMessageEnqueuer = { eventType, contentJson, transactionId ->
+                this@map.enqueueRawWithTransactionId(
+                    eventType = eventType,
+                    content = contentJson,
+                    transactionId = transactionId,
+                ).destroy()
+            },
         )
     }
 }

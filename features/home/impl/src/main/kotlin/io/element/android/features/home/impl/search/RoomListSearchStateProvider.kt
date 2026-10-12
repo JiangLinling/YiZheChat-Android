@@ -12,6 +12,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import io.element.android.features.home.impl.model.RoomListRoomSummary
 import io.element.android.features.home.impl.roomlist.aRoomListRoomSummaryList
+import io.element.android.features.userprofile.api.FriendPrivateProfile
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -31,10 +32,12 @@ fun aRoomListSearchState(
     isSearchActive: Boolean = false,
     query: String = "",
     results: ImmutableList<RoomListRoomSummary> = persistentListOf(),
+    contactResults: ImmutableList<FriendPrivateProfile> = persistentListOf(),
     eventSink: (RoomListSearchEvent) -> Unit = { },
 ) = RoomListSearchState(
     isSearchActive = isSearchActive,
     query = TextFieldState(initialText = query),
     results = results,
+    contactResults = contactResults,
     eventSink = eventSink,
 )

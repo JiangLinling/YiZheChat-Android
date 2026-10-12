@@ -19,4 +19,10 @@
   <string name="screen_media_details_title">"文件信息"</string>
   <string name="screen_media_details_uploaded_by">"上传者："</string>
   <string name="screen_media_details_uploaded_on">"上传于"</string>
+  <string name="screen_media_office_secure_preview_empty">"此文档没有可在安全预览中显示的文字。"</string>
+  <string name="screen_media_archive_secure_preview_error">"无法安全预览此压缩包。"</string>
+  <string name="screen_media_archive_secure_preview_empty">"此压缩包中没有可显示的文件。"</string>
+  <string name="screen_media_archive_directory">"文件夹"</string>
+  <string name="screen_media_archive_entry_bytes">"%1$d 字节"</string>
+  <string name="screen_media_archive_entry_size_unknown">"大小未知"</string>
 </resources>

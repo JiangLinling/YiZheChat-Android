@@ -25,6 +25,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.features.lockscreen.impl.pin.model.PinDigit
@@ -47,6 +49,7 @@ fun PinEntryTextField(
             onValueChange(it)
         },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        visualTransformation = if (isSecured) PasswordVisualTransformation() else VisualTransformation.None,
         decorationBox = {
             PinEntryRow(pinEntry = pinEntry, isSecured = isSecured)
         }

@@ -11,6 +11,10 @@ package io.element.android.libraries.preferences.api.store
 import kotlinx.coroutines.flow.Flow
 
 interface SessionPreferencesStore {
+    /** Atomically acknowledge one recent-image batch. Defaults fail closed for older adapters. */
+    suspend fun claimRecentImageSuggestions(newestFirstIds: List<String>, nowEpochMillis: Long): Set<String> = emptySet()
+    suspend fun acknowledgeSelectedImages(ids: List<String>, nowEpochMillis: Long) = Unit
+
     suspend fun setSharePresence(enabled: Boolean)
     fun isSharePresenceEnabled(): Flow<Boolean>
 
@@ -34,6 +38,18 @@ interface SessionPreferencesStore {
 
     suspend fun setVideoCompressionPreset(preset: VideoCompressionPreset)
     fun getVideoCompressionPreset(): Flow<VideoCompressionPreset>
+
+    /**
+     * UI-only acknowledgement for a stable history-recovery notice. This never changes the
+     * underlying recovery/security state and is cleared when that state converges.
+     */
+    suspend fun acknowledgeHistoryRecoveryBanner(roomId: String, status: String)
+    suspend fun clearHistoryRecoveryBannerAcknowledgements(roomId: String)
+    fun isHistoryRecoveryBannerAcknowledged(roomId: String, status: String): Flow<Boolean>
+
+    /** Local UI acknowledgement only; never an authorization, read receipt, or media cache. */
+    suspend fun markVoiceMessagePlayed(eventId: String)
+    fun hasVoiceMessagePlayed(eventId: String): Flow<Boolean>
 
     suspend fun clear()
 }

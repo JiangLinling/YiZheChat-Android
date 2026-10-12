@@ -37,6 +37,7 @@ import io.element.android.libraries.matrix.ui.model.getBestName
 fun MatrixUserHeader(
     matrixUser: MatrixUser,
     modifier: Modifier = Modifier,
+    trailingContent: @Composable () -> Unit = {},
 ) {
     Row(
         modifier = modifier
@@ -77,6 +78,7 @@ fun MatrixUserHeader(
                 )
             }
         }
+        trailingContent()
     }
 }
 

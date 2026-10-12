@@ -87,6 +87,7 @@ class JoinedRoomLoadedFlowNode(
         fun handlePermalinkClick(data: PermalinkData, pushToBackstack: Boolean)
         fun navigateToGlobalNotificationSettings()
         fun navigateToDeveloperSettings()
+        fun navigateToChatSecurity() = Unit
     }
 
     data class Inputs(
@@ -265,6 +266,10 @@ class JoinedRoomLoadedFlowNode(
 
             override fun navigateToDeveloperSettings() {
                 callback.navigateToDeveloperSettings()
+            }
+
+            override fun navigateToChatSecurity() {
+                callback.navigateToChatSecurity()
             }
         }
         val params = MessagesEntryPoint.Params(

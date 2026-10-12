@@ -237,6 +237,7 @@ class RoomFlowNode(
                     roomId = navTarget.roomId,
                     initialElement = inputs.initialElement,
                     joinedRoom = navTarget.joinedRoom,
+                    roomName = inputs.roomDescription.getOrNull()?.name,
                 )
                 createNode<JoinedRoomFlowNode>(buildContext, plugins = listOf(inputs) + roomFlowNodeCallback)
             }
@@ -253,6 +254,7 @@ class RoomFlowNode(
             state = LoadingRoomState.Loading,
             onBackClick = { navigateUp() },
             modifier = modifier,
+            roomName = inputs.roomDescription.getOrNull()?.name,
         )
     }
 

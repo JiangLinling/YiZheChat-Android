@@ -9,6 +9,7 @@
 package io.element.android.features.messages.impl.actionlist
 
 import androidx.compose.runtime.Immutable
+import androidx.compose.ui.unit.IntRect
 import io.element.android.features.messages.impl.actionlist.model.TimelineItemAction
 import io.element.android.features.messages.impl.crypto.sendfailure.VerifiedUserSendFailure
 import io.element.android.features.messages.impl.timeline.model.TimelineItem
@@ -29,6 +30,7 @@ data class ActionListState(
             val recentEmojis: ImmutableList<String>,
             val verifiedUserSendFailure: VerifiedUserSendFailure,
             val actions: ImmutableList<TimelineItemAction>,
+            val anchorBounds: IntRect = IntRect.Zero,
         ) : Target
     }
 }

@@ -9,6 +9,8 @@ kotlin = "2.3.21"
 kotlinpoet = "2.3.0"
 ksp = "2.3.9"
 firebaseAppDistribution = "5.2.1"
+huaweiAgconnect = "1.9.6.300"
+huaweiPush = "6.13.0.301"
 
 # AndroidX
 core = "1.18.0"
@@ -86,6 +88,7 @@ ksp_gradle_plugin = { module = "com.google.devtools.ksp:com.google.devtools.ksp.
 # https://firebase.google.com/docs/android/setup#available-libraries
 google_firebase_bom = "com.google.firebase:firebase-bom:34.13.0"
 firebase_appdistribution_gradle = { module = "com.google.firebase:firebase-appdistribution-gradle", version.ref = "firebaseAppDistribution" }
+huawei_hms_push = { module = "com.huawei.hms:push", version.ref = "huaweiPush" }
 autonomousapps_dependencyanalysis_plugin = { module = "com.autonomousapps:dependency-analysis-gradle-plugin", version.ref = "dependencyAnalysis" }
 ksp_plugin = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "ksp" }
 google_tink = "com.google.crypto.tink:tink-android:1.21.0"
@@ -107,6 +110,7 @@ androidx_workmanager_runtime = { module = "androidx.work:work-runtime-ktx", vers
 
 androidx_recyclerview = "androidx.recyclerview:recyclerview:1.4.0"
 androidx_browser = "androidx.browser:browser:1.10.0"
+androidx_lifecycle_runtime_compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx_lifecycle_runtime = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx_lifecycle_process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle" }
 androidx_splash = "androidx.core:core-splashscreen:1.2.0"
@@ -121,6 +125,7 @@ androidx_biometric = "androidx.biometric:biometric-ktx:1.4.0-alpha02"
 androidx_activity_activity = { module = "androidx.activity:activity", version.ref = "activity" }
 androidx_activity_compose = { module = "androidx.activity:activity-compose", version.ref = "activity" }
 androidx_startup = "androidx.startup:startup-runtime:1.2.0"
+androidx_profileinstaller = "androidx.profileinstaller:profileinstaller:1.4.1"
 androidx_preference = "androidx.preference:preference:1.2.1"
 androidx_webkit = "androidx.webkit:webkit:1.16.0"
 
@@ -273,6 +278,7 @@ paparazzi = "app.cash.paparazzi:2.0.0-alpha04"
 roborazzi = { id = "io.github.takahirom.roborazzi", version.ref = "roborazzi" }
 sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
 firebaseAppDistribution = { id = "com.google.firebase.appdistribution", version.ref = "firebaseAppDistribution" }
+huawei-agconnect = { id = "com.huawei.agconnect.agcp", version.ref = "huaweiAgconnect" }
 sonarqube = "org.sonarqube:7.3.0.8198"
 licensee = "app.cash.licensee:1.14.1"
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

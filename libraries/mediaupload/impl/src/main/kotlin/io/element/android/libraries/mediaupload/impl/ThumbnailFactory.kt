@@ -60,8 +60,9 @@ class ThumbnailFactory(
     suspend fun createImageThumbnail(
         file: File,
         mimeType: String,
+        onTemporaryFile: (File) -> Unit = {},
     ): ThumbnailResult? {
-        return createThumbnail(mimeType = mimeType) { cancellationSignal ->
+        return createThumbnail(mimeType = mimeType, onTemporaryFile = onTemporaryFile) { cancellationSignal ->
             try {
                 // This API works correctly with GIF
                 if (sdkIntProvider.isAtLeast(Build.VERSION_CODES.Q)) {
@@ -89,8 +90,8 @@ class ThumbnailFactory(
         }
     }
 
-    suspend fun createVideoThumbnail(file: File): ThumbnailResult? {
-        return createThumbnail(mimeType = MimeTypes.Jpeg) {
+    suspend fun createVideoThumbnail(file: File, onTemporaryFile: (File) -> Unit = {}): ThumbnailResult? {
+        return createThumbnail(mimeType = MimeTypes.Jpeg, onTemporaryFile = onTemporaryFile) {
             MediaMetadataRetriever().runAndRelease {
                 setDataSource(context, file.toUri())
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -104,6 +105,7 @@ class ThumbnailFactory(
 
     private suspend fun createThumbnail(
         mimeType: String,
+        onTemporaryFile: (File) -> Unit,
         bitmapFactory: (CancellationSignal) -> Bitmap?,
     ): ThumbnailResult? = suspendCancellableCoroutine { continuation ->
         val cancellationSignal = CancellationSignal()
@@ -115,25 +117,31 @@ class ThumbnailFactory(
             continuation.resume(null)
             return@suspendCancellableCoroutine
         }
-        val format = mimeTypeToCompressFormat(mimeType)
-        val extension = mimeTypeToCompressFileExtension(mimeType)
-        val thumbnailFile = context.createTmpFile(extension = extension)
-        thumbnailFile.outputStream().use { outputStream ->
-            bitmapThumbnail.compress(format, 78, outputStream)
+        try {
+            val format = mimeTypeToCompressFormat(mimeType)
+            val extension = mimeTypeToCompressFileExtension(mimeType)
+            val thumbnailFile = context.createTmpFile(extension = extension)
+            onTemporaryFile(thumbnailFile)
+            thumbnailFile.outputStream().use { outputStream ->
+                bitmapThumbnail.compress(format, 78, outputStream)
+            }
+            val blurhash = BlurHash.encode(bitmapThumbnail, 3, 3)
+            val thumbnailResult = ThumbnailResult(
+                file = thumbnailFile,
+                info = ThumbnailInfo(
+                    width = bitmapThumbnail.width.toLong(),
+                    height = bitmapThumbnail.height.toLong(),
+                    mimetype = mimeTypeToThumbnailMimeType(mimeType),
+                    size = thumbnailFile.length()
+                ),
+                blurhash = blurhash
+            )
+            continuation.resume(thumbnailResult)
+        } finally {
+            // Thumbnail creation runs alongside the attachment preview. Do not retain its pixel buffer
+            // until a later upload-triggered GC, including when compression or blurhash generation fails.
+            bitmapThumbnail.recycle()
         }
-        val blurhash = BlurHash.encode(bitmapThumbnail, 3, 3)
-        val thumbnailResult = ThumbnailResult(
-            file = thumbnailFile,
-            info = ThumbnailInfo(
-                width = bitmapThumbnail.width.toLong(),
-                height = bitmapThumbnail.height.toLong(),
-                mimetype = mimeTypeToThumbnailMimeType(mimeType),
-                size = thumbnailFile.length()
-            ),
-            blurhash = blurhash
-        )
-        bitmapThumbnail.recycle()
-        continuation.resume(thumbnailResult)
     }
 }
 

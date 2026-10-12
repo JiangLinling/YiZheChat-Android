@@ -1,0 +1,12 @@
+<resources>
+    <string name="error_share_recipient_device_unavailable">A recipient has no verified device available. Ask them to finish device verification, then try again.</string>
+    <string name="error_share_security_access_denied">Your account or device has not completed security verification. This share could not be sent.</string>
+    <string name="error_share_security_service_unavailable">The security service is temporarily unavailable. Please try again later.</string>
+    <string name="error_share_send_failed">This share could not be sent. Please try again.</string>
+    <string name="screen_voice_recording_stopped_title">Recording stopped</string>
+    <string name="screen_voice_recording_permission_lost">Microphone access is off. Your recording has stopped and was not sent. Enable microphone access to record again.</string>
+    <string name="common_relay_ended_preview">Relay ended</string>
+    <string name="screen_room_media_cancellation_pending">Cancellation pending confirmation</string>
+    <string name="screen_room_media_submission_pending">Send result awaiting confirmation</string>
+    <string name="screen_media_viewer_external_read_choose_app">Open with</string>
+</resources>

@@ -45,7 +45,8 @@ class DeclineCallBroadcastReceiver : BroadcastReceiver() {
                 callData = CallData(
                     sessionId = notificationData.sessionId,
                     roomId = notificationData.roomId,
-                    isAudioCall = notificationData.audioOnly
+                    isAudioCall = notificationData.audioOnly,
+                    notificationEventId = notificationData.eventId.value,
                 )
             )
         }

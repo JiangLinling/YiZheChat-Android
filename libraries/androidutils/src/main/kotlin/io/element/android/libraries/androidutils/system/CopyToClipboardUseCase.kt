@@ -8,16 +8,10 @@
 
 package io.element.android.libraries.androidutils.system
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import androidx.core.content.getSystemService
+import io.element.android.libraries.androidutils.clipboard.InAppClipboard
 
-class CopyToClipboardUseCase(
-    private val context: Context,
-) {
+class CopyToClipboardUseCase {
     fun execute(text: CharSequence) {
-        context.getSystemService<ClipboardManager>()
-            ?.setPrimaryClip(ClipData.newPlainText("", text))
+        InAppClipboard.copyPlainText(text)
     }
 }

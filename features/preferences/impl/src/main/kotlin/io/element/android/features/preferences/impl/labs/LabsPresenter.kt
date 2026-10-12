@@ -22,7 +22,7 @@ import dev.zacsweers.metro.Inject
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.preferences.impl.R
 import io.element.android.features.preferences.impl.model.EnabledFeature
-import io.element.android.features.preferences.impl.tasks.ClearCacheUseCase
+import io.element.android.features.preferences.api.ClearCacheUseCase
 import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.designsystem.theme.components.IconSource
 import io.element.android.libraries.featureflag.api.FeatureFlagService

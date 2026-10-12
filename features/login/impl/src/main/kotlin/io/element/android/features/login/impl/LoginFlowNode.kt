@@ -71,7 +71,7 @@ class LoginFlowNode(
     private val preferencesEntryPoint: PreferencesEntryPoint,
 ) : BaseFlowNode<LoginFlowNode.NavTarget>(
     backstack = BackStack(
-        initialElement = NavTarget.CheckClassicFlow,
+        initialElement = NavTarget.LoginPassword(),
         savedStateMap = buildContext.savedStateMap,
     ),
     buildContext = buildContext,

@@ -12,6 +12,7 @@ import android.net.Uri
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.api.timeline.Timeline
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedMediaAlbum
 
 fun interface MediaSenderFactory {
     /**
@@ -32,10 +33,13 @@ fun interface MediaSenderRoomFactory {
 }
 
 interface MediaSender {
+    suspend fun mediaSubmissionFact(transportName: String): io.element.android.libraries.matrix.api.media.MediaSubmissionFact? = null
+
     suspend fun preProcessMedia(
         uri: Uri,
         mimeType: String,
         mediaOptimizationConfig: MediaOptimizationConfig,
+        onProgress: (Float) -> Unit = {},
     ): Result<MediaUploadInfo>
 
     suspend fun sendPreProcessedMedia(
@@ -43,6 +47,11 @@ interface MediaSender {
         caption: String?,
         formattedCaption: String?,
         inReplyToEventId: EventId?,
+        burnAfterRead: Boolean = false,
+        mediaAlbum: ProtectedMediaAlbum? = null,
+        onProgress: (Float) -> Unit = {},
+        onUploadStarted: () -> Unit = {},
+        onUploadIdentity: (String) -> Unit = {},
     ): Result<Unit>
 
     suspend fun sendMedia(
@@ -52,14 +61,37 @@ interface MediaSender {
         formattedCaption: String? = null,
         inReplyToEventId: EventId? = null,
         mediaOptimizationConfig: MediaOptimizationConfig,
+        burnAfterRead: Boolean = false,
+        onUploadStarted: () -> Unit = {},
     ): Result<Unit>
 
     suspend fun sendVoiceMessage(
         uri: Uri,
         mimeType: String,
         waveForm: List<Float>,
+        onUploadIdentity: (String) -> Unit = {},
         inReplyToEventId: EventId? = null,
+        burnAfterRead: Boolean = false,
+        onUploadStarted: () -> Unit = {},
     ): Result<Unit>
+
+    suspend fun sendSticker(
+        uri: Uri,
+        mimeType: String,
+        mediaOptimizationConfig: MediaOptimizationConfig,
+    ): Result<Unit> = Result.failure(UnsupportedOperationException("Sticker sending is unavailable."))
+
+    /**
+     * Sends one already PREPARED Contract B segmented-media root event.
+     *
+     * This method has no legacy fallback. Implementations that do not have the complete signed
+     * Contract A authority, durable journal, and caller-transaction Matrix queue must fail closed.
+     */
+    suspend fun sendPreparedSegmentedMedia(
+        request: PreparedSegmentedMediaSend,
+    ): Result<SegmentedMediaSendOutcome> = Result.failure(
+        UnsupportedOperationException("Contract-bound segmented-media sending is unavailable."),
+    )
 
     fun cleanUp()
 }

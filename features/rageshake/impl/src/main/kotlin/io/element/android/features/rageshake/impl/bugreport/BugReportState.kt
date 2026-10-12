@@ -18,9 +18,14 @@ data class BugReportState(
     val screenshotUri: String?,
     val sendingProgress: Float,
     val sending: AsyncAction<Unit>,
+    val attachments: List<BugReportAttachmentState>,
+    val attachmentNotice: BugReportAttachmentNotice?,
     val eventSink: (BugReportEvents) -> Unit
 ) {
-    val submitEnabled = sending !is AsyncAction.Loading
+    val isPreparingAttachments = attachments.any { it.status is BugReportAttachmentStatus.Compressing }
+    val hasAttachmentErrors = attachments.any { it.status is BugReportAttachmentStatus.Failed }
+    val canAddAttachments = attachments.size < MAX_BUG_REPORT_MEDIA_COUNT && !isPreparingAttachments && sending !is AsyncAction.Loading
+    val submitEnabled = sending !is AsyncAction.Loading && !isPreparingAttachments && !hasAttachmentErrors
     val isDescriptionInError = sending is AsyncAction.Failure &&
         sending.error is BugReportFormError.DescriptionTooShort
 }
@@ -32,16 +37,40 @@ data class BugReportFormState(
     val canContact: Boolean,
     val sendScreenshot: Boolean,
     val sendPushRules: Boolean,
-    val ghIssueNumber: Int?,
 ) : Parcelable {
     companion object {
         val Default = BugReportFormState(
             description = "",
             sendLogs = true,
-            canContact = false,
-            sendScreenshot = false,
-            sendPushRules = false,
-            ghIssueNumber = null,
+            canContact = true,
+            sendScreenshot = true,
+            sendPushRules = true,
         )
     }
+}
+
+data class BugReportAttachmentState(
+    val id: String,
+    val displayName: String,
+    val kind: BugReportAttachmentKind,
+    val sizeBytes: Long? = null,
+    val previewUri: String? = null,
+    val status: BugReportAttachmentStatus,
+)
+
+sealed interface BugReportAttachmentStatus {
+    data object Compressing : BugReportAttachmentStatus
+    data object Ready : BugReportAttachmentStatus
+    data class Failed(val reason: BugReportAttachmentError) : BugReportAttachmentStatus
+}
+
+enum class BugReportAttachmentError {
+    UnsupportedFormat,
+    CompressionFailed,
+    ItemTooLarge,
+    TotalTooLarge,
+}
+
+enum class BugReportAttachmentNotice {
+    SelectionTrimmed,
 }

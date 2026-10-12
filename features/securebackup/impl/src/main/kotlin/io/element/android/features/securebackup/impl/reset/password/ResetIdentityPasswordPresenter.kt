@@ -20,10 +20,13 @@ import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.matrix.api.encryption.IdentityPasswordResetHandle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class ResetIdentityPasswordPresenter(
     private val identityPasswordResetHandle: IdentityPasswordResetHandle,
     private val dispatchers: CoroutineDispatchers,
+    private val completeReset: suspend (suspend () -> Result<Unit>) -> Result<Unit>,
+    private val onResetSucceeded: () -> Unit,
 ) : Presenter<ResetIdentityPasswordState> {
     @Composable
     override fun present(): ResetIdentityPasswordState {
@@ -45,8 +48,15 @@ class ResetIdentityPasswordPresenter(
     }
 
     private fun CoroutineScope.reset(password: String, action: MutableState<AsyncAction<Unit>>) = launch(dispatchers.io) {
-        suspend {
-            identityPasswordResetHandle.resetPassword(password).getOrThrow()
+        val result = suspend {
+            completeReset {
+                identityPasswordResetHandle.resetPassword(password)
+            }.getOrThrow()
         }.runCatchingUpdatingState(action)
+        if (result.isSuccess) {
+            withContext(dispatchers.main) {
+                onResetSucceeded()
+            }
+        }
     }
 }

@@ -15,6 +15,8 @@ import com.google.common.truth.Truth.assertThat
 import io.element.android.features.createroom.api.FakeCreateRoomEntryPoint
 import io.element.android.features.startchat.api.StartChatEntryPoint
 import io.element.android.libraries.matrix.api.core.RoomIdOrAlias
+import io.element.android.libraries.matrix.test.FakeMatrixClient
+import io.element.android.libraries.permissions.test.FakePermissionsPresenterFactory
 import io.element.android.tests.testutils.lambda.lambdaError
 import io.element.android.tests.testutils.node.TestParentNode
 import org.junit.Rule
@@ -35,11 +37,15 @@ class DefaultStartChatEntryPointTest {
                 buildContext = buildContext,
                 plugins = plugins,
                 createRoomEntryPoint = FakeCreateRoomEntryPoint(),
+                matrixClient = FakeMatrixClient(),
+                androidContext = io.mockk.mockk(relaxed = true),
+                permissionsPresenterFactory = FakePermissionsPresenterFactory(),
             )
         }
         val callback = object : StartChatEntryPoint.Callback {
             override fun onRoomCreated(roomIdOrAlias: RoomIdOrAlias, serverNames: List<String>) = lambdaError()
             override fun navigateToRoomDirectory() = lambdaError()
+            override fun navigateToUserProfile(userId: io.element.android.libraries.matrix.api.core.UserId) = lambdaError()
         }
         val result = entryPoint.createNode(
             parentNode = parentNode,

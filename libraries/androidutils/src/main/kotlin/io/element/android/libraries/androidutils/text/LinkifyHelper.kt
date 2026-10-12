@@ -67,6 +67,15 @@ object LinkifyHelper {
             }
         }
 
+        // Product identity links are explicit app targets, including an opaque group capability.
+        // WEB_URLS does not recognize custom schemes and can otherwise linkify only an inner domain.
+        Regex("yizhe://(?:friend|group)/v1\\?[^\\s<>\"']{1,4096}").findAll(spannable).forEach { match ->
+            val start = match.range.first
+            val end = match.range.last + 1
+            spannable.getSpans<URLSpan>(start, end).forEach(spannable::removeSpan)
+            spannable.setSpan(URLSpan(match.value), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+
         // Restore old spans, remove new ones if there is a conflict
         for ((urlSpan, location) in oldURLSpans) {
             val (start, end) = location

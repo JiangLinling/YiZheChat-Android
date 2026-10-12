@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_signout_prepare_recovery_key_action">Set up and save a recovery key first</string>
+    <string name="screen_signout_confirm_recovery_key_action">Confirm recovery key</string>
+    <string name="screen_signout_change_recovery_key_action">Key not saved? Create a new one</string>
+    <string name="screen_signout_readiness_checking">Checking</string>
+</resources>

@@ -13,10 +13,8 @@ import io.element.android.libraries.pushproviders.api.Distributor
 import io.element.android.libraries.pushproviders.unifiedpush.UnifiedPushConfig
 import io.element.android.libraries.troubleshoot.api.test.NotificationTroubleshootTestState
 import io.element.android.libraries.troubleshoot.api.test.TestFilterData
-import io.element.android.libraries.troubleshoot.test.FakeNotificationTroubleshootNavigator
 import io.element.android.libraries.troubleshoot.test.runAndTestState
 import io.element.android.services.toolbox.test.strings.FakeStringProvider
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
@@ -41,57 +39,32 @@ class UnifiedPushTestTest {
     }
 
     @Test
-    fun `test UnifiedPushTest error`() = runTest {
-        val providers = FakeUnifiedPushDistributorProvider()
+    fun `test UnifiedPushTest succeeds with embedded ntfy when no external distributor exists`() = runTest {
         val sut = UnifiedPushTest(
-            unifiedPushDistributorProvider = providers,
-            openDistributorWebPageAction = FakeOpenDistributorWebPageAction(
-                executeAction = {
-                    providers.setDistributorsResult(
-                        listOf(
-                            Distributor("value", "Name"),
-                        )
-                    )
-                }
-            ),
+            unifiedPushDistributorProvider = FakeUnifiedPushDistributorProvider(),
+            openDistributorWebPageAction = FakeOpenDistributorWebPageAction(),
             stringProvider = FakeStringProvider(),
         )
         sut.runAndTestState {
             assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.Idle(false))
             assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.InProgress)
             val lastItem = awaitItem()
-            assertThat(lastItem.status).isEqualTo(NotificationTroubleshootTestState.Status.Failure(hasQuickFix = true))
-            // Quick fix
-            backgroundScope.launch {
-                sut.quickFix(this, FakeNotificationTroubleshootNavigator())
-                sut.run(this)
-            }
-            assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.InProgress)
-            assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.Success)
+            assertThat(lastItem.status).isEqualTo(NotificationTroubleshootTestState.Status.Success)
         }
     }
 
     @Test
-    fun `test UnifiedPushTest error and reset`() = runTest {
-        val providers = FakeUnifiedPushDistributorProvider()
+    fun `test UnifiedPushTest success and reset`() = runTest {
         val sut = UnifiedPushTest(
-            unifiedPushDistributorProvider = providers,
-            openDistributorWebPageAction = FakeOpenDistributorWebPageAction(
-                executeAction = {
-                    providers.setDistributorsResult(
-                        listOf(
-                            Distributor("value", "Name"),
-                        )
-                    )
-                }
-            ),
+            unifiedPushDistributorProvider = FakeUnifiedPushDistributorProvider(),
+            openDistributorWebPageAction = FakeOpenDistributorWebPageAction(),
             stringProvider = FakeStringProvider(),
         )
         sut.runAndTestState {
             assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.Idle(false))
             assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.InProgress)
             val lastItem = awaitItem()
-            assertThat(lastItem.status).isEqualTo(NotificationTroubleshootTestState.Status.Failure(hasQuickFix = true))
+            assertThat(lastItem.status).isEqualTo(NotificationTroubleshootTestState.Status.Success)
             sut.reset()
             assertThat(awaitItem().status).isEqualTo(NotificationTroubleshootTestState.Status.Idle(false))
         }

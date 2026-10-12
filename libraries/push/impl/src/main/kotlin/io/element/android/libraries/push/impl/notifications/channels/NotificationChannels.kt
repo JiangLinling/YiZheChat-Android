@@ -8,6 +8,8 @@
 
 package io.element.android.libraries.push.impl.notifications.channels
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
@@ -32,6 +34,7 @@ import io.element.android.libraries.di.annotations.ApplicationContext
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.preferences.api.store.AppPreferencesStore
 import io.element.android.libraries.preferences.api.store.NotificationSound
+import io.element.android.libraries.push.api.notifications.CallNotificationPolicyService
 import io.element.android.libraries.push.api.notifications.NotificationSoundUpdater
 import io.element.android.libraries.push.impl.R
 import io.element.android.services.toolbox.api.strings.StringProvider
@@ -44,9 +47,11 @@ import timber.log.Timber
  * IDs for channels
  * ========================================================================================== */
 internal const val SILENT_NOTIFICATION_CHANNEL_ID = "DEFAULT_SILENT_NOTIFICATION_CHANNEL_ID_V2"
-internal const val NOISY_NOTIFICATION_CHANNEL_ID_BASE = "DEFAULT_NOISY_NOTIFICATION_CHANNEL_ID_V2"
+internal const val NOISY_NOTIFICATION_CHANNEL_ID_BASE = "DEFAULT_NOISY_NOTIFICATION_CHANNEL_ID_V4"
+private const val LEGACY_NOISY_NOTIFICATION_CHANNEL_ID_V3 = "DEFAULT_NOISY_NOTIFICATION_CHANNEL_ID_V3"
 internal const val CALL_NOTIFICATION_CHANNEL_ID = "CALL_NOTIFICATION_CHANNEL_ID_V3"
-internal const val RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE = "RINGING_CALL_NOTIFICATION_CHANNEL_ID"
+private const val LEGACY_RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE = "RINGING_CALL_NOTIFICATION_CHANNEL_ID"
+internal const val RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE = "RINGING_CALL_NOTIFICATION_CHANNEL_ID_V2"
 
 private fun versionedChannelId(base: String, version: Int): String =
     if (version <= 0) base else "${base}_v$version"
@@ -54,8 +59,10 @@ private fun versionedChannelId(base: String, version: Int): String =
 internal fun noisyNotificationChannelId(version: Int): String =
     versionedChannelId(NOISY_NOTIFICATION_CHANNEL_ID_BASE, version)
 
-internal fun ringingCallNotificationChannelId(version: Int): String =
-    versionedChannelId(RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE, version)
+internal fun ringingCallNotificationChannelId(version: Int, bypassDnd: Boolean = false): String {
+    val versionedId = versionedChannelId(RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE, version)
+    return if (bypassDnd) "${versionedId}_priority" else versionedId
+}
 
 /**
  * on devices >= android O, we need to define a channel for each notifications.
@@ -91,6 +98,7 @@ private fun supportNotificationChannels() = Build.VERSION.SDK_INT >= Build.VERSI
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class, binding = binding<NotificationChannels>())
 @ContributesBinding(AppScope::class, binding = binding<NotificationSoundUpdater>())
+@ContributesBinding(AppScope::class, binding = binding<CallNotificationPolicyService>())
 class DefaultNotificationChannels(
     private val notificationManager: NotificationManagerCompat,
     private val stringProvider: StringProvider,
@@ -98,7 +106,7 @@ class DefaultNotificationChannels(
     private val context: Context,
     private val enterpriseService: EnterpriseService,
     private val appPreferencesStore: AppPreferencesStore,
-) : NotificationChannels {
+) : NotificationChannels, CallNotificationPolicyService {
     @Volatile private var currentNoisyChannelId: String = NOISY_NOTIFICATION_CHANNEL_ID_BASE
     @Volatile private var currentRingingCallChannelId: String = RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE
 
@@ -121,13 +129,24 @@ class DefaultNotificationChannels(
 
         // Single-snapshot read; keep this path minimal — extra ContentResolver lookups here would
         // risk a cold-start ANR.
+        val legacyV3ChannelExists = notificationManager.notificationChannels.any {
+            it.id == LEGACY_NOISY_NOTIFICATION_CHANNEL_ID_V3 ||
+                it.id.startsWith("${LEGACY_NOISY_NOTIFICATION_CHANNEL_ID_V3}_v")
+        }
         val config = runBlocking {
             val initial = appPreferencesStore.getNotificationSoundChannelConfig()
-            // Pre-dialog builds mapped the noisy `SystemDefault` to our bundled message.mp3.
-            // Now `SystemDefault` means Android's system tone, so untouched legacy state would
-            // silently flip sound. Promote it to `ElementDefault` once, gated on version==0 so the
-            // migration is idempotent.
-            if (initial.messageSoundVersion == 0 && initial.messageSound == NotificationSound.SystemDefault) {
+            // MIUI cached the V3 channel and silently skipped its audio on real devices. Its
+            // system default was also the almost inaudible FadeIn tone. Move built-in/default V3
+            // users once to the new, clearly audible bundled tone. Silent and custom choices are
+            // deliberate, so preserve them.
+            val shouldRepairLegacyV3Sound = legacyV3ChannelExists && when (initial.messageSound) {
+                NotificationSound.SystemDefault,
+                NotificationSound.ElementDefault,
+                NotificationSound.ElementFade -> true
+                NotificationSound.Silent,
+                is NotificationSound.Custom -> false
+            }
+            if (shouldRepairLegacyV3Sound) {
                 appPreferencesStore.setMessageSoundAndIncrementVersion(NotificationSound.ElementDefault, title = null)
                 appPreferencesStore.getNotificationSoundChannelConfig()
             } else {
@@ -136,7 +155,8 @@ class DefaultNotificationChannels(
         }
 
         currentNoisyChannelId = noisyNotificationChannelId(config.messageSoundVersion)
-        currentRingingCallChannelId = ringingCallNotificationChannelId(config.callRingtoneVersion)
+        val bypassDnd = canBypassDoNotDisturb()
+        currentRingingCallChannelId = ringingCallNotificationChannelId(config.callRingtoneVersion, bypassDnd)
 
         // Migration - the noisy channel was deleted and recreated when sound preference was changed (id was DEFAULT_NOISY_NOTIFICATION_CHANNEL_ID_BASE
         // + currentTimeMillis).
@@ -160,11 +180,31 @@ class DefaultNotificationChannels(
                 notificationManager.deleteNotificationChannel(channelId)
             }
         }
+        // V2 used IMPORTANCE_DEFAULT and V3 became silently cached on tested MIUI/HyperOS builds.
+        // Remove every old sound-version variant before publishing the repaired V4 channel.
+        for (channel in notificationManager.notificationChannels) {
+            if (channel.id.startsWith("DEFAULT_NOISY_NOTIFICATION_CHANNEL_ID_V2") ||
+                channel.id == LEGACY_NOISY_NOTIFICATION_CHANNEL_ID_V3 ||
+                channel.id.startsWith("${LEGACY_NOISY_NOTIFICATION_CHANNEL_ID_V3}_v")
+            ) {
+                notificationManager.deleteNotificationChannel(channel.id)
+            }
+        }
+        // Notification-channel sound is immutable. Move existing installs to a new channel id so
+        // the bundled YiZhe call ringtone takes effect without overwriting Silent or Custom prefs.
+        for (channel in notificationManager.notificationChannels) {
+            if (channel.id == LEGACY_RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE ||
+                channel.id.startsWith("${LEGACY_RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE}_v") ||
+                channel.id.startsWith("${LEGACY_RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE}_priority")
+            ) {
+                notificationManager.deleteNotificationChannel(channel.id)
+            }
+        }
         // Drop older versioned channels; only the current one remains.
         deleteStaleVersionedChannels(NOISY_NOTIFICATION_CHANNEL_ID_BASE, currentNoisyChannelId)
         deleteStaleVersionedChannels(RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE, currentRingingCallChannelId)
 
-        // Default notification importance: shows everywhere, makes noise, but does not visually intrude.
+        // High importance is required for a visible heads-up notification on OEM builds such as MIUI.
         val noisySoundUri = resolveNoisySoundUri(config.messageSound)
         grantSoundUriToSystem(noisySoundUri)
         notificationManager.createNotificationChannel(
@@ -211,12 +251,13 @@ class DefaultNotificationChannels(
                 channelId = currentRingingCallChannelId,
                 soundUri = ringingSoundUri,
                 accentColor = accentColor,
+                bypassDnd = bypassDnd,
             )
         )
     }
 
     private fun buildNoisyChannel(channelId: String, soundUri: Uri?, accentColor: Int): NotificationChannelCompat {
-        val builder = NotificationChannelCompat.Builder(channelId, NotificationManagerCompat.IMPORTANCE_DEFAULT)
+        val builder = NotificationChannelCompat.Builder(channelId, NotificationManagerCompat.IMPORTANCE_HIGH)
             .setName(stringProvider.getString(R.string.notification_channel_noisy).ifEmpty { "Noisy notifications" })
             .setDescription(stringProvider.getString(R.string.notification_channel_noisy))
             .setVibrationEnabled(true)
@@ -236,15 +277,22 @@ class DefaultNotificationChannels(
         return builder.build()
     }
 
-    private fun buildRingingCallChannel(channelId: String, soundUri: Uri?, accentColor: Int): NotificationChannelCompat {
-        val builder = NotificationChannelCompat.Builder(channelId, NotificationManagerCompat.IMPORTANCE_MAX)
-            .setName(stringProvider.getString(R.string.notification_channel_ringing_calls).ifEmpty { "Ringing calls" })
-            .setDescription(stringProvider.getString(R.string.notification_channel_ringing_calls))
-            .setVibrationEnabled(true)
-            .setLightsEnabled(true)
-            .setLightColor(accentColor)
+    private fun buildRingingCallChannel(
+        channelId: String,
+        soundUri: Uri?,
+        accentColor: Int,
+        bypassDnd: Boolean = canBypassDoNotDisturb(),
+    ): NotificationChannel {
+        val channelName = stringProvider.getString(R.string.notification_channel_ringing_calls).ifEmpty { "Ringing calls" }
+        val channel = NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_MAX).apply {
+            description = stringProvider.getString(R.string.notification_channel_ringing_calls)
+            enableVibration(true)
+            enableLights(true)
+            lightColor = accentColor
+            setBypassDnd(bypassDnd)
+        }
         if (soundUri != null) {
-            builder.setSound(
+            channel.setSound(
                 soundUri,
                 AudioAttributes.Builder()
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -253,10 +301,15 @@ class DefaultNotificationChannels(
                     .build()
             )
         } else {
-            builder.setSound(null, null)
+            channel.setSound(null, null)
         }
-        return builder.build()
+        return channel
     }
+
+    override fun isDoNotDisturbAccessGranted(): Boolean =
+        context.getSystemService(NotificationManager::class.java)?.isNotificationPolicyAccessGranted == true
+
+    private fun canBypassDoNotDisturb(): Boolean = isDoNotDisturbAccessGranted()
 
     private fun resolveNoisySoundUri(sound: NotificationSound): Uri? = when (sound) {
         NotificationSound.Silent -> null
@@ -268,18 +321,20 @@ class DefaultNotificationChannels(
 
     private fun resolveRingingSoundUri(sound: NotificationSound): Uri? = when (sound) {
         NotificationSound.Silent -> null
-        // The ringing channel has no bundled tone — treat ElementDefault and ElementFade like SystemDefault here.
-        NotificationSound.SystemDefault,
+        NotificationSound.SystemDefault -> Settings.System.DEFAULT_RINGTONE_URI
         NotificationSound.ElementDefault,
-        NotificationSound.ElementFade -> Settings.System.DEFAULT_RINGTONE_URI
-        is NotificationSound.Custom -> parseUriOrFallback(sound.uri) { Settings.System.DEFAULT_RINGTONE_URI }
+        NotificationSound.ElementFade -> bundledCallRingtoneUri()
+        is NotificationSound.Custom -> parseUriOrFallback(sound.uri) { bundledCallRingtoneUri() }
     }
 
     private fun bundledMessageSoundUri(): Uri =
-        "${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/${R.raw.message}".toUri()
+        "${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/${R.raw.yizhe_message_alert}".toUri()
 
     private fun bundledFadeSoundUri(): Uri =
         "${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/${R.raw.element_fade}".toUri()
+
+    private fun bundledCallRingtoneUri(): Uri =
+        "${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/${R.raw.yizhe_call_ringtone}".toUri()
 
     /**
      * Lets system_server ("android") and SystemUI read our FileProvider sound URI; no-op otherwise.
@@ -331,6 +386,17 @@ class DefaultNotificationChannels(
 
     override fun getChannelIdForTest(): String = currentNoisyChannelId
 
+    override fun refreshRingingCallChannel() {
+        if (!supportNotificationChannels()) return
+        synchronized(recreateLock) {
+            val config = runBlocking { appPreferencesStore.getNotificationSoundChannelConfig() }
+            recreateRingingCallChannelLocked(
+                sound = config.callRingtone,
+                version = config.callRingtoneVersion,
+            )
+        }
+    }
+
     override fun recreateNoisyChannel(sound: NotificationSound, version: Int) {
         if (!supportNotificationChannels()) return
         synchronized(recreateLock) {
@@ -351,17 +417,22 @@ class DefaultNotificationChannels(
     override fun recreateRingingCallChannel(sound: NotificationSound, version: Int) {
         if (!supportNotificationChannels()) return
         synchronized(recreateLock) {
-            val accentColor = NotificationConfig.NOTIFICATION_ACCENT_COLOR
-            val newChannelId = ringingCallNotificationChannelId(version)
-            val soundUri = resolveRingingSoundUri(sound)
-            grantSoundUriToSystem(soundUri)
-            // See recreateNoisyChannel: the channel must exist before the id is published.
-            notificationManager.createNotificationChannel(
-                buildRingingCallChannel(newChannelId, soundUri, accentColor)
-            )
-            currentRingingCallChannelId = newChannelId
-            deleteStaleVersionedChannels(RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE, newChannelId)
+            recreateRingingCallChannelLocked(sound, version)
         }
+    }
+
+    private fun recreateRingingCallChannelLocked(sound: NotificationSound, version: Int) {
+        val accentColor = NotificationConfig.NOTIFICATION_ACCENT_COLOR
+        val bypassDnd = canBypassDoNotDisturb()
+        val newChannelId = ringingCallNotificationChannelId(version, bypassDnd)
+        val soundUri = resolveRingingSoundUri(sound)
+        grantSoundUriToSystem(soundUri)
+        // Create before publishing the id so notification delivery never races a missing channel.
+        notificationManager.createNotificationChannel(
+            buildRingingCallChannel(newChannelId, soundUri, accentColor, bypassDnd)
+        )
+        currentRingingCallChannelId = newChannelId
+        deleteStaleVersionedChannels(RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE, newChannelId)
     }
 
     override suspend fun readNoisyChannelSound(): NotificationSound? {
@@ -376,7 +447,7 @@ class DefaultNotificationChannels(
     override suspend fun readRingingCallChannelSound(): NotificationSound? {
         return readChannelSound(
             channelId = currentRingingCallChannelId,
-            bundledUri = null,
+            bundledUri = bundledCallRingtoneUri(),
             bundledFadeUri = null,
             systemDefaultUri = Settings.System.DEFAULT_RINGTONE_URI,
         )
@@ -384,8 +455,8 @@ class DefaultNotificationChannels(
 
     /**
      * Classifies the channel's sound URI: null → Silent, bundled → ElementDefault, bundled fade →
-     * ElementFade, system default → SystemDefault, else → Custom. Both bundled URIs are nullable
-     * because the ringing channel has no bundled tones.
+     * ElementFade, system default → SystemDefault, else → Custom. The fade URI is nullable for
+     * channels that intentionally share their default bundled tone.
      */
     private suspend fun readChannelSound(
         channelId: String,

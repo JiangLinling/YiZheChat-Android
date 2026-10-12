@@ -10,6 +10,7 @@ package io.element.android.features.messages.impl.timeline.model.event
 
 import io.element.android.libraries.core.mimetype.MimeTypes.isMimeTypeAnimatedImage
 import io.element.android.libraries.matrix.api.media.MediaSource
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedMediaAlbum
 import io.element.android.libraries.matrix.ui.media.MAX_THUMBNAIL_HEIGHT
 import io.element.android.libraries.matrix.ui.media.MAX_THUMBNAIL_WIDTH
 import io.element.android.libraries.matrix.ui.media.MediaRequestData
@@ -30,7 +31,11 @@ data class TimelineItemImageContent(
     val height: Int?,
     val thumbnailWidth: Int?,
     val thumbnailHeight: Int?,
-    val aspectRatio: Float?
+    val aspectRatio: Float?,
+    override val isBurnAfterRead: Boolean = false,
+    val mediaAlbum: ProtectedMediaAlbum? = null,
+    val localMediaProgress: Float? = null,
+    val localPreviewUri: String? = null,
 ) : TimelineItemEventContentWithAttachment {
     override val type: String = "TimelineItemImageContent"
 
@@ -43,7 +48,8 @@ data class TimelineItemImageContent(
                 kind = MediaRequestData.Kind.File(
                     fileName = filename,
                     mimeType = mimeType
-                )
+                ),
+                cacheable = !isBurnAfterRead,
             )
         } else {
             MediaRequestData(
@@ -52,6 +58,7 @@ data class TimelineItemImageContent(
                     width = thumbnailWidth?.toLong() ?: MAX_THUMBNAIL_WIDTH,
                     height = thumbnailHeight?.toLong() ?: MAX_THUMBNAIL_HEIGHT
                 ),
+                cacheable = !isBurnAfterRead,
             )
         }
     }

@@ -34,6 +34,7 @@ dependencies {
     implementation(projects.libraries.designsystem)
     implementation(projects.services.analytics.api)
     implementation(projects.features.messages.api)
+    implementation(projects.security.dataProtection.api)
     implementation(projects.libraries.dateformatter.api)
     implementation(projects.libraries.uiStrings)
 
@@ -41,6 +42,7 @@ dependencies {
     testImplementation(projects.libraries.matrix.test)
     testImplementation(projects.services.analytics.test)
     testImplementation(projects.features.messages.test)
+    testImplementation(projects.security.dataProtection.test)
     testImplementation(projects.libraries.dateformatter.test)
     testImplementation(projects.features.poll.test)
 }

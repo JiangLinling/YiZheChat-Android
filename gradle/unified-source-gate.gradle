@@ -1,0 +1,42 @@
+import groovy.json.JsonSlurper
+import java.security.MessageDigest
+
+// A Next APK must retain the reviewed cumulative source baseline. This is a
+// local integration gate, independent of server authority/signature validation.
+def manifestFile = rootProject.file('unified-source-manifest.json')
+def verifyUnifiedSourceBaseline = tasks.register('verifyUnifiedSourceBaseline') {
+    group = 'verification'
+    description = 'Rejects omitted or replaced cumulative Android source inputs before Next packaging.'
+    inputs.file(manifestFile)
+    doLast {
+        if (!manifestFile.isFile()) {
+            throw new GradleException('UNIFIED_SOURCE_MANIFEST_MISSING: run tools/next/freeze_unified_source.py after reviewing the cumulative source.')
+        }
+        def manifest = new JsonSlurper().parse(manifestFile)
+        if (manifest.schema_version != 1 || !manifest.sources || manifest.sources.size() < 10000) {
+            throw new GradleException('UNIFIED_SOURCE_MANIFEST_INCOMPLETE')
+        }
+        def problems = []
+        manifest.sources.each { relative, expected ->
+            def source = rootProject.file(relative)
+            if (!source.isFile()) {
+                problems.add(relative + ': MISSING')
+            } else {
+                def digest = MessageDigest.getInstance('SHA-256')
+                source.withInputStream { input ->
+                    byte[] buffer = new byte[65536]
+                    int length
+                    while ((length = input.read(buffer)) != -1) digest.update(buffer, 0, length)
+                }
+                if (digest.digest().encodeHex().toString() != expected) problems.add(relative + ': SOURCE_DRIFT')
+            }
+        }
+        if (problems) throw new GradleException('UNIFIED_SOURCE_BASELINE_REJECTED\n' + problems.take(20).join('\n'))
+        logger.lifecycle('UNIFIED_SOURCE_BASELINE_PASS: ' + manifest.sources.size() + ' reviewed inputs; revision=' + manifest.revision)
+    }
+}
+allprojects {
+    tasks.configureEach {
+        if (name == 'preNextDebugBuild' || name == 'preNextReleaseBuild') dependsOn(verifyUnifiedSourceBaseline)
+    }
+}

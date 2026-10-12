@@ -18,6 +18,8 @@ import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.di.annotations.ApplicationContext
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.services.toolbox.api.systemclock.SystemClock
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import timber.log.Timber
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.atomics.AtomicLong
@@ -45,64 +47,100 @@ class LiveLocationSharingCoordinator internal constructor(
         nowMillis = clock::epochMillis
     )
 
-    private val receivers = ConcurrentHashMap<SessionId, LiveLocationReceiver>()
+    internal class RuntimeLease {
+        val released = CompletableDeferred<Unit>()
+        var retiring = false
+        private var collections = 0
+        private var cleanupFailed = false
+        @Synchronized fun collectionStarted() { collections += 1 }
+        @Synchronized fun collectionFinished(clean: Boolean) { collections -= 1; cleanupFailed = cleanupFailed || !clean }
+        @Synchronized fun verifyReleased() { check(collections == 0 && !cleanupFailed) { "Location provider cleanup is incomplete" } }
+    }
 
+    private val receivers = ConcurrentHashMap<SessionId, LiveLocationReceiver>()
     private val lastDispatchMillis = AtomicLong(0L)
     private val lastKnownLocation = AtomicReference<Location?>(null)
+    private var runtime: RuntimeLease? = null
+    private var nextRuntime: RuntimeLease? = null
 
-    suspend fun register(sessionId: SessionId, receiver: LiveLocationReceiver) {
+    @Synchronized
+    fun register(sessionId: SessionId, receiver: LiveLocationReceiver): Location? {
         val wasEmpty = receivers.isEmpty()
-        Timber.d("LiveLocationSharingCoordinator registering receiver for session $sessionId (wasEmpty=$wasEmpty)")
         receivers[sessionId] = receiver
         if (wasEmpty) {
-            Timber.d("LiveLocationSharingCoordinator starting service")
-            runCatchingExceptions(startService).onFailure {
-                Timber.e(it, "Failed to start live location sharing service")
+            if (runtime?.retiring == true) {
+                // Android may deliver onDestroy after a new room starts. The old
+                // owner must finish before the replacement service is requested.
+                if (nextRuntime == null) nextRuntime = RuntimeLease()
+            } else if (runtime == null) {
+                runtime = RuntimeLease()
+                requestServiceStart()
             }
         }
-        lastKnownLocation.load()?.let {
-            dispatch(it)
+        return lastKnownLocation.load()
+    }
+
+    @Synchronized
+    fun unregister(sessionId: SessionId): Deferred<Unit>? {
+        receivers.remove(sessionId)
+        if (receivers.isNotEmpty()) return null // Other accounts still own the shared provider.
+        lastKnownLocation.store(null)
+        lastDispatchMillis.store(0L)
+        nextRuntime?.released?.complete(Unit) // This lease never requested a producer.
+        nextRuntime = null
+        val original = runtime ?: return null
+        if (!original.retiring) {
+            original.retiring = true
+            runCatchingExceptions(stopService).onFailure { original.released.completeExceptionally(it) }
+        }
+        return original.released
+    }
+
+    @Synchronized
+    internal fun serviceCreated(): RuntimeLease = checkNotNull(runtime) { "Location service has no active owner" }
+
+    @Synchronized
+    internal fun serviceReleased(original: RuntimeLease, failure: Throwable? = null) {
+        if (failure != null) { original.released.completeExceptionally(failure); return }
+        original.verifyReleased()
+        original.released.complete(Unit)
+        if (runtime !== original) return
+        runtime = null
+        if (receivers.isEmpty()) lastKnownLocation.store(null)
+        else {
+            runtime = nextRuntime ?: RuntimeLease()
+            nextRuntime = null
+            requestServiceStart()
         }
     }
 
-    fun unregister(sessionId: SessionId) {
-        Timber.d("LiveLocationSharingCoordinator unregistering receiver for session $sessionId")
-        receivers.remove(sessionId)
-        if (receivers.isEmpty()) {
-            lastKnownLocation.store(null)
-            Timber.d("LiveLocationSharingCoordinator stopping service (no more receivers)")
-            runCatchingExceptions(stopService).onFailure {
-                Timber.e(it, "Failed to stop live location sharing service")
-            }
+    private fun requestServiceStart() {
+        runCatchingExceptions(startService).onFailure { failure ->
+            runtime?.released?.completeExceptionally(failure)
+            Timber.e(failure, "Failed to start live location service")
         }
     }
 
     suspend fun dispatchUnrecoverableError() {
-        Timber.d("LiveLocationSharingCoordinator dispatching unrecoverable error")
-        receivers.forEach { (sessionId, receiver) ->
-            runCatchingExceptions {
-                receiver.onUnrecoverableError()
-            }.onFailure {
-                Timber.e(it, "Failed to dispatch unrecoverable error for session $sessionId")
+        receivers.values.toList().forEach { receiver ->
+            runCatchingExceptions { receiver.onUnrecoverableError() }.onFailure {
+                Timber.e(it, "Failed to dispatch live location error")
             }
         }
     }
 
     suspend fun dispatch(location: Location) {
-        val currentTimeMillis = nowMillis()
-        val millisSincePrevious = currentTimeMillis - lastDispatchMillis.load()
-        if (millisSincePrevious < THROTTLE_WINDOW.inWholeMilliseconds) {
-            Timber.d("Received location before $THROTTLE_WINDOW, ignore.")
-            return
+        val targets = synchronized(this) {
+            if (receivers.isEmpty() || runtime?.retiring == true) return
+            val now = nowMillis()
+            if (lastKnownLocation.load() != null && now - lastDispatchMillis.load() < THROTTLE_WINDOW.inWholeMilliseconds) return
+            lastKnownLocation.store(location)
+            lastDispatchMillis.store(now)
+            receivers.values.toList()
         }
-        lastKnownLocation.store(location)
-        lastDispatchMillis.store(currentTimeMillis)
-        receivers.forEach { (sessionId, receiver) ->
-            Timber.d("Dispatch received location for session $sessionId ")
-            runCatchingExceptions {
-                receiver.onLocationUpdate(location)
-            }.onFailure {
-                Timber.e(it, "Failed to dispatch live location update for session $sessionId")
+        targets.forEach { receiver ->
+            runCatchingExceptions { receiver.onLocationUpdate(location) }.onFailure {
+                Timber.e(it, "Failed to dispatch live location")
             }
         }
     }

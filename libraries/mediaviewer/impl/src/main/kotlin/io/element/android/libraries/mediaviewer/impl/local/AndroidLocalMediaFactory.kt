@@ -12,7 +12,7 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.webkit.MimeTypeMap
-import androidx.core.net.toUri
+import androidx.exifinterface.media.ExifInterface
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import io.element.android.libraries.androidutils.file.getFileName
@@ -24,11 +24,15 @@ import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.di.annotations.ApplicationContext
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.media.MediaFile
-import io.element.android.libraries.matrix.api.media.toFile
+import io.element.android.libraries.matrix.api.media.ProgressiveMediaFile
 import io.element.android.libraries.mediaviewer.api.MediaInfo
 import io.element.android.libraries.mediaviewer.api.local.LocalMedia
 import io.element.android.libraries.mediaviewer.api.local.LocalMediaFactory
 import io.element.android.libraries.mediaviewer.api.util.FileExtensionExtractor
+import io.element.android.libraries.mediaviewer.impl.local.image.ImageDecodePlan
+import io.element.android.libraries.mediaviewer.impl.local.image.ImageDecodePolicy
+import io.element.android.libraries.mediaviewer.impl.local.image.ImageValidationException
+import java.util.UUID
 
 @ContributesBinding(AppScope::class)
 class AndroidLocalMediaFactory(
@@ -39,8 +43,18 @@ class AndroidLocalMediaFactory(
     override fun createFromMediaFile(
         mediaFile: MediaFile,
         mediaInfo: MediaInfo,
-    ): LocalMedia = createFromUri(
-        uri = mediaFile.toFile().toUri(),
+    ): LocalMedia = if (mediaFile is ProgressiveMediaFile) {
+        require(mediaInfo.mimeType.startsWith("video/"))
+        LocalMedia(
+            uri = mediaFile.uri(),
+            info = mediaInfo.copy(
+                fileSize = mediaFile.plaintextLength,
+                formattedFileSize = fileSizeFormatter.format(mediaFile.plaintextLength),
+            ),
+            progressiveVideo = mediaFile,
+        )
+    } else createFromUri(
+        uri = mediaFile.uri(),
         mimeType = mediaInfo.mimeType,
         name = mediaInfo.filename,
         caption = mediaInfo.caption,
@@ -95,6 +109,15 @@ class AndroidLocalMediaFactory(
             fileName = fileName,
         )
         val fileSize = context.getFileSize(uri)
+        val imageDecodePlan = if (resolvedMimeType.startsWith("image/", ignoreCase = true)) {
+            inspectImageBeforeDecode(
+                uri = uri,
+                encodedBytes = fileSize,
+                declaredMimeType = resolvedMimeType,
+            )
+        } else {
+            null
+        }
         val calculatedFormattedFileSize = formattedFileSize ?: fileSizeFormatter.format(fileSize)
         val fileExtension = fileExtensionExtractor.extractFromName(fileName)
         return LocalMedia(
@@ -114,7 +137,11 @@ class AndroidLocalMediaFactory(
                 dateSentFull = dateSentFull,
                 waveform = waveform,
                 duration = duration,
-            )
+            ),
+            lifecycleOperationId = UUID.randomUUID().toString(),
+            imageDecodeWidth = imageDecodePlan?.decodeWidth,
+            imageDecodeHeight = imageDecodePlan?.decodeHeight,
+            imageExifOrientation = imageDecodePlan?.exifOrientation,
         )
     }
 
@@ -148,5 +175,51 @@ class AndroidLocalMediaFactory(
                 options.outMimeType
             }
         }
+    }
+
+    private fun inspectImageBeforeDecode(
+        uri: Uri,
+        encodedBytes: Long,
+        declaredMimeType: String,
+    ): ImageDecodePlan {
+        val bounds = try {
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                BitmapFactory.Options().also { options ->
+                    options.inJustDecodeBounds = true
+                    BitmapFactory.decodeStream(inputStream, null, options)
+                }
+            }
+        } catch (_: Exception) {
+            null
+        } ?: throw ImageValidationException.Unreadable()
+        val decodedMimeType = bounds.outMimeType ?: throw ImageValidationException.Unreadable()
+        if (!sameImageMimeType(declaredMimeType, decodedMimeType)) {
+            throw ImageValidationException.TypeMismatch()
+        }
+        val exifOrientation = try {
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                ExifInterface(inputStream).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_UNDEFINED,
+                )
+            }
+        } catch (_: Exception) {
+            null
+        } ?: throw ImageValidationException.InvalidMetadata()
+        return ImageDecodePolicy.plan(
+            width = bounds.outWidth,
+            height = bounds.outHeight,
+            encodedBytes = encodedBytes,
+            exifOrientation = exifOrientation,
+        )
+    }
+
+    private fun sameImageMimeType(declared: String, decoded: String): Boolean {
+        fun String.normalized(): String = lowercase()
+            .substringBefore(';')
+            .trim()
+            .replace("image/jpg", "image/jpeg")
+        val normalizedDeclared = declared.normalized()
+        return normalizedDeclared == "image/*" || normalizedDeclared == decoded.normalized()
     }
 }

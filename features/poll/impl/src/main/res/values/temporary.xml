@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_poll_create_heading">Start a poll</string>
+    <string name="screen_poll_publish">Publish to chat</string>
+    <string name="screen_poll_publish_failed">Could not publish. Your draft is retained. Try again.</string>
+    <string name="screen_poll_topic">Poll topic</string>
+    <string name="screen_poll_options">Options · Choose one</string>
+    <string name="screen_poll_settings">Poll settings</string>
+    <string name="screen_poll_hide_results">Show results after ending</string>
+    <string name="screen_poll_hide_results_hint">When enabled, results are hidden until the poll ends.</string>
+</resources>

@@ -15,6 +15,7 @@ import io.element.android.libraries.matrix.api.encryption.BackupUploadState
 import io.element.android.libraries.matrix.api.encryption.EnableRecoveryProgress
 import io.element.android.libraries.matrix.api.encryption.EncryptionService
 import io.element.android.libraries.matrix.api.encryption.IdentityResetHandle
+import io.element.android.libraries.matrix.api.encryption.IdentityResetCompletionState
 import io.element.android.libraries.matrix.api.encryption.RecoveryState
 import io.element.android.libraries.matrix.api.encryption.identity.IdentityState
 import io.element.android.tests.testutils.lambda.lambdaError
@@ -40,6 +41,14 @@ class FakeEncryptionService(
 
     private var recoverFailure: Exception? = null
     private var doesBackupExistOnServerResult: Result<Boolean> = Result.success(true)
+    private var identityResetCompletionStateResult: Result<IdentityResetCompletionState> = Result.success(
+        IdentityResetCompletionState(
+            backupState = BackupState.UNKNOWN,
+            recoveryState = RecoveryState.UNKNOWN,
+            isCurrentSessionVerified = false,
+            backupExistsOnServer = false,
+        )
+    )
 
     private var enableBackupsFailure: Exception? = null
 
@@ -74,6 +83,14 @@ class FakeEncryptionService(
 
     override suspend fun doesBackupExistOnServer(): Result<Boolean> = simulateLongTask {
         return doesBackupExistOnServerResult
+    }
+
+    fun givenIdentityResetCompletionStateResult(result: Result<IdentityResetCompletionState>) {
+        identityResetCompletionStateResult = result
+    }
+
+    override suspend fun getIdentityResetCompletionState(): Result<IdentityResetCompletionState> = simulateLongTask {
+        return identityResetCompletionStateResult
     }
 
     override suspend fun recover(recoveryKey: String): Result<Unit> = simulateLongTask {

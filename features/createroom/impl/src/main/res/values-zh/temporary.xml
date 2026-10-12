@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_create_room_message_retention_title">消息保留方式</string>
+    <string name="screen_create_room_message_retention_standard_title">常规安全聊天</string>
+    <string name="screen_create_room_message_retention_standard_description">消息按组织设置的常规期限保留（当前为30天）。</string>
+    <string name="screen_create_room_message_retention_confidential_title">保密聊天</string>
+    <string name="screen_create_room_message_retention_confidential_description">消息按更短的保密期限保留（当前为7天），换机恢复还需额外审批。</string>
+    <string name="screen_create_room_start_group">发起群聊</string>
+    <string name="screen_create_room_confirm_group">确认建群</string>
+    <string name="screen_create_room_next_count">下一步（%1$d）</string>
+    <string name="screen_create_room_search_contacts">搜索联系人</string>
+    <string name="screen_create_room_contacts_title">联系人</string>
+    <string name="screen_create_room_contacts_loading">正在加载联系人…</string>
+    <string name="screen_create_room_selected_members">已选%1$d人：%2$s</string>
+    <string name="screen_create_room_contacts_empty">先在通讯录添加好友，再发起群聊</string>
+    <string name="screen_create_room_contacts_no_match">没有找到匹配的联系人</string>
+    <string name="screen_create_room_group_details">群资料</string>
+    <string name="screen_create_room_group_name">群名称</string>
+    <string name="screen_create_room_group_members">群成员</string>
+    <string name="screen_create_room_members_count">共%1$d人（含你）</string>
+    <string name="screen_create_room_group_settings">群设置</string>
+    <string name="screen_create_room_join_method">加入方式</string>
+    <string name="screen_create_room_invitation_only">仅限邀请</string>
+    <string name="screen_create_room_public_join">公开加入</string>
+    <string name="screen_create_room_confidential_policy_note">按组织保密期限保留，换机恢复需额外审批。</string>
+    <string name="screen_create_room_standard_policy_note">按组织常规期限保留。</string>
+    <string name="screen_create_room_more_details">更多群资料</string>
+    <string name="screen_create_room_optional">选填</string>
+    <string name="screen_create_room_group_avatar">群头像</string>
+    <string name="screen_create_room_group_service_unavailable">建群安全服务尚未就绪，请稍后重试。</string>
+</resources>

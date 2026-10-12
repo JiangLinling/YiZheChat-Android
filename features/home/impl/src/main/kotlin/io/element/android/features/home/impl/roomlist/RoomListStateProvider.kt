@@ -9,6 +9,8 @@
 package io.element.android.features.home.impl.roomlist
 
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
+import io.element.android.libraries.architecture.AsyncData
+import kotlinx.collections.immutable.persistentSetOf
 import io.element.android.features.home.impl.filters.RoomListFiltersState
 import io.element.android.features.home.impl.filters.aRoomListFiltersState
 import io.element.android.features.home.impl.model.LatestEvent
@@ -56,6 +58,7 @@ internal fun aRoomListState(
     filtersState: RoomListFiltersState = aRoomListFiltersState(),
     spaceFiltersState: SpaceFiltersState = anUnselectedSpaceFiltersState(),
     contentState: RoomListContentState = aRoomsContentState(),
+    unreadSummary: HomeUnreadSummary = HomeUnreadSummary(),
     acceptDeclineInviteState: AcceptDeclineInviteState = anAcceptDeclineInviteState(),
     hideInvitesAvatars: Boolean = false,
     canReportRoom: Boolean = true,
@@ -68,6 +71,13 @@ internal fun aRoomListState(
     searchState = searchState,
     spaceFiltersState = spaceFiltersState,
     contentState = contentState,
+    contactsSummaries = when (contentState) {
+        is RoomListContentState.Rooms -> AsyncData.Success(contentState.summaries)
+        is RoomListContentState.Empty -> AsyncData.Success(persistentListOf())
+        is RoomListContentState.Skeleton -> AsyncData.Loading()
+    },
+    seenRoomInvites = (contentState as? RoomListContentState.Rooms)?.seenRoomInvites ?: persistentSetOf(),
+    unreadSummary = unreadSummary,
     acceptDeclineInviteState = acceptDeclineInviteState,
     hideInvitesAvatars = hideInvitesAvatars,
     canReportRoom = canReportRoom,

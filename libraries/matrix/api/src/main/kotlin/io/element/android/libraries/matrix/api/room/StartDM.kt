@@ -22,8 +22,14 @@ suspend fun MatrixClient.startDM(
     return findDM(userId)
         .fold(
             onSuccess = { existingDM ->
-                if (existingDM != null) {
-                    StartDMResult.Success(existingDM, isNew = false)
+                val existingState = existingDM?.let { roomId -> getRoom(roomId)?.info()?.directRoomRelationState() }
+                val canReuseExistingRoom = existingDM != null && existingState !in setOf(
+                    DirectRoomRelationState.STALE,
+                    DirectRoomRelationState.INVALID,
+                    DirectRoomRelationState.NOT_DIRECT,
+                )
+                if (canReuseExistingRoom) {
+                    StartDMResult.Success(requireNotNull(existingDM), isNew = false)
                 } else if (createIfDmDoesNotExist) {
                     createDM(userId).fold(
                         { StartDMResult.Success(it, isNew = true) },

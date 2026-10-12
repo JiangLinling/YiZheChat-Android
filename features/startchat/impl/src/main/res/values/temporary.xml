@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_add_friend_title">Add friend</string>
+    <string name="screen_add_friend_scan">Scan</string>
+    <string name="screen_add_friend_my_qr_code">My QR code</string>
+    <string name="screen_friend_scan_title">Scan to add friend</string>
+    <string name="screen_friend_scan_description">Scan a YiZhe friend QR code</string>
+    <string name="screen_friend_scan_active">Scanning</string>
+    <string name="screen_friend_scan_waiting">Camera unavailable</string>
+    <string name="screen_friend_scan_camera_permission">Allow camera access to scan a YiZhe friend QR code</string>
+    <string name="screen_friend_scan_my_qr_description">Let a friend scan to add you</string>
+    <string name="screen_friend_scan_invalid">This is not a valid YiZhe friend QR code</string>
+    <string name="screen_friend_scan_again">Scan again</string>
+    <string name="screen_friend_scan_from_image">Scan from photo</string>
+    <string name="screen_friend_my_qr_title">My QR code</string>
+    <string name="screen_friend_my_qr_description">Ask a friend to scan this code to find and add you. No private contact details are included.</string>
+    <string name="screen_add_friend_search_hint">Search a name or account</string>
+    <string name="screen_friend_copy_account">Copy account</string>
+    <string name="screen_friend_account_copied">Account copied</string>
+    <string name="screen_friend_save_qr">Save QR code</string>
+    <string name="screen_friend_qr_saved">QR code saved</string>
+    <string name="screen_friend_qr_save_failed">Could not save QR code</string>
+</resources>

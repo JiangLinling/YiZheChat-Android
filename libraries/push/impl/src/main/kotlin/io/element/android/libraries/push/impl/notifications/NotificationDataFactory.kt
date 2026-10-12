@@ -162,8 +162,9 @@ class DefaultNotificationDataFactory(
         simpleNotifications: List<OneShotNotification>,
         notificationAccountParams: NotificationAccountParams,
     ): SummaryNotification {
+        val childCount = roomNotifications.size + invitationNotifications.size + simpleNotifications.size
         return when {
-            roomNotifications.isEmpty() && invitationNotifications.isEmpty() && simpleNotifications.isEmpty() -> SummaryNotification.Removed
+            childCount == 0 -> SummaryNotification.Removed
             else -> SummaryNotification.Update(
                 summaryGroupMessageCreator.createSummaryNotification(
                     roomNotifications = roomNotifications,

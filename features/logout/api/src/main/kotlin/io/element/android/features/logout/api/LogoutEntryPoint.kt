@@ -14,6 +14,12 @@ import com.bumble.appyx.core.plugin.Plugin
 import io.element.android.libraries.architecture.FeatureEntryPoint
 
 interface LogoutEntryPoint : FeatureEntryPoint {
+    enum class RecoveryDestination {
+        SET_UP,
+        CONFIRM,
+        CHANGE,
+    }
+
     fun createNode(
         parentNode: Node,
         buildContext: BuildContext,
@@ -21,6 +27,6 @@ interface LogoutEntryPoint : FeatureEntryPoint {
     ): Node
 
     interface Callback : Plugin {
-        fun navigateToSecureBackup()
+        fun navigateToRecovery(destination: RecoveryDestination)
     }
 }

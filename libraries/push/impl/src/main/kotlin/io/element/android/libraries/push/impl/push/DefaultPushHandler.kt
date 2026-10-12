@@ -11,6 +11,7 @@ package io.element.android.libraries.push.impl.push
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.SingleIn
+import io.element.android.appconfig.NextDeploymentConfig
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.core.log.logger.LoggerTag
 import io.element.android.libraries.core.meta.BuildMeta
@@ -141,10 +142,12 @@ class DefaultPushHandler(
             )
 
             Timber.d("Queueing notification: $pushRequest")
-            pushHistoryService.insertOrUpdatePushRequest(pushRequest)
+            pushHistoryService.enqueuePushRequest(pushRequest)
             Timber.d("Queueing notification finished")
 
-            if (!workManagerScheduler.hasPendingWork(userId, WorkManagerRequestType.NOTIFICATION_SYNC)) {
+            // Next can yield opportunistic sync as soon as this durable request appears.
+            // Always append a drain job so enqueue/worker-completion races cannot lose its wakeup.
+            if (NextDeploymentConfig.isNextDeployment || !workManagerScheduler.hasPendingWork(userId, WorkManagerRequestType.NOTIFICATION_SYNC)) {
                 Timber.d("No pending worker for push notifications found")
                 workManagerScheduler.submit(syncPendingNotificationsRequestFactory.create(userId))
             }

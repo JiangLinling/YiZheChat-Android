@@ -10,6 +10,7 @@
 
 package io.element.android.features.messages.impl
 
+import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.Lifecycle
 import com.google.common.truth.Truth.assertThat
 import im.vector.app.features.analytics.plan.PinUnpinAction
@@ -21,6 +22,7 @@ import io.element.android.features.messages.impl.actionlist.model.TimelineItemAc
 import io.element.android.features.messages.impl.crypto.identity.anIdentityChangeState
 import io.element.android.features.messages.impl.fixtures.aMessageEvent
 import io.element.android.features.messages.impl.link.aLinkState
+import io.element.android.features.messages.impl.local.FakeMessageReferenceStore
 import io.element.android.features.messages.impl.messagecomposer.MessageComposerEvent
 import io.element.android.features.messages.impl.messagecomposer.MessageComposerState
 import io.element.android.features.messages.impl.messagecomposer.aMessageComposerState
@@ -28,6 +30,7 @@ import io.element.android.features.messages.impl.pinned.banner.aLoadedPinnedMess
 import io.element.android.features.messages.impl.threads.list.aThreadListItem
 import io.element.android.features.messages.impl.timeline.FakeMarkAsFullyRead
 import io.element.android.features.messages.impl.timeline.MarkAsFullyRead
+import io.element.android.features.messages.impl.timeline.MESSAGE_REMOVAL_DESTRUCTION_MILLIS
 import io.element.android.features.messages.impl.timeline.TimelineController
 import io.element.android.features.messages.impl.timeline.TimelineEvent
 import io.element.android.features.messages.impl.timeline.aTimelineState
@@ -44,6 +47,9 @@ import io.element.android.features.messages.test.timeline.FakeHtmlConverterProvi
 import io.element.android.features.messages.test.timeline.voicemessages.composer.FakeDefaultVoiceMessageComposerPresenterFactory
 import io.element.android.features.roomcall.api.aStandByCallState
 import io.element.android.features.roommembermoderation.api.RoomMemberModerationState
+import io.element.android.features.roommembermoderation.api.RoomMemberModerationEvents
+import io.element.android.features.userprofile.api.FriendProfileRepository
+import io.element.android.features.userprofile.test.FakeFriendProfileRepository
 import io.element.android.libraries.androidutils.clipboard.FakeClipboardHelper
 import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.architecture.Presenter
@@ -54,14 +60,20 @@ import io.element.android.libraries.designsystem.components.avatar.AvatarSize
 import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
 import io.element.android.libraries.featureflag.api.FeatureFlags
 import io.element.android.libraries.featureflag.test.FakeFeatureFlagService
+import io.element.android.libraries.matrix.api.core.DeviceId
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
+import io.element.android.libraries.matrix.api.core.SendHandle
 import io.element.android.libraries.matrix.api.core.ThreadId
+import io.element.android.libraries.matrix.api.core.UniqueId
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.core.toThreadId
 import io.element.android.libraries.matrix.api.encryption.identity.IdentityState
+import io.element.android.libraries.matrix.api.encryption.HistoryRecoveryStatus
+import io.element.android.libraries.preferences.test.InMemorySessionPreferencesStore
 import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.matrix.api.permalink.PermalinkParser
+import io.element.android.libraries.matrix.api.room.DirectRoomRelationState
 import io.element.android.libraries.matrix.api.room.MessageEventType
 import io.element.android.libraries.matrix.api.room.RoomMembersState
 import io.element.android.libraries.matrix.api.room.RoomMembershipState
@@ -69,11 +81,16 @@ import io.element.android.libraries.matrix.api.room.StateEventType
 import io.element.android.libraries.matrix.api.room.history.RoomHistoryVisibility
 import io.element.android.libraries.matrix.api.room.tombstone.SuccessorRoom
 import io.element.android.libraries.matrix.api.timeline.Timeline
+import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.api.timeline.item.TimelineItemDebugInfo
 import io.element.android.libraries.matrix.api.timeline.item.event.EventOrTransactionId
+import io.element.android.libraries.matrix.api.timeline.item.event.LocalEventSendState
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageClipboardSource
+import io.element.android.libraries.matrix.api.timeline.item.event.SendHandleProvider
 import io.element.android.libraries.matrix.api.timeline.item.event.toEventOrTransactionId
 import io.element.android.libraries.matrix.test.AN_AVATAR_URL
 import io.element.android.libraries.matrix.test.AN_EVENT_ID
+import io.element.android.libraries.matrix.test.AN_EVENT_ID_2
 import io.element.android.libraries.matrix.test.AN_EXCEPTION
 import io.element.android.libraries.matrix.test.A_CAPTION
 import io.element.android.libraries.matrix.test.A_ROOM_ID
@@ -82,6 +99,7 @@ import io.element.android.libraries.matrix.test.A_SESSION_ID_2
 import io.element.android.libraries.matrix.test.A_THREAD_ID
 import io.element.android.libraries.matrix.test.A_USER_ID
 import io.element.android.libraries.matrix.test.A_USER_ID_2
+import io.element.android.libraries.matrix.test.core.FakeSendHandle
 import io.element.android.libraries.matrix.test.core.aBuildMeta
 import io.element.android.libraries.matrix.test.encryption.FakeEncryptionService
 import io.element.android.libraries.matrix.test.permalink.FakePermalinkParser
@@ -99,6 +117,7 @@ import io.element.android.libraries.textcomposer.model.MessageComposerMode
 import io.element.android.libraries.textcomposer.model.TextEditorState
 import io.element.android.libraries.textcomposer.model.aTextEditorStateMarkdown
 import io.element.android.services.analytics.test.FakeAnalyticsService
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.tests.testutils.EventsRecorder
 import io.element.android.tests.testutils.FakeLifecycleOwner
 import io.element.android.tests.testutils.WarmUpRule
@@ -111,10 +130,14 @@ import io.element.android.tests.testutils.lambda.value
 import io.element.android.tests.testutils.testCoroutineDispatchers
 import io.element.android.tests.testutils.testWithLifecycleOwner
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentSetOf
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -127,6 +150,50 @@ import kotlin.time.Duration.Companion.seconds
 class MessagesPresenterTest {
     @get:Rule
     val warmUpRule = WarmUpRule()
+
+    @Test
+    fun `direct chat avatar opens profile without moderation sheet`() = runTest {
+        var openedUser: UserId? = null
+        val moderationEvents = EventsRecorder<RoomMemberModerationEvents>(expectEvents = false)
+        val presenter = createMessagesPresenter(
+            joinedRoom = FakeJoinedRoom(baseRoom = FakeBaseRoom(initialRoomInfo = aRoomInfo(isDm = true))),
+            navigator = FakeMessagesNavigator(navigateToMemberLambda = { openedUser = it }),
+            roomMemberModerationPresenter = Presenter {
+                object : RoomMemberModerationState {
+                    override val permissions = aRoomMemberModerationState().permissions
+                    override val eventSink = moderationEvents
+                }
+            },
+        )
+        presenter.testWithLifecycleOwner {
+            val state = consumeItemsUntilTimeout().last()
+            state.eventSink(MessagesEvent.OnUserClicked(MatrixUser(A_USER_ID_2)))
+            assertThat(openedUser).isEqualTo(A_USER_ID_2)
+            moderationEvents.assertEmpty()
+        }
+    }
+
+    @Test
+    fun `group avatar opens profile without moderation sheet`() = runTest {
+        var openedUser: UserId? = null
+        val moderationEvents = EventsRecorder<RoomMemberModerationEvents>(expectEvents = false)
+        val presenter = createMessagesPresenter(
+            navigator = FakeMessagesNavigator(navigateToMemberLambda = { openedUser = it }),
+            roomMemberModerationPresenter = Presenter {
+                object : RoomMemberModerationState {
+                    override val permissions = aRoomMemberModerationState().permissions
+                    override val eventSink = moderationEvents
+                }
+            },
+        )
+        presenter.testWithLifecycleOwner {
+            val state = consumeItemsUntilTimeout().last()
+            val user = MatrixUser(A_USER_ID_2)
+            state.eventSink(MessagesEvent.OnUserClicked(user))
+            assertThat(openedUser).isEqualTo(A_USER_ID_2)
+            moderationEvents.assertEmpty()
+        }
+    }
 
     @Test
     fun `present - initial state`() = runTest {
@@ -219,6 +286,7 @@ class MessagesPresenterTest {
             joinedRoom = room,
             addRecentEmoji = AddRecentEmoji { addRecentEmojiResult(it) },
             coroutineDispatchers = coroutineDispatchers,
+            sessionCoroutineScope = this,
         )
         presenter.testWithLifecycleOwner {
             skipItems(1)
@@ -264,7 +332,8 @@ class MessagesPresenterTest {
             timeline = timeline,
             joinedRoom = room,
             addRecentEmoji = AddRecentEmoji { addRecentEmoji(it) },
-            coroutineDispatchers = coroutineDispatchers
+            coroutineDispatchers = coroutineDispatchers,
+            sessionCoroutineScope = this,
         )
         presenter.testWithLifecycleOwner {
             val initialState = awaitItem()
@@ -298,15 +367,137 @@ class MessagesPresenterTest {
     }
 
     @Test
-    fun `present - handle action copy`() = runTest {
+    fun `present - outgoing friend request cannot send or pin messages`() = runTest {
+        val room = FakeJoinedRoom(
+            baseRoom = FakeBaseRoom(
+                roomPermissions = roomPermissions(),
+                initialRoomInfo = aRoomInfo(
+                    isDm = true,
+                    activeMembersCount = 2,
+                    invitedMembersCount = 1,
+                    joinedMembersCount = 1,
+                ),
+            ),
+            typingNoticeResult = { Result.success(Unit) },
+        )
+        val presenter = createMessagesPresenter(joinedRoom = room)
+
+        presenter.testWithLifecycleOwner {
+            val state = consumeItemsUntilTimeout().last()
+            assertThat(state.directRoomRelationState).isEqualTo(DirectRoomRelationState.OUTGOING_REQUEST)
+            assertThat(state.userEventPermissions.canSendMessage).isFalse()
+            assertThat(state.userEventPermissions.canSendReaction).isFalse()
+            assertThat(state.userEventPermissions.canPinUnpin).isFalse()
+        }
+    }
+
+    @Test
+    fun `present - recent emoji failure does not block reaction lifecycle receipts`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val timeline = FakeTimeline().apply {
+            toggleReactionLambda = { _, _ -> Result.success(true) }
+        }
+        val presenter = createMessagesPresenter(
+            timeline = timeline,
+            addRecentEmoji = AddRecentEmoji { Result.failure(IllegalStateException("local recents unavailable")) },
+            appOperationalStateCoordinator = coordinator,
+            coroutineDispatchers = testCoroutineDispatchers(useUnconfinedTestDispatcher = true),
+            sessionCoroutineScope = this,
+        )
+
+        presenter.testWithLifecycleOwner {
+            val state = awaitItem()
+            state.eventSink(MessagesEvent.ToggleReaction("👍", AN_EVENT_ID.toEventOrTransactionId()))
+            advanceUntilIdle()
+
+            assertThat(coordinator.startedRequests).hasSize(1)
+            assertThat(coordinator.clientReceipts).hasSize(2)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - unsigned device confirmation resends before starting call`() = runTest {
+        val devices = mapOf(A_USER_ID to listOf(DeviceId("NEW_DEVICE")))
+        val sendHandle = FakeSendHandle()
+        var resendCompleted = false
+        var callStarted = false
+        val room = FakeJoinedRoom(
+            ignoreDeviceTrustAndResendResult = { actualDevices: Map<UserId, List<DeviceId>>, actualHandle: SendHandle ->
+                assertThat(actualDevices).isEqualTo(devices)
+                assertThat(actualHandle).isSameInstanceAs(sendHandle)
+                resendCompleted = true
+                Result.success(Unit)
+            },
+        )
+        val navigator = FakeMessagesNavigator(
+            navigateToRoomCallLambda = { roomId, isAudioCall ->
+                assertThat(resendCompleted).isTrue()
+                assertThat(roomId).isEqualTo(A_ROOM_ID)
+                assertThat(isAudioCall).isTrue()
+                callStarted = true
+            },
+        )
+        val failedEvent = aMessageEvent(
+            sendState = LocalEventSendState.Failed.VerifiedUserHasUnsignedDevice(devices),
+            sendHandleProvider = SendHandleProvider { sendHandle },
+        )
+        val presenter = createMessagesPresenter(joinedRoom = room, navigator = navigator)
+
+        presenter.testWithLifecycleOwner {
+            val initialState = awaitItem()
+            initialState.eventSink(MessagesEvent.ResolveUnsignedDeviceAndStartCall(failedEvent, isAudioCall = true))
+            advanceUntilIdle()
+
+            assertThat(resendCompleted).isTrue()
+            assertThat(callStarted).isTrue()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - failed unsigned device resend keeps call blocked`() = runTest {
+        val devices = mapOf(A_USER_ID to listOf(DeviceId("NEW_DEVICE")))
+        val sendHandle = FakeSendHandle()
+        var callStarted = false
+        val room = FakeJoinedRoom(
+            ignoreDeviceTrustAndResendResult = { _, _ -> Result.failure(AN_EXCEPTION) },
+        )
+        val navigator = FakeMessagesNavigator(
+            navigateToRoomCallLambda = { _, _ -> callStarted = true },
+        )
+        val failedEvent = aMessageEvent(
+            sendState = LocalEventSendState.Failed.VerifiedUserHasUnsignedDevice(devices),
+            sendHandleProvider = SendHandleProvider { sendHandle },
+        )
+        val presenter = createMessagesPresenter(joinedRoom = room, navigator = navigator)
+
+        presenter.testWithLifecycleOwner {
+            val initialState = awaitItem()
+            initialState.eventSink(MessagesEvent.ResolveUnsignedDeviceAndStartCall(failedEvent, isAudioCall = false))
+            advanceUntilIdle()
+
+            assertThat(callStarted).isFalse()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - event plaintext copy fails closed until source authorization is projected`() = runTest {
         val clipboardHelper = FakeClipboardHelper()
         val event = aMessageEvent()
-        val presenter = createMessagesPresenter(clipboardHelper = clipboardHelper)
+        val presenter = createMessagesPresenter(
+            clipboardHelper = clipboardHelper,
+            timelinePresenter = Presenter { aTimelineState(timelineItems = persistentListOf(event)) },
+        )
         presenter.testWithLifecycleOwner {
             val initialState = awaitItem()
             initialState.eventSink(MessagesEvent.HandleAction(TimelineItemAction.CopyText, event))
-            skipItems(2)
-            assertThat(clipboardHelper.clipboardContents).isEqualTo((event.content as TimelineItemTextContent).body)
+            val feedbackState = consumeItemsUntilPredicate { it.favouriteSnackbarMessage != null }.last()
+            assertThat(clipboardHelper.clipboardContents).isNull()
+            assertThat(requireNotNull(feedbackState.favouriteSnackbarMessage).messageResId)
+                .isEqualTo(R.string.screen_room_timeline_copy_not_allowed)
+            assertThat(feedbackState.snackbarMessage).isNull()
         }
     }
 
@@ -534,6 +725,7 @@ class MessagesPresenterTest {
     @Test
     fun `present - handle action redact`() = runTest {
         val coroutineDispatchers = testCoroutineDispatchers(useUnconfinedTestDispatcher = true)
+        val coordinator = FakeAppOperationalStateCoordinator()
 
         val liveTimeline = FakeTimeline()
         val joinedRoom = FakeJoinedRoom(
@@ -550,6 +742,7 @@ class MessagesPresenterTest {
             timeline = liveTimeline,
             joinedRoom = joinedRoom,
             coroutineDispatchers = coroutineDispatchers,
+            appOperationalStateCoordinator = coordinator,
         )
         presenter.testWithLifecycleOwner {
             val initialState = awaitItem()
@@ -559,6 +752,227 @@ class MessagesPresenterTest {
             assert(redactEventLambda)
                 .isCalledOnce()
                 .with(value(messageEvent.eventOrTransactionId), value(null))
+            val request = coordinator.startedRequests.single()
+            fun hash(value: String) = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(value.toByteArray()).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            assertThat(request.accountIdHash).isEqualTo(hash(joinedRoom.sessionId.value))
+            assertThat(request.matrixDeviceIdHash).isEqualTo(hash(io.element.android.libraries.matrix.test.A_DEVICE_ID.value))
+            assertThat(request.roomIdHash).isEqualTo(hash(joinedRoom.roomId.value))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - current explicitly unprotected event plaintext can be copied`() = runTest {
+        val clipboardHelper = FakeClipboardHelper()
+        val event = aMessageEvent().copy(clipboardSource = MessageClipboardSource.Unprotected)
+        val presenter = createMessagesPresenter(
+            clipboardHelper = clipboardHelper,
+            timelinePresenter = Presenter { aTimelineState(timelineItems = persistentListOf(event)) },
+        )
+        presenter.testWithLifecycleOwner {
+            val initialState = awaitItem()
+            initialState.eventSink(MessagesEvent.HandleAction(TimelineItemAction.CopyText, event))
+            val feedbackState = consumeItemsUntilPredicate { it.favouriteSnackbarMessage != null }.last()
+            assertThat(clipboardHelper.clipboardContents).isEqualTo((event.content as TimelineItemTextContent).body)
+            assertThat(requireNotNull(feedbackState.favouriteSnackbarMessage).messageResId)
+                .isEqualTo(R.string.screen_room_timeline_message_copied)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - protected copy binds exact current projection authority`() = runTest {
+        val clipboardHelper = FakeClipboardHelper()
+        val source = protectedClipboardSource(authorizationRevision = 7L)
+        val event = aMessageEvent().copy(clipboardSource = source)
+        val presenter = createMessagesPresenter(
+            clipboardHelper = clipboardHelper,
+            timelinePresenter = Presenter { aTimelineState(timelineItems = persistentListOf(event)) },
+        )
+        presenter.testWithLifecycleOwner {
+            val initialState = awaitItem()
+            initialState.eventSink(MessagesEvent.HandleAction(TimelineItemAction.CopyText, event))
+            val feedbackState = consumeItemsUntilPredicate { it.favouriteSnackbarMessage != null }.last()
+            assertThat(clipboardHelper.clipboardContents).isEqualTo((event.content as TimelineItemTextContent).body)
+            assertThat(clipboardHelper.protectedSource?.authorizationRevision).isEqualTo(7L)
+            assertThat(requireNotNull(feedbackState.favouriteSnackbarMessage).messageResId)
+                .isEqualTo(R.string.screen_room_timeline_message_copied)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - stale action cannot copy after current projection authority changes`() = runTest {
+        val clipboardHelper = FakeClipboardHelper()
+        val staleEvent = aMessageEvent().copy(clipboardSource = protectedClipboardSource(authorizationRevision = 7L))
+        val currentEvent = staleEvent.copy(clipboardSource = protectedClipboardSource(authorizationRevision = 8L))
+        val presenter = createMessagesPresenter(
+            clipboardHelper = clipboardHelper,
+            timelinePresenter = Presenter { aTimelineState(timelineItems = persistentListOf(currentEvent)) },
+        )
+        presenter.testWithLifecycleOwner {
+            val initialState = awaitItem()
+            initialState.eventSink(MessagesEvent.HandleAction(TimelineItemAction.CopyText, staleEvent))
+            val feedbackState = consumeItemsUntilPredicate { it.favouriteSnackbarMessage != null }.last()
+            assertThat(clipboardHelper.clipboardContents).isNull()
+            assertThat(requireNotNull(feedbackState.favouriteSnackbarMessage).messageResId)
+                .isEqualTo(R.string.screen_room_timeline_copy_not_allowed)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - rejected copy link does not report success`() = runTest {
+        val clipboardHelper = FakeClipboardHelper().apply { allowCopy = false }
+        val event = aMessageEvent()
+        val room = FakeJoinedRoom(
+            baseRoom = FakeBaseRoom(
+                roomPermissions = roomPermissions(),
+                eventPermalinkResult = { Result.success("a link") },
+            ),
+            typingNoticeResult = { Result.success(Unit) },
+        )
+        val presenter = createMessagesPresenter(
+            clipboardHelper = clipboardHelper,
+            joinedRoom = room,
+        )
+        presenter.testWithLifecycleOwner {
+            val initialState = awaitItem()
+            initialState.eventSink(MessagesEvent.HandleAction(TimelineItemAction.CopyLink, event))
+            val feedbackState = consumeItemsUntilPredicate { it.favouriteSnackbarMessage != null }.last()
+            assertThat(clipboardHelper.clipboardContents).isNull()
+            assertThat(requireNotNull(feedbackState.favouriteSnackbarMessage).messageResId)
+                .isEqualTo(R.string.screen_room_timeline_copy_not_allowed)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - handle action redact uses the server event after optimistic identity is confirmed`() = runTest {
+        val coroutineDispatchers = testCoroutineDispatchers(useUnconfinedTestDispatcher = true)
+        val liveTimeline = FakeTimeline()
+        val joinedRoom = FakeJoinedRoom(
+            baseRoom = FakeBaseRoom(roomPermissions = roomPermissions()),
+            liveTimeline = liveTimeline,
+            typingNoticeResult = { Result.success(Unit) },
+        )
+        val redactEventLambda = lambdaRecorder { _: EventOrTransactionId, _: String? -> Result.success(Unit) }
+        liveTimeline.redactEventLambda = redactEventLambda
+        val presenter = createMessagesPresenter(
+            timeline = liveTimeline,
+            joinedRoom = joinedRoom,
+            coroutineDispatchers = coroutineDispatchers,
+        )
+
+        presenter.testWithLifecycleOwner {
+            val initialState = awaitItem()
+            val confirmedEvent = aMessageEvent().copy(id = UniqueId("optimistic:confirmed"))
+            initialState.eventSink(MessagesEvent.HandleAction(TimelineItemAction.Redact, confirmedEvent))
+            awaitItem()
+            assert(redactEventLambda)
+                .isCalledOnce()
+                .with(value(confirmedEvent.eventOrTransactionId), value(null))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - successful redaction prepares then commits one removal transition`() = runTest {
+        val timelineEvents = mutableListOf<TimelineEvent>()
+        val liveTimeline = FakeTimeline().apply {
+            redactEventLambda = { _, _ -> Result.success(Unit) }
+        }
+        val presenter = createMessagesPresenter(
+            timeline = liveTimeline,
+            joinedRoom = FakeJoinedRoom(
+                baseRoom = FakeBaseRoom(roomPermissions = roomPermissions()),
+                liveTimeline = liveTimeline,
+                typingNoticeResult = { Result.success(Unit) },
+            ),
+            timelineEventSink = timelineEvents::add,
+        )
+
+        presenter.testWithLifecycleOwner {
+            val initial = awaitItem()
+            initial.eventSink(MessagesEvent.HandleAction(TimelineItemAction.Withdraw, aMessageEvent()))
+            runCurrent()
+
+            assertThat(timelineEvents).containsExactly(
+                TimelineEvent.PrepareMessageRemoval(AN_EVENT_ID),
+                TimelineEvent.CommitMessageRemoval(AN_EVENT_ID),
+            ).inOrder()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - local deletion stays visible for the terminal animation when the store publishes first`() = runTest {
+        val event = aMessageEvent()
+        val timelineEvents = mutableListOf<TimelineEvent>()
+        val messageReferenceStore = FakeMessageReferenceStore()
+        val presenter = createMessagesPresenter(
+            timelinePresenter = Presenter {
+                aTimelineState(
+                    timelineItems = persistentListOf(event),
+                    eventSink = timelineEvents::add,
+                )
+            },
+            messageReferenceStore = messageReferenceStore,
+        )
+
+        presenter.testWithLifecycleOwner {
+            val initial = consumeItemsUntilPredicate { state ->
+                state.timelineState.timelineItems.any { item ->
+                    (item as? io.element.android.features.messages.impl.timeline.model.TimelineItem.Event)?.eventId == AN_EVENT_ID
+                }
+            }.last()
+            initial.eventSink(MessagesEvent.HandleAction(TimelineItemAction.DeleteLocal, event))
+            runCurrent()
+
+            val animating = consumeItemsUntilPredicate { state ->
+                TimelineEvent.CommitMessageRemoval(AN_EVENT_ID) in timelineEvents &&
+                    state.timelineState.timelineItems.any { item ->
+                        (item as? io.element.android.features.messages.impl.timeline.model.TimelineItem.Event)?.eventId == AN_EVENT_ID
+                    }
+            }.last()
+            assertThat(messageReferenceStore.state.value.isLocallyDeleted(A_ROOM_ID, AN_EVENT_ID)).isTrue()
+            assertThat(animating.timelineState.timelineItems).isNotEmpty()
+
+            advanceTimeBy(MESSAGE_REMOVAL_DESTRUCTION_MILLIS)
+            runCurrent()
+            val settled = consumeItemsUntilPredicate { it.timelineState.timelineItems.isEmpty() }.last()
+            assertThat(settled.timelineState.timelineItems).isEmpty()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - failed redaction emits exactly one cancellation and no commit`() = runTest {
+        val timelineEvents = mutableListOf<TimelineEvent>()
+        val liveTimeline = FakeTimeline().apply {
+            redactEventLambda = { _, _ -> Result.failure(AN_EXCEPTION) }
+        }
+        val presenter = createMessagesPresenter(
+            timeline = liveTimeline,
+            joinedRoom = FakeJoinedRoom(
+                baseRoom = FakeBaseRoom(roomPermissions = roomPermissions()),
+                liveTimeline = liveTimeline,
+                typingNoticeResult = { Result.success(Unit) },
+            ),
+            timelineEventSink = timelineEvents::add,
+        )
+
+        presenter.testWithLifecycleOwner {
+            val initial = awaitItem()
+            initial.eventSink(MessagesEvent.HandleAction(TimelineItemAction.Withdraw, aMessageEvent()))
+            runCurrent()
+
+            assertThat(timelineEvents).containsExactly(
+                TimelineEvent.PrepareMessageRemoval(AN_EVENT_ID),
+                TimelineEvent.CancelMessageRemoval(AN_EVENT_ID),
+            ).inOrder()
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
@@ -883,7 +1297,6 @@ class MessagesPresenterTest {
 
     @Test
     fun `present - handle action pin`() = runTest {
-        val successPinEventLambda = lambdaRecorder { _: EventId -> Result.success(true) }
         val failurePinEventLambda = lambdaRecorder { _: EventId -> Result.failure<Boolean>(AN_EXCEPTION) }
         val analyticsService = FakeAnalyticsService()
         val timeline = FakeTimeline()
@@ -894,6 +1307,10 @@ class MessagesPresenterTest {
             liveTimeline = timeline,
             typingNoticeResult = { Result.success(Unit) },
         )
+        val successPinEventLambda = lambdaRecorder { eventId: EventId ->
+            room.givenRoomInfo(aRoomInfo(pinnedEventIds = listOf(eventId)))
+            Result.success(true)
+        }
         val presenter = createMessagesPresenter(
             timeline = timeline,
             joinedRoom = room,
@@ -912,8 +1329,8 @@ class MessagesPresenterTest {
             timeline.pinEventLambda = failurePinEventLambda
             initialState.eventSink(MessagesEvent.HandleAction(TimelineItemAction.Pin, messageEvent))
             assert(failurePinEventLambda).isCalledOnce().with(value(messageEvent.eventId))
-            skipItems(1)
-            assertThat(awaitItem().snackbarMessage).isNotNull()
+            val failureState = consumeItemsUntilPredicate { it.snackbarMessage != null }.last()
+            assertThat(failureState.snackbarMessage).isNotNull()
             assertThat(analyticsService.capturedEvents).containsExactly(
                 PinUnpinAction(kind = PinUnpinAction.Kind.Pin, from = PinUnpinAction.From.Timeline),
                 PinUnpinAction(kind = PinUnpinAction.Kind.Pin, from = PinUnpinAction.From.Timeline)
@@ -922,8 +1339,90 @@ class MessagesPresenterTest {
     }
 
     @Test
+    fun `pin mutations wait for authenticated room state before starting the next mutation`() = runTest {
+        val calls = mutableListOf<EventId>()
+        val timeline = FakeTimeline().apply {
+            pinEventLambda = { eventId ->
+                calls += eventId
+                Result.success(true)
+            }
+        }
+        val room = FakeJoinedRoom(
+            baseRoom = FakeBaseRoom(roomPermissions = roomPermissions()),
+            liveTimeline = timeline,
+            typingNoticeResult = { Result.success(Unit) },
+        )
+        val presenter = createMessagesPresenter(timeline = timeline, joinedRoom = room)
+
+        presenter.testWithLifecycleOwner {
+            val state = awaitItem()
+            state.eventSink(MessagesEvent.HandleAction(TimelineItemAction.Pin, aMessageEvent(eventId = AN_EVENT_ID)))
+            runCurrent()
+            state.eventSink(MessagesEvent.HandleAction(TimelineItemAction.Pin, aMessageEvent(eventId = AN_EVENT_ID_2)))
+            runCurrent()
+
+            assertThat(calls).containsExactly(AN_EVENT_ID)
+
+            room.givenRoomInfo(aRoomInfo(pinnedEventIds = listOf(AN_EVENT_ID)))
+            runCurrent()
+            assertThat(calls).containsExactly(AN_EVENT_ID, AN_EVENT_ID_2).inOrder()
+
+            room.givenRoomInfo(aRoomInfo(pinnedEventIds = listOf(AN_EVENT_ID, AN_EVENT_ID_2)))
+            runCurrent()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `present - favourite action exposes feedback only in the current room`() = runTest {
+        val presenter = createMessagesPresenter()
+        presenter.testWithLifecycleOwner {
+            val initialState = awaitItem()
+            initialState.eventSink(
+                MessagesEvent.HandleAction(
+                    action = TimelineItemAction.Favourite,
+                    event = aMessageEvent(content = aTimelineItemTextContent()),
+                )
+            )
+
+            val feedbackState = consumeItemsUntilPredicate { it.favouriteSnackbarMessage != null }.last()
+            val feedback = requireNotNull(feedbackState.favouriteSnackbarMessage)
+            assertThat(feedback.messageResId).isEqualTo(R.string.message_favourited)
+            assertThat(feedbackState.snackbarMessage).isNull()
+
+            feedbackState.eventSink(MessagesEvent.DismissFavouriteSnackbar(feedback.id))
+            assertThat(awaitItem().favouriteSnackbarMessage).isNull()
+        }
+    }
+
+    @Test
+    fun `stable history recovery notice acknowledgement hides the same security state`() = runTest {
+        val status = HistoryRecoveryStatus.FAILED_CLOSED
+        val preferences = InMemorySessionPreferencesStore()
+        val token = historyRecoveryNoticeToken(status, candidateCount = 3)
+
+        assertThat(shouldDisplayHistoryRecoveryBanner(status, acknowledged = false)).isTrue()
+        preferences.acknowledgeHistoryRecoveryBanner(A_ROOM_ID.value, token)
+
+        assertThat(preferences.isHistoryRecoveryBannerAcknowledged(A_ROOM_ID.value, token).first()).isTrue()
+        assertThat(shouldDisplayHistoryRecoveryBanner(status, acknowledged = true)).isFalse()
+    }
+
+    @Test
+    fun `new history candidates do not inherit an older notice acknowledgement`() = runTest {
+        val status = HistoryRecoveryStatus.FAILED_CLOSED
+        val preferences = InMemorySessionPreferencesStore()
+        val oldToken = historyRecoveryNoticeToken(status, candidateCount = 2)
+        val newToken = historyRecoveryNoticeToken(status, candidateCount = 3)
+
+        preferences.acknowledgeHistoryRecoveryBanner(A_ROOM_ID.value, oldToken)
+
+        assertThat(preferences.isHistoryRecoveryBannerAcknowledged(A_ROOM_ID.value, oldToken).first()).isTrue()
+        assertThat(preferences.isHistoryRecoveryBannerAcknowledged(A_ROOM_ID.value, newToken).first()).isFalse()
+    }
+
+    @Test
     fun `present - handle action unpin`() = runTest {
-        val successUnpinEventLambda = lambdaRecorder { _: EventId -> Result.success(true) }
         val failureUnpinEventLambda = lambdaRecorder { _: EventId -> Result.failure<Boolean>(AN_EXCEPTION) }
         val timeline = FakeTimeline()
         val analyticsService = FakeAnalyticsService()
@@ -934,6 +1433,11 @@ class MessagesPresenterTest {
             liveTimeline = timeline,
             typingNoticeResult = { Result.success(Unit) },
         )
+        room.givenRoomInfo(aRoomInfo(pinnedEventIds = listOf(AN_EVENT_ID)))
+        val successUnpinEventLambda = lambdaRecorder { _: EventId ->
+            room.givenRoomInfo(aRoomInfo(pinnedEventIds = emptyList()))
+            Result.success(true)
+        }
         val presenter = createMessagesPresenter(
             timeline = timeline,
             joinedRoom = room,
@@ -952,8 +1456,8 @@ class MessagesPresenterTest {
             timeline.unpinEventLambda = failureUnpinEventLambda
             initialState.eventSink(MessagesEvent.HandleAction(TimelineItemAction.Unpin, messageEvent))
             assert(failureUnpinEventLambda).isCalledOnce().with(value(messageEvent.eventId))
-            skipItems(1)
-            assertThat(awaitItem().snackbarMessage).isNotNull()
+            val failureState = consumeItemsUntilPredicate { it.snackbarMessage != null }.last()
+            assertThat(failureState.snackbarMessage).isNotNull()
             assertThat(analyticsService.capturedEvents).containsExactly(
                 PinUnpinAction(kind = PinUnpinAction.Kind.Unpin, from = PinUnpinAction.From.Timeline),
                 PinUnpinAction(kind = PinUnpinAction.Kind.Unpin, from = PinUnpinAction.From.Timeline)
@@ -1345,6 +1849,57 @@ class MessagesPresenterTest {
         canPinUnpin = canPinUnpin,
     )
 
+    @Test
+    fun `previous SDK failure retries through the action menu entry point`() = runTest {
+        val called = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val presenter = createMessagesPresenter()
+        presenter.testWithLifecycleOwner {
+            val initial = awaitItem()
+            val event = aMessageEvent(
+                sendState = io.element.android.libraries.matrix.api.timeline.item.event.LocalEventSendState.Failed.Unknown("previous failure"),
+                sendHandleProvider = io.element.android.libraries.matrix.api.timeline.item.event.SendHandleProvider {
+                    io.element.android.libraries.matrix.api.core.SendHandle { called.complete(Unit); Result.success(Unit) }
+                },
+            )
+            initial.eventSink(MessagesEvent.HandleAction(TimelineItemAction.Retry, event))
+            called.await()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `paused current room stays visible and Stop clears it without restarting capture`() = runTest {
+        var stops = 0
+        val manager = FakeActiveLiveLocationShareManager(stopShareLambda = { stops++; Result.success(Unit) })
+        manager.givenPausedShare(A_ROOM_ID, io.element.android.features.location.api.live.PausedLiveLocationShare.RECOVERABLE)
+        val presenter = createMessagesPresenter(liveLocationShareManager = manager)
+        presenter.testWithLifecycleOwner {
+            val state = consumeItemsUntilTimeout().last()
+            assertThat(state.showLiveLocationShareBanner).isTrue()
+            assertThat(state.pausedLiveLocationShare).isEqualTo(io.element.android.features.location.api.live.PausedLiveLocationShare.RECOVERABLE)
+            assertThat(manager.sharingRoomIds.value).isEmpty()
+            state.eventSink(MessagesEvent.StopLiveLocationShare)
+            advanceUntilIdle()
+            val stoppedState = consumeItemsUntilTimeout().last()
+            assertThat(stoppedState.showLiveLocationShareBanner).isFalse()
+            assertThat(stoppedState.pausedLiveLocationShare).isNull()
+            assertThat(stops).isEqualTo(1)
+            assertThat(manager.pausedShares.value).isEmpty()
+            assertThat(manager.sharingRoomIds.value).isEmpty()
+        }
+    }
+
+    @Test
+    fun `pause from another room is not projected into current chat`() = runTest {
+        val manager = FakeActiveLiveLocationShareManager()
+        manager.givenPausedShare(RoomId("!other:matrix.org"), io.element.android.features.location.api.live.PausedLiveLocationShare.RECOVERABLE)
+        createMessagesPresenter(liveLocationShareManager = manager).testWithLifecycleOwner {
+            val state = consumeItemsUntilTimeout().last()
+            assertThat(state.showLiveLocationShareBanner).isFalse()
+            assertThat(state.pausedLiveLocationShare).isNull()
+        }
+    }
+
     private fun TestScope.createMessagesPresenter(
         coroutineDispatchers: CoroutineDispatchers = testCoroutineDispatchers(),
         timeline: Timeline = FakeTimeline(),
@@ -1383,13 +1938,21 @@ class MessagesPresenterTest {
         addRecentEmoji: AddRecentEmoji = AddRecentEmoji { _ -> lambdaError() },
         markAsFullyRead: MarkAsFullyRead = FakeMarkAsFullyRead(),
         liveLocationShareManager: FakeActiveLiveLocationShareManager = FakeActiveLiveLocationShareManager(),
+        messageReferenceStore: FakeMessageReferenceStore = FakeMessageReferenceStore(),
+        friendProfileRepository: FriendProfileRepository = FakeFriendProfileRepository(),
+        sessionPreferencesStore: InMemorySessionPreferencesStore = InMemorySessionPreferencesStore(),
+        timelinePresenter: Presenter<io.element.android.features.messages.impl.timeline.TimelineState> = Presenter {
+            aTimelineState(eventSink = timelineEventSink)
+        },
+        appOperationalStateCoordinator: FakeAppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
+        sessionCoroutineScope: CoroutineScope = backgroundScope,
     ): MessagesPresenter {
         return MessagesPresenter(
             navigator = navigator,
             room = joinedRoom,
             composerPresenter = messageComposerPresenter,
             voiceMessageComposerPresenterFactory = FakeDefaultVoiceMessageComposerPresenterFactory(backgroundScope),
-            timelinePresenter = { aTimelineState(eventSink = timelineEventSink) },
+            timelinePresenter = timelinePresenter,
             timelineProtectionPresenter = { aTimelineProtectionState() },
             identityChangeStatePresenter = { anIdentityChangeState() },
             linkPresenter = { aLinkState() },
@@ -1413,7 +1976,23 @@ class MessagesPresenterTest {
             addRecentEmoji = addRecentEmoji,
             markAsFullyRead = markAsFullyRead,
             liveLocationShareManager = liveLocationShareManager,
-            sessionCoroutineScope = backgroundScope,
+            messageReferenceStore = messageReferenceStore,
+            friendProfileRepository = friendProfileRepository,
+            sessionPreferencesStore = sessionPreferencesStore,
+            sessionCoroutineScope = sessionCoroutineScope,
+            appOperationalStateCoordinator = appOperationalStateCoordinator,
+            matrixClient = io.element.android.libraries.matrix.test.FakeMatrixClient(sessionId = joinedRoom.sessionId),
         )
     }
 }
+
+private fun protectedClipboardSource(authorizationRevision: Long): MessageClipboardSource.Protected =
+    MessageClipboardSource.Protected(
+        sessionId = A_SESSION_ID.value,
+        roomId = A_ROOM_ID.value,
+        eventId = AN_EVENT_ID.value,
+        contentVersion = "ciphertext:policy:envelope",
+        contentIds = persistentSetOf("content-a"),
+        authorizationRevision = authorizationRevision,
+        expiresAtEpochMillis = Long.MAX_VALUE,
+    )
