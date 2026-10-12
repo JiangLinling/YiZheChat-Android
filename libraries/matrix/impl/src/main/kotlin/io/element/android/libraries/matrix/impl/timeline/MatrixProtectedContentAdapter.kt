@@ -3485,7 +3485,7 @@ private class DefaultMatrixProtectedContentAdapter(
                     lifecycleWork.registrationWork(isLiveSend = originatingOperation != null) {
                         if (originatingOperation != null) {
                             withContext(originatingOperation) {
-                                lifecycleWork.registrationTransport {
+                                lifecycleWork.registrationTransport(isLiveSend = true) {
                                     check(contentProtectionService.registerMessageEvent(contentId, roomId.value, eventId, mediaUris))
                                     if (storedOrigin != null && storedOrigin.eventId == null) {
                                         protectedSendOriginStore.remember(

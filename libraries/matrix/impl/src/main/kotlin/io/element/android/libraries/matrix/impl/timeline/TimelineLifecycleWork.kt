@@ -40,7 +40,7 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
     private val receives = LinkedHashMap<String, Receive>()
     private val registrations = LinkedHashMap<String, Registration>()
     private val originatingOperations = LinkedHashMap<String, LifecycleOperationContext>()
-    private val transport = Semaphore(2)
+    private val transport = TimelineTransportScheduler()
     private val backgroundTransport = Semaphore(1)
     private val historicalRegistration = Semaphore(1)
 
@@ -138,8 +138,11 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
         return completion.await()
     }
 
-    suspend fun <T> registrationTransport(isForeground: Boolean = true, block: suspend () -> T): T =
-        shortTransport(isForeground, block)
+    suspend fun <T> registrationTransport(
+        isForeground: Boolean = true,
+        isLiveSend: Boolean = false,
+        block: suspend () -> T,
+    ): T = if (isLiveSend) transport.withPermit(isLiveSend = true, block) else shortTransport(isForeground, block)
 
     // Background waits outside the shared semaphore, leaving one physical slot for current reads.
     private suspend fun <T> shortTransport(isForeground: Boolean, block: suspend () -> T): T =

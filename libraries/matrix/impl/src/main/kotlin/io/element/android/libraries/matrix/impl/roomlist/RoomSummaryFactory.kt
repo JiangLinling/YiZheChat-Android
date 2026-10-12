@@ -63,7 +63,13 @@ class RoomSummaryFactory(
     private val latestCarrierBindings = java.util.Collections.synchronizedMap(LinkedHashMap<RoomId, CarrierBinding>())
     private val identityLookups = Semaphore(2)
 
-    suspend fun create(room: Room): RoomSummary {
+    suspend fun create(room: Room): RoomSummary = create(room, initialSnapshot = false)
+
+    // First list population must not wait for every optional message preview. A timed-out
+    // preview remains a protected shell; normal rebuilds still use the full authorization path.
+    suspend fun createInitial(room: Room): RoomSummary = create(room, initialSnapshot = true)
+
+    private suspend fun create(room: Room, initialSnapshot: Boolean): RoomSummary {
         val roomInfo = room.roomInfo().let(roomInfoMapper::map)
         val latestEvent = room.latestEvent().use { event ->
             when (event) {
@@ -79,6 +85,7 @@ class RoomSummaryFactory(
                             sender = event.sender,
                             content = contentMapper.map(event.content),
                             isPendingLocalSummary = true,
+                            initialSnapshot = initialSnapshot,
                         ),
                         isSending = event.state == LatestEventValueLocalState.IS_SENDING,
                         senderId = UserId(event.sender),
@@ -94,6 +101,7 @@ class RoomSummaryFactory(
                             sender = event.sender,
                             content = contentMapper.map(event.content),
                             isConfirmedOwnSummary = true,
+                            initialSnapshot = initialSnapshot,
                         ),
                         senderId = UserId(event.sender),
                         senderProfile = event.profile.map(),
@@ -109,6 +117,7 @@ class RoomSummaryFactory(
                         sender = event.sender,
                         content = contentMapper.map(event.content),
                         isConfirmedOwnSummary = event.isOwn,
+                        initialSnapshot = initialSnapshot,
                     ),
                     senderId = UserId(event.sender),
                     senderProfile = event.profile.map(),
@@ -135,10 +144,19 @@ class RoomSummaryFactory(
         content: io.element.android.libraries.matrix.api.timeline.item.event.EventContent,
         isConfirmedOwnSummary: Boolean = false,
         isPendingLocalSummary: Boolean = false,
+        initialSnapshot: Boolean = false,
     ): io.element.android.libraries.matrix.api.timeline.item.event.EventContent {
         val message = content as? io.element.android.libraries.matrix.api.timeline.item.event.MessageContent ?: return content
         val currentSessionId = sessionId ?: return content
         val currentDeviceId = deviceId ?: return content
+        if (initialSnapshot) {
+            return withTimeoutOrNull(INITIAL_PREVIEW_TIMEOUT_MILLIS) {
+                authorizeLatestContent(
+                    room, roomId, timestamp, sender, content,
+                    isConfirmedOwnSummary, isPendingLocalSummary, initialSnapshot = false,
+                )
+            } ?: message.withProtectedDisplayState(ProtectedMessageDisplayState.TEMPORARILY_UNAVAILABLE)
+        }
         return try {
             val adapter = previewAdapters.getOrPut(roomId) {
                 protectedContentAdapterFactory.create(
@@ -242,6 +260,7 @@ class RoomSummaryFactory(
     }
 
     private companion object {
+        const val INITIAL_PREVIEW_TIMEOUT_MILLIS = 300L
         val previewOwnerSequence = AtomicLong()
     }
 }

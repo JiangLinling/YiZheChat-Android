@@ -300,4 +300,37 @@ class TimelineLifecycleWorkTest {
         work.clearOriginatingOperations()
         assertThat(work.originatingOperation("scope-key")).isNull()
     }
+
+    @Test
+    fun `original binding keeps send identity and precedes queued own origin lookups`() = runTest {
+        val work = TimelineLifecycleWork { testScheduler.currentTime }
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        val occupied = List(2) { launch { work.registrationTransport { release.await() } } }
+        runCurrent()
+        val lookups = List(100) { index -> launch {
+            work.registrationTransport { order += "origin-$index" }
+        } }
+        runCurrent()
+        val original = LifecycleOperationContext(request.operationId, request.lifecycleId)
+        val binding = async {
+            work.registrationWork(isLiveSend = true) {
+                kotlinx.coroutines.withContext(original) {
+                    work.registrationTransport(isLiveSend = true) {
+                        assertThat(currentLifecycleOperationContext()).isSameInstanceAs(original)
+                        order += "original-binding"
+                        "mapped"
+                    }
+                }
+            }
+        }
+        runCurrent()
+        assertThat(binding.isCompleted).isFalse()
+        release.complete(Unit)
+        occupied.forEach { it.join() }
+        assertThat(binding.await()).isEqualTo("mapped")
+        lookups.forEach { it.join() }
+        assertThat(order.first()).isEqualTo("original-binding")
+        assertThat(order.drop(1)).containsExactlyElementsIn((0 until 100).map { "origin-$it" }).inOrder()
+    }
 }

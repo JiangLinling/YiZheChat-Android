@@ -38,6 +38,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.collect
@@ -189,6 +190,42 @@ class RoomSummaryPreviewIsolationTest {
         val shell = previouslyAuthorized.withProtectedDisplayState(ProtectedMessageDisplayState.VAULT_LOCKED)
         assertSafe(shell, ProtectedMessageStatus.VAULT_LOCKED)
         assertThat(shell.isBurnAfterRead).isTrue()
+    }
+
+    @Test
+    fun `slow previews do not block the first twenty structural rooms or leak owners`() = runTest {
+        val adapter = PreviewAdapter { _, _ -> awaitCancellation() }
+        val summaries = MutableSharedFlow<List<RoomSummary>>(replay = 1)
+        val processor = RoomSummaryListProcessor(
+            summaries, FakeFfiRoomListService(), StandardTestDispatcher(testScheduler), factory(adapter), FakeAnalyticsService(),
+        )
+        val rooms = (1..20).map { room(RoomId("!qa-$it:next")) }
+        val startedAt = testScheduler.currentTime
+        withTimeout(2_000L) { processor.postUpdate(listOf(RoomListEntriesUpdate.Reset(rooms))) }
+        assertThat(testScheduler.currentTime - startedAt).isAtMost(2_000L)
+        assertThat(summaries.replayCache.last().map { it.roomId }).containsExactlyElementsIn(
+            (1..20).map { RoomId("!qa-$it:next") },
+        ).inOrder()
+        summaries.replayCache.last().forEach { assertSafe(it.message(), ProtectedMessageStatus.TEMPORARILY_UNAVAILABLE) }
+        assertThat(adapter.rawScopes).hasSize(20)
+        assertThat(adapter.activeHandles).isEmpty()
+    }
+
+    @Test
+    fun `parent cancellation during first population publishes no structural or plaintext snapshot`() = runTest {
+        val adapter = PreviewAdapter { _, _ -> awaitCancellation() }
+        val summaries = MutableSharedFlow<List<RoomSummary>>(replay = 1)
+        val processor = RoomSummaryListProcessor(
+            summaries, FakeFfiRoomListService(), StandardTestDispatcher(testScheduler), factory(adapter), FakeAnalyticsService(),
+        )
+        val parent = async { processor.postUpdate(listOf(RoomListEntriesUpdate.Reset(listOf(room())))) }
+        runCurrent()
+        assertThat(adapter.activeHandles).hasSize(1)
+        parent.cancel()
+        parent.join()
+        assertThat(parent.isCancelled).isTrue()
+        assertThat(summaries.replayCache).isEmpty()
+        assertThat(adapter.activeHandles).isEmpty()
     }
 
     private class PreviewAdapter(

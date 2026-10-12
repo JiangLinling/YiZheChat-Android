@@ -299,7 +299,7 @@
     <string name="screen_messages_latest_messages_with_count">最新消息 · %1$s</string>
     <string name="screen_room_relay_submitting">正在提交接龙…</string>
     <string name="screen_room_relay_create_hint">填写主题和第一条内容，即可发起接龙。</string>
-    <string name="screen_room_send_binding_pending">发送确认中</string>
+    <string name="screen_room_send_binding_pending">消息状态：正在核对发送结果</string>
 <string name="media_confirm_submission">核实发送结果</string>
 <string name="media_send_recovered_failure">提交前发送失败。原媒体和选择已恢复，可以重试。</string>
 <string name="media_confirmation_pending">原发送结果仍未确认，草稿已保留。核实原发送结果前，暂不能再次发送。</string>

@@ -32,16 +32,16 @@ class RoomSummaryListProcessor(
     private val mutex = Mutex()
 
     suspend fun postUpdate(updates: List<RoomListEntriesUpdate>) {
-        updateRoomSummaries(updates) {
+        updateRoomSummaries(updates) { initialSnapshot ->
             Timber.v("Update rooms from postUpdates (with ${updates.size} items) on ${Thread.currentThread()}")
             updates.forEach { update ->
-                applyUpdate(update)
+                applyUpdate(update, initialSnapshot)
             }
         }
     }
 
     suspend fun rebuildRoomSummaries() {
-        updateRoomSummaries(emptyList()) {
+        updateRoomSummaries(emptyList()) { _ ->
             forEachIndexed { i, summary ->
                 val result = buildRoomSummaryForIdentifier(summary.roomId.value)
                 if (result != null) {
@@ -51,28 +51,28 @@ class RoomSummaryListProcessor(
         }
     }
 
-    private suspend fun MutableList<RoomSummary>.applyUpdate(update: RoomListEntriesUpdate) {
+    private suspend fun MutableList<RoomSummary>.applyUpdate(update: RoomListEntriesUpdate, initialSnapshot: Boolean) {
         // Remove this comment to debug changes in the room list
         // Timber.d("Apply room list update: ${update.describe()}")
         when (update) {
             is RoomListEntriesUpdate.Append -> {
-                val roomSummaries = buildRoomSummaryBatch(update.values, roomSummaryFactory)
+                val roomSummaries = buildRoomSummaryBatch(update.values, roomSummaryFactory, initialSnapshot)
                 addAll(roomSummaries)
             }
             is RoomListEntriesUpdate.PushBack -> {
-                val roomSummary = buildSummaryForRoomListEntry(update.value)
+                val roomSummary = buildSummaryForRoomListEntry(update.value, initialSnapshot)
                 add(roomSummary)
             }
             is RoomListEntriesUpdate.PushFront -> {
-                val roomSummary = buildSummaryForRoomListEntry(update.value)
+                val roomSummary = buildSummaryForRoomListEntry(update.value, initialSnapshot)
                 add(0, roomSummary)
             }
             is RoomListEntriesUpdate.Set -> {
-                val roomSummary = buildSummaryForRoomListEntry(update.value)
+                val roomSummary = buildSummaryForRoomListEntry(update.value, initialSnapshot)
                 this[update.index.toInt()] = roomSummary
             }
             is RoomListEntriesUpdate.Insert -> {
-                val roomSummary = buildSummaryForRoomListEntry(update.value)
+                val roomSummary = buildSummaryForRoomListEntry(update.value, initialSnapshot)
                 add(update.index.toInt(), roomSummary)
             }
             is RoomListEntriesUpdate.Remove -> {
@@ -80,7 +80,7 @@ class RoomSummaryListProcessor(
             }
             is RoomListEntriesUpdate.Reset -> {
                 clear()
-                addAll(buildRoomSummaryBatch(update.values, roomSummaryFactory))
+                addAll(buildRoomSummaryBatch(update.values, roomSummaryFactory, initialSnapshot))
             }
             RoomListEntriesUpdate.PopBack -> {
                 removeLastOrNull()
@@ -97,8 +97,8 @@ class RoomSummaryListProcessor(
         }
     }
 
-    private suspend fun buildSummaryForRoomListEntry(entry: Room): RoomSummary {
-        return entry.use { roomSummaryFactory.create(room = it) }
+    private suspend fun buildSummaryForRoomListEntry(entry: Room, initialSnapshot: Boolean = false): RoomSummary {
+        return entry.use { if (initialSnapshot) roomSummaryFactory.createInitial(it) else roomSummaryFactory.create(room = it) }
     }
 
     private suspend fun buildRoomSummaryForIdentifier(identifier: String): RoomSummary? {
@@ -107,7 +107,7 @@ class RoomSummaryListProcessor(
         }
     }
 
-    private suspend fun updateRoomSummaries(updates: List<RoomListEntriesUpdate>, block: suspend MutableList<RoomSummary>.() -> Unit) = withContext(
+    private suspend fun updateRoomSummaries(updates: List<RoomListEntriesUpdate>, block: suspend MutableList<RoomSummary>.(Boolean) -> Unit) = withContext(
         coroutineContext
     ) {
         // Capture the description before applying updates: applyUpdate consumes each Room via
@@ -118,7 +118,7 @@ class RoomSummaryListProcessor(
         mutex.withLock {
             val current = roomSummaries.replayCache.lastOrNull()
             val mutableRoomSummaries = current.orEmpty().toMutableList()
-            block(mutableRoomSummaries)
+            block(mutableRoomSummaries, current.isNullOrEmpty())
 
             // TODO remove once https://github.com/element-hq/element-x-android/issues/5031 has been confirmed as fixed
             val uniqueRooms = mutableRoomSummaries.distinctBy { it.roomId }

@@ -12,11 +12,11 @@ import kotlinx.coroutines.sync.withPermit
 import org.matrix.rustcomponents.sdk.Room
 
 /** Keep SDK order and authorization while overlapping independent room preview reads. */
-internal suspend fun buildRoomSummaryBatch(rooms: List<Room>, factory: RoomSummaryFactory): List<RoomSummary> {
+internal suspend fun buildRoomSummaryBatch(rooms: List<Room>, factory: RoomSummaryFactory, initialSnapshot: Boolean = false): List<RoomSummary> {
     val permits = Semaphore(4)
     try {
         return coroutineScope {
-            rooms.map { room -> async { permits.withPermit { factory.create(room) } } }.awaitAll()
+            rooms.map { room -> async { permits.withPermit { if (initialSnapshot) factory.createInitial(room) else factory.create(room) } } }.awaitAll()
         }
     } finally {
         // coroutineScope joins cancelled workers before releasing all owned native handles,
