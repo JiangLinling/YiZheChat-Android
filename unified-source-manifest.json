@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-next-r8-20261013",
-  "frozen_utc": "2026-10-12T19:59:01.405140+00:00",
+  "revision": "unified-next-r9-20261013",
+  "frozen_utc": "2026-10-12T20:20:45.152074+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -6895,7 +6895,7 @@
     "libraries/push/impl/src/test/kotlin/io/element/android/libraries/push/impl/history/FakePushHistoryService.kt": "d7c060319e98a6c52ee2d5bcd9fffae46fd9db46ef025589b5b093c5823ac9c1",
     "libraries/push/impl/src/test/kotlin/io/element/android/libraries/push/impl/history/PendingPushObservationTest.kt": "fa07464daa2ebd256c2b21d4f9ccbd6b868bd101e519a0ba401008cae92b6091",
     "libraries/push/impl/src/test/kotlin/io/element/android/libraries/push/impl/notifications/DefaultActiveNotificationsProviderTest.kt": "7d2fb77a7319de0c9cadc1261744ccc0ad3f1728dbf18f48ebd55efca345dd56",
-    "libraries/push/impl/src/test/kotlin/io/element/android/libraries/push/impl/notifications/DefaultBaseRoomGroupMessageCreatorTest.kt": "fc5464943e8d451109ebfb74bde85e691ca6216fffdf7d7d35ff06408e804410",
+    "libraries/push/impl/src/test/kotlin/io/element/android/libraries/push/impl/notifications/DefaultBaseRoomGroupMessageCreatorTest.kt": "2b4c41c9730dff32ef5da4baae1e47ae223e6e89e5ac2489dcc55cc4612e86f7",
     "libraries/push/impl/src/test/kotlin/io/element/android/libraries/push/impl/notifications/DefaultCallNotificationEventResolverTest.kt": "ed13e74ede22496d41d026257cc3b59e12f9611b16f05743c9fde1a40c492066",
     "libraries/push/impl/src/test/kotlin/io/element/android/libraries/push/impl/notifications/DefaultForegroundNotificationHostTest.kt": "b780bdb39e6ffe207d520a00d56620cfaf46e4caab171510f55a108f50969cc0",
     "libraries/push/impl/src/test/kotlin/io/element/android/libraries/push/impl/notifications/DefaultNotifiableEventResolverTest.kt": "861c40cf82e243bd774f07a25c9fbe8af235d328f6a7448e7a5d01646c7e28c8",

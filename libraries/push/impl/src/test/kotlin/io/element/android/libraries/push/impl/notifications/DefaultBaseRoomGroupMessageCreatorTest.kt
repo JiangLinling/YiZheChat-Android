@@ -155,7 +155,7 @@ class DefaultBaseRoomGroupMessageCreatorTest {
         assertThat(fakeImageLoader.getExecutedRequestsData()).containsExactlyElementsIn(expectedCoilRequests)
     }
 
-    @Config(sdk = [23, 35])
+    @Config(sdk = [24, 35])
     @Test
     fun `test createRoomMessage with two Events`() = runTest {
         val sut = createRoomGroupMessageCreator()
@@ -184,7 +184,7 @@ class DefaultBaseRoomGroupMessageCreatorTest {
         assertThat(fakeImageLoader.getExecutedRequestsData()).isEmpty()
     }
 
-    @Config(sdk = [23, 35])
+    @Config(sdk = [24, 35])
     @Test
     fun `test createRoomMessage with smart reply error`() = runTest {
         val sut = createRoomGroupMessageCreator()
