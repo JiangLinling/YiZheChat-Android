@@ -14,14 +14,26 @@ import com.lemonappdev.konsist.api.verify.assertTrue
 import org.junit.Test
 
 class KonsistLicenseTest {
-    private val publicLicense = """
-        /\*
-        (?:.*\n)* \* Copyright \(c\) 20\d\d((, |-)20\d\d)? Element Creations Ltd\.
-        (?:.*\n)* \*
-         \* SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial\.
-         \* Please see LICENSE files in the repository root for full details\.
-         \*/
-        """.trimIndent().toRegex()
+    private val publicCopyright = """ \* Copyright \(c\) 20\d\d((, |-)20\d\d)? Element Creations Ltd\.""".toRegex()
+    private val publicLicenseSuffix = listOf(
+        " *",
+        " * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial.",
+        " * Please see LICENSE files in the repository root for full details.",
+        " */",
+    )
+
+    private fun firstLicenseHeader(text: String): String {
+        val source = text.trimStart { it.isWhitespace() || it == '\uFEFF' }
+        if (!source.startsWith("/*")) return ""
+        val end = source.indexOf("*/", startIndex = 2)
+        return if (end < 0) "" else source.substring(0, end + 2)
+    }
+
+    private fun hasPublicLicenseHeader(text: String): Boolean {
+        val lines = firstLicenseHeader(text).split('\n')
+        return lines.size >= 6 && lines.first() == "/*" && lines.takeLast(4) == publicLicenseSuffix &&
+            lines.drop(1).dropLast(4).any(publicCopyright::matches)
+    }
 
     private val enterpriseLicense = """
         /\*
@@ -56,7 +68,7 @@ class KonsistLicenseTest {
                 assertThat(it).isNotEmpty()
             }
             .assertTrue {
-                publicLicense.containsMatchIn(it.text)
+                hasPublicLicenseHeader(it.text)
             }
     }
 
@@ -69,7 +81,7 @@ class KonsistLicenseTest {
                 it.moduleName.startsWith("enterprise")
             }
             .assertTrue {
-                enterpriseLicense.containsMatchIn(it.text)
+                enterpriseLicense.containsMatchIn(firstLicenseHeader(it.text))
             }
     }
 
@@ -87,6 +99,20 @@ class KonsistLicenseTest {
             .assertTrue {
                 it.text.count("Element Creations Ltd.") == 1
             }
+    }
+
+    @Test
+    fun `license checking is bounded to the actual header even for a large source body`() {
+        val header = "/*\n * Copyright (c) 2025 Element Creations Ltd.\n" + publicLicenseSuffix.joinToString("\n")
+        assertThat(hasPublicLicenseHeader(header + "\n" + "val body = 0\n".repeat(10_000))).isTrue()
+        assertThat(hasPublicLicenseHeader("/*\n" + " * documentation\n".repeat(5_000) + " */")).isFalse()
+    }
+
+    @Test
+    fun `a later source body license cannot substitute for a missing leading license header`() {
+        val header = "/*\n * Copyright (c) 2025 Element Creations Ltd.\n" + publicLicenseSuffix.joinToString("\n")
+        assertThat(hasPublicLicenseHeader("/* module documentation */\n" + header)).isFalse()
+        assertThat(hasPublicLicenseHeader(header.replace(" * SPDX-License-Identifier:", " * Missing-License-Identifier:"))).isFalse()
     }
 }
 

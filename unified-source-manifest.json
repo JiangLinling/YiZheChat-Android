@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-next-r9-20261013",
-  "frozen_utc": "2026-10-12T20:20:45.152074+00:00",
+  "revision": "unified-next-r10-20261013",
+  "frozen_utc": "2026-10-12T20:38:07.611570+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -8048,7 +8048,7 @@
     "tests/konsist/src/test/kotlin/io/element/android/tests/konsist/KonsistFlowTest.kt": "4a2ce4c2723e4f6032bdc1d4e6fdbcec38658e56ec7d8aab33d91ec9995abb6c",
     "tests/konsist/src/test/kotlin/io/element/android/tests/konsist/KonsistImmutableTest.kt": "8b446812c24a9e9c6809828eb52bfd687190879c0f8d0c1305502264c6c4e4df",
     "tests/konsist/src/test/kotlin/io/element/android/tests/konsist/KonsistImportTest.kt": "89f0bf1652bb8039e0cc0be3934a2a9cea1e52fbfdf64009a097ed3c242e08a6",
-    "tests/konsist/src/test/kotlin/io/element/android/tests/konsist/KonsistLicenseTest.kt": "f7ff3c916ccbcf68e3cc2b2ec663257813b48bf76a85f68d4a59ff3ab86082de",
+    "tests/konsist/src/test/kotlin/io/element/android/tests/konsist/KonsistLicenseTest.kt": "db821dcd1f681d178636fbe6dee9c26b59c37305d2114df60e32d31be4cd6dd8",
     "tests/konsist/src/test/kotlin/io/element/android/tests/konsist/KonsistMethodNameTest.kt": "65f7474406071454ea9e15c783f8ba7b773b061287b00f391f6afb55ece175d1",
     "tests/konsist/src/test/kotlin/io/element/android/tests/konsist/KonsistParameterNameTest.kt": "3b89ca72486c0c154520b9ce0591d2c1802c8db561a14bffea81f1be5760975a",
     "tests/konsist/src/test/kotlin/io/element/android/tests/konsist/KonsistPresenterTest.kt": "1ba0523ef9f16e75dc5e8055c972fe493a1fb94a7e01efb832391d4dbb409620",
