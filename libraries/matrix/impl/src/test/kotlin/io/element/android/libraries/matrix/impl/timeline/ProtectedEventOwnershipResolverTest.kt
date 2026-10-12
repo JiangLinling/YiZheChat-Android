@@ -6,10 +6,28 @@ package io.element.android.libraries.matrix.impl.timeline
 
 import io.element.android.security.contentprotection.api.ContentKind
 import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.LifecycleOperationContext
 import org.junit.Test
 import org.junit.Assert.*
 
 class ProtectedEventOwnershipResolverTest {
+    @Test fun `bound restored sender journal retains owner without becoming a current send`() {
+        val restored = origin()
+        assertFalse(ProtectedEventOwnershipResolver.needsImmediateEventBinding(restored, null))
+        assertEquals(restored.operationId, ProtectedEventOwnershipResolver.resolve(input, restored).sendContext?.operationId)
+        assertTrue(ProtectedEventOwnershipResolver.needsImmediateEventBinding(restored.copy(eventId = null), null))
+        assertNull(ProtectedEventOwnershipResolver.resolve(input, restored.copy(eventId = null)).sendContext)
+    }
+
+    @Test fun `only matching runtime owner promotes a bound journal to current mapping`() {
+        val restored = origin()
+        val current = LifecycleOperationContext(restored.operationId, restored.lifecycleId)
+        assertTrue(ProtectedEventOwnershipResolver.needsImmediateEventBinding(restored, current))
+        assertFalse(ProtectedEventOwnershipResolver.needsImmediateEventBinding(restored, LifecycleOperationContext("other-operation", restored.lifecycleId)))
+        assertFalse(ProtectedEventOwnershipResolver.needsImmediateEventBinding(restored, LifecycleOperationContext(restored.operationId, FullAppLifecycleId.LC_13)))
+        assertTrue(ProtectedEventOwnershipResolver.needsImmediateEventBinding(null, current))
+        assertFalse(ProtectedEventOwnershipResolver.needsImmediateEventBinding(null, null))
+    }
     @Test fun `original LC20 and LC15 call binding resumes same owner and rejects conflicting resources`() {
         listOf(FullAppLifecycleId.LC_20, FullAppLifecycleId.LC_15).forEach { lifecycle ->
             val current = input.copy(contentKind = ContentKind.CALL_OPERATION)

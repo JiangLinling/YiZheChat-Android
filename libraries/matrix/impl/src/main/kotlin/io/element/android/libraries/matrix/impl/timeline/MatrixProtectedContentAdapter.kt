@@ -3476,16 +3476,18 @@ private class DefaultMatrixProtectedContentAdapter(
                 val originScopeKey = originatingOperationScopeKey(contentId)
                 val carrier = protectedCarrierForContent(message, contentId)
                 val storedOrigin = carrier?.let { matchingStoredSendOrigin(it, contentId, eventId) }
+                val currentOperation = lifecycleWork.originatingOperation(originScopeKey)
                 val originatingOperation = storedOrigin?.let { LifecycleOperationContext(it.operationId, it.lifecycleId) }
-                    ?: lifecycleWork.originatingOperation(originScopeKey)
+                    ?: currentOperation
+                val isLiveSend = ProtectedEventOwnershipResolver.needsImmediateEventBinding(storedOrigin, currentOperation)
                 Timber.tag(PERFORMANCE_TAG).d(
-                    "stage=event_registration key=%s live=%s", registrationKey, originatingOperation != null,
+                    "stage=event_registration key=%s live=%s", registrationKey, isLiveSend,
                 )
                 val registered = runCatching {
-                    lifecycleWork.registrationWork(isLiveSend = originatingOperation != null) {
+                    lifecycleWork.registrationWork(isLiveSend = isLiveSend) {
                         if (originatingOperation != null) {
                             withContext(originatingOperation) {
-                                lifecycleWork.registrationTransport(isLiveSend = true) {
+                                lifecycleWork.registrationTransport(isForeground = isLiveSend, isLiveSend = isLiveSend) {
                                     check(contentProtectionService.registerMessageEvent(contentId, roomId.value, eventId, mediaUris))
                                     if (storedOrigin != null && storedOrigin.eventId == null) {
                                         protectedSendOriginStore.remember(
@@ -3619,7 +3621,9 @@ private class DefaultMatrixProtectedContentAdapter(
             // original SEND identity, using the current signed authority and live Matrix
             // binding. This request admits no new operation and grants no content lease.
             val context = lifecycleWork.registrationTransport(
-                isForeground = releaseIntent?.releaseClass != TimelineContentReleaseClass.HISTORY_PREFETCH,
+                // Signed legacy-origin recovery is metadata repair, including visible old rows.
+                // Keep its queue outside the shared slots used by a current original send.
+                isForeground = false,
             ) {
                 appOperationalStateCoordinator.protectedEventOrigin(
                     io.element.android.security.dataprotection.api.ProtectedEventOriginQuery(

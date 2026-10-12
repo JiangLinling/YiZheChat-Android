@@ -302,6 +302,42 @@ class TimelineLifecycleWorkTest {
     }
 
     @Test
+    fun `blocked restored bound send and legacy lookups leave a physical slot for current binding`() = runTest {
+        val work = TimelineLifecycleWork { testScheduler.currentTime }
+        val release = CompletableDeferred<Unit>()
+        val completed = mutableListOf<String>()
+        val repairs = List(100) { index -> launch {
+            work.registrationWork(isLiveSend = false) {
+                work.registrationTransport(isForeground = false) {
+                    if (index == 0) release.await()
+                    completed += "bound-original-$index"
+                }
+            }
+        } }
+        val lookups = List(100) { index -> launch {
+            work.registrationTransport(isForeground = false) { completed += "legacy-origin-$index" }
+        } }
+        runCurrent()
+        val original = LifecycleOperationContext(request.operationId, request.lifecycleId)
+        val current = async { kotlinx.coroutines.withContext(original) {
+            work.registrationWork(isLiveSend = true) {
+                work.registrationTransport(isLiveSend = true) {
+                    assertThat(currentLifecycleOperationContext()).isSameInstanceAs(original)
+                    completed += "current-original-binding"
+                }
+            }
+        } }
+        runCurrent()
+        assertThat(current.isCompleted).isTrue()
+        current.await()
+        assertThat(completed).containsExactly("current-original-binding")
+        release.complete(Unit)
+        repairs.forEach { it.join() }
+        lookups.forEach { it.join() }
+        assertThat(completed).hasSize(201)
+    }
+
+    @Test
     fun `original binding keeps send identity and precedes queued own origin lookups`() = runTest {
         val work = TimelineLifecycleWork { testScheduler.currentTime }
         val release = CompletableDeferred<Unit>()

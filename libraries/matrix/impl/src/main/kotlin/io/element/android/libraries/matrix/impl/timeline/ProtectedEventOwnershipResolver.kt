@@ -98,4 +98,11 @@ object ProtectedEventOwnershipResolver {
             resolve(input, origin.copy(eventId = input.eventId)).ownership == Ownership.OWN_LOCAL_SEND
 
     fun isCanonicalEvent(value: String): Boolean = value.length in 2..512 && value.startsWith('$') && value.none(Char::isWhitespace)
+
+    /** Scheduling only. A restored, bound journal retains its owner but is historical work. */
+    internal fun needsImmediateEventBinding(origin: Origin?, current: LifecycleOperationContext?): Boolean =
+        if (origin == null) current != null
+        else origin.eventId == null || current?.let {
+            it.operationId == origin.operationId && it.lifecycleId == origin.lifecycleId
+        } == true
 }
