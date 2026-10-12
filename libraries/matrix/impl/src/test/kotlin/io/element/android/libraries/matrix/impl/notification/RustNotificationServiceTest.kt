@@ -111,6 +111,18 @@ class RustNotificationServiceTest {
                 message: MessageContent,
                 diagnosticOrigin: ProtectedReadDiagnosticOrigin,
             ): MessageContent = decryptMessageContent(eventIdentity, message)
+
+            override suspend fun decryptMessageContent(
+                eventIdentity: String,
+                message: MessageContent,
+                diagnosticOrigin: ProtectedReadDiagnosticOrigin,
+                senderAccountIdHash: String,
+            ): MessageContent {
+                assertThat(senderAccountIdHash).isEqualTo(
+                    io.element.android.security.securestorage.api.accountIdHash(A_USER_ID_2.value)
+                )
+                return decryptMessageContent(eventIdentity, message, diagnosticOrigin)
+            }
         }
         val sut = createRustNotificationService(
             notificationClient = notificationClient,
@@ -163,6 +175,18 @@ class RustNotificationServiceTest {
                 origins += diagnosticOrigin
                 eventIds += eventIdentity
                 return message.copy(isContentProtectionAuthorized = false, isBurnAfterRead = false)
+            }
+
+            override suspend fun decryptMessageContent(
+                eventIdentity: String,
+                message: MessageContent,
+                diagnosticOrigin: ProtectedReadDiagnosticOrigin,
+                senderAccountIdHash: String,
+            ): MessageContent {
+                assertThat(senderAccountIdHash).isEqualTo(
+                    io.element.android.security.securestorage.api.accountIdHash(A_USER_ID_2.value)
+                )
+                return decryptMessageContent(eventIdentity, message, diagnosticOrigin)
             }
         }
         val sut = createRustNotificationService(

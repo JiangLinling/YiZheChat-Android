@@ -19,6 +19,7 @@ import io.element.android.security.securestorage.test.InMemorySensitiveFileStore
 import io.element.android.services.toolbox.api.systemclock.SystemClock
 import io.mockk.coEvery
 import io.mockk.mockk
+import io.mockk.every
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
@@ -27,6 +28,31 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
 class MediaAdmissionOwnershipTest {
+    @Test
+    fun `nested media rejects mismatched subjects without acquiring bytes or receipting`() = runTest {
+        val facts = FakeAppOperationalStateCoordinator()
+        var acquired = false
+        val delegate = mockk<MatrixMediaLoader>()
+        coEvery { delegate.loadMediaContent(any(), any()) } answers {
+            acquired = true
+            Result.success(byteArrayOf(1))
+        }
+        val loader = SecureMatrixMediaLoader(delegate, AccountVaultId("different-subjects"), InMemorySensitiveFileStore(),
+            mockk<SecureMediaLeaseManager>(), backgroundScope, SystemClock { 1L }, facts,
+            accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
+        val request = lifecycleOperationRequest(FullAppLifecycleId.LC_16, "download",
+            accountIdHash = "c".repeat(64), matrixDeviceIdHash = "b".repeat(64))
+        val result = runCatching {
+            facts.perform(request) {
+                loader.loadMediaContent(MediaSource("mxc://example.org/foreign-resource")).getOrThrow()
+            }
+        }
+        assertThat(result.exceptionOrNull()).isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(acquired).isFalse()
+        assertThat(facts.startedRequests).hasSize(1)
+        assertThat(facts.clientReceipts).isEmpty()
+    }
+
     @Test
     fun `LC13 parent cannot replace the independent LC16 download operation`() = runTest {
         val facts = FakeAppOperationalStateCoordinator()
@@ -58,7 +84,7 @@ class MediaAdmissionOwnershipTest {
             val loader = SecureMatrixMediaLoader(delegate, AccountVaultId("nested-owner"), InMemorySensitiveFileStore(),
                 mockk<SecureMediaLeaseManager>(), backgroundScope, SystemClock { 1L }, facts,
                 accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
-            val request = lifecycleOperationRequest(FullAppLifecycleId.LC_16, "download")
+            val request = lifecycleOperationRequest(FullAppLifecycleId.LC_16, "download", accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
             val outcome = runCatching {
                 facts.perform(request) {
                     val acquired = loader.loadMediaContent(MediaSource("mxc://example.org/nested-resource")).getOrThrow()
@@ -82,6 +108,9 @@ class MediaAdmissionOwnershipTest {
     fun `server accepted start survives navigation response cancellation and records only actual acquisition`() = runTest {
         val facts = FakeAppOperationalStateCoordinator()
         val coordinator = mockk<AppOperationalStateCoordinator>()
+        every { coordinator.operations } returns facts.operations
+        coEvery { coordinator.persistClientReceipts(any()) } coAnswers { facts.persistClientReceipts(firstArg()) }
+
         val accepted = CompletableDeferred<Unit>()
         val response = CompletableDeferred<Unit>()
         coEvery { coordinator.start(any()) } coAnswers {
@@ -114,6 +143,9 @@ class MediaAdmissionOwnershipTest {
     fun `actual acquisition followed by receipt failure does not leak result or claim success`() = runTest {
         val facts = FakeAppOperationalStateCoordinator()
         val coordinator = mockk<AppOperationalStateCoordinator>()
+        every { coordinator.operations } returns facts.operations
+        coEvery { coordinator.persistClientReceipts(any()) } coAnswers { facts.persistClientReceipts(firstArg()) }
+
         coEvery { coordinator.start(any()) } coAnswers { facts.start(firstArg()) }
         coEvery { coordinator.recordClientReceipt(any()) } throws IllegalStateException("fixture receipt unavailable")
         val bytes = byteArrayOf(21, 22, 23)

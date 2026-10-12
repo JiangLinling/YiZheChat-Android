@@ -9,6 +9,8 @@
 package io.element.android.libraries.matrix.impl.auth
 
 import com.google.common.truth.Truth.assertThat
+import io.element.android.appconfig.NextDeploymentConfig
+import io.element.android.libraries.matrix.impl.fixtures.factories.aRustSession
 import io.element.android.features.enterprise.api.EnterpriseService
 import io.element.android.features.enterprise.test.FakeEnterpriseService
 import io.element.android.libraries.matrix.api.core.SessionId
@@ -107,7 +109,7 @@ class RustMatrixAuthenticationServiceTest {
 
     @Test
     fun `restoreSession refuses a legacy session without a database key`() = runTest {
-        val sessionData = aSessionData(isTokenValid = true)
+        val sessionData = configuredSessionData(isTokenValid = true)
         val sessionStore = InMemorySessionStore(initialList = listOf(sessionData))
         var clientBuilderRequested = false
         val sut = createRustMatrixAuthenticationService(
@@ -134,9 +136,9 @@ class RustMatrixAuthenticationServiceTest {
                 provideResult = {
                     FakeFfiClientBuilder(
                         buildResult = {
-                            FakeFfiClient(
+                            configuredClient(
                                 homeserverLoginDetailsResult = {
-                                    FakeFfiHomeserverLoginDetails()
+                                    FakeFfiHomeserverLoginDetails(url = testHomeserver)
                                 }
                             )
                         }
@@ -144,17 +146,17 @@ class RustMatrixAuthenticationServiceTest {
                 }
             ),
         )
-        assertThat(sut.setHomeserver("matrix.org").isSuccess).isTrue()
+        assertThat(sut.setHomeserver(testHomeserver).isSuccess).isTrue()
     }
 
     @Test
     fun `password login replaces an existing invalid session`() = runTest {
-        val oldSession = aSessionData(isTokenValid = false)
+        val oldSession = configuredSessionData(isTokenValid = false)
         val sessionStore = InMemorySessionStore(initialList = listOf(oldSession))
         var logoutCount = 0
         var initialDeviceName: String? = null
-        val client = FakeFfiClient(
-            homeserverLoginDetailsResult = { FakeFfiHomeserverLoginDetails() },
+        val client = configuredClient(
+            homeserverLoginDetailsResult = { FakeFfiHomeserverLoginDetails(url = testHomeserver) },
             withUtdHook = {},
             loginResult = { _, _, deviceName, _ -> initialDeviceName = deviceName },
             logoutResult = { logoutCount++ },
@@ -167,7 +169,7 @@ class RustMatrixAuthenticationServiceTest {
             workManagerScheduler = FakeWorkManagerScheduler(submitLambda = {}),
         )
 
-        assertThat(sut.setHomeserver("matrix.org").isSuccess).isTrue()
+        assertThat(sut.setHomeserver(testHomeserver).isSuccess).isTrue()
         assertThat(sut.login("alice", "password").isSuccess).isTrue()
         assertThat(sessionStore.getAllSessions()).hasSize(1)
         assertThat(sessionStore.getAllSessions().single().isTokenValid).isTrue()
@@ -177,11 +179,11 @@ class RustMatrixAuthenticationServiceTest {
 
     @Test
     fun `password login uses the pre-login snapshot when the SDK session callback rewrites the old row`() = runTest {
-        val oldSession = aSessionData(isTokenValid = false)
+        val oldSession = configuredSessionData(isTokenValid = false)
         val sessionStore = InMemorySessionStore(initialList = listOf(oldSession))
         var logoutCount = 0
-        val client = FakeFfiClient(
-            homeserverLoginDetailsResult = { FakeFfiHomeserverLoginDetails() },
+        val client = configuredClient(
+            homeserverLoginDetailsResult = { FakeFfiHomeserverLoginDetails(url = testHomeserver) },
             withUtdHook = {},
             loginResult = { _, _, _, _ ->
                 // Mirrors saveSessionInKeychain racing ahead of duplicate-account
@@ -203,7 +205,7 @@ class RustMatrixAuthenticationServiceTest {
             workManagerScheduler = FakeWorkManagerScheduler(submitLambda = {}),
         )
 
-        assertThat(sut.setHomeserver("matrix.org").isSuccess).isTrue()
+        assertThat(sut.setHomeserver(testHomeserver).isSuccess).isTrue()
         assertThat(sut.login("alice", "password").isSuccess).isTrue()
         assertThat(sessionStore.getAllSessions()).hasSize(1)
         assertThat(sessionStore.getAllSessions().single().isTokenValid).isTrue()
@@ -214,11 +216,11 @@ class RustMatrixAuthenticationServiceTest {
     @Test
     fun `password login still rejects an existing valid session`() = runTest {
         val sessionStore = InMemorySessionStore(
-            initialList = listOf(aSessionData(isTokenValid = true).copy(passphrase = "existing-database-key")),
+            initialList = listOf(configuredSessionData(isTokenValid = true).copy(passphrase = "existing-database-key")),
         )
         var logoutCount = 0
-        val client = FakeFfiClient(
-            homeserverLoginDetailsResult = { FakeFfiHomeserverLoginDetails() },
+        val client = configuredClient(
+            homeserverLoginDetailsResult = { FakeFfiHomeserverLoginDetails(url = testHomeserver) },
             logoutResult = { logoutCount++ },
         )
         val sut = createRustMatrixAuthenticationService(
@@ -228,7 +230,7 @@ class RustMatrixAuthenticationServiceTest {
             ),
         )
 
-        assertThat(sut.setHomeserver("matrix.org").isSuccess).isTrue()
+        assertThat(sut.setHomeserver(testHomeserver).isSuccess).isTrue()
         assertThat(sut.login("alice", "password").isFailure).isTrue()
         assertThat(sessionStore.getAllSessions()).hasSize(1)
         assertThat(logoutCount).isEqualTo(1)
@@ -236,14 +238,14 @@ class RustMatrixAuthenticationServiceTest {
 
     @Test
     fun `password login replaces a valid session after its local restore failed`() = runTest {
-        val oldSession = aSessionData(isTokenValid = true).copy(passphrase = "existing-database-key")
+        val oldSession = configuredSessionData(isTokenValid = true).copy(passphrase = "existing-database-key")
         val sessionStore = InMemorySessionStore(initialList = listOf(oldSession))
         var logoutCount = 0
-        val restoreClient = FakeFfiClient(
+        val restoreClient = configuredClient(
             restoreSessionResult = { error("Encrypted Matrix store cannot be restored") },
         )
-        val loginClient = FakeFfiClient(
-            homeserverLoginDetailsResult = { FakeFfiHomeserverLoginDetails() },
+        val loginClient = configuredClient(
+            homeserverLoginDetailsResult = { FakeFfiHomeserverLoginDetails(url = testHomeserver) },
             withUtdHook = {},
             logoutResult = { logoutCount++ },
         )
@@ -257,7 +259,7 @@ class RustMatrixAuthenticationServiceTest {
         )
 
         assertThat(sut.restoreSession(SessionId(oldSession.userId)).isFailure).isTrue()
-        assertThat(sut.setHomeserver("matrix.org").isSuccess).isTrue()
+        assertThat(sut.setHomeserver(testHomeserver).isSuccess).isTrue()
         assertThat(sut.login("alice", "password").isSuccess).isTrue()
         assertThat(sessionStore.getAllSessions()).hasSize(1)
         assertThat(sessionStore.getAllSessions().single().isTokenValid).isTrue()
@@ -267,9 +269,9 @@ class RustMatrixAuthenticationServiceTest {
 
     @Test
     fun `password login replaces an unrestorable legacy session marked valid`() = runTest {
-        val sessionStore = InMemorySessionStore(initialList = listOf(aSessionData(isTokenValid = true)))
-        val client = FakeFfiClient(
-            homeserverLoginDetailsResult = { FakeFfiHomeserverLoginDetails() },
+        val sessionStore = InMemorySessionStore(initialList = listOf(configuredSessionData(isTokenValid = true)))
+        val client = configuredClient(
+            homeserverLoginDetailsResult = { FakeFfiHomeserverLoginDetails(url = testHomeserver) },
             withUtdHook = {},
         )
         val sut = createRustMatrixAuthenticationService(
@@ -280,12 +282,34 @@ class RustMatrixAuthenticationServiceTest {
             workManagerScheduler = FakeWorkManagerScheduler(submitLambda = {}),
         )
 
-        assertThat(sut.setHomeserver("matrix.org").isSuccess).isTrue()
+        assertThat(sut.setHomeserver(testHomeserver).isSuccess).isTrue()
         assertThat(sut.login("alice", "password").isSuccess).isTrue()
         assertThat(sessionStore.getAllSessions()).hasSize(1)
         assertThat(sessionStore.getAllSessions().single().isTokenValid).isTrue()
         assertThat(sessionStore.getAllSessions().single().passphrase).isNotEmpty()
     }
+
+    private val testHomeserver: String
+        get() = if (NextDeploymentConfig.isNextDeployment) NextDeploymentConfig.matrixHomeserverUrl else "https://matrix.org"
+
+    private fun configuredSessionData(isTokenValid: Boolean) =
+        aSessionData(isTokenValid = isTokenValid).copy(homeserverUrl = testHomeserver)
+
+    private fun configuredClient(
+        homeserverLoginDetailsResult: () -> org.matrix.rustcomponents.sdk.HomeserverLoginDetails =
+            { FakeFfiHomeserverLoginDetails(url = testHomeserver) },
+        withUtdHook: (org.matrix.rustcomponents.sdk.UnableToDecryptDelegate) -> Unit = {},
+        loginResult: suspend (String, String, String?, String?) -> Unit = { _, _, _, _ -> },
+        logoutResult: suspend () -> Unit = {},
+        restoreSessionResult: suspend (org.matrix.rustcomponents.sdk.Session) -> Unit = {},
+    ) = FakeFfiClient(
+        session = aRustSession().copy(homeserverUrl = testHomeserver),
+        homeserverLoginDetailsResult = homeserverLoginDetailsResult,
+        withUtdHook = withUtdHook,
+        loginResult = loginResult,
+        logoutResult = logoutResult,
+        restoreSessionResult = restoreSessionResult,
+    )
 
     private fun TestScope.createRustMatrixAuthenticationService(
         sessionStore: SessionStore = InMemorySessionStore(),
