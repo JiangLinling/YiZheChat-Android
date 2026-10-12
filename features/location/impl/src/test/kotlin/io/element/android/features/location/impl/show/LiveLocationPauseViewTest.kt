@@ -6,7 +6,6 @@
 package io.element.android.features.location.impl.show
 
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.platform.LocalView
@@ -22,11 +21,15 @@ import io.element.android.features.location.api.live.PausedLiveLocationShare
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.HardwareRenderingScreenshot
+import org.robolectric.util.ReflectionHelpers
 import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [35])
 class LiveLocationPauseViewTest {
     @Test fun `paused banner explains permission and Stop works without Resume`() = runAndroidComposeUiTest<ComponentActivity> {
         var stops = 0
@@ -74,9 +77,22 @@ class LiveLocationPauseViewTest {
         val bitmap = runOnUiThread {
             assertThat(view.width).isGreaterThan(0)
             assertThat(view.height).isGreaterThan(0)
-            // Compose captureToImage waits for a real window redraw, unavailable in Robolectric.
-            // Draw the actual view tree using the already-enabled native graphics backend.
-            Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).apply { view.draw(Canvas(this)) }
+            // Render the actual hardware display list with Robolectric's native
+            // screenshot backend. A software Bitmap Canvas omits RenderNode layers
+            // and produced a two-color empty projection despite correct semantics.
+            Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).apply {
+                assertThat(ReflectionHelpers.callStaticMethod<Boolean>(
+                    HardwareRenderingScreenshot::class.java,
+                    "canTakeScreenshot",
+                    ReflectionHelpers.ClassParameter.from(View::class.java, view),
+                )).isTrue()
+                ReflectionHelpers.callStaticMethod<Any?>(
+                    HardwareRenderingScreenshot::class.java,
+                    "takeScreenshot",
+                    ReflectionHelpers.ClassParameter.from(View::class.java, view),
+                    ReflectionHelpers.ClassParameter.from(Bitmap::class.java, this),
+                )
+            }
         }
         val pixels = IntArray(bitmap.width * bitmap.height)
         bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)

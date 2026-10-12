@@ -279,6 +279,11 @@ class MediaViewerPresenterTest {
             mediaLoader.finished.await()
             runCurrent()
             verify(exactly = 1) { mediaLoader.returnedFile.close() }
+            val settled = expectMostRecentItem()
+            assertThat(settled.currentIndex).isEqualTo(state.currentIndex)
+            assertThat(settled.canShowInfo).isEqualTo(state.canShowInfo)
+            assertThat(settled.mediaBottomSheetState).isEqualTo(MediaBottomSheetState.Hidden)
+            expectNoEvents()
         }
     }
 
@@ -347,6 +352,11 @@ class MediaViewerPresenterTest {
             verify(exactly = 1) { returnedFiles[0].close() }
             verify(exactly = 1) { returnedFiles[1].close() }
             assertThat(callIndex.get()).isEqualTo(2)
+            val settled = expectMostRecentItem()
+            assertThat(settled.currentIndex).isEqualTo(state.currentIndex)
+            assertThat(settled.canShowInfo).isEqualTo(state.canShowInfo)
+            assertThat(settled.mediaBottomSheetState).isEqualTo(MediaBottomSheetState.Hidden)
+            expectNoEvents()
         }
     }
 

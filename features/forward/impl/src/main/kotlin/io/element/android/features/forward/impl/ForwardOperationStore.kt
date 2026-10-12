@@ -137,7 +137,7 @@ class DefaultForwardOperationStore(
 
     private fun PersistedForwardOperation.restoreSafe(nowEpochMs: Long): PersistedForwardOperation {
         val restoredStates = pairStates.mapValues { (pair, state) -> when {
-            state is ForwardPairState.Sending && pairClaimTokens[pair] !in activeClaimTokens -> ForwardPairState.Ambiguous("Interrupted after send may have started")
+            state is ForwardPairState.Sending && pairClaimTokens[pair]?.let(activeClaimTokens::contains) != true -> ForwardPairState.Ambiguous("Interrupted after send may have started")
             expiresAtEpochMs <= nowEpochMs && state !is ForwardPairState.Success && state !is ForwardPairState.Ambiguous ->
                 ForwardPairState.Ambiguous("Forward recovery window expired")
             else -> state

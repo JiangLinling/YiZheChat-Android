@@ -33,6 +33,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
 private const val A_ROOM_AVATAR = "mxc://roomAvatar"
 private const val A_USER_AVATAR_1 = "mxc://userAvatar1"
@@ -154,6 +155,7 @@ class DefaultBaseRoomGroupMessageCreatorTest {
         assertThat(fakeImageLoader.getExecutedRequestsData()).containsExactlyElementsIn(expectedCoilRequests)
     }
 
+    @Config(sdk = [23, 35])
     @Test
     fun `test createRoomMessage with two Events`() = runTest {
         val sut = createRoomGroupMessageCreator()
@@ -175,11 +177,14 @@ class DefaultBaseRoomGroupMessageCreatorTest {
         // rather than action buttons or generated system replies. Keep this in sync
         // with DefaultNotificationCreatorTest's current presentation contract.
         assertThat(result.actions.orEmpty()).isEmpty()
-        assertThat(result.allowSystemGeneratedContextualActions).isFalse()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            assertThat(result.allowSystemGeneratedContextualActions).isFalse()
+        }
         assertThat(result.contentIntent).isNotNull()
         assertThat(fakeImageLoader.getExecutedRequestsData()).isEmpty()
     }
 
+    @Config(sdk = [23, 35])
     @Test
     fun `test createRoomMessage with smart reply error`() = runTest {
         val sut = createRoomGroupMessageCreator()
@@ -201,7 +206,9 @@ class DefaultBaseRoomGroupMessageCreatorTest {
         // rather than action buttons or generated system replies. Keep this in sync
         // with DefaultNotificationCreatorTest's current presentation contract.
         assertThat(result.actions.orEmpty()).isEmpty()
-        assertThat(result.allowSystemGeneratedContextualActions).isFalse()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            assertThat(result.allowSystemGeneratedContextualActions).isFalse()
+        }
         assertThat(result.contentIntent).isNotNull()
         assertThat(fakeImageLoader.getExecutedRequestsData()).isEmpty()
     }

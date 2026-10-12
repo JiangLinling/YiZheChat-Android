@@ -19,8 +19,13 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
+// Exercise the actual NIO file-replacement branch used by the target phones,
+// at its API boundary and a current SDK. Robolectric's default API 23 instead
+// runs File.renameTo on Windows, whose replacement semantics differ from Android.
+@Config(sdk = [26, 35])
 class UserPushStoreDataStoreTest {
     @Test
     fun `test getPushProviderName`() = runTest {

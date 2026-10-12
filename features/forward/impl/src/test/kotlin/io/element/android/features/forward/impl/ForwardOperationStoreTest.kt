@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 YiZheChat contributors. SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial. */
 package io.element.android.features.forward.impl
 
+import android.content.SharedPreferences
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.matrix.api.core.EventId
@@ -8,8 +9,6 @@ import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.test.FakeMatrixClient
 import io.element.android.security.securestorage.test.InMemorySensitiveFileStore
 import kotlinx.coroutines.test.runTest
-import io.mockk.every
-import io.mockk.spyk
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -102,6 +101,37 @@ class ForwardOperationStoreTest {
 
         assertThat(restored?.operationNonce).isEqualTo("nonce")
         assertThat(restored?.pairStates?.get(pair)).isInstanceOf(ForwardPairState.Ambiguous::class.java)
+        assertThat(restored?.scopeKey).isEqualTo("scope")
+        assertThat(restored?.generation).isEqualTo("generation")
+        assertThat(restored?.pairClaimTokens).isEmpty()
+        val reopened = DefaultForwardOperationStore(FakeMatrixClient(), files, preferences)
+        assertThat(reopened.claimPair("scope", "generation", pair)).isNull()
+        assertThat(reopened.load("scope", 1_000L)).isEqualTo(restored)
+    }
+
+    @Test
+    fun `restart with an inactive original claim preserves ambiguous identity and cannot resend`() = runTest {
+        val preferences = preferences()
+        val files = InMemorySensitiveFileStore()
+        val pair = ForwardPair(EventId("\$event:test"), RoomId("!room:test"))
+        val original = operation("original-generation").copy(
+            pairStates = mapOf(pair to ForwardPairState.Sending),
+            pairClaimTokens = mapOf(pair to "original-inactive-claim"),
+        )
+        DefaultForwardOperationStore(FakeMatrixClient(), files, preferences).create(original)
+        val reopened = DefaultForwardOperationStore(FakeMatrixClient(), files, preferences)
+
+        val restored = reopened.load("scope", 1_000L)!!
+
+        assertThat(restored.scopeKey).isEqualTo(original.scopeKey)
+        assertThat(restored.generation).isEqualTo(original.generation)
+        assertThat(restored.operationNonce).isEqualTo(original.operationNonce)
+        assertThat(restored.expiresAtEpochMs).isEqualTo(original.expiresAtEpochMs)
+        assertThat(restored.pairStates.keys).containsExactly(pair)
+        assertThat(restored.pairStates[pair]).isInstanceOf(ForwardPairState.Ambiguous::class.java)
+        assertThat(restored.pairClaimTokens).isEmpty()
+        assertThat(reopened.claimPair("scope", original.generation, pair)).isNull()
+        assertThat(reopened.load("scope", 1_000L)).isEqualTo(restored)
     }
 
     @Test
@@ -134,15 +164,32 @@ class ForwardOperationStoreTest {
         val files = InMemorySensitiveFileStore()
         val firstStore = DefaultForwardOperationStore(FakeMatrixClient(), files, real)
         val created = firstStore.create(operation("generation"))
-        val preferences = spyk(real)
-        val editor = spyk(real.edit())
-        every { preferences.edit() } returns editor
-        every { editor.putString(any(), any()) } returns editor
-        every { editor.remove(any()) } returns editor
-        every { editor.commit() } returns false
+        var refusedCommits = 0
+        val preferences = object : SharedPreferences by real {
+            override fun edit(): SharedPreferences.Editor {
+                val editor = real.edit()
+                return object : SharedPreferences.Editor by editor {
+                    override fun putString(key: String?, value: String?): SharedPreferences.Editor {
+                        editor.putString(key, value)
+                        return this
+                    }
+
+                    override fun remove(key: String?): SharedPreferences.Editor {
+                        editor.remove(key)
+                        return this
+                    }
+
+                    override fun commit(): Boolean {
+                        refusedCommits += 1
+                        return false
+                    }
+                }
+            }
+        }
 
         assertFails { DefaultForwardOperationStore(FakeMatrixClient(), files, preferences).save(created.copy(operationNonce = "new"), created.revision) }
 
+        assertThat(refusedCommits).isEqualTo(1)
         assertThat(DefaultForwardOperationStore(FakeMatrixClient(), files, real).load("scope", 1_000L)?.operationNonce).isEqualTo("nonce")
     }
 
