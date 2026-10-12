@@ -66,6 +66,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.ByteArrayInputStream
 import java.io.FilterInputStream
@@ -178,7 +179,6 @@ private fun LocalOfficePreviewAttempt(
     LaunchedEffect(hostLease) {
         hostLease?.state?.collect { state ->
             if (state is FilePreviewLeaseState.Released) {
-                validationRunner.cancel()
                 leaseRevoked = true
                 leaseReleaseReason = state.reason
                 currentOnState(LocalOfficePreviewState.SECURITY_BLOCKED)
@@ -236,7 +236,6 @@ private fun LocalOfficePreviewAttempt(
     DisposableEffect(lifecycleOwner, runtimeGate) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
-                validationRunner.cancel()
                 if (runtimeGate.beginTermination(LocalOfficeCloseReason.APP_LOCKED)) {
                     terminatedByLock = true
                     if (!runtimeGate.hasWebRuntime()) {
@@ -248,7 +247,6 @@ private fun LocalOfficePreviewAttempt(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            validationRunner.cancel()
             runtimeGate.disposeAttempt(preserveHostLease = preserveHostLeaseOnDispose)
         }
     }
@@ -379,6 +377,7 @@ private fun IsolatedOfficeWebView(
             .build()
             .toString()
     }
+    val releaseOwners = remember(runtimeGate) { mutableMapOf<WebView, LocalOfficeWebRuntimeRelease>() }
     AndroidView(
         modifier = modifier.fillMaxSize(),
         factory = { context ->
@@ -388,6 +387,22 @@ private fun IsolatedOfficeWebView(
                 .build()
             WebView(context).apply {
                 runtimeGate.markCreated()
+                val boundView = this
+                val boundRelease = LocalOfficeWebRuntimeRelease(
+                    evaluate = { script, callback -> boundView.evaluateJavascript(script) { callback(it) } },
+                    destroyNative = { rendererGone ->
+                        if (!rendererGone) {
+                            boundView.stopLoading()
+                            boundView.removeJavascriptInterface(BRIDGE_NAME)
+                            boundView.clearFormData()
+                            boundView.clearHistory()
+                        }
+                        boundView.destroy()
+                    },
+                    onComplete = runtimeGate::finishAfterWebRuntimeReleased,
+                    allowUninitialized = { !sourceHandler.hasOpenedPayload() },
+                )
+                releaseOwners[boundView] = boundRelease
                 with(settings) {
                     javaScriptEnabled = true
                     domStorageEnabled = false
@@ -418,7 +433,9 @@ private fun IsolatedOfficeWebView(
                         resultMsg: android.os.Message?,
                     ): Boolean = false
                 }
-                webViewClient = IsolatedOfficeWebViewClient(loader, indexUrl, onFailure)
+                webViewClient = IsolatedOfficeWebViewClient(loader, indexUrl, onFailure) { affectedView ->
+                    if (affectedView === boundView) boundRelease.rendererExited()
+                }
                 addJavascriptInterface(
                     OfficeBridge(
                         onReady = { post { onReady() } },
@@ -430,15 +447,9 @@ private fun IsolatedOfficeWebView(
             }
         },
         update = { webView -> if (webView.url != indexUrl) webView.loadUrl(indexUrl) },
-        onRelease = { webView ->
-            webView.evaluateJavascript("globalThis.YiZheOffice?.destroy?.()", null)
-            webView.stopLoading()
-            webView.removeJavascriptInterface(BRIDGE_NAME)
-            webView.clearFormData()
-            webView.clearHistory()
-            webView.loadUrl("about:blank")
-            webView.destroy()
-            runtimeGate.finishAfterWebRuntimeReleased()
+        onRelease = { releasedView ->
+            runtimeGate.beginTermination(LocalOfficeCloseReason.HOST_DISPOSED)
+            releaseOwners.remove(releasedView)?.release()
         },
     )
 }
@@ -448,6 +459,7 @@ internal class LocalOfficeRuntimeGate(
     private val hostLease: FilePreviewLease? = null,
     private val validationRunner: LocalOfficeValidationRunner? = null,
     private val runtime: FilePreviewRuntime? = hostLease?.beginRuntime(),
+    private val cleanupScope: CoroutineScope? = null,
     private val onState: (LocalOfficePreviewState) -> Unit,
     private val onClose: (LocalOfficeCloseReason, LocalOfficeCleanupResult) -> Unit,
 ) {
@@ -456,6 +468,7 @@ internal class LocalOfficeRuntimeGate(
     private val finished = AtomicBoolean(false)
     private val reason = AtomicReference(LocalOfficeCloseReason.HOST_DISPOSED)
     private val hostRelease = AtomicReference<FilePreviewLeaseReleaseResult?>()
+    private val hostReleaseReason = AtomicReference<LocalOfficeCloseReason?>()
 
     fun markCreated() {
         runtimeCreated.set(true)
@@ -470,12 +483,13 @@ internal class LocalOfficeRuntimeGate(
         if (!acceptingResults.compareAndSet(true, false)) return false
         reason.set(value)
         sourceHandler.revoke()
+        validationRunner?.cancel()
         return true
     }
 
     fun finishWithoutRuntime(closeReason: LocalOfficeCloseReason) {
         beginTermination(closeReason)
-        finish(webRuntimeReleased = true)
+        if (!runtimeCreated.get()) finish(webRuntimeReleased = true)
     }
 
     fun disposeAttempt(preserveHostLease: Boolean = false) {
@@ -492,43 +506,64 @@ internal class LocalOfficeRuntimeGate(
     private fun finish(webRuntimeReleased: Boolean) {
         if (!finished.compareAndSet(false, true)) return
         onState(LocalOfficePreviewState.CLOSED)
-        val deliver = { validationClosed: Boolean ->
-        val release = hostRelease.get()
-        val sourceCleared = sourceHandler.isCleanupComplete()
-        runtime?.complete(FilePreviewRuntimeCleanup(webRuntimeReleased, validationClosed, sourceCleared))
-        onClose(
-            reason.get(),
-            LocalOfficeCleanupResult(
-                webRuntimeReleased = webRuntimeReleased,
-                sourceClosed = validationClosed && sourceCleared,
-                validatedPayloadCleared = validationClosed && sourceCleared,
-                hostLeaseReleased = release?.hostHandleCloseCompleted == true,
-                hostLeaseTokenMatched = release?.leaseTokenMatched == true,
-                hostActiveStreamsClosed = release?.activeStreamsClosed == true,
-                hostBackingCleanupStatus = release?.backingCleanupStatus
-                    ?: FilePreviewBackingCleanupStatus.NOT_OBSERVABLE,
-                temporaryPlaintextRemoved = validationClosed && sourceCleared,
-                pendingRecovery = !validationClosed || !sourceCleared,
-            ),
-        )
-        onState(LocalOfficePreviewState.RESOURCES_RELEASED)
+        val deliver = {
+            val release = hostRelease.get()
+            onClose(
+                reason.get(),
+                LocalOfficeCleanupResult(
+                    webRuntimeReleased = webRuntimeReleased,
+                    sourceClosed = true,
+                    validatedPayloadCleared = true,
+                    hostLeaseReleased = release?.hostHandleCloseCompleted == true,
+                    hostLeaseTokenMatched = release?.leaseTokenMatched == true,
+                    hostActiveStreamsClosed = release?.activeStreamsClosed == true,
+                    hostBackingCleanupStatus = release?.backingCleanupStatus
+                        ?: FilePreviewBackingCleanupStatus.NOT_OBSERVABLE,
+                    temporaryPlaintextRemoved = true,
+                    pendingRecovery = false,
+                ),
+            )
+            onState(LocalOfficePreviewState.RESOURCES_RELEASED)
         }
-        if (validationRunner == null) {
-            deliver(true)
+        if (validationRunner == null && sourceHandler.isCleanupComplete() && isRequestedHostReleaseComplete()) {
+            runtime?.complete(FilePreviewRuntimeCleanup(webRuntimeReleased, true, true))
+            deliver()
         } else {
-            // This observer survives Compose cancellation and checks the worker's actual termination.
-            CoroutineScope(Dispatchers.Main.immediate).launch {
-                deliver(validationRunner.awaitCleanup())
+            // Survives Compose disposal. No runtime completion is published for an intermediate
+            // false snapshot: retry the original owners until their actual work has ended.
+            (cleanupScope ?: CoroutineScope(Dispatchers.Main.immediate)).launch {
+                var validationClosed = validationRunner == null
+                while (true) {
+                    if (!validationClosed) validationClosed = validationRunner?.awaitCleanup() == true
+                    withContext(Dispatchers.IO) { sourceHandler.revoke() }
+                    if (validationClosed && sourceHandler.isCleanupComplete()) break
+                    delay(250)
+                }
+                runtime?.complete(FilePreviewRuntimeCleanup(webRuntimeReleased, true, true))
+                while (!isRequestedHostReleaseComplete()) {
+                    withContext(Dispatchers.IO) { releaseHostLease(checkNotNull(hostReleaseReason.get())) }
+                    if (!isRequestedHostReleaseComplete()) delay(250)
+                }
+                deliver()
             }
         }
     }
 
     private fun releaseHostLease(closeReason: LocalOfficeCloseReason) {
         synchronized(hostRelease) {
-            if (hostRelease.get() != null) return
+            val previous = hostRelease.get()
+            if (previous?.leaseTokenMatched == true && previous.activeStreamsClosed && previous.hostHandleCloseCompleted) return
             val lease = hostLease ?: return
-            hostRelease.set(lease.release(closeReason.toLeaseReleaseReason()))
+            hostReleaseReason.compareAndSet(null, closeReason)
+            runCatching { lease.release(checkNotNull(hostReleaseReason.get()).toLeaseReleaseReason()) }
+                .onSuccess(hostRelease::set)
         }
+    }
+
+    private fun isRequestedHostReleaseComplete(): Boolean {
+        if (hostReleaseReason.get() == null) return true
+        val release = hostRelease.get() ?: return false
+        return release.leaseTokenMatched && release.activeStreamsClosed && release.hostHandleCloseCompleted
     }
 }
 
@@ -571,12 +606,12 @@ private fun LocalOfficeCloseReason.toLeaseReleaseReason(): FilePreviewLeaseRelea
 
 internal class SessionContentPathHandler(
     private val token: String,
+    private val openStream: (LocalOfficeValidatedPayload) -> InputStream = { it.openInputStream() },
 ) : WebViewAssetLoader.PathHandler {
     private val revoked = AtomicBoolean(false)
     private val served = AtomicBoolean(false)
     private val payload = AtomicReference<InstalledPayload?>()
     private val activeStreams = ConcurrentHashMap.newKeySet<InputStream>()
-    private val cleanupFailed = AtomicBoolean(false)
 
     @Synchronized
     fun install(value: LocalOfficeValidatedPayload, mimeType: String): Boolean {
@@ -612,53 +647,95 @@ internal class SessionContentPathHandler(
     internal fun openPayloadStream(path: String): OpenPayload? {
         if (revoked.get() || path != token || !served.compareAndSet(false, true)) return null
         val installed = payload.get() ?: return null
-        val rawStream = runCatching { installed.payload.openInputStream() }.getOrElse { return null }
+        val rawStream = runCatching { openStream(installed.payload) }.getOrElse { return null }
         lateinit var trackedStream: InputStream
         trackedStream = object : FilterInputStream(rawStream) {
-            private val closed = AtomicBoolean(false)
+            private val stateLock = Any()
+            private val closeLock = Any()
+            private var closeRequested = false
+            private var rawClosed = false
+            private var reads = 0
 
-            override fun read(): Int {
-                ensureReadable()
-                return super.read()
-            }
+            override fun read(): Int = reading { rawStream.read() }
+
+            override fun read(buffer: ByteArray): Int = read(buffer, 0, buffer.size)
 
             override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-                ensureReadable()
-                return super.read(buffer, offset, length)
+                require(offset >= 0 && length >= 0 && offset <= buffer.size - length)
+                return reading(onFailure = { buffer.fill(0, offset, offset + length) }) {
+                    rawStream.read(buffer, offset, length)
+                }
             }
 
+            override fun skip(count: Long): Long = reading { rawStream.skip(count) }
+
             override fun close() {
-                if (!closed.compareAndSet(false, true)) return
+                synchronized(stateLock) { closeRequested = true }
+                // Do not hold the read state or handler monitor across an external close.
+                synchronized(closeLock) {
+                    if (!synchronized(stateLock) { rawClosed }) {
+                        rawStream.close()
+                        synchronized(stateLock) { rawClosed = true }
+                    }
+                }
+                retireIfFinished()
+            }
+
+            private fun <T> reading(onFailure: () -> Unit = {}, action: () -> T): T {
+                synchronized(stateLock) {
+                    ensureReadable()
+                    reads++
+                }
                 try {
-                    super.close()
+                    val result = action()
+                    synchronized(stateLock) { ensureReadable() }
+                    return result
+                } catch (failure: Throwable) {
+                    onFailure()
+                    throw failure
                 } finally {
-                    activeStreams.remove(trackedStream)
+                    synchronized(stateLock) { reads-- }
+                    retireIfFinished()
                 }
             }
 
             private fun ensureReadable() {
-                if (closed.get() || revoked.get()) throw IOException("Local Office payload revoked")
+                if (closeRequested || revoked.get()) throw IOException("Local Office payload revoked")
+            }
+
+            private fun retireIfFinished() {
+                if (synchronized(stateLock) { rawClosed && reads == 0 }) {
+                    activeStreams.remove(trackedStream)
+                    clearPayloadIfFinished()
+                }
             }
         }
         activeStreams.add(trackedStream)
         return OpenPayload(installed.mimeType, trackedStream)
     }
 
-    @Synchronized
     fun revoke() {
-        if (!revoked.compareAndSet(false, true)) return
+        synchronized(this) { revoked.set(true) }
         activeStreams.toList().forEach { stream ->
-            if (runCatching { stream.close() }.isFailure) cleanupFailed.set(true)
+            // A failed close remains owned and is retried on the same stream.
+            runCatching { stream.close() }
         }
-        activeStreams.clear()
-        payload.getAndSet(null)?.payload?.let { value ->
-            value.clear()
-            if (!value.isCleared()) cleanupFailed.set(true)
+        clearPayloadIfFinished()
+    }
+
+    @Synchronized
+    private fun clearPayloadIfFinished() {
+        if (!revoked.get() || activeStreams.isNotEmpty()) return
+        payload.get()?.let { installed ->
+            installed.payload.clear()
+            if (installed.payload.isCleared()) payload.compareAndSet(installed, null)
         }
     }
 
     @Synchronized
-    fun isCleanupComplete(): Boolean = revoked.get() && !cleanupFailed.get() && activeStreams.isEmpty() && payload.get() == null
+    fun isCleanupComplete(): Boolean = revoked.get() && activeStreams.isEmpty() && payload.get() == null
+
+    fun hasOpenedPayload(): Boolean = served.get()
 
     private data class InstalledPayload(
         val payload: LocalOfficeValidatedPayload,
@@ -699,6 +776,7 @@ private class IsolatedOfficeWebViewClient(
     private val loader: WebViewAssetLoader,
     private val indexUrl: String,
     private val onFailure: (String) -> Unit,
+    private val onRendererGone: (WebView?) -> Unit,
 ) : WebViewClient() {
     override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest): WebResourceResponse =
         loader.shouldInterceptRequest(request.url) ?: blockedResponse()
@@ -724,6 +802,7 @@ private class IsolatedOfficeWebViewClient(
     }
 
     override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+        onRendererGone(view)
         onFailure("renderer-process-gone")
         return true
     }

@@ -9,8 +9,10 @@ import io.element.android.libraries.localofficeviewer.api.LocalOfficeContentSour
 import io.element.android.libraries.localofficeviewer.api.LocalOfficePreviewRequest
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -36,7 +38,9 @@ internal class LocalOfficeValidationRunner(
 ) {
     private val cancelled = AtomicBoolean(false)
     private val activeStream = AtomicReference<InputStream?>()
-    private val streamCloseFailed = AtomicBoolean(false)
+    // Retain the same buffer across continuation dispatch. Worker termination alone does not
+    // mean that a queued UI result has been consumed or its cancellation cleanup has executed.
+    private val acceptedPayload = AtomicReference<LocalOfficeValidatedPayload?>()
     private val worker = AtomicReference<Future<*>?>()
     private val continuation = AtomicReference<CancellableContinuation<LocalOfficeDetection>?>()
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
@@ -47,7 +51,13 @@ internal class LocalOfficeValidationRunner(
     )
 
     suspend fun await(): LocalOfficeDetection = try {
-        withTimeout(timeoutMillis) { awaitWorker() }
+        withTimeout(timeoutMillis) { awaitWorker() }.also { result ->
+            if (cancelled.get()) {
+                result.clearValidatedPayload()
+                clearAcceptedPayload()
+                throw CancellationException("Local Office validation cancelled before delivery")
+            }
+        }
     } catch (_: TimeoutCancellationException) {
         cancelWorker()
         LocalOfficeDetection.SecurityBlocked(LocalOfficeBlockReason.VALIDATION_TIMEOUT)
@@ -61,7 +71,11 @@ internal class LocalOfficeValidationRunner(
     internal fun isWorkerTerminated(): Boolean = executor.isTerminated
 
     suspend fun awaitCleanup(): Boolean = withContext(Dispatchers.IO) {
-        executor.awaitTermination(5, TimeUnit.SECONDS) && activeStream.get() == null && !streamCloseFailed.get()
+        if (cancelled.get() || executor.isTerminated) retrySourceClose()
+        val terminated = executor.awaitTermination(5, TimeUnit.SECONDS)
+        if (terminated) retrySourceClose()
+        if (cancelled.get()) clearAcceptedPayload()
+        terminated && activeStream.get() == null && acceptedPayload.get() == null
     }
 
     private suspend fun awaitWorker(): LocalOfficeDetection = suspendCancellableCoroutine { current ->
@@ -75,11 +89,13 @@ internal class LocalOfficeValidationRunner(
             executor.submit {
                 try {
                     val result = LocalOfficeFormatDetector.detect(trackedRequest)
+                    if (result is LocalOfficeDetection.Accepted) acceptedPayload.set(result.payload)
                     val deliver = !cancelled.get() && continuation.compareAndSet(current, null) && current.isActive
                     if (deliver) {
                         current.resume(result) { _, discarded, _ -> discarded.clearValidatedPayload() }
                     } else {
                         result.clearValidatedPayload()
+                        clearAcceptedPayload()
                     }
                 } finally {
                     executor.shutdown()
@@ -100,15 +116,14 @@ internal class LocalOfficeValidationRunner(
         val rawStream = request.contentSource.openInputStream()
         lateinit var trackedStream: InputStream
         trackedStream = object : FilterInputStream(rawStream) {
+            private var closed = false
+
+            @Synchronized
             override fun close() {
-                try {
-                    super.close()
-                } catch (failure: Exception) {
-                    streamCloseFailed.set(true)
-                    throw failure
-                } finally {
-                    activeStream.compareAndSet(trackedStream, null)
-                }
+                if (closed) return
+                super.close()
+                closed = true
+                activeStream.compareAndSet(trackedStream, null)
             }
         }
         if (!activeStream.compareAndSet(null, trackedStream)) {
@@ -124,11 +139,22 @@ internal class LocalOfficeValidationRunner(
 
     private fun cancelWorker() {
         if (!cancelled.compareAndSet(false, true)) return
-        activeStream.getAndSet(null)?.let { stream ->
-            if (runCatching { stream.close() }.isFailure) streamCloseFailed.set(true)
-        }
         worker.getAndSet(null)?.cancel(true)
         executor.shutdownNow()
+        clearAcceptedPayload()
+        // Provider close may block. Never wait for it on the Compose/main cancellation caller.
+        CoroutineScope(Dispatchers.IO).launch { retrySourceClose() }
+    }
+
+    private fun retrySourceClose() {
+        activeStream.get()?.let { stream -> runCatching { stream.close() } }
+    }
+
+    private fun clearAcceptedPayload() {
+        acceptedPayload.get()?.let { payload ->
+            payload.clear()
+            acceptedPayload.compareAndSet(payload, null)
+        }
     }
 }
 

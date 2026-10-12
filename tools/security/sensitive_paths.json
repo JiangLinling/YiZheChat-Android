@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "paths": [
+    {
+      "token": "sessions",
+      "assetIds": ["L-001", "L-002"],
+      "owner": "SESSION_STORAGE",
+      "source": "app/src/main/kotlin/io/element/android/x/di/AppModule.kt"
+    },
+    {
+      "token": "secure/v1",
+      "assetIds": ["L-015"],
+      "owner": "SECURE_STORAGE",
+      "source": "security/secure-storage/impl/src/main/kotlin/io/element/android/security/securestorage/impl/DefaultSecureStorageRoots.kt"
+    },
+    {
+      "token": "secure-runtime/v1",
+      "assetIds": ["M-011"],
+      "owner": "SECURE_STORAGE",
+      "source": "security/secure-storage/impl/src/main/kotlin/io/element/android/security/securestorage/impl/DefaultSecureStorageRoots.kt"
+    },
+    {
+      "token": "device-root",
+      "assetIds": ["L-015", "M-011"],
+      "owner": "SECURE_STORAGE",
+      "source": "security/secure-storage/impl/src/main/kotlin/io/element/android/security/securestorage/impl/DeviceRootKeyRecords.kt"
+    },
+    {
+      "token": "vault-keys",
+      "assetIds": ["L-015"],
+      "owner": "SECURE_STORAGE",
+      "source": "security/secure-storage/impl/src/main/kotlin/io/element/android/security/securestorage/impl/VaultKeyEnvelopeStore.kt"
+    },
+    {
+      "token": "account-vaults",
+      "assetIds": ["L-001", "L-002", "L-004", "L-005", "L-006", "L-011", "L-015", "M-011"],
+      "owner": "SECURE_STORAGE",
+      "source": "security/secure-storage/impl/src/main/kotlin/io/element/android/security/securestorage/impl/AccountVaultRecordStore.kt"
+    },
+    {
+      "token": "objects",
+      "assetIds": ["L-004", "L-005", "L-006", "L-007", "L-008", "L-009", "L-011", "L-013", "L-015"],
+      "owner": "SECURE_STORAGE",
+      "source": "security/secure-storage/impl/src/main/kotlin/io/element/android/security/securestorage/impl/DefaultSensitiveFileStore.kt"
+    },
+    {
+      "token": "tombstones",
+      "assetIds": ["L-015"],
+      "owner": "SECURE_STORAGE",
+      "source": "security/secure-storage/impl/src/main/kotlin/io/element/android/security/securestorage/impl/DefaultSensitiveFileStore.kt"
+    },
+    {
+      "token": "deletion-journal",
+      "assetIds": ["L-015"],
+      "owner": "SECURE_STORAGE",
+      "source": "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/DeletionJournal.kt"
+    },
+    {
+      "token": "plaintext-migration",
+      "assetIds": ["L-015"],
+      "owner": "SECURE_STORAGE",
+      "source": "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/PlaintextMigrationJournal.kt"
+    },
+    {
+      "token": "security/management/control-state-v1.json",
+      "assetIds": ["L-015"],
+      "owner": "SECURE_STORAGE",
+      "source": "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/SignedManagementStateRepository.kt"
+    },
+    {
+      "token": "offline-licenses",
+      "assetIds": ["L-015", "S-010"],
+      "owner": "CONTENT_PROTECTION",
+      "source": "security/content-protection/impl/src/main/kotlin/io/element/android/security/contentprotection/impl/OfflineLicenseStore.kt"
+    },
+    {
+      "token": "temp/media",
+      "assetIds": ["L-004", "L-011"],
+      "owner": "MEDIA_PIPELINE",
+      "source": "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/media/RustMediaLoader.kt"
+    },
+    {
+      "token": "temp/voice",
+      "assetIds": ["L-005"],
+      "owner": "VOICE_PIPELINE",
+      "source": "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/RustMatrixClientFactory.kt"
+    },
+    {
+      "token": "voice_recordings",
+      "assetIds": ["L-005", "L-007"],
+      "owner": "VOICE_PIPELINE",
+      "source": "libraries/voicerecorder/impl/src/main/kotlin/io/element/android/libraries/voicerecorder/impl/di/VoiceRecorderModule.kt"
+    },
+    {
+      "token": "temp/notif",
+      "assetIds": ["L-006"],
+      "owner": "PUSH_AND_NOTIFICATIONS",
+      "source": "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/RustMatrixClientFactory.kt"
+    },
+    {
+      "token": "notification_sounds",
+      "assetIds": ["L-006"],
+      "owner": "PUSH_AND_NOTIFICATIONS",
+      "source": "libraries/push/impl/src/main/kotlin/io/element/android/libraries/push/impl/notifications/sound/DefaultNotificationSoundCopier.kt"
+    },
+    {
+      "token": "uploads",
+      "assetIds": ["L-007"],
+      "owner": "UPLOAD_AND_SHARE",
+      "source": "libraries/mediaupload/impl/src/main/kotlin/io/element/android/libraries/mediaupload/impl/AndroidMediaPreProcessor.kt"
+    },
+    {
+      "token": "edited-media",
+      "assetIds": ["L-008"],
+      "owner": "UPLOAD_AND_SHARE",
+      "source": "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/attachments/preview/imageeditor/AttachmentImageEditor.kt"
+    },
+    {
+      "token": "photo.jpg",
+      "assetIds": ["L-008"],
+      "owner": "UPLOAD_AND_SHARE",
+      "source": "libraries/mediapickers/impl/src/main/kotlin/io/element/android/libraries/mediapickers/impl/DefaultPickerProvider.kt"
+    },
+    {
+      "token": "video.mp4",
+      "assetIds": ["L-008"],
+      "owner": "UPLOAD_AND_SHARE",
+      "source": "libraries/mediapickers/impl/src/main/kotlin/io/element/android/libraries/mediapickers/impl/DefaultPickerProvider.kt"
+    },
+    {
+      "token": "screenshot.png",
+      "assetIds": ["L-013", "M-009"],
+      "owner": "LOGGING_AND_AUDIT",
+      "source": "features/rageshake/impl/src/main/kotlin/io/element/android/features/rageshake/impl/screenshot/DefaultScreenshotHolder.kt"
+    },
+    {
+      "token": "logs",
+      "assetIds": ["L-013"],
+      "owner": "LOGGING_AND_AUDIT",
+      "source": "features/rageshake/impl/src/main/kotlin/io/element/android/features/rageshake/impl/reporter/DefaultBugReporter.kt"
+    }
+  ]
+}

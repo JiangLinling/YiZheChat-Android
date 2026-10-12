@@ -12,13 +12,21 @@ import io.element.android.libraries.localofficeviewer.api.FilePreviewVerificatio
 import io.element.android.libraries.localofficeviewer.api.LocalOfficeCleanupResult
 import io.element.android.libraries.localofficeviewer.api.LocalOfficeCloseReason
 import io.element.android.libraries.localofficeviewer.api.LocalOfficePreviewState
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 
 class LocalOfficeRuntimeGateTest {
     @Test
@@ -131,9 +139,40 @@ class LocalOfficeRuntimeGateTest {
         assertThat(preservedCloses.single().second.hostLeaseReleased).isFalse()
     }
 
-    private class TrackingFilePreviewLease : FilePreviewLease {
+    @Test
+    fun `host close failure retries same lease and original reason before released state`() = runBlocking<Unit> {
+        val allowClose = AtomicBoolean(false)
+        val lease = TrackingFilePreviewLease(allowClose)
+        val scope = CoroutineScope(Dispatchers.Default)
+        val closed = CompletableDeferred<LocalOfficeCleanupResult>()
+        val released = CompletableDeferred<Unit>()
+        val gate = LocalOfficeRuntimeGate(
+            sourceHandler = SessionContentPathHandler("token"),
+            hostLease = lease,
+            cleanupScope = scope,
+            onState = { if (it == LocalOfficePreviewState.RESOURCES_RELEASED) released.complete(Unit) },
+            onClose = { _, cleanup -> closed.complete(cleanup) },
+        )
+        try {
+            gate.finishWithoutRuntime(LocalOfficeCloseReason.APP_LOCKED)
+            assertThat(closed.isCompleted).isFalse()
+            assertThat(released.isCompleted).isFalse()
+            allowClose.set(true)
+            val result = withTimeout(5_000) { closed.await() }
+            withTimeout(5_000) { released.await() }
+            assertThat(result.hostLeaseReleased).isTrue()
+            assertThat(result.pendingRecovery).isFalse()
+            assertThat(lease.releaseReasons.size).isAtLeast(2)
+            assertThat(lease.releaseReasons.toSet()).containsExactly(FilePreviewLeaseReleaseReason.APP_LOCKED)
+        } finally {
+            allowClose.set(true)
+            scope.cancel()
+        }
+    }
+
+    private class TrackingFilePreviewLease(private val allowClose: AtomicBoolean = AtomicBoolean(true)) : FilePreviewLease {
         private val mutableState = MutableStateFlow<FilePreviewLeaseState>(FilePreviewLeaseState.Available)
-        val releaseReasons = mutableListOf<FilePreviewLeaseReleaseReason>()
+        val releaseReasons = CopyOnWriteArrayList<FilePreviewLeaseReleaseReason>()
 
         override val leaseToken = "lease-token"
         override val operationId = "operation"
@@ -155,7 +194,7 @@ class LocalOfficeRuntimeGateTest {
             return FilePreviewLeaseReleaseResult(
                 leaseTokenMatched = true,
                 activeStreamsClosed = true,
-                hostHandleCloseCompleted = true,
+                hostHandleCloseCompleted = allowClose.get(),
                 backingCleanupStatus = FilePreviewBackingCleanupStatus.NOT_OBSERVABLE,
             )
         }

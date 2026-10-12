@@ -122,6 +122,24 @@ class SignedManagementStateRepositoryTest {
     }
 
     @Test
+    fun `incomplete upgraded publication blocks refresh without rewriting original authority bytes`() {
+        val fixture = Fixture(temporaryFolder.root)
+        fixture.repository.updateTrustedTime(1_000)
+        val publication = """{"publication":{"nonce":"synthetic"},"state":"APPLIED"}"""
+        for (serialized in listOf(
+            """{"highest_policy_version":7,"highest_tombstone_sequence":12,"latest_policy_application":$publication}""",
+            """{"highest_policy_version":7,"highest_tombstone_sequence":12,"policy_application_history":[$publication]}""",
+        )) {
+            val original = serialized.encodeToByteArray()
+            fixture.stateFile.writeBytes(original)
+            val restarted = fixture.newRepository()
+            assertThat(restarted.currentPolicyState()).isEqualTo(CurrentPolicyState.AccessBlocked(highestAcceptedVersion = null))
+            assertThrows(IllegalStateException::class.java) { restarted.updateTrustedTime(2_000) }
+            assertThat(fixture.stateFile.readBytes()).isEqualTo(original)
+        }
+    }
+
+    @Test
     fun `repeated management state commits replace the prior file and survive restart`() {
         val fixture = Fixture(temporaryFolder.root)
 

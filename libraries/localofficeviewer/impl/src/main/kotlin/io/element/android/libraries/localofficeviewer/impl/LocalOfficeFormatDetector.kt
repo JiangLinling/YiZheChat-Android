@@ -31,13 +31,17 @@ internal class LocalOfficeValidatedPayload internal constructor(
     val size: Int
         get() = bytes.size
 
+    @Synchronized
     fun openInputStream(): InputStream {
         check(!cleared.get()) { "Validated local Office payload is no longer available." }
         return ByteArrayInputStream(bytes)
     }
 
+    @Synchronized
     fun clear() {
-        if (cleared.compareAndSet(false, true)) bytes.fill(0)
+        if (cleared.get()) return
+        bytes.fill(0)
+        cleared.set(true)
     }
 
     internal fun isCleared(): Boolean = cleared.get()

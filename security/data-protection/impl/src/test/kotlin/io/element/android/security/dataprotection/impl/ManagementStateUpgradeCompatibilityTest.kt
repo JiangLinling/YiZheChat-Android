@@ -11,7 +11,6 @@ import com.google.common.truth.Truth.assertThat
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
@@ -25,8 +24,9 @@ class ManagementStateUpgradeCompatibilityTest {
     @Test
     fun `older state without publication fields stays readable`() {
         val state = json.decodeFromString<PersistedManagementState>("""{"highest_policy_version":7}""")
-        state.requireSupportedPolicyApplications()
         assertThat(state.highestPolicyVersion).isEqualTo(7)
+        assertThat(state.policyApplicationHistory).isEmpty()
+        assertThat(state.latestPolicyApplication).isNull()
     }
 
     @Test
@@ -34,20 +34,18 @@ class ManagementStateUpgradeCompatibilityTest {
         val state = json.decodeFromString<PersistedManagementState>(
             """{"highest_policy_version":7,"highest_tombstone_sequence":12,"policy_application_history":[],"latest_policy_application":null}""",
         )
-        state.requireSupportedPolicyApplications()
         assertThat(json.decodeFromString<PersistedManagementState>(json.encodeToString(state))).isEqualTo(state)
         assertThat(state.highestTombstoneSequence).isEqualTo(12)
     }
 
     @Test
-    fun `populated newer applications fail closed and their data is retained`() {
-        val publication = json.parseToJsonElement("""{"publication":{"nonce":"synthetic"},"state":"APPLIED"}""").jsonObject
-        for (state in listOf(
-            PersistedManagementState(latestPolicyApplication = publication),
-            PersistedManagementState(policyApplicationHistory = listOf(publication)),
+    fun `incomplete populated applications cannot become supported signed application records`() {
+        val publication = """{"publication":{"nonce":"synthetic"},"state":"APPLIED"}"""
+        for (serialized in listOf(
+            """{"highest_policy_version":7,"latest_policy_application":$publication}""",
+            """{"highest_policy_version":7,"policy_application_history":[$publication]}""",
         )) {
-            assertThrows(IllegalStateException::class.java) { state.requireSupportedPolicyApplications() }
-            assertThat(json.decodeFromString<PersistedManagementState>(json.encodeToString(state))).isEqualTo(state)
+            assertThrows(SerializationException::class.java) { json.decodeFromString<PersistedManagementState>(serialized) }
         }
     }
 
