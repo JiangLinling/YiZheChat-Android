@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-next-r10-20261013",
-  "frozen_utc": "2026-10-12T20:38:07.611570+00:00",
+  "revision": "20261013-r11",
+  "frozen_utc": "2026-10-12T21:10:31.463269+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -302,7 +302,7 @@
     "appnav/src/main/kotlin/io/element/android/appnav/LoggedInAppScopeFlowNode.kt": "a79b0e3e7d31829635a5b80923dcccba6e0e55b56a1572bbfb9c13dd1dcf7d99",
     "appnav/src/main/kotlin/io/element/android/appnav/LoggedInBackgroundLifecycleObserver.kt": "9d42bc7fb92d3e67ea1d1b91579ce91dc00fe2b8e08b969da1d1681f28bc9323",
     "appnav/src/main/kotlin/io/element/android/appnav/LoggedInEventProcessor.kt": "b948bcee9e7893c1ec2517c516987504636c95a57405cc2315ce50bd398e8d53",
-    "appnav/src/main/kotlin/io/element/android/appnav/LoggedInFlowNode.kt": "97475258b841cf4c09ff7b81e1e1676fce2e0b6ef5f06f1b89887ae38316bb51",
+    "appnav/src/main/kotlin/io/element/android/appnav/LoggedInFlowNode.kt": "4fa14368079f06361b5c8d78322c597688bcb02bdb1f4025f2839c8acc752e7a",
     "appnav/src/main/kotlin/io/element/android/appnav/LoggedInFlowTransitionHandler.kt": "f45a0c06481c2429bf77d77c2ab8c2ece546800994f22940ed994ba858419c9d",
     "appnav/src/main/kotlin/io/element/android/appnav/LoggedInNavigationRestorer.kt": "9d8741ab91e57707d39b1f1a6cd34fb9f473dedfab12c922546b8dc819cb38dd",
     "appnav/src/main/kotlin/io/element/android/appnav/NotLoggedInFlowNode.kt": "fcefafecb8377a55699ac39ae8145d352d3c132c5455b686ff1a02c7b9fa18e9",
@@ -7622,7 +7622,7 @@
     "plugins/src/main/kotlin/Enterprise.kt": "a406edd48120bfca3cc184646a88bd8208d96e6640f0323ab1110738382fc475",
     "plugins/src/main/kotlin/Logger.kt": "ea90b238bd627af66172933a2d996c8fea3dcda6389ce67a9f0f03697a4cc060",
     "plugins/src/main/kotlin/ModulesConfig.kt": "27d815d48bef6c5e3e762ed78073f56d8ddb9f86801eb99577d437c2b8da8752",
-    "plugins/src/main/kotlin/Versions.kt": "1d5caf1186896ed5290d0a1f0ea7c064618a768f0839e724e667d6277b655114",
+    "plugins/src/main/kotlin/Versions.kt": "6d88f815ed33ef06fd5a05d344b588b5cb97718cae79839f6aef371fe3036d3c",
     "plugins/src/main/kotlin/config/AnalyticsConfig.kt": "8bb1aa40093df7c074a2e19358eadbb953aaa605d95f64d74b2b981973154923",
     "plugins/src/main/kotlin/config/BuildTimeConfig.kt": "521b894a45fd7d9b88d855392d6837dda38ec0d68fcc72fd20152f5bf1ab4878",
     "plugins/src/main/kotlin/config/PushProvidersConfig.kt": "0c7d09e2de9dbba27df479d8ab1024488054aa2616f35f0432144ef2d4fe1ad0",

@@ -320,9 +320,12 @@ class LoggedInFlowNode(
                 ProcessLifecycleOwner.get().lifecycle.addObserver(backgroundLifecycleObserver)
                 appNavigationStateService.onNavigateToSession(id, matrixClient.sessionId)
                 lifecycleScope.launch {
+                    StartupTrace.mark("Startup.session.deletionCheck.begin")
                     if (enterDeletionRecoveryIfPending()) return@launch
+                    StartupTrace.mark("Startup.session.deletionCheck.end")
                     try {
                         securitySetupReady.first { it }
+                        StartupTrace.mark("Startup.session.securityReady")
                         val initializeSession: suspend () -> Unit = {
                             StartupTrace.mark("Session.initialize.begin")
                             check(matrixSessionCache.startSync(matrixClient.sessionId)) {
@@ -346,7 +349,10 @@ class LoggedInFlowNode(
                             analyticsService.startLongRunningTransaction(AnalyticsLongRunningTransaction.FirstRoomsDisplayed)
                             StartupTrace.mark("Session.initialize.end")
                         }
-                        if (accountCoreReady.value && accountReactivationCoordinator.canRestoreOffline(matrixClient)) {
+                        StartupTrace.mark("Startup.session.offlineCheck.begin")
+                        val restoreOffline = accountCoreReady.value && accountReactivationCoordinator.canRestoreOffline(matrixClient)
+                        StartupTrace.mark("Startup.session.offlineCheck.end ready=$restoreOffline")
+                        if (restoreOffline) {
                             startupSessionInitialization.initialize(null, initializeSession)
                         } else {
                             StartupTrace.mark("Startup.operation.begin")
@@ -365,6 +371,7 @@ class LoggedInFlowNode(
                         // Sync-start alone is not readiness: the sending queue, listeners,
                         // enterprise setup and every required post-login receipt must be done.
                         sessionInitializationComplete.value = true
+                        StartupTrace.mark("Startup.session.initialization.complete")
                         startupSessionInitialization.complete()
                     } catch (failure: CancellationException) {
                         startupSessionInitialization.fail(failure)
@@ -1124,7 +1131,10 @@ class LoggedInFlowNode(
                     localRequirementsLoaded = lockScreenSetupRequired != null,
                     recoveryCompletionToken = recoveryCompletionToken,
                     identityResetConvergenceState = resetConvergenceState,
-                    onApprovalReady = { securitySetupReady.value = true },
+                    onApprovalReady = {
+                        StartupTrace.mark("Startup.security.approvalReady")
+                        securitySetupReady.value = true
+                    },
                     onUseAnotherDevice = { backstack.push(NavTarget.VerifyCurrentSession) },
                     onOpenLockScreenSetup = { backstack.push(NavTarget.LockScreenSetup) },
                     onAnalyticsChoice = { consent ->
