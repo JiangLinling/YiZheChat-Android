@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-next-r36-noop-media-origin-projection-20261013",
-  "frozen_utc": "2026-10-13T15:03:48.874510+00:00",
+  "revision": "unified-next-r37-direct-text-receipt-owner-20261013",
+  "frozen_utc": "2026-10-13T15:53:04.689707+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -166,7 +166,7 @@
     ".tmp-postinstall-home.png": "5241e7ab9164095c39e53bfe1f28ceb4635a6b48d5f809f76e66b289d1e0dfe6",
     "annotations/build.gradle.kts": "c8a2ec0144aec33df0ff14f1a5c29ac53d7c73a83b23ac0e21ff23471eda0755",
     "annotations/src/main/kotlin/io/element/android/annotations/ContributesNode.kt": "52890552c7459490db80093fa1a71a06210d24face9b9ab7d3111774007370a2",
-    "app/build.gradle.kts": "a46657de400d87b7859f0bbfc08b9d2e110d679024df23b67fce459cd7a8e5bf",
+    "app/build.gradle.kts": "bc4ab03ff269e8d04c2583f7459e07be13bf8daa38203ce955549c56049b5bb4",
     "app/common-proguard-rules.pro": "54b157faf5f39f002face256a18e66763f96f2f42f27ad28ce735b5a4ac2174d",
     "app/default-proguard-rules.pro": "48513ed55e34a76ba4667dcd113b07bbb3b0a0018ae31f8cf9a5e38aca7efb58",
     "app/src/androidTestNext/AndroidManifest.xml": "843f3e8f2726bfe3c82af58340ec77b2232dd0df9e08c0d94c42596aefb081a9",
@@ -2256,7 +2256,7 @@
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/messagecomposer/DefaultMessageComposerContext.kt": "aaea3f4138db9709ee14fffa2f9b50bbdb61399f328325f1b82809a75c0b7aaa",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/messagecomposer/DisabledComposerView.kt": "cd1a6d282e85efc65a73ce698142ccd110390c4a7a15b967726bec35361c9182",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/messagecomposer/MessageComposerEvent.kt": "68555162360ef1da76d7fd54995b98f3cc392684eacec844bf96a6fa38c75e3c",
-    "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/messagecomposer/MessageComposerPresenter.kt": "a6b57109f181d97624f65977573043e799f6c2d02e8af8b9c2804f3fcd70b3de",
+    "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/messagecomposer/MessageComposerPresenter.kt": "327e2a132499d1af79b14ed1dcff0a739045b7c7479124065d2c8a16b1c52064",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/messagecomposer/MessageComposerState.kt": "6bf2c71691df8f72a1cdb53f2f71207290c97637128815a29f03c6ec09818706",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/messagecomposer/MessageComposerStateProvider.kt": "4790731c85ff781442735b05223312511d0fb78bcfaa531bf362a51b48c7632c",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/messagecomposer/MessageComposerView.kt": "49182428d879e41518b6af51d84c43dda54f1be8e10efc25080a9a299b1f03f8",
@@ -2623,7 +2623,7 @@
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/messagecomposer/DefaultRoomAliasSuggestionsDataSourceTest.kt": "72c989b23cb9d358dbffb1e6a0639ddec36460ccb2b83d33611ee0ce99eb6db3",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/messagecomposer/FakeRoomAliasSuggestionsDataSource.kt": "bdf18c7cb44425210b3a69ce025950527350d74dc34d3902442b217bad340818",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/messagecomposer/MessageComposerPresenterSlashCommandTest.kt": "6c92a6e49005d712c9fc4f1804d6175b8ce0fc61a4cf76fc5e3dc6b455ad7bd6",
-    "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/messagecomposer/MessageComposerPresenterTest.kt": "571d3e1a37a7a210175fb47248f7e1f0c7d28bcf0ff4ba32138c226b53bd1f95",
+    "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/messagecomposer/MessageComposerPresenterTest.kt": "a7c52ab92cf45d3da60913e3386b74f0863c7a8175760be9044236622b119729",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/messagecomposer/MessageLifecycleIdentityTest.kt": "566e81d825675603f607ccf9193aca2bdb66033d9bf9edff8fbfc0a482d359cc",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/messagecomposer/RecentImageSuggestionsTest.kt": "47c79f1e02a2d1e435408aa5cb5e3d8b49ccce6feba638b4125bf9c10882b9a0",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/messagecomposer/RecentImagesRowTest.kt": "407924d388c7118f4cc3188446bb59316a2441f6e8afd0b790e2e0a50535e80f",

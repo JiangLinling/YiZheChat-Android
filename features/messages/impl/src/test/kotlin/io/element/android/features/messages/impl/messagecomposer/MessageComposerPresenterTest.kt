@@ -2878,6 +2878,7 @@ class MessageComposerPresenterTest {
 
     @Test
     fun `present - common direct send sends only the item and preserves the composer draft`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
         val repository = mockk<CommonInfoRepository>(relaxed = true) {
             coEvery { sendText(any()) } returns "COMMON ONLY"
         }
@@ -2885,8 +2886,23 @@ class MessageComposerPresenterTest {
         val timeline = FakeTimeline().apply {
             sendMessageLambda = { body, _, _, _, _ -> sent += body; Result.success(Unit) }
         }
+        val ownerCheckedTimeline = object : Timeline by timeline {
+            override suspend fun sendMessageTransaction(
+                transactionId: io.element.android.libraries.matrix.api.core.TransactionId,
+                body: String,
+                htmlBody: String?,
+                intentionalMentions: List<IntentionalMention>,
+                repliedToEventId: EventId?,
+                msgType: MsgType,
+                asPlainText: Boolean,
+            ): Result<Unit> {
+                assertTextReceiptOwner(coordinator, transactionId.value)
+                return timeline.sendMessageTransaction(transactionId, body, htmlBody, intentionalMentions, repliedToEventId, msgType, asPlainText)
+            }
+        }
         val presenter = createPresenter(
-            room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }), commonInfoRepository = repository,
+            room = FakeJoinedRoom(liveTimeline = ownerCheckedTimeline, typingNoticeResult = { Result.success(Unit) }),
+            commonInfoRepository = repository, appOperationalStateCoordinator = coordinator,
         )
         presenter.test {
             val state = awaitFirstItem()
@@ -2911,7 +2927,21 @@ class MessageComposerPresenterTest {
                 Result.success(Unit)
             }
         }
-        createPresenter(room = FakeJoinedRoom(liveTimeline = timeline, typingNoticeResult = { Result.success(Unit) }),
+        val ownerCheckedTimeline = object : Timeline by timeline {
+            override suspend fun sendMessageTransaction(
+                transactionId: io.element.android.libraries.matrix.api.core.TransactionId,
+                body: String,
+                htmlBody: String?,
+                intentionalMentions: List<IntentionalMention>,
+                repliedToEventId: EventId?,
+                msgType: MsgType,
+                asPlainText: Boolean,
+            ): Result<Unit> {
+                assertTextReceiptOwner(coordinator, transactionId.value)
+                return timeline.sendMessageTransaction(transactionId, body, htmlBody, intentionalMentions, repliedToEventId, msgType, asPlainText)
+            }
+        }
+        createPresenter(room = FakeJoinedRoom(liveTimeline = ownerCheckedTimeline, typingNoticeResult = { Result.success(Unit) }),
             appOperationalStateCoordinator = coordinator).test {
             val state = awaitFirstItem()
             state.textEditorState.setMarkdown("keep draft")
@@ -3425,6 +3455,19 @@ class MessageComposerPresenterTest {
     ).apply {
         isTesting = true
         showTextFormatting = isRichTextEditorEnabled
+    }
+
+    private suspend fun assertTextReceiptOwner(coordinator: FakeAppOperationalStateCoordinator, transactionId: String) {
+        val context = requireNotNull(currentLifecycleOperationContext())
+        val owner = requireNotNull(kotlinx.coroutines.currentCoroutineContext()[io.element.android.security.dataprotection.api.TextVersionReceiptOwner])
+        val request = coordinator.startedRequests.single { it.operationId == context.operationId }
+        val room = FakeJoinedRoom()
+        val expected = ordinaryMessageLifecycleRequest(room, FakeMatrixClient(sessionId = room.sessionId), "send", transactionId)
+        assertThat(request.operationId).isEqualTo(expected.operationId)
+        assertThat(owner.operationId).isEqualTo(request.operationId)
+        assertThat(owner.accountIdHash).isEqualTo(expected.accountIdHash)
+        assertThat(owner.matrixDeviceIdHash).isEqualTo(expected.matrixDeviceIdHash)
+        assertThat(owner.roomIdHash).isEqualTo(expected.roomIdHash)
     }
 
     private suspend fun <T> ReceiveTurbine<T>.awaitFirstItem(): T {

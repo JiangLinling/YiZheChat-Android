@@ -584,9 +584,10 @@ class MessageComposerPresenter(
                                 val result = runCatchingExceptions {
                                     val localEcho = timelineController.addOptimisticLocalEcho(emotion.token, null)
                                     echo = localEcho
-                                    appOperationalStateCoordinator.perform(lifecycleOperationRequest(
-                                        lifecycleId = FullAppLifecycleId.LC_13, trigger = "send", roomIdHash = room.roomId.value.sha256Hex(),
-                                    )) {
+                                    timelineController.stageOptimisticLocalEcho(localEcho).getOrThrow()
+                                    appOperationalStateCoordinator.performMessageWithDeferredReceipts(
+                                        ordinaryMessageLifecycleRequest(room, matrixClient, "send", localEcho.value),
+                                    ) {
                                         val sent = timelineController.sendOptimisticLocalEcho(localEcho)
                                         timelineController.resolveOptimisticLocalEcho(localEcho, sent.exceptionOrNull())
                                         sent.getOrThrow()
@@ -615,10 +616,11 @@ class MessageComposerPresenter(
                                 val literal = repository.sendText(event.item)
                                 val localEcho = timelineController.addOptimisticLocalEcho(literal, null)
                                 commonEcho = localEcho
+                                timelineController.stageOptimisticLocalEcho(localEcho).getOrThrow()
                                 repository.stageSend(event.item.id, room.roomId.value, localEcho.value)
-                                appOperationalStateCoordinator.perform(lifecycleOperationRequest(
-                                    lifecycleId = FullAppLifecycleId.LC_13, trigger = "send", roomIdHash = room.roomId.value.sha256Hex(),
-                                )) {
+                                appOperationalStateCoordinator.performMessageWithDeferredReceipts(
+                                    ordinaryMessageLifecycleRequest(room, matrixClient, "send", localEcho.value),
+                                ) {
                                     val sent = timelineController.sendOptimisticLocalEcho(localEcho)
                                     timelineController.resolveOptimisticLocalEcho(localEcho, sent.exceptionOrNull())
                                     sent.getOrThrow()
