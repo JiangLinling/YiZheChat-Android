@@ -60,6 +60,42 @@ class TimelineLifecycleWorkTest {
     private val request = lifecycleOperationRequest(FullAppLifecycleId.LC_13, "receive", operationId = "lc13-receive-test-identity")
 
     @Test
+    fun `fresh original receive starts before restored visible admission backlog without replacing receipts`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val started = mutableListOf<String>()
+        val backing = FakeAppOperationalStateCoordinator()
+        val coordinator = object : AppOperationalStateCoordinator by backing {
+            override suspend fun start(request: io.element.android.security.dataprotection.api.LifecycleOperationRequest): LifecycleOperation {
+                started += request.operationId
+                if (request.operationId.startsWith("restored-")) kotlinx.coroutines.delay(10)
+                return backing.start(request)
+            }
+        }
+        val work = TimelineLifecycleWork { testScheduler.currentTime }
+        val occupied = List(2) { launch { work.registrationTransport { gate.await() } } }
+        runCurrent()
+        val old = List(100) { index -> launch {
+            work.receive(coordinator, request.copy(operationId = "restored-visible-$index")) { Unit }
+        } }
+        runCurrent()
+        val fresh = async { work.receive(coordinator, request) {
+            assertThat(currentLifecycleOperationContext()?.operationId).isEqualTo(request.operationId)
+            "normal-authorized-read"
+        } }
+        runCurrent()
+        gate.complete(Unit)
+        runCurrent()
+        assertThat(fresh.isCompleted).isTrue()
+        assertThat(fresh.await()).isEqualTo("normal-authorized-read")
+        assertThat(started.first()).isEqualTo(request.operationId)
+        assertThat(backing.clientReceipts.filter { it.operationId == request.operationId }).hasSize(2)
+        occupied.forEach { it.join() }
+        old.forEach { it.join() }
+        assertThat(started).hasSize(101)
+        assertThat(backing.clientReceipts).hasSize(202)
+    }
+
+    @Test
     fun `history receive flood leaves physical start capacity for foreground`() = runTest {
         val gate = CompletableDeferred<Unit>()
         val started = mutableListOf<String>()

@@ -17,6 +17,64 @@ import java.io.IOException
 
 class TimelineTransportSchedulerTest {
     @Test
+    fun `fresh receive precedes restored foreground backlog while send and old work progress`() = runTest {
+        val work = TimelineTransportScheduler()
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        val occupied = List(2) { launch { work.withPermit { release.await() } } }
+        runCurrent()
+        val old = List(100) { index -> launch { work.withPermit(isForegroundRead = true) {
+            order += "old-visible-$index"
+            delay(10)
+        } } }
+        val history = launch { work.withPermit { order += "history" } }
+        runCurrent()
+        val fresh = async { work.withPermit(isForegroundRead = true) { order += "fresh-original-receive" } }
+        val send = async { work.withPermit(isLiveSend = true) { order += "original-send" } }
+        runCurrent()
+        release.complete(Unit)
+        runCurrent()
+        assertThat(fresh.isCompleted).isTrue()
+        assertThat(send.isCompleted).isTrue()
+        assertThat(order.take(2)).containsExactly("original-send", "fresh-original-receive").inOrder()
+        advanceTimeBy(100)
+        runCurrent()
+        assertThat(order.indexOf("old-visible-0")).isAtMost(10)
+        assertThat(history.isCompleted).isTrue()
+        assertThat(old.any { !it.isCompleted }).isTrue()
+        occupied.forEach { it.join() }
+        old.forEach { it.join() }
+        assertThat(order).hasSize(103)
+    }
+
+    @Test
+    fun `cancelled foreground admission cannot occupy or leak either transport slot`() = runTest {
+        val work = TimelineTransportScheduler()
+        val release = CompletableDeferred<Unit>()
+        val occupied = List(2) { launch { work.withPermit { release.await() } } }
+        runCurrent()
+        val queued = async { work.withPermit(isForegroundRead = true) { error("cancelled receive must not run") } }
+        runCurrent()
+        queued.cancel()
+        val entered = CompletableDeferred<Unit>()
+        val granted = async { work.withPermit(isForegroundRead = true) { entered.complete(Unit); awaitCancellation() } }
+        runCurrent()
+        occupied[0].cancel()
+        occupied[0].join()
+        runCurrent()
+        assertThat(entered.isCompleted).isTrue()
+        granted.cancel()
+        runCurrent()
+        val next = async { work.withPermit(isForegroundRead = true) { "same-next-original" } }
+        runCurrent()
+        assertThat(next.await()).isEqualTo("same-next-original")
+        assertThat(queued.isCancelled).isTrue()
+        assertThat(granted.isCancelled).isTrue()
+        release.complete(Unit)
+        occupied[1].join()
+    }
+
+    @Test
     fun `new send mapping precedes a hundred queued origin lookups while keeping two slots`() = runTest {
         val work = TimelineTransportScheduler()
         val release = CompletableDeferred<Unit>()

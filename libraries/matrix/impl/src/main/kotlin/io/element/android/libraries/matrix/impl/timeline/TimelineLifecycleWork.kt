@@ -145,8 +145,8 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
     ): T = if (isLiveSend) transport.withPermit(isLiveSend = true, block) else shortTransport(isForeground, block)
 
     // Background waits outside the shared semaphore, leaving one physical slot for current reads.
-    private suspend fun <T> shortTransport(isForeground: Boolean, block: suspend () -> T): T =
-        if (isForeground) transport.withPermit { block() }
+    private suspend fun <T> shortTransport(isForeground: Boolean, isForegroundRead: Boolean = false, block: suspend () -> T): T =
+        if (isForeground) transport.withPermit(isForegroundRead = isForegroundRead) { block() }
         else backgroundTransport.withPermit { transport.withPermit { block() } }
 
     /**
@@ -185,7 +185,7 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
     private suspend fun transportAttempt(state: Receive, operationId: String, isForeground: Boolean, block: suspend () -> Unit) {
         val waitAt = System.nanoTime()
         try {
-            shortTransport(isForeground) {
+            shortTransport(isForeground, isForegroundRead = isForeground) {
                 trace(operationId, "transport_wait", waitAt)
                 val httpAt = System.nanoTime()
                 block()
