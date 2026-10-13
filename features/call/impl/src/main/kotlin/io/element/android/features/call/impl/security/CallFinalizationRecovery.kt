@@ -165,20 +165,25 @@ class DefaultCallFinalizationRecovery(
                     if (!record.recordSent) {
                         val client = clients.getOrRestore(SessionId(record.sessionId)).getOrThrow()
                         check(client.deviceId.value == record.deviceId)
-                        val room = checkNotNull(client.getJoinedRoom(RoomId(record.roomId)))
-                        val noInvitation = pending.noInvitationConfirmed && record.invitationId == null && !record.incoming && !record.connected
-                        if (room.roomInfoFlow.value.isDm && !noInvitation) {
-                            // No room-wide fallback: it could bind this old hangup to a later call.
-                            val invitation = checkNotNull(record.invitationId) { "Exact call invitation binding is unavailable." }
-                            val state = when {
-                                record.connected -> CallLifecycleState.ENDED
-                                record.incoming -> CallLifecycleState.DECLINED
-                                else -> CallLifecycleState.CANCELLED
+                        // getJoinedRoom creates an owned room, including its timeline subscriptions.
+                        // Every recovery attempt must release it even when the exact invitation is
+                        // unavailable, the write fails, or the worker is cancelled. The encrypted
+                        // checkpoint and original operation remain pending independently of this scope.
+                        checkNotNull(client.getJoinedRoom(RoomId(record.roomId))).use { room ->
+                            val noInvitation = pending.noInvitationConfirmed && record.invitationId == null && !record.incoming && !record.connected
+                            if (room.roomInfoFlow.value.isDm && !noInvitation) {
+                                // No room-wide fallback: it could bind this old hangup to a later call.
+                                val invitation = checkNotNull(record.invitationId) { "Exact call invitation binding is unavailable." }
+                                val state = when {
+                                    record.connected -> CallLifecycleState.ENDED
+                                    record.incoming -> CallLifecycleState.DECLINED
+                                    else -> CallLifecycleState.CANCELLED
+                                }
+                                // CALL_STATE carries this existing operation ID. A crash after send but before
+                                // checkpoint may replay it; the authenticated reducer deduplicates that ID.
+                                val duration = record.connectedAt?.let { began -> pending.releasedAt?.let { (it - began).coerceAtLeast(0) } }
+                                room.liveTimeline.sendCallLifecycle(EventId(invitation), state, duration).getOrThrow()
                             }
-                            // CALL_STATE carries this existing operation ID. A crash after send but before
-                            // checkpoint may replay it; the authenticated reducer deduplicates that ID.
-                            val duration = record.connectedAt?.let { began -> pending.releasedAt?.let { (it - began).coerceAtLeast(0) } }
-                            room.liveTimeline.sendCallLifecycle(EventId(invitation), state, duration).getOrThrow()
                         }
                         store.put(pending.vaultId, owner, record.copy(recordSent = true))
                     }

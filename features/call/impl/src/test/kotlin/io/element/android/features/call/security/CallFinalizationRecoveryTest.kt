@@ -124,6 +124,7 @@ class CallFinalizationRecoveryTest {
         restarted.recoverOnce { error("Already released") }
         assertThat(sent).isEqualTo(1)
         assertThat(operations.clientReceipts).hasSize(2)
+        room.baseRoom.assertDestroyed()
         assertThat(operations.startedRequests.map { it.operationId }.toSet()).containsExactly("$operationId-hangup")
         val store = EncryptedCallFinalizationStore(files, roots)
         assertThat(store.read(store.pending().single()).recordSent).isTrue()
@@ -209,6 +210,51 @@ class CallFinalizationRecoveryTest {
         assertThat(sent).isEqualTo(0)
     }
 
+    @Test fun `repeated unknown invitation recovery closes every room and preserves the original checkpoint`() = runTest {
+        val store = EncryptedCallFinalizationStore(files, roots)
+        val first = recovery(store = store)
+        val outgoing = call.copy(notificationEventId = null)
+        first.checkpoint(outgoing, operationId)
+        first.released(outgoing, true)
+        repeat(4) {
+            val acquired = FakeJoinedRoom().apply { givenRoomInfo(aRoomInfo(isDm = true)) }
+            client.givenGetRoomResult(A_ROOM_ID, acquired)
+            // Recreating the worker models a new eligible attempt without bypassing its backoff.
+            recovery(store = store).recoverOnce { error("Already released") }
+            acquired.baseRoom.assertDestroyed()
+            val pending = store.pending().single()
+            assertThat(pending.operationId).isEqualTo("$operationId-hangup")
+            assertThat(store.read(pending).recordSent).isFalse()
+        }
+        assertThat(operations.clientReceipts).isEmpty()
+    }
+
+    @Test fun `failed lifecycle write releases its room without acknowledging the pending call`() = runTest {
+        val store = EncryptedCallFinalizationStore(files, roots)
+        val current = recovery(store = store)
+        timeline.sendCallLifecycleLambda = { _, _, _ -> Result.failure(IOException("Transport unavailable")) }
+        current.checkpoint(call, operationId)
+        current.released(call, true)
+        current.recoverOnce { error("Already released") }
+        room.baseRoom.assertDestroyed()
+        assertThat(store.read(store.pending().single()).recordSent).isFalse()
+        assertThat(operations.clientReceipts).isEmpty()
+    }
+
+    @Test fun `cancelled lifecycle write releases its room and propagates cancellation`() = runTest {
+        val store = EncryptedCallFinalizationStore(files, roots)
+        val current = recovery(store = store)
+        val cancelled = kotlinx.coroutines.CancellationException("Worker stopped")
+        timeline.sendCallLifecycleLambda = { _, _, _ -> throw cancelled }
+        current.checkpoint(call, operationId)
+        current.released(call, true)
+        val failure = runCatching { current.recoverOnce { error("Already released") } }.exceptionOrNull()
+        assertThat(failure).isSameInstanceAs(cancelled)
+        room.baseRoom.assertDestroyed()
+        assertThat(store.read(store.pending().single()).recordSent).isFalse()
+        assertThat(operations.clientReceipts).isEmpty()
+    }
+
     @Test fun `early cancellation needs proof that there was no pending invitation`() = runTest {
         val outgoing = call.copy(notificationEventId = null, attemptId = "outgoing-early")
         val current = recovery()
@@ -227,6 +273,7 @@ class CallFinalizationRecoveryTest {
         current.recoverOnce { false }
         assertThat(operations.clientReceipts).isEmpty()
         assertThat(sent).isEqualTo(0)
+        room.baseRoom.assertDestroyed()
     }
 
     @Test fun `authoritative pre-admission cancellation retires the completed recovery journal`() = runTest {
