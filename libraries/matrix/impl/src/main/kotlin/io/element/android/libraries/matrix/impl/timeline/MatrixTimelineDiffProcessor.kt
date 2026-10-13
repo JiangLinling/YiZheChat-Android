@@ -435,7 +435,8 @@ internal class MatrixTimelineDiffProcessor(
      * unseen hard generation remains fail-closed.
      */
     private suspend fun retryProtectedAuthorization(refresh: MatrixAuthorizationRefresh) {
-        resetTransientRetries()
+        Timber.tag(PERFORMANCE_TAG).d("stage=timeline_authorization_refresh mode=%s revision=%d", refresh.mode, refresh.revision)
+        resetTransientRetries("AUTHORIZATION_REFRESH")
         val retrySnapshot = mutex.withLock {
             val adapter = decryptAdapter ?: return
             if (refresh.mode == MatrixAuthorizationRefreshMode.HISTORY_RECOVERY_DELTA) {
@@ -1415,7 +1416,7 @@ internal class MatrixTimelineDiffProcessor(
      */
     private fun updateTransientRetrySchedule(hasTemporarilyUnavailableItems: Boolean) {
         if (!hasTemporarilyUnavailableItems) {
-            resetTransientRetries()
+            resetTransientRetries("NO_TRANSIENT_ITEMS")
             return
         }
         val scope = backgroundScope ?: return
@@ -1423,6 +1424,7 @@ internal class MatrixTimelineDiffProcessor(
         synchronized(transientRetryLock) {
             if (transientRetryJob?.isActive == true || transientRetryAttempt >= TRANSIENT_RETRY_DELAYS_MILLIS.size) return
             val delayMillis = TRANSIENT_RETRY_DELAYS_MILLIS[transientRetryAttempt++]
+            Timber.tag(PERFORMANCE_TAG).d("stage=timeline_retry_schedule attempt=%d delay_ms=%d", transientRetryAttempt, delayMillis)
             transientRetryJob = scope.launch(dispatcher) {
                 delay(delayMillis)
                 val retrySnapshot = mutex.withLock {
@@ -1442,7 +1444,7 @@ internal class MatrixTimelineDiffProcessor(
                 }
                 synchronized(transientRetryLock) { transientRetryJob = null }
                 if (retrySnapshot.visible.isEmpty() && retrySnapshot.history.isEmpty()) {
-                    resetTransientRetries()
+                    resetTransientRetries("EMPTY_RETRY_SNAPSHOT")
                     return@launch
                 }
                 pendingDecrypts.offer(
@@ -1458,7 +1460,10 @@ internal class MatrixTimelineDiffProcessor(
         }
     }
 
-    private fun resetTransientRetries() = synchronized(transientRetryLock) {
+    private fun resetTransientRetries(reason: String) = synchronized(transientRetryLock) {
+        if (transientRetryAttempt > 0) {
+            Timber.tag(PERFORMANCE_TAG).d("stage=timeline_retry_reset reason=%s previous_attempt=%d", reason, transientRetryAttempt)
+        }
         transientRetryJob?.cancel()
         transientRetryJob = null
         transientRetryAttempt = 0

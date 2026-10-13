@@ -26,6 +26,7 @@ import io.element.android.security.dataprotection.api.LifecyclePhase
 import io.element.android.security.dataprotection.api.LifecycleStepStatus
 import io.element.android.security.dataprotection.api.FullAppLifecycleId
 import io.element.android.security.dataprotection.api.LifecycleOperationContext
+import io.element.android.security.dataprotection.api.LifecycleStageTiming
 import io.element.android.security.dataprotection.api.TextVersionReceiptOwner
 import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
 import io.element.android.security.securestorage.api.deriveAccountVaultId
@@ -243,7 +244,10 @@ class ProtectedCaptionLineageCoordinator(
         authenticatedExpiresAt: Long,
         liveSendOperation: LifecycleOperationContext? = null,
     ) = mutex.withLock {
-        val item = pending.all(scope).firstOrNull { it.contentId == contentId.value } ?: return@withLock
+        LifecycleStageTiming.point("caption_binding_lock_acquired", eventId)
+        val item = LifecycleStageTiming.measure("caption_pending_read", eventId) {
+            pending.all(scope).firstOrNull { it.contentId == contentId.value }
+        } ?: return@withLock
         require(liveSendOperation == null || liveSendOperation.operationId == item.operationId &&
             liveSendOperation.lifecycleId.name == item.lifecycleId) {
             "Live event binding must retain the original operation."
@@ -406,15 +410,17 @@ class ProtectedCaptionLineageCoordinator(
         val created = requireNotNull(item.createdAt)
         require(hash.matches(Regex("[0-9a-f]{64}")) && created in 1..expiry &&
             (item.parentContentId == null || expiry <= item.parentExpiresAt))
-        lineage.append(scope, ContentVersionNode(
-            contentId = ContentId(item.contentId),
-            rootContentId = ContentId(item.rootContentId),
-            parentContentId = item.parentContentId?.let(::ContentId),
-            operationId = item.operationId,
-            eventIdSha256 = hash,
-            createdAtEpochMillis = created,
-            expiresAtEpochMillis = expiry,
-        ))
+        LifecycleStageTiming.measure("caption_lineage_append", operationId = item.operationId) {
+            lineage.append(scope, ContentVersionNode(
+                contentId = ContentId(item.contentId),
+                rootContentId = ContentId(item.rootContentId),
+                parentContentId = item.parentContentId?.let(::ContentId),
+                operationId = item.operationId,
+                eventIdSha256 = hash,
+                createdAtEpochMillis = created,
+                expiresAtEpochMillis = expiry,
+            ))
+        }
         if (item.parentContentId == null) {
             val reservation = pending.reserveRootOperation(scope, item.operationId, item.contentId)
             require(reservation.existing) { "Registered root lost its durable operation reservation." }

@@ -3486,9 +3486,12 @@ private class DefaultMatrixProtectedContentAdapter(
             val shouldRegister = lifecycleWork.claimRegistration(registrationKey)
             if (!shouldRegister) return@forEach
             coroutineScope.launch {
+                LifecycleStageTiming.point("send_binding_preflight_start", eventId)
                 val originScopeKey = originatingOperationScopeKey(contentId)
                 val carrier = protectedCarrierForContent(message, contentId)
-                val storedOrigin = carrier?.let { matchingStoredSendOrigin(it, contentId, eventId) }
+                val storedOrigin = LifecycleStageTiming.measure("send_binding_origin_read", eventId) {
+                    carrier?.let { matchingStoredSendOrigin(it, contentId, eventId) }
+                }
                 val currentOperation = lifecycleWork.originatingOperation(originScopeKey)
                 if (ProtectedEventOwnershipResolver.hasRecordedTextBinding(
                         storedOrigin, currentOperation, eventId, captionLineageCoordinator.hasPendingContent(contentId),
@@ -3502,14 +3505,17 @@ private class DefaultMatrixProtectedContentAdapter(
                 val originatingOperation = storedOrigin?.let { LifecycleOperationContext(it.operationId, it.lifecycleId) }
                     ?: currentOperation
                 val isLiveSend = ProtectedEventOwnershipResolver.needsImmediateEventBinding(storedOrigin, currentOperation)
+                LifecycleStageTiming.point("send_binding_preflight_complete", eventId, operationId = originatingOperation?.operationId)
                 Timber.tag(PERFORMANCE_TAG).d(
                     "stage=event_registration key=%s live=%s", registrationKey, isLiveSend,
                 )
                 val registered = runCatching {
                     lifecycleWork.registrationWork(isLiveSend = isLiveSend) {
+                        LifecycleStageTiming.point("send_binding_work_admitted", eventId, operationId = originatingOperation?.operationId)
                         if (originatingOperation != null) {
                             withContext(originatingOperation) {
                                 lifecycleWork.registrationTransport(isForeground = isLiveSend, isLiveSend = isLiveSend) {
+                                    LifecycleStageTiming.point("send_binding_transport_admitted", eventId)
                                     check(contentProtectionService.registerMessageEvent(contentId, roomId.value, eventId, mediaUris))
                                     if (storedOrigin != null && storedOrigin.eventId == null) {
                                         protectedSendOriginStore.remember(
@@ -3546,10 +3552,12 @@ private class DefaultMatrixProtectedContentAdapter(
                                 decryptionCacheKey(eventId, message)
                             }
                             require(binding.contentId == contentId)
-                            captionLineageCoordinator.observeBoundEvent(
-                                contentId, eventId, binding.expiresAtEpochMillis,
-                                liveSendOperation = currentOperation.takeIf { isLiveSend },
-                            )
+                            LifecycleStageTiming.measure("send_caption_binding_commit", eventId, operationId = originatingOperation?.operationId) {
+                                captionLineageCoordinator.observeBoundEvent(
+                                    contentId, eventId, binding.expiresAtEpochMillis,
+                                    liveSendOperation = currentOperation.takeIf { isLiveSend },
+                                )
+                            }
                         }
                     }
                     if (observed.isFailure) {
