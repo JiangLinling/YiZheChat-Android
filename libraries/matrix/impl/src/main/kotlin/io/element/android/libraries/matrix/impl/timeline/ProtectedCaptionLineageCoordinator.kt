@@ -237,8 +237,17 @@ class ProtectedCaptionLineageCoordinator(
         pending.all(scope).any { it.contentId == contentId.value }
 
     /** Called only after registerMessageEvent succeeded for this exact authenticated sync carrier. */
-    suspend fun observeBoundEvent(contentId: ContentId, eventId: String, authenticatedExpiresAt: Long) = mutex.withLock {
+    suspend fun observeBoundEvent(
+        contentId: ContentId,
+        eventId: String,
+        authenticatedExpiresAt: Long,
+        liveSendOperation: LifecycleOperationContext? = null,
+    ) = mutex.withLock {
         val item = pending.all(scope).firstOrNull { it.contentId == contentId.value } ?: return@withLock
+        require(liveSendOperation == null || liveSendOperation.operationId == item.operationId &&
+            liveSendOperation.lifecycleId.name == item.lifecycleId) {
+            "Live event binding must retain the original operation."
+        }
         if (pending.isDestructionFenced(scope, item.contentId)) {
             if (item.phase != CaptionPendingPhase.DESTRUCTION_PENDING.name) {
                 pending.put(scope, item.copy(phase = CaptionPendingPhase.DESTRUCTION_PENDING.name))
@@ -273,11 +282,20 @@ class ProtectedCaptionLineageCoordinator(
         }
         require(item.phase in setOf(CaptionPendingPhase.AWAITING_BINDING.name, CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name) &&
             item.eventIdSha256 == null)
-        val resumed = lifecycle.resume(item.operationId)
         val originalLifecycle = FullAppLifecycleId.valueOf(item.lifecycleId)
-        require(resumed.lifecycleId == originalLifecycle && resumed.operationId == item.operationId) {
-            "Caption lifecycle identity changed during recovery."
+        val continuesLiveTextRoot = liveSendOperation != null && originalLifecycle == FullAppLifecycleId.LC_13 &&
+            item.parentContentId == null && item.serviceReceiptOwner != null &&
+            item.phase == CaptionPendingPhase.AWAITING_BINDING.name
+        if (!continuesLiveTextRoot) {
+            val resumed = lifecycle.resume(item.operationId)
+            require(resumed.lifecycleId == originalLifecycle && resumed.operationId == item.operationId) {
+                "Caption lifecycle identity changed during recovery."
+            }
         }
+        // A just-verified live binding already belongs to the admitted original SEND.
+        // The version endpoint independently checks current operation state/deadline,
+        // subjects, content ownership and destruction fences on every mutation. Resuming
+        // that same live root adds a round trip, not authority. Recovery keeps its resume.
         val result = withContext(LifecycleOperationContext(item.operationId, originalLifecycle)) {
             kms.registerContentVersion(RegisterContentVersionRequest(
                 contentId = ContentId(item.contentId),
@@ -422,11 +440,11 @@ class ProtectedCaptionLineageCoordinator(
                 serviceAppliedAt = System.currentTimeMillis(),
             )
             pending.put(scope, applied)
-            deliverServiceReceipt(applied)
+            deliverServiceReceipt(applied, firstDelivery = item.lifecycleId == FullAppLifecycleId.LC_13.name)
         }
     }
 
-    private suspend fun deliverServiceReceipt(item: CaptionPending) {
+    private suspend fun deliverServiceReceipt(item: CaptionPending, firstDelivery: Boolean = false) {
         require(item.phase == CaptionPendingPhase.LINEAGE_COMMITTED.name && item.lifecycleId in setOf(FullAppLifecycleId.LC_15.name, FullAppLifecycleId.LC_13.name))
         val owner = requireNotNull(item.serviceReceiptOwner)
         val appliedAt = requireNotNull(item.serviceAppliedAt)
@@ -453,10 +471,13 @@ class ProtectedCaptionLineageCoordinator(
             }
             return true
         }
-        // Read first: a prior delivery can have committed while its response was lost.
-        val current = lifecycle.operation(item.operationId)
-        if (!accepted(current)) {
-            check(!current.status.isTerminal)
+        // Recovery reads first because a previous delivery may have committed while its
+        // response was lost. A newly persisted fact can submit directly: the authenticated,
+        // idempotent endpoint validates the original operation and returns its signed state.
+        // The exact response checks below apply to both paths; no local success is inferred.
+        val current = if (firstDelivery) null else lifecycle.operation(item.operationId)
+        if (current == null || !accepted(current)) {
+            check(current == null || !current.status.isTerminal)
             val recorded = lifecycle.recordClientReceipt(LifecycleClientReceipt(
                 operationId = item.operationId,
                 component = LifecycleComponent.ANDROID_SERVICE,

@@ -802,6 +802,69 @@ class ProtectedCaptionLineageCoordinatorTest {
         assertThat(h.store.all(scope)).isEmpty()
     }
 
+    @Test fun `live TEXT binding avoids recovery reads but still verifies and persists every result`() = runTest {
+        val h = OwnedRootHarness()
+        h.current = h.current.copy(lifecycleId = FullAppLifecycleId.LC_13)
+        val operation = LifecycleOperationContext(operationId, FullAppLifecycleId.LC_13)
+        withContext(operation + textOwner()) { h.coordinator.prepareRoot(root) }
+        h.coordinator.observeBoundEvent(root, targetEvent, expiry, liveSendOperation = operation)
+        coVerify(exactly = 0) { h.lifecycle.resume(any()) }
+        coVerify(exactly = 0) { h.lifecycle.operation(any()) }
+        coVerify(exactly = 1) { h.kms.registerContentVersion(any()) }
+        assertThat(h.receipts.single().receiptReference).isEqualTo("android-service:$operationId")
+        assertThat(h.lineage.appended).hasSize(1)
+        assertThat(h.store.all(scope)).isEmpty()
+    }
+
+    @Test fun `live TEXT binding rejects another operation before any remote or local commit`() = runTest {
+        val h = OwnedRootHarness()
+        h.current = h.current.copy(lifecycleId = FullAppLifecycleId.LC_13)
+        withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_13) + textOwner()) {
+            h.coordinator.prepareRoot(root)
+        }
+        expectSuspendFailure<IllegalArgumentException> {
+            h.coordinator.observeBoundEvent(root, targetEvent, expiry,
+                liveSendOperation = LifecycleOperationContext("foreign-operation-0001", FullAppLifecycleId.LC_13))
+        }
+        coVerify(exactly = 0) { h.kms.registerContentVersion(any()) }
+        assertThat(h.lineage.appended).isEmpty()
+        assertThat(h.receipts).isEmpty()
+        assertThat(h.store.all(scope)).hasSize(1)
+    }
+
+    @Test fun `live TEXT authority rejection preserves original pending intent without a service receipt`() = runTest {
+        val h = OwnedRootHarness()
+        h.current = h.current.copy(lifecycleId = FullAppLifecycleId.LC_13)
+        val operation = LifecycleOperationContext(operationId, FullAppLifecycleId.LC_13)
+        withContext(operation + textOwner()) { h.coordinator.prepareRoot(root) }
+        coEvery { h.kms.registerContentVersion(any()) } throws SecurityException("Operation revoked")
+        expectSuspendFailure<SecurityException> {
+            h.coordinator.observeBoundEvent(root, targetEvent, expiry, liveSendOperation = operation)
+        }
+        assertThat(h.store.all(scope).single().operationId).isEqualTo(operationId)
+        assertThat(h.lineage.appended).isEmpty()
+        assertThat(h.receipts).isEmpty()
+    }
+
+    @Test fun `live TEXT lost receipt response retains original fact and recovery verifies it without replay`() = runTest {
+        val h = OwnedRootHarness()
+        h.current = h.current.copy(lifecycleId = FullAppLifecycleId.LC_13)
+        val operation = LifecycleOperationContext(operationId, FullAppLifecycleId.LC_13)
+        withContext(operation + textOwner()) { h.coordinator.prepareRoot(root) }
+        h.loseResponse = true
+        expectSuspendFailure<IllegalStateException> {
+            h.coordinator.observeBoundEvent(root, targetEvent, expiry, liveSendOperation = operation)
+        }
+        assertThat(h.store.all(scope).single().phase).isEqualTo(CaptionPendingPhase.LINEAGE_COMMITTED.name)
+        assertThat(h.receipts).hasSize(1)
+        h.loseResponse = false
+        h.coordinator.reconcileLocalCommits()
+        coVerify(exactly = 1) { h.lifecycle.operation(operationId) }
+        assertThat(h.receipts).hasSize(1)
+        assertThat(h.lineage.appended).hasSize(1)
+        assertThat(h.store.all(scope)).isEmpty()
+    }
+
     private inner class OwnedRootHarness(
         val store: CaptionPendingStore = MemoryPending(),
         private val frontendFirst: Boolean = false,

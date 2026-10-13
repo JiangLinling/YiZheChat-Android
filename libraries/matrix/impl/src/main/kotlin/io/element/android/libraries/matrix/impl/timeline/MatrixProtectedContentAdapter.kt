@@ -3526,6 +3526,7 @@ private class DefaultMatrixProtectedContentAdapter(
                             require(binding.contentId == contentId)
                             captionLineageCoordinator.observeBoundEvent(
                                 contentId, eventId, binding.expiresAtEpochMillis,
+                                liveSendOperation = currentOperation.takeIf { isLiveSend },
                             )
                         }
                     }
