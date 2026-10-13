@@ -3491,8 +3491,12 @@ private class DefaultMatrixProtectedContentAdapter(
                 LifecycleStageTiming.point("send_binding_preflight_start", eventId)
                 val originScopeKey = originatingOperationScopeKey(contentId)
                 val carrier = protectedCarrierForContent(message, contentId)
-                val storedOrigin = LifecycleStageTiming.measure("send_binding_origin_read", eventId) {
-                    carrier?.let { matchingStoredSendOrigin(it, contentId, eventId) }
+                val storedOrigin = lifecycleWork.registrationPrerequisites(
+                    isLiveSend = lifecycleWork.originatingOperation(originScopeKey) != null,
+                ) {
+                    LifecycleStageTiming.measure("send_binding_origin_read", eventId) {
+                        carrier?.let { matchingStoredSendOrigin(it, contentId, eventId) }
+                    }
                 }
                 val currentOperation = lifecycleWork.originatingOperation(originScopeKey)
                 if (currentOperation == null && ProtectedEventOwnershipResolver.hasRecordedTextBinding(

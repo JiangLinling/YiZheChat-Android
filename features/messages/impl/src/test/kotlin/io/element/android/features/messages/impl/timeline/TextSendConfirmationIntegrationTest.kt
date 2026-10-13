@@ -39,6 +39,7 @@ class TextSendConfirmationIntegrationTest {
         val requests = mutableMapOf<UniqueId, LifecycleOperationRequest>()
         var reads = 0
         var freshReply: LifecycleOperation? = null
+        var pendingReads = 0
         val coordinator = object : AppOperationalStateCoordinator by FakeAppOperationalStateCoordinator() {
             override val operations = this@Fixture.operations
             override suspend fun start(request: LifecycleOperationRequest): LifecycleOperation =
@@ -47,7 +48,8 @@ class TextSendConfirmationIntegrationTest {
                 }
             override suspend fun operation(operationId: String): LifecycleOperation {
                 reads++
-                return (freshReply?.takeIf { it.operationId == operationId } ?: operations.value.getValue(operationId)).also {
+                return (if (pendingReads-- > 0) operations.value.getValue(operationId)
+                    else freshReply?.takeIf { it.operationId == operationId } ?: operations.value.getValue(operationId)).also {
                     operations.value = operations.value + (operationId to it)
                 }
             }
@@ -85,6 +87,19 @@ class TextSendConfirmationIntegrationTest {
                 } }.filterIsInstance<MatrixTimelineItem.Event>().single { it.displayUniqueId == id }
             }
         }
+    }
+
+    @Test fun `early authority snapshot still settles without another coordinator or history event`() = runTest {
+        val f = Fixture()
+        try {
+            val id = f.send(); val event = EventId("\$early-status")
+            f.freshReply = committedTextSend(f.requests.getValue(id), event)
+            f.pendingReads = 1
+            f.queueAck(id, event)
+            assertThat(f.sent(id).eventId).isEqualTo(event)
+            assertThat(f.reads).isEqualTo(2)
+            assertThat(f.items.value).isEmpty()
+        } finally { f.controller.close() }
     }
 
     @Test fun `native ACK and signed direct status settle the original bubble without any history update`() = runTest {

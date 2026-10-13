@@ -220,12 +220,22 @@ class TimelineController(
                 optimisticLocalEchoes.update { echoes -> echoes.map { echo ->
                     if (echo.item.uniqueId == owned.item.uniqueId) echo.copy(nativeConfirmedEventId = update.eventId) else echo
                 } }
-                // One signed status read for this original send, never a resend, new operation,
-                // or history fetch. Later signed coordinator updates finish a still-pending bind.
+                // Only read this original signed status. The bounded refresh closes an early
+                // snapshot race; normal remote handover remains the fallback after its deadline.
                 coroutineScope.launch {
                     runCatchingExceptions {
-                        LifecycleStageTiming.measure("send_confirmation_status_read", update.eventId.value, operationId = operationId) {
-                            coordinator.operation(operationId)
+                        refreshTextSendConfirmation(checkNotNull(owned.confirmationBinding), update.eventId,
+                            isPending = {
+                                optimisticLocalEchoes.value.any { echo ->
+                                    echo.item.uniqueId == owned.item.uniqueId && !isOptimisticDisplayIdRetired(echo.item.uniqueId) &&
+                                        echo.item.event.localSendState !is LocalEventSendState.Sent &&
+                                        echo.item.event.localSendState !is LocalEventSendState.Failed
+                                }
+                            },
+                        ) {
+                            LifecycleStageTiming.measure("send_confirmation_status_read", update.eventId.value, operationId = operationId) {
+                                coordinator.operation(operationId)
+                            }
                         }
                     }
                 }

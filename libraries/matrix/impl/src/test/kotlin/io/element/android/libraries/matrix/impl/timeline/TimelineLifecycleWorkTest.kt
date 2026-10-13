@@ -23,6 +23,39 @@ import java.io.IOException
 
 class TimelineLifecycleWorkTest {
     @Test
+    fun `hundreds of historical preflights cannot occupy live send origin reads`() = runTest {
+        val work = TimelineLifecycleWork { testScheduler.currentTime }
+        val release = CompletableDeferred<Unit>()
+        val entered = mutableListOf<Int>()
+        val old = List(100) { index -> launch {
+            work.registrationPrerequisites(isLiveSend = false) { entered += index; release.await() }
+        } }
+        runCurrent()
+        assertThat(entered).containsExactly(0)
+        val live = async { work.registrationPrerequisites(isLiveSend = true) { "exact original live send" } }
+        runCurrent()
+        assertThat(live.await()).isEqualTo("exact original live send")
+        assertThat(entered).containsExactly(0)
+        release.complete(Unit)
+        old.forEach { it.join() }
+        assertThat(entered).containsExactlyElementsIn(0 until 100).inOrder()
+    }
+
+    @Test
+    fun `historical preflight cancellation and failure release only their own permit`() = runTest {
+        val work = TimelineLifecycleWork { testScheduler.currentTime }
+        val release = CompletableDeferred<Unit>()
+        val active = launch { work.registrationPrerequisites(false) { release.await() } }
+        runCurrent()
+        var cancelledRead = false
+        val cancelled = launch { work.registrationPrerequisites(false) { cancelledRead = true } }
+        runCurrent(); cancelled.cancel(); release.complete(Unit); active.join(); cancelled.join()
+        assertThat(cancelledRead).isFalse()
+        assertThat(runCatching { work.registrationPrerequisites(false) { throw IOException("failed read") } }.isFailure).isTrue()
+        assertThat(work.registrationPrerequisites(false) { "next historical read" }).isEqualTo("next historical read")
+    }
+
+    @Test
     fun `canonical readers join original mapping and do not block registration transport`() = runTest {
         val work = TimelineLifecycleWork { testScheduler.currentTime }
         assertThat(work.claimRegistration("original-send-mapping")).isTrue()

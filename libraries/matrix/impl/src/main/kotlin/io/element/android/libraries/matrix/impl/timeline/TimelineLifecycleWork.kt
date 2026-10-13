@@ -44,6 +44,7 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
     private val transport = TimelineTransportScheduler()
     private val backgroundTransport = Semaphore(1)
     private val historicalRegistration = Semaphore(1)
+    private val historicalPrerequisites = Semaphore(1)
     val originRecovery = ProtectedOriginRecovery(now = now)
 
     suspend fun <T> receive(
@@ -164,6 +165,12 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
      */
     suspend fun <T> registrationWork(isLiveSend: Boolean, block: suspend () -> T): T =
         if (isLiveSend) block() else historicalRegistration.withPermit { block() }
+
+    // Apply admission before encrypted origin/trust reads too. Otherwise hundreds of restored
+    // rows can congest storage before they even reach the historical registration semaphore.
+    // The original scoped live-send hint changes scheduling only, never identity validation.
+    suspend fun <T> registrationPrerequisites(isLiveSend: Boolean, block: suspend () -> T): T =
+        if (isLiveSend) block() else historicalPrerequisites.withPermit { block() }
 
     // Room summaries and room timelines have distinct adapter instances. The existing shared work
     // owner must retain the originating operation hint for both, otherwise the summary can claim a
