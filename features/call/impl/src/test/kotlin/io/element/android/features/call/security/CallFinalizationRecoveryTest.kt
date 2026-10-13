@@ -43,10 +43,16 @@ class CallFinalizationRecoveryTest {
     }
     private val timeline = FakeTimeline()
     private val room = FakeJoinedRoom(liveTimeline = timeline).apply { givenRoomInfo(aRoomInfo(isDm = true)) }
-    private val client = FakeMatrixClient().apply { givenGetRoomResult(A_ROOM_ID, room) }
+    private var roomCloses = 0
+    private val trackedRoom = object : io.element.android.libraries.matrix.api.room.JoinedRoom by room {
+        override fun close() { roomCloses++; room.close() }
+    }
+    private val client = FakeMatrixClient().apply { givenGetRoomResult(A_ROOM_ID, trackedRoom) }
     private val clients = FakeMatrixClientProvider { Result.success(client) }
     private val protection = FakeCallProtectionService()
     private val operations = FakeAppOperationalStateCoordinator()
+    private val clock = io.element.android.services.toolbox.test.systemclock.FakeSystemClock()
+        .apply { epochMillisResult = System.currentTimeMillis() }
     private val call get() = CallData(client.sessionId, A_ROOM_ID, true, "\$exact-invitation", "attempt-1")
     private val operationId = "join-operation-123456789"
     private var sent = 0
@@ -55,7 +61,7 @@ class CallFinalizationRecoveryTest {
         coordinator: AppOperationalStateCoordinator = operations,
         store: CallFinalizationStore = EncryptedCallFinalizationStore(files, roots),
         authorization: CallProtectionService = protection,
-    ) = DefaultCallFinalizationRecovery(store, clients, authorization, coordinator, backgroundScope)
+    ) = DefaultCallFinalizationRecovery(store, clients, authorization, coordinator, backgroundScope, clock)
 
     @Test fun `real call authorization blocks restored worker reads when SDK Vault is unlocked but PIN is locked`() = runTest {
         org.junit.Assume.assumeTrue(io.element.android.appconfig.NextDeploymentConfig.isNextDeployment)
@@ -124,7 +130,7 @@ class CallFinalizationRecoveryTest {
         restarted.recoverOnce { error("Already released") }
         assertThat(sent).isEqualTo(1)
         assertThat(operations.clientReceipts).hasSize(2)
-        room.baseRoom.assertDestroyed()
+        assertThat(roomCloses).isEqualTo(0) // The original authority operation is still running.
         assertThat(operations.startedRequests.map { it.operationId }.toSet()).containsExactly("$operationId-hangup")
         val store = EncryptedCallFinalizationStore(files, roots)
         assertThat(store.read(store.pending().single()).recordSent).isTrue()
@@ -219,8 +225,8 @@ class CallFinalizationRecoveryTest {
         repeat(4) {
             val acquired = FakeJoinedRoom().apply { givenRoomInfo(aRoomInfo(isDm = true)) }
             client.givenGetRoomResult(A_ROOM_ID, acquired)
-            // Recreating the worker models a new eligible attempt without bypassing its backoff.
-            recovery(store = store).recoverOnce { error("Already released") }
+            clock.epochMillisResult += 31_000
+            first.recoverOnce { error("Already released") }
             acquired.baseRoom.assertDestroyed()
             val pending = store.pending().single()
             assertThat(pending.operationId).isEqualTo("$operationId-hangup")
@@ -229,16 +235,80 @@ class CallFinalizationRecoveryTest {
         assertThat(operations.clientReceipts).isEmpty()
     }
 
-    @Test fun `failed lifecycle write releases its room without acknowledging the pending call`() = runTest {
+    @Test fun `unknown write outcome reuses one room across eligible retries without acknowledging the call`() = runTest {
         val store = EncryptedCallFinalizationStore(files, roots)
         val current = recovery(store = store)
-        timeline.sendCallLifecycleLambda = { _, _, _ -> Result.failure(IOException("Transport unavailable")) }
+        timeline.sendCallLifecycleLambda = { _, _, _ -> sent++; Result.failure(IOException("Transport unavailable")) }
+        current.checkpoint(call, operationId)
+        current.released(call, true)
+        repeat(4) {
+            clock.epochMillisResult += 31_000
+            current.recoverOnce { error("Already released") }
+        }
+        assertThat(sent).isEqualTo(4)
+        assertThat(client.getJoinedRoomCalledCount).isEqualTo(1)
+        assertThat(roomCloses).isEqualTo(0)
+        assertThat(store.read(store.pending().single()).recordSent).isFalse()
+        assertThat(operations.clientReceipts).isEmpty()
+    }
+
+    @Test fun `queued lifecycle send retains its room until the original authority operation completes`() = runTest {
+        var terminal = false
+        val coordinator = object : AppOperationalStateCoordinator by operations {
+            override suspend fun operation(operationId: String): LifecycleOperation = this@CallFinalizationRecoveryTest.operations.operation(operationId).let {
+                if (terminal) it.copy(status = LifecycleOperationStatus.SUCCEEDED, terminalReceiptId = "original-terminal") else it
+            }
+        }
+        val store = EncryptedCallFinalizationStore(files, roots)
+        val current = recovery(coordinator, store)
+        timeline.sendCallLifecycleLambda = { _, _, _ -> sent++; Result.success(Unit) }
         current.checkpoint(call, operationId)
         current.released(call, true)
         current.recoverOnce { error("Already released") }
-        room.baseRoom.assertDestroyed()
-        assertThat(store.read(store.pending().single()).recordSent).isFalse()
+        assertThat(roomCloses).isEqualTo(0)
+        clock.epochMillisResult += 31_000
+        current.recoverOnce { error("Already released") }
+        assertThat(sent).isEqualTo(1)
+        assertThat(client.getJoinedRoomCalledCount).isEqualTo(1)
+        assertThat(roomCloses).isEqualTo(0)
+        terminal = true
+        clock.epochMillisResult += 31_000
+        current.recoverOnce { error("Already released") }
+        assertThat(roomCloses).isEqualTo(1)
+        assertThat(store.pending()).isEmpty()
+    }
+
+    @Test fun `retiring the durable checkpoint releases its retained room without fabricating completion`() = runTest {
+        val store = EncryptedCallFinalizationStore(files, roots)
+        val current = recovery(store = store)
+        timeline.sendCallLifecycleLambda = { _, _, _ -> Result.failure(IOException("Outcome unknown")) }
+        current.checkpoint(call, operationId)
+        current.released(call, true)
+        current.recoverOnce { error("Already released") }
+        assertThat(roomCloses).isEqualTo(0)
+        store.remove(store.pending().single().key)
+        current.recoverOnce { error("No pending checkpoint") }
+        assertThat(roomCloses).isEqualTo(1)
         assertThat(operations.clientReceipts).isEmpty()
+    }
+
+    @Test fun `recovery room capacity preserves queued owners and leaves excess work pending`() = runTest {
+        val store = EncryptedCallFinalizationStore(files, roots)
+        val current = recovery(store = store)
+        timeline.sendCallLifecycleLambda = { _, _, _ -> sent++; Result.success(Unit) }
+        repeat(17) { index ->
+            val attempt = call.copy(attemptId = "bounded-attempt-$index")
+            current.checkpoint(attempt, "$operationId-$index")
+            current.released(attempt, true)
+        }
+        current.recoverOnce { error("Already released") }
+        assertThat(client.getJoinedRoomCalledCount).isEqualTo(16)
+        assertThat(sent).isEqualTo(16)
+        assertThat(roomCloses).isEqualTo(0)
+        assertThat(store.pending()).hasSize(17)
+        val records = store.pending().map { store.read(it) }
+        assertThat(records.count { it.recordSent }).isEqualTo(16)
+        assertThat(records.count { !it.recordSent }).isEqualTo(1)
     }
 
     @Test fun `cancelled lifecycle write releases its room and propagates cancellation`() = runTest {

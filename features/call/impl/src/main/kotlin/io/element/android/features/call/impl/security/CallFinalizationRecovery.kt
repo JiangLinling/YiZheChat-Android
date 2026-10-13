@@ -13,9 +13,11 @@ import io.element.android.libraries.matrix.api.MatrixClientProvider
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SessionId
+import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.api.timeline.item.event.CallLifecycleState
 import io.element.android.security.dataprotection.api.*
 import io.element.android.security.securestorage.api.deriveAccountVaultId
+import io.element.android.services.toolbox.api.systemclock.SystemClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +26,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
@@ -47,6 +50,7 @@ class DefaultCallFinalizationRecovery(
     private val protection: CallProtectionService,
     private val operations: AppOperationalStateCoordinator,
     @AppCoroutineScope private val scope: CoroutineScope,
+    private val clock: SystemClock,
 ) : CallFinalizationRecovery {
     private val owner = UUID.randomUUID().toString()
     private val mutex = Mutex()
@@ -55,19 +59,25 @@ class DefaultCallFinalizationRecovery(
     private var worker: Job? = null
     private val retryAt = mutableMapOf<String, Long>()
     private val started = mutableSetOf<String>()
+    private class RecoveryRoom(val room: JoinedRoom, var sendAttempted: Boolean = false)
+    // One owner per original pending operation, never one new subscription per retry.
+    // A queued send may still need its timeline after sendCallLifecycle returns.
+    private val recoveryRooms = mutableMapOf<String, RecoveryRoom>()
     private data class CleanupResult(val phase: CallCleanupPhase, val noInvitation: Boolean, val at: Long)
     private val cleanupResults = mutableMapOf<String, CleanupResult>()
 
     override fun start(cleanAbandonedLocalCall: suspend () -> Boolean) {
         if (!NextDeploymentConfig.isNextDeployment || worker != null) return
         worker = scope.launch(Dispatchers.IO) {
-            while (true) {
-                try {
-                    recoverOnce(cleanAbandonedLocalCall)
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (failure: Exception) { Timber.w(failure, "RTC recovery scan remains pending") }
-                withTimeoutOrNull(5_000) { wake.receive() }
-            }
+            try {
+                while (true) {
+                    try {
+                        recoverOnce(cleanAbandonedLocalCall)
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) { Timber.w(failure, "RTC recovery scan remains pending") }
+                    withTimeoutOrNull(5_000) { wake.receive() }
+                }
+            } finally { closeRecoveryRooms() }
         }
     }
 
@@ -84,7 +94,7 @@ class DefaultCallFinalizationRecovery(
         val record = CallFinalizationRecord(
             operationId = "$joinOperationId-hangup", sessionId = call.sessionId.value, deviceId = client.deviceId.value,
             roomId = call.roomId.value, audioOnly = call.isAudioCall, attemptId = call.attemptId,
-            invitationId = call.notificationEventId, incoming = call.notificationEventId != null, createdAt = System.currentTimeMillis(),
+            invitationId = call.notificationEventId, incoming = call.notificationEventId != null, createdAt = clock.epochMillis(),
         )
         // Once a durable checkpoint commits, cancellation must not lose the in-process handle
         // that its already-running teardown uses to publish the RELEASED marker.
@@ -101,7 +111,7 @@ class DefaultCallFinalizationRecovery(
         if (outgoingInvitation != null && old.invitationId != null) check(outgoingInvitation == old.invitationId)
         if ((outgoingInvitation == null || outgoingInvitation == old.invitationId) && (!connected || old.connected)) return@withLock
         store.put(pending.vaultId, owner, old.copy(invitationId = outgoingInvitation ?: old.invitationId, connected = connected || old.connected,
-            connectedAt = old.connectedAt ?: System.currentTimeMillis().takeIf { connected }))
+            connectedAt = old.connectedAt ?: clock.epochMillis().takeIf { connected }))
         Unit
     }
 
@@ -109,7 +119,7 @@ class DefaultCallFinalizationRecovery(
     override suspend fun released(call: CallData, cleanupSucceeded: Boolean, noInvitationConfirmed: Boolean): Boolean = mutex.withLock {
         val pending = active[call] ?: return@withLock false
         val result = CleanupResult(if (cleanupSucceeded) CallCleanupPhase.RELEASED else CallCleanupPhase.CLEANUP_FAILED,
-            cleanupSucceeded && noInvitationConfirmed, System.currentTimeMillis())
+            cleanupSucceeded && noInvitationConfirmed, clock.epochMillis())
         cleanupResults[pending.key] = result
         active.remove(call)
         try {
@@ -120,8 +130,11 @@ class DefaultCallFinalizationRecovery(
     }
 
     internal suspend fun recoverOnce(cleanAbandonedLocalCall: suspend () -> Boolean) {
-        for (initial in store.pending()) {
-            if (System.currentTimeMillis() < (retryAt[initial.key] ?: 0)) continue
+        val pendingRecords = store.pending()
+        val pendingKeys = pendingRecords.mapTo(mutableSetOf()) { it.key }
+        recoveryRooms.keys.toList().filterNot(pendingKeys::contains).forEach(::closeRecoveryRoom)
+        for (initial in pendingRecords) {
+            if (clock.epochMillis() < (retryAt[initial.key] ?: 0)) continue
             try {
                 var pending = initial
                 mutex.withLock {
@@ -154,6 +167,7 @@ class DefaultCallFinalizationRecovery(
                 val record = store.read(pending)
                 val existing = operations.operation(record.operationId)
                 if (existing.status.isTerminal) {
+                    closeRecoveryRoom(pending.key)
                     check(record.recordSent && isCompleted(existing)) { "Call finalization has a conflicting terminal authority result." }
                     store.remove(pending.key)
                     retryAt.remove(pending.key)
@@ -165,11 +179,18 @@ class DefaultCallFinalizationRecovery(
                     if (!record.recordSent) {
                         val client = clients.getOrRestore(SessionId(record.sessionId)).getOrThrow()
                         check(client.deviceId.value == record.deviceId)
-                        // getJoinedRoom creates an owned room, including its timeline subscriptions.
-                        // Every recovery attempt must release it even when the exact invitation is
-                        // unavailable, the write fails, or the worker is cancelled. The encrypted
-                        // checkpoint and original operation remain pending independently of this scope.
-                        checkNotNull(client.getJoinedRoom(RoomId(record.roomId))).use { room ->
+                        recoveryRooms[pending.key]?.takeIf { !it.room.roomCoroutineScope.isActive }?.let {
+                            closeRecoveryRoom(pending.key)
+                        }
+                        val roomOwner = recoveryRooms[pending.key] ?: run {
+                            // Never evict an in-flight send to admit another recovery subscription.
+                            check(recoveryRooms.size < 16) { "Call recovery room capacity is occupied." }
+                            RecoveryRoom(checkNotNull(client.getJoinedRoom(RoomId(record.roomId))))
+                                .also { recoveryRooms[pending.key] = it }
+                        }
+                        val room = roomOwner.room
+                        try {
+                            check(room.sessionId == client.sessionId && room.roomId.value == record.roomId)
                             val noInvitation = pending.noInvitationConfirmed && record.invitationId == null && !record.incoming && !record.connected
                             if (room.roomInfoFlow.value.isDm && !noInvitation) {
                                 // No room-wide fallback: it could bind this old hangup to a later call.
@@ -182,24 +203,44 @@ class DefaultCallFinalizationRecovery(
                                 // CALL_STATE carries this existing operation ID. A crash after send but before
                                 // checkpoint may replay it; the authenticated reducer deduplicates that ID.
                                 val duration = record.connectedAt?.let { began -> pending.releasedAt?.let { (it - began).coerceAtLeast(0) } }
+                                roomOwner.sendAttempted = true
                                 room.liveTimeline.sendCallLifecycle(EventId(invitation), state, duration).getOrThrow()
                             }
+                        } finally {
+                            // Unknown invitations and group/no-invitation branches have no queued
+                            // send to retain. An attempted send keeps this exact owner until the
+                            // authority is terminal, its journal is retired, or the worker stops.
+                            if (!roomOwner.sendAttempted) closeRecoveryRoom(pending.key)
                         }
                         store.put(pending.vaultId, owner, record.copy(recordSent = true))
                     }
                 }
                 val result = operations.resume(record.operationId)
+                if (result.status.isTerminal) closeRecoveryRoom(pending.key)
                 if (isCompleted(result)) {
                     store.remove(pending.key)
                     retryAt.remove(pending.key)
                     started.remove(pending.key)
                     Timber.i("RTC durable finalization completed with authoritative LC-20 terminal receipt")
-                } else retryAt[pending.key] = System.currentTimeMillis() + 30_000L
-            } catch (cancelled: CancellationException) { throw cancelled }
+                } else retryAt[pending.key] = clock.epochMillis() + 30_000L
+            } catch (cancelled: CancellationException) {
+                closeRecoveryRooms()
+                throw cancelled
+            }
             catch (failure: Exception) {
-                retryAt[initial.key] = System.currentTimeMillis() + 30_000L
+                retryAt[initial.key] = clock.epochMillis() + 30_000L
                 Timber.w(failure, "RTC durable finalization remains pending")
             }
+        }
+    }
+
+    private fun closeRecoveryRoom(key: String) {
+        recoveryRooms.remove(key)?.room?.close()
+    }
+
+    private fun closeRecoveryRooms() {
+        recoveryRooms.keys.toList().forEach { key ->
+            runCatching { closeRecoveryRoom(key) }.onFailure { Timber.w(it, "RTC recovery room cleanup failed") }
         }
     }
 
