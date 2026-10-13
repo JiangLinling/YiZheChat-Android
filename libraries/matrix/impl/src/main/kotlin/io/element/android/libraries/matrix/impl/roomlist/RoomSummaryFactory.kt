@@ -55,6 +55,12 @@ class RoomSummaryFactory(
                                       val eventId: String)
     // Matrix identity facts only: no plaintext, lease or native timeline is retained.
     private val latestCarrierBindings = java.util.Collections.synchronizedMap(LinkedHashMap<RoomId, CarrierBinding>())
+    private data class PreviewSignature(
+        val timestamp: Long, val sender: String,
+        val message: io.element.android.libraries.matrix.api.timeline.item.event.MessageContent,
+        val isConfirmedOwnSummary: Boolean,
+    )
+    private val previewIdentityRetries = RoomPreviewIdentityRetryGate<PreviewSignature>()
 
     suspend fun create(room: Room): RoomSummary = create(room, initialSnapshot = false)
 
@@ -215,33 +221,43 @@ class RoomSummaryFactory(
     ): String? {
         latestCarrierBindings[roomId]?.takeIf { it.timestamp == timestamp && it.sender == sender && it.message == message }
             ?.let { return it.eventId }
-        return withTimeoutOrNull(5_000L) {
-            previewTimelines?.withTimeline(roomId) { timeline ->
-                val eventId = timeline.latestEventId()?.takeIf(::isCanonicalProtectedEventIdentity) ?: run {
-                    Timber.w("Room preview identity: latest Matrix event unavailable")
-                    return@withTimeline null
+        val attempt = previewIdentityRetries.begin(roomId, PreviewSignature(timestamp, sender, message, isConfirmedOwnSummary)) ?: return null
+        var resolved: String? = null
+        try {
+            resolved = withTimeoutOrNull(5_000L) {
+                previewTimelines?.withTimeline(roomId) { timeline ->
+                    val eventId = timeline.latestEventId()?.takeIf(::isCanonicalProtectedEventIdentity) ?: run {
+                        Timber.w("Room preview identity: latest Matrix event unavailable")
+                        return@withTimeline null
+                    }
+                    val event = EventTimelineItemMapper(contentMapper).map(timeline.getEventTimelineItemByEventId(eventId))
+                    // A sent local summary may retain its enqueue time after server confirmation.
+                    // Its exact ciphertext and authenticated own author bind the real remote carrier;
+                    // the canonical ID still passes through normal ownership and KMS authorization.
+                    val confirmedOwnCarrier = isConfirmedOwnSummary && sender == sessionId?.value && event.isOwn
+                    if (!event.isRemote || event.eventId?.value != eventId || (!confirmedOwnCarrier && event.timestamp != timestamp) ||
+                        event.sender.value != sender || event.content != message) {
+                        val candidate = event.content as? io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
+                        // Boolean diagnostics only: do not log identifiers, bodies, or ciphertext.
+                        Timber.w("Room preview identity mismatch: remote=%s id=%s time=%s sender=%s body=%s type=%s reply=%s thread=%s",
+                            event.isRemote, event.eventId?.value == eventId, event.timestamp == timestamp,
+                            event.sender.value == sender, candidate?.body == message.body, candidate?.type == message.type,
+                            candidate?.inReplyTo == message.inReplyTo, candidate?.threadInfo == message.threadInfo)
+                        return@withTimeline null
+                    }
+                    synchronized(latestCarrierBindings) {
+                        latestCarrierBindings[roomId] = CarrierBinding(timestamp, sender, message, eventId)
+                        while (latestCarrierBindings.size > 512) latestCarrierBindings.remove(latestCarrierBindings.keys.first())
+                    }
+                    eventId
                 }
-                val event = EventTimelineItemMapper(contentMapper).map(timeline.getEventTimelineItemByEventId(eventId))
-                // A sent local summary may retain its enqueue time after server confirmation.
-                // Its exact ciphertext and authenticated own author bind the real remote carrier;
-                // the canonical ID still passes through normal ownership and KMS authorization.
-                val confirmedOwnCarrier = isConfirmedOwnSummary && sender == sessionId?.value && event.isOwn
-                if (!event.isRemote || event.eventId?.value != eventId || (!confirmedOwnCarrier && event.timestamp != timestamp) ||
-                    event.sender.value != sender || event.content != message) {
-                    val candidate = event.content as? io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
-                    // Boolean diagnostics only: do not log identifiers, bodies, or ciphertext.
-                    Timber.w("Room preview identity mismatch: remote=%s id=%s time=%s sender=%s body=%s type=%s reply=%s thread=%s",
-                        event.isRemote, event.eventId?.value == eventId, event.timestamp == timestamp,
-                        event.sender.value == sender, candidate?.body == message.body, candidate?.type == message.type,
-                        candidate?.inReplyTo == message.inReplyTo, candidate?.threadInfo == message.threadInfo)
-                    return@withTimeline null
-                }
-                synchronized(latestCarrierBindings) {
-                    latestCarrierBindings[roomId] = CarrierBinding(timestamp, sender, message, eventId)
-                    while (latestCarrierBindings.size > 512) latestCarrierBindings.remove(latestCarrierBindings.keys.first())
-                }
-                eventId
             }
+            return resolved
+        } finally {
+            // Unchanged unresolved summaries must not rebuild whole native histories on every
+            // unrelated room-list update. Observed canonical metadata still bypasses this gate,
+            // and every resolved carrier still uses the existing ownership/KMS read checks.
+            previewIdentityRetries.complete(attempt, success = resolved != null)
         }
     }
 

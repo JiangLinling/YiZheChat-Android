@@ -31,6 +31,18 @@ import uniffi.matrix_sdk_ui.LatestEventValueLocalState
 
 class RoomSummaryFactoryIdentityTest {
     @Test
+    fun `unchanged mismatched previews do not repeatedly read native history`() = runTest {
+        assertThat(createSummary(null, cachedIdentity = "\$mismatch", cachedTimestamp = 999uL,
+            repeats = 100, expectedNativeReads = 1)).isNull()
+    }
+
+    @Test
+    fun `observed exact carrier bypasses prior optional preview backoff`() = runTest {
+        assertThat(createSummary(null, cachedIdentity = "\$mismatch", cachedTimestamp = 999uL,
+            repeats = 2, expectedNativeReads = 1, observedAfterFirst = true)).isEqualTo("\$observed")
+    }
+
+    @Test
     fun `confirmed own summary binds exact remote carrier despite enqueue timestamp`() = runTest {
         for (localState in listOf(null, LatestEventValueLocalState.HAS_BEEN_SENT)) {
             assertThat(createSummary(null, cachedIdentity = "\$confirmed-own", cachedSender = A_SESSION_ID.value,
@@ -97,8 +109,10 @@ class RoomSummaryFactoryIdentityTest {
                                      cachedIdentity: String? = null, cachedSender: String = "@qa:next", cachedTimestamp: ULong = 1000uL,
                                      summarySender: String = "@qa:next", summaryOwn: Boolean = false,
                                      localState: LatestEventValueLocalState? = null, cachedBody: String? = null,
-                                     cachedRemote: Boolean = true, cachedOwn: Boolean = true): String? {
+                                     cachedRemote: Boolean = true, cachedOwn: Boolean = true,
+                                     repeats: Int = 1, expectedNativeReads: Int? = null, observedAfterFirst: Boolean = false): String? {
         var identity: String? = null
+        var observations = 0
         val owners = mutableListOf<String>()
         val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
             override fun openTimelineReleaseScope(scopeId: String): String = "preview-owner".also { owners += it }
@@ -108,7 +122,7 @@ class RoomSummaryFactoryIdentityTest {
                 assertThat(sender).isEqualTo(summarySender)
                 assertThat(message.body).isEqualTo(if (attachment) ".yizhe-caption-content.yzm" else "yizhe-secure-v1:opaque")
                 if (attachment) assertThat((message.type as ImageMessageType).caption).isEqualTo("yizhe-caption-v1:opaque")
-                return canonicalIdentity
+                return if (++observations > 1 && observedAfterFirst) "\$observed" else canonicalIdentity
             }
             override suspend fun decryptMessageContent(
                 eventIdentity: String, message: MessageContent, timelineReleaseIntent: TimelineContentReleaseIntent,
@@ -170,7 +184,8 @@ class RoomSummaryFactoryIdentityTest {
                 LatestEventValue.Remote(1000uL, summarySender, summaryOwn, ProfileDetails.Unavailable, content)
             }
         })
-        factory.create(room)
+        repeat(repeats) { factory.create(room) }
+        expectedNativeReads?.let { assertThat(cachedTimeline.fetchedEventIds).hasSize(it) }
         previewTimelines.close()
         assertThat(owners).isEmpty()
         if (localState == LatestEventValueLocalState.IS_SENDING || localState == LatestEventValueLocalState.CANNOT_BE_SENT) {
