@@ -71,7 +71,7 @@ class TimelineLifecycleWorkTest {
                 return backing.start(request)
             }
         }
-        val work = TimelineLifecycleWork { testScheduler.currentTime }
+        val work = TimelineLifecycleWork(System::currentTimeMillis)
         val occupied = List(2) { launch { work.registrationTransport { gate.await() } } }
         runCurrent()
         val old = List(100) { index -> launch {
