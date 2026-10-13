@@ -1539,7 +1539,8 @@ internal class MatrixTimelineDiffProcessor(
             .resolveReplyPreviewsFromAuthorizedProjection()
             .map { item ->
                 if (mediaRoomId != null && item is MatrixTimelineItem.Event) {
-                    item.copy(event = item.event.copy(content = item.event.content.withMediaEventOrigin(mediaRoomId, item.event.eventId?.value)))
+                    val boundContent = item.event.content.withMediaEventOrigin(mediaRoomId, item.event.eventId?.value)
+                    if (boundContent === item.event.content) item else item.copy(event = item.event.copy(content = boundContent))
                 } else item
             }
         if (!hasPublishedItems || reducedItems != currentlyPublished) {

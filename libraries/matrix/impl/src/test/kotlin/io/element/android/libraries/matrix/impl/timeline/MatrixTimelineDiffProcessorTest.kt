@@ -75,6 +75,18 @@ class MatrixTimelineDiffProcessorTest {
     private val anEvent2 = MatrixTimelineItem.Event(A_UNIQUE_ID_2, anEventTimelineItem())
 
     @Test
+    fun `one arrival with media origins enabled preserves all unchanged historical text references`() = runTest {
+        val history = (1..500).map { index ->
+            MatrixTimelineItem.Event(UniqueId("history-$index"), anEventTimelineItem(eventId = EventId("\$history-$index")))
+        }
+        timelineItems.value = history
+        val processor = createMatrixTimelineDiffProcessor(timelineItems, mediaRoomId = "!room:server")
+        processor.postDiffs(listOf(TimelineDiff.PushBack(FakeFfiTimelineItem())))
+        assertThat(timelineItems.value).hasSize(501)
+        history.indices.forEach { index -> assertThat(timelineItems.value[index]).isSameInstanceAs(history[index]) }
+    }
+
+    @Test
     fun `room summary carrier snapshot belongs only to accepted live Matrix commits`() = runTest {
         val snapshots = mutableListOf<Pair<String, MatrixTimelineItem.Event?>>()
         val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
@@ -4009,6 +4021,7 @@ internal fun TestScope.createMatrixTimelineDiffProcessor(
     syncedEventReceivedFlow: MutableSharedFlow<Unit> = MutableSharedFlow(),
     protectedContentAdapter: MatrixProtectedContentAdapter? = null,
     workerScope: CoroutineScope = backgroundScope,
+    mediaRoomId: String? = null,
     ): MatrixTimelineDiffProcessor {
     val timelineEventContentMapper = TimelineEventContentMapper()
     val timelineItemFactory = MatrixTimelineItemMapper(
@@ -4027,5 +4040,6 @@ internal fun TestScope.createMatrixTimelineDiffProcessor(
         protectedContentAdapter = protectedContentAdapter,
         coroutineScope = workerScope,
         decryptDispatcher = StandardTestDispatcher(testScheduler),
+        mediaRoomId = mediaRoomId,
     )
 }
