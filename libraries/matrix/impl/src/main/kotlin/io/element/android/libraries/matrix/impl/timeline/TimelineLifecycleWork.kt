@@ -147,7 +147,7 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
         isForeground: Boolean = true,
         isLiveSend: Boolean = false,
         block: suspend () -> T,
-    ): T = if (isLiveSend) transport.withPermit(isLiveSend = true, block) else shortTransport(isForeground, block)
+    ): T = if (isLiveSend) transport.withPermit(isLiveSend = true, block = block) else shortTransport(isForeground, block)
 
     // Background waits outside the shared semaphore, leaving one physical slot for current reads.
     private suspend fun <T> shortTransport(isForeground: Boolean, block: suspend () -> T): T =

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "20261013-r15",
-  "frozen_utc": "2026-10-13T00:18:20.553979+00:00",
+  "revision": "20261013-r16",
+  "frozen_utc": "2026-10-13T00:24:15.009549+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -154,7 +154,7 @@
     ".tmp-postinstall-home.png": "5241e7ab9164095c39e53bfe1f28ceb4635a6b48d5f809f76e66b289d1e0dfe6",
     "annotations/build.gradle.kts": "c8a2ec0144aec33df0ff14f1a5c29ac53d7c73a83b23ac0e21ff23471eda0755",
     "annotations/src/main/kotlin/io/element/android/annotations/ContributesNode.kt": "52890552c7459490db80093fa1a71a06210d24face9b9ab7d3111774007370a2",
-    "app/build.gradle.kts": "5ce4451d0eab15873a431f317575c668c72c4329d41f70167bc23181f953eef7",
+    "app/build.gradle.kts": "83f961bcd5465cfd6a157a9a0d4345d1999078e168b45dabab756df556fa0516",
     "app/common-proguard-rules.pro": "54b157faf5f39f002face256a18e66763f96f2f42f27ad28ce735b5a4ac2174d",
     "app/default-proguard-rules.pro": "48513ed55e34a76ba4667dcd113b07bbb3b0a0018ae31f8cf9a5e38aca7efb58",
     "app/src/androidTestNext/AndroidManifest.xml": "843f3e8f2726bfe3c82af58340ec77b2232dd0df9e08c0d94c42596aefb081a9",
@@ -5793,7 +5793,7 @@
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/RustTimeline.kt": "b82f3c57f8df9d00b21ad9e958350bdfd997459446063bbb027510b32833adb5",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/TimelineDiffTransaction.kt": "18345d8c80bb385f848cd0b35d03e6986637b16fc5eae1a1a5104c7619e3f7e3",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/TimelineItemsSubscriber.kt": "7e3707675ec7506f906c3c7ca88afdf91d7d7549d85fd46fcf1e0d45ce583665",
-    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/TimelineLifecycleWork.kt": "f8ddb07b43ac8752c9d0eec0c712d32ce79ab7aa36eb58da4263fd4bebc9b150",
+    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/TimelineLifecycleWork.kt": "3dc877677b85473bfc32a08bbddc36c5d5fc1a819821b8d4c3713a00c9552068",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/TimelineTransportScheduler.kt": "e6baa04a618c08b56e31974df359542eaa02236c20f866e95a457a2617d3925e",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/item/event/EventMessageMapper.kt": "f7bcdf31aa76bcc1ec378002893e9cdde44fc29b5cf1d7f0a562032678105b42",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/item/event/EventOrTransactionIdExtension.kt": "08c194c8af322e29179d5891644eb824cc83ae03d353deac81bf78080af51005",
