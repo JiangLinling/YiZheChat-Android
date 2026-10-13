@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-next-r37-direct-text-receipt-owner-20261013",
-  "frozen_utc": "2026-10-13T15:53:04.689707+00:00",
+  "revision": "unified-next-r38-private-profile-identity-20261014",
+  "frozen_utc": "2026-10-13T16:49:57.324730+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -166,7 +166,7 @@
     ".tmp-postinstall-home.png": "5241e7ab9164095c39e53bfe1f28ceb4635a6b48d5f809f76e66b289d1e0dfe6",
     "annotations/build.gradle.kts": "c8a2ec0144aec33df0ff14f1a5c29ac53d7c73a83b23ac0e21ff23471eda0755",
     "annotations/src/main/kotlin/io/element/android/annotations/ContributesNode.kt": "52890552c7459490db80093fa1a71a06210d24face9b9ab7d3111774007370a2",
-    "app/build.gradle.kts": "bc4ab03ff269e8d04c2583f7459e07be13bf8daa38203ce955549c56049b5bb4",
+    "app/build.gradle.kts": "d2eeb1791cd269b36284063726f07803a755db5ce584a71e8d0b07e1ba916fc8",
     "app/common-proguard-rules.pro": "54b157faf5f39f002face256a18e66763f96f2f42f27ad28ce735b5a4ac2174d",
     "app/default-proguard-rules.pro": "48513ed55e34a76ba4667dcd113b07bbb3b0a0018ae31f8cf9a5e38aca7efb58",
     "app/src/androidTestNext/AndroidManifest.xml": "843f3e8f2726bfe3c82af58340ec77b2232dd0df9e08c0d94c42596aefb081a9",
@@ -2165,7 +2165,7 @@
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/MessagesFlowNode.kt": "4f518e24b38e7da7b17f29d9710f59160e47746cfa4fe3f768640bcc6429c974",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/MessagesNavigator.kt": "de866c9beace91a54de1dc288b1192890842f2af24c50a1b01f4c5a012ce2b01",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/MessagesNode.kt": "7287cbf77892e49d385d6e2399f78f884715787e1bd457b557ad40257e74f721",
-    "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/MessagesPresenter.kt": "3ba4ef2f8746f068a23f15a68e0327e4b7728662cddf3367b64445440c37b426",
+    "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/MessagesPresenter.kt": "402209fd2cadf0f5200757f213485cea78dd09e436362e4bec1326cfeb649d3b",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/MessagesState.kt": "f4c5ba366de8e81e176ff9e50a63b3147478a090f986e5b039272360fd4e9da2",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/MessagesStateProvider.kt": "fb1e27e1923038b2134d814319da9d1bf459978d97f74e856d23140be6349c06",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/MessagesView.kt": "290bce7d2794d27b04830bbb0bba2507960697755c23a3d78e4f7d87efc360c6",
@@ -2572,6 +2572,7 @@
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/LocallyDeletedMessageFilterTest.kt": "d28a5055a3dfc9a3c5d7a76bf4575698368dfaa4cd66664f58b99ae4495a9193",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/MessagesPresenterTest.kt": "c054e1340668d28af119638993f79f0bee7bafe4a3c914651f11f14a3f081b1e",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/MessagesViewTest.kt": "5b8e332cff46b0dc33817a85374b11b4e15abf3430a831e9d928cb69b51545bd",
+    "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/PrivateProfileProjectionTest.kt": "39d7fe389b25522523f4701c2cb20b6ac90fbb70b53bec338abb715eb62fdd22",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/actionlist/ActionListPresenterTest.kt": "ba536e99d49ebd4964d822eadae9028071937417a8e4d48631554fc71560151b",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/actionlist/model/TimelineItemActionComparatorTest.kt": "20e9c5493443ef05aa5509998fda4da4b8e66a9201f8ba1e33b4d1a9f6f70f5c",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/attachments/AttachmentGalleryFlagsTest.kt": "ac1cee6464054f28fb212f0edd93f4176cac1bee6bee59361bfe0324a643a0a1",
