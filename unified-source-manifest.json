@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "revision": "unified-next-r28-bounded-permalinks-20261013",
-  "frozen_utc": "2026-10-13T09:43:58.015767+00:00",
+  "frozen_utc": "2026-10-13T09:56:06.958810+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -4415,7 +4415,7 @@
     "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/system/DateTimeObserver.kt": "50038ef5b296dc8918f3c3569e030c7ef087c1138d9d1bceac9e0fec209abcef",
     "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/system/DeviceHasVulkanSupport.kt": "a6d8e9ba9886bdf4c2b6b373bb08ec697b5b7ce9dc25ea3a0bdfc388c683be2f",
     "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/system/SystemUtils.kt": "b886bf7ddd5d72d7c006828dc5f58f1df82bc1f1a5c1f094c0af92baadd50a2a",
-    "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/text/LinkifyHelper.kt": "144fb620d8e07a36b524be95afe09b04f7769e2f045547d3a33da6fd3e40fa5d",
+    "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/text/LinkifyHelper.kt": "51622c39895bb23faef216442b15e445026cc0e2c1220d84d5175b422342bca0",
     "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/text/TextUtils.kt": "b7d844f39be44d58035c95a64186ca3c7ca6545704145bc9eff54659731bbb13",
     "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/throttler/FirstThrottler.kt": "e31502822020ca121433e63de70e2899d4ed536e3b5306742cd44f73c325af79",
     "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/ui/View.kt": "bb34f8c61d7e55018ade92db93674dddf28ea2aa87d1dbdcafc02e8df5b8edf9",

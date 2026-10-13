@@ -120,7 +120,7 @@ object LinkifyHelper {
                     if (text[cursor].isDigit()) digits++
                     cursor++
                 }
-                if (digits >= 5 && cursor - start <= MAX_LINKIFY_TOKEN_LENGTH) {
+                if (digits > 0 && cursor - start <= MAX_LINKIFY_TOKEN_LENGTH) {
                     added = addLinksInRange(text, start, cursor, Linkify.PHONE_NUMBERS) || added
                 }
             }
