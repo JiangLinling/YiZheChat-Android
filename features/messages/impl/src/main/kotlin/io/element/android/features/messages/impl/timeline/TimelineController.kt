@@ -280,6 +280,7 @@ class TimelineController(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun timelineItems(): Flow<List<MatrixTimelineItem>> {
+        val displayProjectionCache = DisplayIdentityProjectionCache()
         return combine(
             currentTimelineFlow.flatMapLatest { timeline ->
                 combine(
@@ -442,18 +443,8 @@ class TimelineController(
                     }
                 }
             }
-            val stableTimelineItems = projectionItems.mapIndexed { index, item ->
-                val protectedShellReplacement = protectedShellReplacements[index]
-                if (protectedShellReplacement != null) {
-                    protectedShellReplacement
-                } else {
-                    val displayUniqueId = stableDisplayIds[index] ?: confirmedDisplayId(item)
-                    if (displayUniqueId != null && item is MatrixTimelineItem.Event) {
-                        item.copy(displayUniqueId = displayUniqueId)
-                    } else {
-                        item
-                    }
-                }
+            val stableTimelineItems = displayProjectionCache.project(projectionItems, protectedShellReplacements) { index, item ->
+                stableDisplayIds[index] ?: confirmedDisplayId(item)
             }
             val result = stableTimelineItems
                 .insertPendingEventsBeforeTrailingVirtualItems(unmatchedLocalEchoes.filter { item ->

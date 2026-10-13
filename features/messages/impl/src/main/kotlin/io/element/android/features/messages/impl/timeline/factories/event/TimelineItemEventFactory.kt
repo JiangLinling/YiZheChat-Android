@@ -29,6 +29,7 @@ import io.element.android.libraries.dateformatter.api.DateFormatterMode
 import io.element.android.libraries.designsystem.components.avatar.AvatarData
 import io.element.android.libraries.designsystem.components.avatar.AvatarSize
 import io.element.android.libraries.matrix.api.MatrixClient
+import io.element.android.libraries.matrix.api.core.UniqueId
 import io.element.android.libraries.matrix.api.permalink.PermalinkParser
 import io.element.android.libraries.matrix.api.room.RoomMember
 import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
@@ -59,6 +60,8 @@ class TimelineItemEventFactory(
         currentTimelineItem: MatrixTimelineItem.Event,
         neighbours: TimelineEventNeighbours,
         roomMembers: List<RoomMember>,
+        id: UniqueId = currentTimelineItem.uniqueId,
+        displayId: UniqueId = currentTimelineItem.displayUniqueId,
     ): TimelineItem.Event {
         val currentSender = currentTimelineItem.event.sender
         val groupPosition = computeGroupPosition(currentTimelineItem, neighbours)
@@ -108,7 +111,7 @@ class TimelineItemEventFactory(
         }
 
         return TimelineItem.Event(
-            id = currentTimelineItem.uniqueId,
+            id = id,
             eventId = currentTimelineItem.eventId,
             transactionId = currentTimelineItem.transactionId,
             senderId = currentSender,
@@ -133,7 +136,7 @@ class TimelineItemEventFactory(
             sendHandleProvider = currentTimelineItem.event.sendHandleProvider,
             forwarder = currentTimelineItem.event.forwarder,
             forwarderProfile = currentTimelineItem.event.forwarderProfile,
-            displayId = currentTimelineItem.displayUniqueId,
+            displayId = displayId,
             clipboardSource = (currentTimelineItem.event.content as? MessageContent)
                 ?.toTimelineItemClipboardSource(currentTimelineItem.eventId),
         )
@@ -145,7 +148,8 @@ class TimelineItemEventFactory(
         roomMembers: List<RoomMember>,
         neighbours: TimelineEventNeighbours,
     ): TimelineItem.Event {
-        return create(receivedMatrixTimelineItem, neighbours, roomMembers).copy(
+        return create(
+            receivedMatrixTimelineItem, neighbours, roomMembers,
             // Acknowledgement mutates the existing row. The remote eventId is updated by create(), while
             // the row identity remains the one allocated before send.
             id = timelineItem.id,

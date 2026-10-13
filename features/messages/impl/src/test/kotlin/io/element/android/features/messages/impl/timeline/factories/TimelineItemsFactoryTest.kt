@@ -29,6 +29,27 @@ import org.junit.Test
 
 class TimelineItemsFactoryTest {
     @Test
+    fun `each changed row reads its current shield once and unchanged rows keep their presentation`() = runTest {
+        val factory = aTimelineItemsFactory(TimelineItemsFactoryConfig(computeReadReceipts = false, computeReactions = false))
+        var shieldReads = 0
+        var source = MatrixTimelineItem.Event(UniqueId("shield-row"), anEventTimelineItem().copy(
+            messageShieldProvider = { shieldReads++; null },
+        ))
+        factory.timelineItems.test {
+            factory.replaceWith(listOf(source), emptyList())
+            awaitItem()
+            assertThat(shieldReads).isEqualTo(1)
+            source = source.copy(event = source.event.copy(localSendState = LocalEventSendState.Failed.Unknown("changed")))
+            factory.replaceWith(listOf(source), emptyList())
+            assertThat(awaitItem().events().single().localSendState).isEqualTo(source.event.localSendState)
+            assertThat(shieldReads).isEqualTo(2)
+            factory.replaceWith(listOf(source), emptyList())
+            expectNoEvents()
+            assertThat(shieldReads).isEqualTo(2)
+        }
+    }
+
+    @Test
     fun `pending sender avatar updates when member profile arrives without a new timeline snapshot`() = runTest {
         val factory = aTimelineItemsFactory(TimelineItemsFactoryConfig(computeReadReceipts = false, computeReactions = false))
         val sender = UserId("@own:server")
