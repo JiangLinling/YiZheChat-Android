@@ -2848,6 +2848,7 @@ private class DefaultMatrixProtectedContentAdapter(
         carrier: String,
         header: io.element.android.security.contentprotection.api.ContentProtectionHeader,
     ): LifecycleOperationContext? {
+        deferUnresolvedHistoricalOrigin(eventIdentity, carrier, header.contentId)
         val origin = protectedSendOriginStore.find(
             io.element.android.security.contentprotection.api.ContentVersionLineageScope(vaultId, roomId.value),
             header.contentId.value,
@@ -2871,6 +2872,18 @@ private class DefaultMatrixProtectedContentAdapter(
 
     private fun sendBindingRegistrationKey(contentId: String, eventId: String): String =
         accountIdHash("mapping:$accountHash:$matrixDeviceHash:$roomHash:$contentId:$eventId")
+
+    private fun originRecoveryKey(eventId: String, carrier: String, contentId: ContentId): String =
+        accountIdHash("origin-recovery:$accountHash:$matrixDeviceHash:$roomHash:$eventId:${contentId.value}:${accountIdHash(carrier)}")
+
+    private fun deferUnresolvedHistoricalOrigin(eventId: String, carrier: String, contentId: ContentId) {
+        // This cache can only deny a repeated metadata repair. A live original send always
+        // bypasses it; it never substitutes for current KMS, Vault or carrier checks.
+        if (ProtectedEventOwnershipResolver.isCanonicalEvent(eventId) &&
+            lifecycleWork.originatingOperation(originatingOperationScopeKey(contentId)) == null &&
+            lifecycleWork.originRecovery.isDeferred(originRecoveryKey(eventId, carrier, contentId))
+        ) throw ContentProtectionException.SendBindingPending()
+    }
 
     private suspend fun awaitOriginalSendBinding(
         input: ProtectedEventOwnershipResolver.Input,
@@ -3483,6 +3496,7 @@ private class DefaultMatrixProtectedContentAdapter(
                     // The encrypted journal records an acknowledged exact carrier/event binding.
                     // Avoid replaying its POST on each process restart; all current KMS read checks remain.
                     lifecycleWork.finishRegistration(registrationKey, success = true)
+                    if (carrier != null) lifecycleWork.originRecovery.invalidate(originRecoveryKey(eventId, carrier, contentId))
                     return@launch
                 }
                 val originatingOperation = storedOrigin?.let { LifecycleOperationContext(it.operationId, it.lifecycleId) }
@@ -3543,6 +3557,7 @@ private class DefaultMatrixProtectedContentAdapter(
                         Timber.tag(PROTECTED_DIAGNOSTIC_TAG).w("YZCP_CAPTION_LINEAGE_BINDING_RETRY")
                     } else {
                         lifecycleWork.finishRegistration(registrationKey, success = true)
+                        if (carrier != null) lifecycleWork.originRecovery.invalidate(originRecoveryKey(eventId, carrier, contentId))
                         lifecycleWork.forgetOriginatingOperation(originScopeKey, originatingOperation)
                     }
                 }
@@ -3608,6 +3623,7 @@ private class DefaultMatrixProtectedContentAdapter(
         val envelope = try { envelopeCodec.decode(bytes) } finally { bytes.fill(0) }
         val header = envelope.header
         envelope.ciphertext.fill(0)
+        deferUnresolvedHistoricalOrigin(eventIdentity, carrier, header.contentId)
         val trust = deviceTrustService.current()
         val scope = io.element.android.security.contentprotection.api.ContentVersionLineageScope(vaultId, roomId.value)
         var origin = protectedSendOriginStore.find(scope, header.contentId.value)
@@ -3629,8 +3645,7 @@ private class DefaultMatrixProtectedContentAdapter(
             // A legacy producer journal may be absent after an upgrade. Recover only the
             // original SEND identity, using the current signed authority and live Matrix
             // binding. This request admits no new operation and grants no content lease.
-            val recoveryKey = accountIdHash("origin-recovery:$accountHash:$matrixDeviceHash:${trust.installationId}:$roomHash:" +
-                "$eventIdentity:${header.contentId.value}:${accountIdHash(carrier)}")
+            val recoveryKey = originRecoveryKey(eventIdentity, carrier, header.contentId)
             val context = lifecycleWork.originRecovery.lookup(recoveryKey) { lifecycleWork.registrationTransport(
                 // Signed legacy-origin recovery is metadata repair, including visible old rows.
                 // Keep its queue outside the shared slots used by a current original send.

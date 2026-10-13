@@ -12,8 +12,21 @@ internal class ProtectedOriginRecovery(private val capacity: Int = 4096, private
         var active: CompletableDeferred<LifecycleOperationContext?>? = null
         var failures = 0
         var retryAt = 0L
+        var invalidated = false
     }
     private val attempts = LinkedHashMap<String, Attempt>()
+
+    fun isDeferred(key: String): Boolean = synchronized(attempts) {
+        attempts[key]?.let { it.active == null && now() < it.retryAt } == true
+    }
+
+    /** A real binding/producer update must not wait for an old metadata-repair cooldown. */
+    fun invalidate(key: String) = synchronized(attempts) {
+        attempts[key]?.let { state ->
+            if (state.active == null) attempts.remove(key) else state.invalidated = true
+        }
+        Unit
+    }
 
     suspend fun lookup(key: String, block: suspend () -> LifecycleOperationContext?): LifecycleOperationContext? {
         var producer = false
@@ -44,7 +57,7 @@ internal class ProtectedOriginRecovery(private val capacity: Int = 4096, private
         } finally {
             synchronized(attempts) {
                 state.active = null
-                if (resolved) {
+                if (resolved || state.invalidated) {
                     // Every later lookup must consult authority again. Readers still perform KMS/AEAD.
                     attempts.remove(key)
                 } else {

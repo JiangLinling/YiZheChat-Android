@@ -85,4 +85,27 @@ class ProtectedOriginRecoveryTest {
         assertThat(work.lookup("old") { error("cancelled attempt must back off") }).isNull()
         assertThat(work.lookup("new") { original }).isEqualTo(original)
     }
+
+    @Test fun `real producer binding invalidates only its exact metadata cooldown`() = runTest {
+        val work = ProtectedOriginRecovery { testScheduler.currentTime }
+        work.lookup("first-carrier") { null }
+        work.lookup("other-carrier") { null }
+        assertThat(work.isDeferred("first-carrier")).isTrue()
+        work.invalidate("first-carrier")
+        assertThat(work.isDeferred("first-carrier")).isFalse()
+        assertThat(work.isDeferred("other-carrier")).isTrue()
+        assertThat(work.lookup("first-carrier") { original }).isEqualTo(original)
+    }
+
+    @Test fun `late unresolved lookup cannot restore cooldown after real binding publication`() = runTest {
+        val work = ProtectedOriginRecovery { testScheduler.currentTime }
+        val gate = CompletableDeferred<Unit>()
+        val stale = async { work.lookup("bound-carrier") { gate.await(); null } }
+        runCurrent()
+        work.invalidate("bound-carrier")
+        gate.complete(Unit)
+        assertThat(stale.await()).isNull()
+        assertThat(work.isDeferred("bound-carrier")).isFalse()
+        assertThat(work.lookup("bound-carrier") { original }).isEqualTo(original)
+    }
 }
