@@ -22,11 +22,11 @@ class RustTracingTreeTest {
 
     @Test fun `debug timing spans preserve exact log payload and level without capturing stacks`() {
         val tree = tree()
-        listOf("YiZheMessageStage", "YiZheTimelinePerf").forEach { tag ->
+        listOf("YiZheMessageStage", "YiZheTimelinePerf", "YiZheDeviceTrust").forEach { tag ->
             tree.log(Log.DEBUG, tag, "phase=finish stage=send span=7 duration_us=55", null)
         }
         assertThat(stackReads).isEqualTo(0)
-        assertThat(entries).hasSize(2)
+        assertThat(entries).hasSize(3)
         entries.forEach {
             assertThat(it.location).isEqualTo(LogEventLocation("", null))
             assertThat(it.level).isEqualTo(LogLevel.DEBUG)
@@ -35,6 +35,7 @@ class RustTracingTreeTest {
         }
         assertThat(entries[0].text).startsWith("[YiZheMessageStage] ")
         assertThat(entries[1].text).startsWith("[YiZheTimelinePerf] ")
+        assertThat(entries[2].text).startsWith("[YiZheDeviceTrust] ")
     }
 
     @Test fun `warnings and errors retain their call site even with a timing tag`() {
@@ -55,7 +56,7 @@ class RustTracingTreeTest {
     @Test fun `ordinary and untagged debug logs retain source locations`() {
         val tree = tree()
         tree.log(Log.DEBUG, "SecurityAudit", "opaque audit event", null)
-        tree.log(Log.DEBUG, null, "ordinary event", null)
+        tree.log(Log.DEBUG, null as String?, "ordinary event", null)
         tree.log(Log.INFO, "YiZheMessageStage", "information", null)
         assertThat(stackReads).isEqualTo(3)
         assertThat(entries.map { it.location }).containsExactly(source, source, source)

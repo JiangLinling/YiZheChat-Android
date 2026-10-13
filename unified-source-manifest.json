@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-next-r25-timing-overhead-20261013",
-  "frozen_utc": "2026-10-13T07:00:52.979146+00:00",
+  "revision": "unified-next-r26-timing-overhead-20261013",
+  "frozen_utc": "2026-10-13T07:12:25.678097+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -166,7 +166,7 @@
     ".tmp-postinstall-home.png": "5241e7ab9164095c39e53bfe1f28ceb4635a6b48d5f809f76e66b289d1e0dfe6",
     "annotations/build.gradle.kts": "c8a2ec0144aec33df0ff14f1a5c29ac53d7c73a83b23ac0e21ff23471eda0755",
     "annotations/src/main/kotlin/io/element/android/annotations/ContributesNode.kt": "52890552c7459490db80093fa1a71a06210d24face9b9ab7d3111774007370a2",
-    "app/build.gradle.kts": "d7cfa91068cf48204974f21154cea8b81ffb3b9d248cf0f4119ea65343352004",
+    "app/build.gradle.kts": "e6859616bea6e4067371e6a2733239eaf486a27aba3d92f406d8a63eda68d4bd",
     "app/common-proguard-rules.pro": "54b157faf5f39f002face256a18e66763f96f2f42f27ad28ce735b5a4ac2174d",
     "app/default-proguard-rules.pro": "48513ed55e34a76ba4667dcd113b07bbb3b0a0018ae31f8cf9a5e38aca7efb58",
     "app/src/androidTestNext/AndroidManifest.xml": "843f3e8f2726bfe3c82af58340ec77b2232dd0df9e08c0d94c42596aefb081a9",
@@ -5823,7 +5823,7 @@
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/reply/InReplyToMapper.kt": "639ddf69bc93200c5018a78b3c9e88d3bcaffdd938886c63793cd958bb98bbcd",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/tracing/LogEventLocation.kt": "969b62ff2c0379092cbea0b9d46d9029cc58a61e42053465487c69d48312c549",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/tracing/RustTracingService.kt": "c43561700c56846f31f353034fb556f5d7d157d3bc63cce633f8c958ee6bb2d4",
-    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/tracing/RustTracingTree.kt": "e37355b09cefd592881d952b91dd92a68211a43fabe36ba141e87ecf1b647265",
+    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/tracing/RustTracingTree.kt": "d7e68cafb2f1b6774542ee3bd250ca6ffe165255010fff941b5cfb1bb6485526",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/tracing/TraceLogPacksMapping.kt": "26cdebc5e22dd277d74a015bb2cbc4820ad6191285b26e98ff42d3a2ecede5de",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/usersearch/UserSearchResultMapper.kt": "2d39cd55b03f1e8b88d42252dc7add709327521cfc4f7ce3005324942e5712a1",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/util/CallbackFlow.kt": "cc9333004d1eb007810e4566efadb48c966d52073ba5d46b926ad29d2bc0c44a",
@@ -6028,7 +6028,7 @@
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/postprocessor/LastForwardIndicatorsPostProcessorTest.kt": "8c912f91e21db7862554555e83dbb3d0953229b1a33878d03fe9e28becac3bc9",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/postprocessor/LoadingIndicatorsPostProcessorTest.kt": "ddb139eea49849af0a372fd4964b7abfb47ea997aac1c37c9c479e37577fd0dc",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/postprocessor/RoomBeginningPostProcessorTest.kt": "8c9a646566666cec21a090182a25e7f49f8b1c0dc24a9e5166d2488535bbacbb",
-    "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/tracing/RustTracingTreeTest.kt": "913be01b08538a18e137c0073eb0829370b2b50d21722baba0d5523ebf84199a",
+    "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/tracing/RustTracingTreeTest.kt": "b898c05c2ae2086c4eccc32c031d9b9514cd6c0c460f9e5f627c5cd9d05cbe22",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/usersearch/UserSearchResultMapperTest.kt": "fd150c12536095b9d4f95c6c98bc20ee59cb3058c2461bf37cce074883f463ae",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/util/SessionPathsProviderTest.kt": "fd542457f21e1ba9a4fa10be91b9be39a82a6f84a709430019f3b423e2c17dac",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/verification/RustSessionVerificationServiceTest.kt": "a06ee757d37919dd016cb824d5c0a04d249aa76e052aaba86cd053badc062312",

@@ -58,7 +58,7 @@ internal class RustTracingTree(
     }
 
     private companion object {
-        val TIMING_TAGS = setOf("YiZheMessageStage", "YiZheTimelinePerf")
+        val TIMING_TAGS = setOf("YiZheMessageStage", "YiZheTimelinePerf", "YiZheDeviceTrust")
     }
 }
 
