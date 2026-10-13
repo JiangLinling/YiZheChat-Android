@@ -12,7 +12,6 @@ import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.URLSpan
-import android.util.Patterns
 import androidx.core.text.getSpans
 import dev.zacsweers.metro.ContributesBinding
 import io.element.android.libraries.di.RoomScope
@@ -49,6 +48,7 @@ class DefaultTextPillificationHelper(
     }
 
     private fun pillifyMatrixPatterns(text: SpannableStringBuilder) {
+        if (text.none { it in "@!#$[" }) return
         val matches = MatrixPatterns.findPatterns(text, permalinkParser).sortedByDescending { it.end }
         if (matches.isEmpty()) return
         for (match in matches) {
@@ -87,12 +87,12 @@ class DefaultTextPillificationHelper(
     }
 
     private fun pillifyPermalinks(text: SpannableStringBuilder) {
-        for (match in Patterns.WEB_URL.toRegex().findAll(text)) {
-            val start = match.range.first
-            val end = match.range.last + 1
+        for (range in permalinkCandidates(text)) {
+            val start = range.first
+            val end = range.last + 1
             if (!text.canPillify(start, end)) continue
-            val url = text.substring(match.range)
-            val mentionSpan = mentionSpanProvider.getMentionSpanFor(match.value, url)
+            val url = text.substring(range)
+            val mentionSpan = mentionSpanProvider.getMentionSpanFor(url, url)
             if (mentionSpan != null) {
                 text.setSpan(mentionSpan, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }

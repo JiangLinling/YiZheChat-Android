@@ -33,6 +33,22 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class DefaultTextPillificationHelperTest {
     @Test
+    fun `pillify - long ordinary messages stay unchanged without URL matching`() {
+        val text = "会议资料已整理，稍后发文件。".repeat(10_000)
+        val result = aTextPillificationHelper().pillify(text)
+        assertThat(result.toString()).isEqualTo(text)
+        assertThat(result.getMentionSpans()).isEmpty()
+    }
+
+    @Test
+    fun `pillify - oversized URL remains readable without a mention decoration`() {
+        val text = "https://" + "a".repeat(100_000)
+        val result = aTextPillificationHelper().pillify(text)
+        assertThat(result.toString()).isEqualTo(text)
+        assertThat(result.getMentionSpans()).isEmpty()
+    }
+
+    @Test
     fun `pillify - adds pills for user ids`() {
         val text = "A @user:server.com"
         val formatter = FakeMentionSpanFormatter()
