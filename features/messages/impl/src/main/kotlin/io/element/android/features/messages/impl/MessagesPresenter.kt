@@ -1121,7 +1121,7 @@ internal fun TimelineItem.withoutLocallyDeletedEvents(
         if (visibleEvents.isEmpty()) {
             null
         } else {
-            copy(events = visibleEvents)
+            if (visibleEvents.size == events.size) this else copy(events = visibleEvents)
         }
     }
     is TimelineItem.Virtual -> this
@@ -1138,13 +1138,19 @@ internal fun TimelineItem.withPrivateProfiles(
     profiles: Map<io.element.android.libraries.matrix.api.core.UserId, FriendPrivateProfile>,
 ): TimelineItem = when (this) {
     is TimelineItem.Event -> withPrivateProfile(profiles)
-    is TimelineItem.GroupedEvents -> copy(
-        events = events.map { it.withPrivateProfile(profiles) }.toImmutableList(),
-        aggregatedReadReceipts = aggregatedReadReceipts.map { receipt ->
+    is TimelineItem.GroupedEvents -> {
+        val mappedEvents = events.map { it.withPrivateProfile(profiles) }.toImmutableList()
+        val mappedReceipts = aggregatedReadReceipts.map { receipt ->
             val userId = io.element.android.libraries.matrix.api.core.UserId(receipt.avatarData.id)
-            receipt.copy(avatarData = receipt.avatarData.copy(name = profiles.privateDisplayName(userId, receipt.avatarData.name)))
-        }.toImmutableList(),
-    )
+            val name = profiles.privateDisplayName(userId, receipt.avatarData.name)
+            if (name == receipt.avatarData.name) receipt else receipt.copy(avatarData = receipt.avatarData.copy(name = name))
+        }.toImmutableList()
+        if (mappedEvents.indices.all { mappedEvents[it] === events[it] } && mappedReceipts == aggregatedReadReceipts) {
+            this
+        } else {
+            copy(events = mappedEvents, aggregatedReadReceipts = mappedReceipts)
+        }
+    }
     is TimelineItem.Virtual -> this
 }
 
@@ -1152,18 +1158,28 @@ private fun TimelineItem.Event.withPrivateProfile(
     profiles: Map<io.element.android.libraries.matrix.api.core.UserId, FriendPrivateProfile>,
 ): TimelineItem.Event {
     val senderName = profiles.privateDisplayName(senderId, senderProfile.getDisplayName())
+    val mappedSender = senderProfile.withPrivateName(senderId, profiles)
     val mappedReply = (inReplyTo as? InReplyToDetails.Ready)?.let { reply ->
-        reply.copy(senderProfile = reply.senderProfile.withPrivateName(reply.senderId, profiles))
+        val profile = reply.senderProfile.withPrivateName(reply.senderId, profiles)
+        if (profile == reply.senderProfile) reply else reply.copy(senderProfile = profile)
     } ?: inReplyTo
+    val mappedReceipts = readReceiptState.receipts.map { receipt ->
+        val userId = io.element.android.libraries.matrix.api.core.UserId(receipt.avatarData.id)
+        val name = profiles.privateDisplayName(userId, receipt.avatarData.name)
+        if (name == receipt.avatarData.name) receipt else receipt.copy(avatarData = receipt.avatarData.copy(name = name))
+    }.toImmutableList()
+    // Event construction reads the native security shield. A private-name projection
+    // with no changed fields must preserve the already-current source row.
+    // Changed profiles, receipts and source/security rows still take the normal path.
+    if (mappedSender == senderProfile && senderName == senderAvatar.name &&
+        mappedReply === inReplyTo && mappedReceipts == readReceiptState.receipts
+    ) return this
     return copy(
-        senderProfile = senderProfile.withPrivateName(senderId, profiles),
+        senderProfile = mappedSender,
         senderAvatar = senderAvatar.copy(name = senderName),
         inReplyTo = mappedReply,
         readReceiptState = readReceiptState.copy(
-            receipts = readReceiptState.receipts.map { receipt ->
-                val userId = io.element.android.libraries.matrix.api.core.UserId(receipt.avatarData.id)
-                receipt.copy(avatarData = receipt.avatarData.copy(name = profiles.privateDisplayName(userId, receipt.avatarData.name)))
-            }.toImmutableList(),
+            receipts = mappedReceipts,
         ),
     )
 }
