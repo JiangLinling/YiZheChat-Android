@@ -28,14 +28,80 @@ import io.element.android.libraries.matrix.test.room.defaultRoomPowerLevelValues
 import io.element.android.tests.testutils.testCoroutineDispatchers
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Test
 import uniffi.matrix_sdk.RoomMemberRole
 
 class RustBaseRoomTest {
+    @Test
+    fun `destroy retains native room until observer cancellation cleanup completes`() = runTest {
+        var nativeDestroyed = false
+        val cleanupStarted = CompletableDeferred<Unit>()
+        val finishCleanup = CompletableDeferred<Unit>()
+        val room = createRustBaseRoom(innerRoom = FakeFfiRoom(destroyLambda = { nativeDestroyed = true }))
+        val observer = room.roomCoroutineScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                withContext(NonCancellable) {
+                    cleanupStarted.complete(Unit)
+                    finishCleanup.await()
+                    assertThat(nativeDestroyed).isFalse()
+                }
+            }
+        }
+
+        room.destroy()
+        cleanupStarted.await()
+        try {
+            assertThat(room.roomCoroutineScope.isActive).isFalse()
+            assertThat(nativeDestroyed).isFalse()
+        } finally {
+            finishCleanup.complete(Unit)
+        }
+        observer.join()
+        assertThat(nativeDestroyed).isTrue()
+    }
+
+    @Test
+    fun `destroy cancels queued observer before it can use the native handle`() = runTest {
+        var nativeDestroyed = false
+        var observerStarted = false
+        val room = createRustBaseRoom(innerRoom = FakeFfiRoom(destroyLambda = { nativeDestroyed = true }))
+        room.roomCoroutineScope.launch { observerStarted = true }
+
+        room.destroy()
+        runCurrent()
+
+        assertThat(observerStarted).isFalse()
+        assertThat(nativeDestroyed).isTrue()
+    }
+
+    @Test
+    fun `destroy after session cancellation releases native room exactly once`() = runTest {
+        var destroys = 0
+        val room = createRustBaseRoom(innerRoom = FakeFfiRoom(destroyLambda = { destroys++ }))
+        room.roomCoroutineScope.cancel()
+        runCurrent()
+
+        room.destroy()
+        room.close()
+        room.destroy()
+
+        assertThat(destroys).isEqualTo(1)
+    }
+
     @Test
     fun `RustBaseRoom should cancel the room coroutine scope when it is destroyed`() = runTest {
         val rustBaseRoom = createRustBaseRoom()

@@ -39,7 +39,7 @@ import io.element.android.libraries.matrix.impl.roomdirectory.map
 import io.element.android.libraries.matrix.impl.timeline.toRustReceiptType
 import io.element.android.libraries.matrix.impl.util.mxCallbackFlow
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -49,6 +49,7 @@ import org.matrix.rustcomponents.sdk.CallDeclineListener
 import org.matrix.rustcomponents.sdk.RoomInfoListener
 import org.matrix.rustcomponents.sdk.use
 import timber.log.Timber
+import java.util.concurrent.atomic.AtomicBoolean
 import uniffi.matrix_sdk_base.EncryptionState
 import org.matrix.rustcomponents.sdk.Room as InnerRoom
 
@@ -136,9 +137,17 @@ class RustBaseRoom(
 
     override fun close() = destroy()
 
+    private val destructionRequested = AtomicBoolean(false)
+
     override fun destroy() {
-        innerRoom.destroy()
-        roomCoroutineScope.cancel()
+        if (!destructionRequested.compareAndSet(false, true)) return
+        val roomJob = checkNotNull(roomCoroutineScope.coroutineContext[Job])
+        // Cancellation is only a request. In particular the RTC observer can still be
+        // entering WidgetDriver.run(room) on IO, whose FFI argument conversion clones
+        // the Room handle without the Room method-call guard. Keep that handle alive
+        // until every room child (including its cancellation cleanup) has finished.
+        roomJob.invokeOnCompletion { innerRoom.destroy() }
+        roomJob.cancel()
     }
 
     override suspend fun userDisplayName(userId: UserId): Result<String?> = withContext(roomDispatcher) {

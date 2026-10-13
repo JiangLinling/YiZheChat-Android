@@ -29,6 +29,7 @@ class FakeFfiRoom(
     private val suggestedRoleForUserLambda: (String) -> RoomMemberRole = { lambdaError() },
     private val roomInfo: RoomInfo = aRustRoomInfo(id = roomId.value),
     private val timelineLambda: (org.matrix.rustcomponents.sdk.TimelineConfiguration) -> org.matrix.rustcomponents.sdk.Timeline = { lambdaError() },
+    private val destroyLambda: () -> Unit = {},
 ) : Room(NoHandle) {
     override suspend fun timelineWithConfiguration(configuration: org.matrix.rustcomponents.sdk.TimelineConfiguration): org.matrix.rustcomponents.sdk.Timeline =
         timelineLambda(configuration)
@@ -67,4 +68,6 @@ class FakeFfiRoom(
     override fun close() {
         // No-op
     }
+
+    override fun destroy() = destroyLambda()
 }
