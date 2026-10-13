@@ -47,7 +47,10 @@ class CallFinalizationRecoveryTest {
     private val trackedRoom = object : io.element.android.libraries.matrix.api.room.JoinedRoom by room {
         override fun close() { roomCloses++; room.close() }
     }
-    private val client = FakeMatrixClient().apply { givenGetRoomResult(A_ROOM_ID, trackedRoom) }
+    private val client = FakeMatrixClient().apply {
+        givenGetRoomResult(A_ROOM_ID, trackedRoom)
+        getCurrentRoomInfoLambda = { Result.success(room.roomInfoFlow.value) }
+    }
     private val clients = FakeMatrixClientProvider { Result.success(client) }
     private val protection = FakeCallProtectionService()
     private val operations = FakeAppOperationalStateCoordinator()
@@ -216,22 +219,45 @@ class CallFinalizationRecoveryTest {
         assertThat(sent).isEqualTo(0)
     }
 
-    @Test fun `repeated unknown invitation recovery closes every room and preserves the original checkpoint`() = runTest {
+    @Test fun `repeated unknown invitation recovery never opens a timeline and preserves the original checkpoint`() = runTest {
         val store = EncryptedCallFinalizationStore(files, roots)
         val first = recovery(store = store)
         val outgoing = call.copy(notificationEventId = null)
         first.checkpoint(outgoing, operationId)
         first.released(outgoing, true)
         repeat(4) {
-            val acquired = FakeJoinedRoom().apply { givenRoomInfo(aRoomInfo(isDm = true)) }
-            client.givenGetRoomResult(A_ROOM_ID, acquired)
             clock.epochMillisResult += 31_000
             first.recoverOnce { error("Already released") }
-            acquired.baseRoom.assertDestroyed()
+            assertThat(client.getJoinedRoomCalledCount).isEqualTo(0)
             val pending = store.pending().single()
             assertThat(pending.operationId).isEqualTo("$operationId-hangup")
             assertThat(store.read(pending).recordSent).isFalse()
         }
+        assertThat(operations.clientReceipts).isEmpty()
+    }
+
+    @Test fun `group finalization does not load history when no direct call event is required`() = runTest {
+        room.givenRoomInfo(aRoomInfo(isDm = false))
+        val store = EncryptedCallFinalizationStore(files, roots)
+        val current = recovery(store = store)
+        current.checkpoint(call, operationId)
+        current.released(call, true)
+        current.recoverOnce { error("Already released") }
+        assertThat(client.getJoinedRoomCalledCount).isEqualTo(0)
+        assertThat(sent).isEqualTo(0)
+        assertThat(store.read(store.pending().single()).recordSent).isTrue()
+        assertThat(operations.clientReceipts).hasSize(2)
+    }
+
+    @Test fun `unavailable current room metadata preserves checkpoint without loading history or acknowledging`() = runTest {
+        client.getCurrentRoomInfoLambda = { Result.failure(IOException("Metadata unavailable")) }
+        val store = EncryptedCallFinalizationStore(files, roots)
+        val current = recovery(store = store)
+        current.checkpoint(call, operationId)
+        current.released(call, true)
+        current.recoverOnce { error("Already released") }
+        assertThat(client.getJoinedRoomCalledCount).isEqualTo(0)
+        assertThat(store.read(store.pending().single()).recordSent).isFalse()
         assertThat(operations.clientReceipts).isEmpty()
     }
 
@@ -333,6 +359,7 @@ class CallFinalizationRecoveryTest {
         current.recoverOnce { false }
         assertThat(sent).isEqualTo(0)
         assertThat(operations.clientReceipts).hasSize(2)
+        assertThat(client.getJoinedRoomCalledCount).isEqualTo(0)
     }
 
     @Test fun `unknown invitation cannot bind to a later call or fabricate completion`() = runTest {
@@ -343,7 +370,7 @@ class CallFinalizationRecoveryTest {
         current.recoverOnce { false }
         assertThat(operations.clientReceipts).isEmpty()
         assertThat(sent).isEqualTo(0)
-        room.baseRoom.assertDestroyed()
+        assertThat(client.getJoinedRoomCalledCount).isEqualTo(0)
     }
 
     @Test fun `authoritative pre-admission cancellation retires the completed recovery journal`() = runTest {

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-next-r28-bounded-permalinks-20261013",
-  "frozen_utc": "2026-10-13T09:56:06.958810+00:00",
+  "revision": "unified-next-r29-call-recovery-preflight-20261013",
+  "frozen_utc": "2026-10-13T10:51:24.798804+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -166,7 +166,7 @@
     ".tmp-postinstall-home.png": "5241e7ab9164095c39e53bfe1f28ceb4635a6b48d5f809f76e66b289d1e0dfe6",
     "annotations/build.gradle.kts": "c8a2ec0144aec33df0ff14f1a5c29ac53d7c73a83b23ac0e21ff23471eda0755",
     "annotations/src/main/kotlin/io/element/android/annotations/ContributesNode.kt": "52890552c7459490db80093fa1a71a06210d24face9b9ab7d3111774007370a2",
-    "app/build.gradle.kts": "1b415df71df811e3e34d06e91ede955a7b17fffe23a564d3cdac6b1d6e07380a",
+    "app/build.gradle.kts": "1a8f2ab878f76c3c728fab62a6afd15300e547d38ad82753f18d8fad85cbdece",
     "app/common-proguard-rules.pro": "54b157faf5f39f002face256a18e66763f96f2f42f27ad28ce735b5a4ac2174d",
     "app/default-proguard-rules.pro": "48513ed55e34a76ba4667dcd113b07bbb3b0a0018ae31f8cf9a5e38aca7efb58",
     "app/src/androidTestNext/AndroidManifest.xml": "843f3e8f2726bfe3c82af58340ec77b2232dd0df9e08c0d94c42596aefb081a9",
@@ -569,7 +569,7 @@
     "features/call/impl/src/main/kotlin/io/element/android/features/call/impl/pip/PipSupportProvider.kt": "26d33851868bfc160c6f8e4828169be89cde25b83a13f796262d4a0b0863b707",
     "features/call/impl/src/main/kotlin/io/element/android/features/call/impl/pip/PipView.kt": "113476ce5511361c4f52952943a17937299834c9567d8ad67de9f3294400d40c",
     "features/call/impl/src/main/kotlin/io/element/android/features/call/impl/receivers/DeclineCallBroadcastReceiver.kt": "3153e9584f634adbca4e07fe74d04b2ce35ee4e7b9ddf69c589307136eb1293a",
-    "features/call/impl/src/main/kotlin/io/element/android/features/call/impl/security/CallFinalizationRecovery.kt": "8156061439936fc101eb720ca54dd9e019c5f9a6ea03e214b6685a6c6d5db601",
+    "features/call/impl/src/main/kotlin/io/element/android/features/call/impl/security/CallFinalizationRecovery.kt": "e3a36fda6f9e6297fdd2df58194938fb75515fff73982fc5f1a5130d91fe47da",
     "features/call/impl/src/main/kotlin/io/element/android/features/call/impl/security/CallFinalizationStore.kt": "b61bf01497eca011568c87327cafa18208427644cb17b02d4738e7d7f4fb1aa5",
     "features/call/impl/src/main/kotlin/io/element/android/features/call/impl/security/CallJoinAttempt.kt": "f5590725dfac7b53499f50af4b915a942992f33eda6d4d857650ac642285630c",
     "features/call/impl/src/main/kotlin/io/element/android/features/call/impl/security/CallProtectionService.kt": "cd52e63a32a5872bea239e1ea1b31e2be24380580af4820be2df431f2c84d2cb",
@@ -657,7 +657,7 @@
     "features/call/impl/src/test/kotlin/io/element/android/features/call/impl/pip/FakePipView.kt": "122b6b7a9fb64cde6276ba4feb59c934e9ecb43bfa9486817b58ba046bbd8de8",
     "features/call/impl/src/test/kotlin/io/element/android/features/call/impl/pip/PictureInPicturePresenterTest.kt": "c74345d5642bef54923902e026849883e2f2c2882756e3c86b5afeceecf34060",
     "features/call/impl/src/test/kotlin/io/element/android/features/call/notifications/RingingCallNotificationCreatorTest.kt": "daee74c6cf98dd71f9ca17fe412db94aa95e2ee5fc0995a0a6441cb9f4d3c186",
-    "features/call/impl/src/test/kotlin/io/element/android/features/call/security/CallFinalizationRecoveryTest.kt": "d5f044164f3cbcdf30bfdbcd64ee09a883f5b6dc483de361b4a3d056952baea8",
+    "features/call/impl/src/test/kotlin/io/element/android/features/call/security/CallFinalizationRecoveryTest.kt": "7cecd28c8a104870646174f0c577847a6cb2fc8e7b18945dccedb9f47be1d0b1",
     "features/call/impl/src/test/kotlin/io/element/android/features/call/security/CallJoinAttemptTest.kt": "1c3bf9070c701d0a65b29ff00dbb49df17a0fa689305f9600c3eee4f10f451b6",
     "features/call/impl/src/test/kotlin/io/element/android/features/call/security/CallWindowSecurityTest.kt": "49b5cffc7fddc6cea6d84808892c05fbbb45e7451528e5db327b5c6caa83e9f0",
     "features/call/impl/src/test/kotlin/io/element/android/features/call/security/DefaultCallProtectionServiceTest.kt": "12b9b3c246ebbbe5e0f17e005e1be1733904fe7511eb0325c256ff57cb2b90f0",

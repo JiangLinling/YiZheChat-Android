@@ -179,22 +179,31 @@ class DefaultCallFinalizationRecovery(
                     if (!record.recordSent) {
                         val client = clients.getOrRestore(SessionId(record.sessionId)).getOrThrow()
                         check(client.deviceId.value == record.deviceId)
+                        val roomId = RoomId(record.roomId)
+                        // A missing original invitation cannot be repaired by loading room history.
+                        // Read current metadata without subscribing to a timeline on every retry.
+                        val roomInfo = client.getCurrentRoomInfo(roomId).getOrThrow()
+                        check(roomInfo.id == roomId)
+                        val noInvitation = pending.noInvitationConfirmed && record.invitationId == null && !record.incoming && !record.connected
+                        if (!roomInfo.isDm || noInvitation) {
+                            store.put(pending.vaultId, owner, record.copy(recordSent = true))
+                            return@perform
+                        }
+                        // No room-wide fallback: it could bind this old hangup to a later call.
+                        val invitation = checkNotNull(record.invitationId) { "Exact call invitation binding is unavailable." }
                         recoveryRooms[pending.key]?.takeIf { !it.room.roomCoroutineScope.isActive }?.let {
                             closeRecoveryRoom(pending.key)
                         }
                         val roomOwner = recoveryRooms[pending.key] ?: run {
                             // Never evict an in-flight send to admit another recovery subscription.
                             check(recoveryRooms.size < 16) { "Call recovery room capacity is occupied." }
-                            RecoveryRoom(checkNotNull(client.getJoinedRoom(RoomId(record.roomId))))
+                            RecoveryRoom(checkNotNull(client.getJoinedRoom(roomId)))
                                 .also { recoveryRooms[pending.key] = it }
                         }
                         val room = roomOwner.room
                         try {
                             check(room.sessionId == client.sessionId && room.roomId.value == record.roomId)
-                            val noInvitation = pending.noInvitationConfirmed && record.invitationId == null && !record.incoming && !record.connected
-                            if (room.roomInfoFlow.value.isDm && !noInvitation) {
-                                // No room-wide fallback: it could bind this old hangup to a later call.
-                                val invitation = checkNotNull(record.invitationId) { "Exact call invitation binding is unavailable." }
+                            if (room.roomInfoFlow.value.isDm) {
                                 val state = when {
                                     record.connected -> CallLifecycleState.ENDED
                                     record.incoming -> CallLifecycleState.DECLINED
@@ -207,8 +216,7 @@ class DefaultCallFinalizationRecovery(
                                 room.liveTimeline.sendCallLifecycle(EventId(invitation), state, duration).getOrThrow()
                             }
                         } finally {
-                            // Unknown invitations and group/no-invitation branches have no queued
-                            // send to retain. An attempted send keeps this exact owner until the
+                            // An attempted send keeps this exact owner until the
                             // authority is terminal, its journal is retired, or the worker stops.
                             if (!roomOwner.sendAttempted) closeRecoveryRoom(pending.key)
                         }
