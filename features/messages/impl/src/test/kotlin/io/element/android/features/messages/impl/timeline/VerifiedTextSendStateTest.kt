@@ -71,7 +71,9 @@ class VerifiedTextSendStateTest {
     @Test fun `event hash must match the exact SDK confirmation`() {
         assertThat(binding.confirms(EventId("\$different-event"), committed)).isFalse()
         listOf("transaction", "\$", "\$bad event", "\$" + "a".repeat(512)).forEach {
-            assertThat(binding.confirms(EventId(it), committedTextSend(request, EventId(it)))).isFalse()
+            // EventId itself rejects some malformed inputs before the confirmation validator.
+            val parsed = runCatching { EventId(it) }.getOrNull()
+            assertThat(parsed == null || !binding.confirms(parsed, committedTextSend(request, parsed))).isTrue()
         }
     }
 

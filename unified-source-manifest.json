@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "revision": "unified-next-r32-direct-signed-send-confirmation-20261013",
-  "frozen_utc": "2026-10-13T12:54:28.251724+00:00",
+  "frozen_utc": "2026-10-13T13:05:16.227627+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -2655,7 +2655,7 @@
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/TimelineTimeSeparatorLabelsTest.kt": "b8f196e33ee046fa6bf86de24bc437fdc4f6af8f730546cbf198feb17d9f5cca",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/TimelineViewTest.kt": "ad43f44b7324f0eafac0399056ef32525688e2f6760c31d45dc4a3bd0d62ec93",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/TimelineViewportAnchorTest.kt": "018024b7ef015d8dedd392d8f881ca8db04ad7af28ea44c584af73630a412b38",
-    "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/VerifiedTextSendStateTest.kt": "b4a656e42acca28311aae8576415bcae69aa01434e4a76aea47bb331463e2180",
+    "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/VerifiedTextSendStateTest.kt": "fa9cfa0790a8dc2ce20dc245a6251522a7d253da4484f665c578398e333492af",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/components/RtcNotificationActorTest.kt": "dcd1785b6ea50ba5f26be3b30eaaf17948c1e0e86d52aea54bd1ec0d98791d1a",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/components/TimelineItemCallNotifyActorViewTest.kt": "9452ee73013ed663e5d259adee3563adf4a58a2b80443c4e87931024d68cd4df",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/components/TimelineItemEventRowLogicTest.kt": "be36b57deef02d79a3565914b569e78a00701041be6ec8aa5e457d22c0ccc506",
