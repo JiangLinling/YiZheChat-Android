@@ -3493,7 +3493,7 @@ private class DefaultMatrixProtectedContentAdapter(
                     carrier?.let { matchingStoredSendOrigin(it, contentId, eventId) }
                 }
                 val currentOperation = lifecycleWork.originatingOperation(originScopeKey)
-                if (ProtectedEventOwnershipResolver.hasRecordedTextBinding(
+                if (currentOperation == null && ProtectedEventOwnershipResolver.hasRecordedTextBinding(
                         storedOrigin, currentOperation, eventId, captionLineageCoordinator.hasPendingContent(contentId),
                     )) {
                     // The encrypted journal records an acknowledged exact carrier/event binding.

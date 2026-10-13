@@ -29,21 +29,23 @@ private val fqcnIgnore = listOf(
 internal class RustTracingTree(
     private val target: String,
     private val retrieveFromStackTrace: Boolean,
+    private val locationProvider: (() -> LogEventLocation)? = null,
+    private val sink: (LogEventLocation, LogLevel, String, String) -> Unit = { location, level, logTarget, text ->
+        logEvent(file = location.file, line = location.line, level = level, target = logTarget, message = text)
+    },
 ) : Timber.Tree() {
-    override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
-        val location = if (retrieveFromStackTrace) {
-            getLogEventLocationFromStackTrace()
+    public override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
+        // These typed timing events already carry stage/span/operation identities. Capturing
+        // a Throwable stack for every start/finish/queue marker makes the measured path slower,
+        // especially on older phones. Preserve every log and all exception/warning locations.
+        val isTimingPoint = priority == Log.DEBUG && t == null && tag in TIMING_TAGS
+        val location = if (retrieveFromStackTrace && !isTimingPoint) {
+            locationProvider?.invoke() ?: getLogEventLocationFromStackTrace()
         } else {
             LogEventLocation("", null)
         }
         val logLevel = priority.toLogLevel()
-        logEvent(
-            file = location.file,
-            line = location.line,
-            level = logLevel,
-            target = target,
-            message = if (tag != null) "[$tag] $message" else message,
-        )
+        sink(location, logLevel, target, if (tag != null) "[$tag] $message" else message)
     }
 
     /**
@@ -53,6 +55,10 @@ internal class RustTracingTree(
         return Throwable(null, null).stackTrace
             .first { it.className !in fqcnIgnore }
             .let(LogEventLocation::from)
+    }
+
+    private companion object {
+        val TIMING_TAGS = setOf("YiZheMessageStage", "YiZheTimelinePerf")
     }
 }
 
