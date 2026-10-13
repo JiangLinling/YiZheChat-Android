@@ -7,6 +7,8 @@
 
 package io.element.android.security.securestorage.impl
 
+import io.element.android.security.securestorage.api.lowercaseHex
+
 import io.element.android.security.securestorage.api.KeyEnvelopeId
 import io.element.android.security.securestorage.api.SecureObjectAuthenticationException
 import io.element.android.security.securestorage.api.SecureObjectPurpose
@@ -143,7 +145,7 @@ internal fun sha256(bytes: ByteArray): ByteArray = MessageDigest.getInstance("SH
 
 internal fun sha256Hex(value: String): String = sha256(value.encodeToByteArray()).toHex()
 
-internal fun ByteArray.toHex(): String = joinToString(separator = "") { byte -> "%02x".format(byte) }
+internal fun ByteArray.toHex(): String = lowercaseHex()
 
 private fun decodeCore(bytes: ByteArray): SecureFileCore = DataInputStream(ByteArrayInputStream(bytes)).use { input ->
     val formatVersion = input.readInt()

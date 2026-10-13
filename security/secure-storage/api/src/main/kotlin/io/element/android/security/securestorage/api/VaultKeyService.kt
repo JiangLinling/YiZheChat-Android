@@ -104,4 +104,4 @@ fun accountIdHash(accountId: String): String {
 
 private fun sha256Hex(value: String): String = MessageDigest.getInstance("SHA-256")
     .digest(value.encodeToByteArray())
-    .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    .lowercaseHex()

@@ -6,6 +6,8 @@
 
 package io.element.android.libraries.matrix.impl.timeline
 
+import io.element.android.security.securestorage.api.lowercaseHex
+
 import io.element.android.libraries.matrix.api.timeline.item.event.withMediaEventOrigin
 
 import dev.zacsweers.metro.AppScope
@@ -4415,7 +4417,7 @@ private fun Exception.diagnosticCode(): String = when (this) {
     else -> "INTERNAL_FAILURE"
 }
 
-private fun ByteArray.toHex(): String = joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+private fun ByteArray.toHex(): String = lowercaseHex()
 
 object DisabledMatrixProtectedContentAdapter : MatrixProtectedContentAdapter {
     override suspend fun enabled(): Boolean = false

@@ -153,6 +153,7 @@ class TimelineController(
     private val confirmedTransactionDisplayIds = mutableMapOf<TransactionId, UniqueId>()
     private val confirmedEventIds = mutableMapOf<UniqueId, EventId>()
     private val confirmedServerIdentities = mutableMapOf<UniqueId, String>()
+    private var confirmedIdentityGeneration = 0L
     private val canonicalTimestamps = mutableMapOf<UniqueId, Long>()
     private val retiredOptimisticDisplayIds = mutableSetOf<UniqueId>()
     private val localReferenceState = messageReferenceStore?.state ?: MutableStateFlow(MessageReferenceState())
@@ -219,6 +220,25 @@ class TimelineController(
                 .filter { it.restoredFromOutbox }
                 .map { it.item.uniqueId }
                 .toSet()
+            // Reconciliation compares each echo with the same immutable snapshot several times.
+            // Cache identity lookups only for this emission, invalidating even cached misses as
+            // soon as an exact binding changes. Content and authorization are always re-evaluated.
+            val displayIdentityCache = java.util.IdentityHashMap<MatrixTimelineItem, UniqueId?>()
+            var identityGeneration = -1L
+            fun confirmedDisplayId(item: MatrixTimelineItem): UniqueId? = synchronized(confirmedDisplayIds) {
+                if (identityGeneration != confirmedIdentityGeneration) {
+                    displayIdentityCache.clear()
+                    identityGeneration = confirmedIdentityGeneration
+                }
+                if (displayIdentityCache.containsKey(item)) return@synchronized displayIdentityCache[item]
+                val result = this@TimelineController.confirmedDisplayId(item)
+                if (identityGeneration != confirmedIdentityGeneration) {
+                    displayIdentityCache.clear()
+                    identityGeneration = confirmedIdentityGeneration
+                }
+                displayIdentityCache[item] = result
+                result
+            }
             val accountHistoryAccessBoundary = accountHistoryAccessBoundaryProvider.current()
             hiddenMessageRecoveryInventory.replaceRoomCandidates(
                 roomId = room.roomId,
@@ -1022,6 +1042,11 @@ class TimelineController(
                 ?: event.transactionId?.let(confirmedTransactionDisplayIds::get)
                 ?: event.priorSdkLocalIdentity()?.let(confirmedDisplayIds::get)
             if (existingOwner != null && existingOwner != displayId) return
+            if (confirmedDisplayIds[identity] == displayId && confirmedServerIdentities[displayId] == identity &&
+                (event.transactionId == null || confirmedTransactionDisplayIds[event.transactionId] == displayId) &&
+                (event.eventId == null || previousEventId == event.eventId)
+            ) return
+            confirmedIdentityGeneration++
             event.transactionId?.let { confirmedTransactionDisplayIds[it] = displayId }
             event.eventId?.let { confirmedEventIds[displayId] = it }
             if (previousEventId == null && event.eventId != null) {
