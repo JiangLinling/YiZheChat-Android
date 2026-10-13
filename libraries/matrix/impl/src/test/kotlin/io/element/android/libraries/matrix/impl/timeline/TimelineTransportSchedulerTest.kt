@@ -17,6 +17,40 @@ import java.io.IOException
 
 class TimelineTransportSchedulerTest {
     @Test
+    fun `visible join promotes original background receive and leaves one slot for foreground`() = runTest {
+        val work = TimelineTransportScheduler()
+        val release = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+        val occupied = List(2) { launch { work.withPermit { release.await() } } }
+        runCurrent()
+        var activeHistory = 0
+        var maximumHistory = 0
+        val backlog = List(100) { index -> launch { work.withPermit(receiveIdentity = "old-$index") {
+            activeHistory++
+            maximumHistory = maxOf(maximumHistory, activeHistory)
+            order += "old-$index"
+            delay(10)
+            activeHistory--
+        } } }
+        val original = async { work.withPermit(receiveIdentity = "original-receive") { order += "original-receive" } }
+        runCurrent()
+        work.promoteReceive("original-receive")
+        release.complete(Unit)
+        runCurrent()
+        assertThat(original.isCompleted).isTrue()
+        assertThat(order.first()).isEqualTo("original-receive")
+        assertThat(maximumHistory).isEqualTo(1)
+        val foreground = async { work.withPermit(isForegroundRead = true) { "current-read" } }
+        runCurrent()
+        assertThat(foreground.isCompleted).isTrue()
+        assertThat(foreground.await()).isEqualTo("current-read")
+        occupied.forEach { it.join() }
+        backlog.forEach { it.join() }
+        assertThat(maximumHistory).isEqualTo(1)
+        assertThat(order).hasSize(101)
+    }
+
+    @Test
     fun `fresh receive precedes restored foreground backlog while send and old work progress`() = runTest {
         val work = TimelineTransportScheduler()
         val release = CompletableDeferred<Unit>()

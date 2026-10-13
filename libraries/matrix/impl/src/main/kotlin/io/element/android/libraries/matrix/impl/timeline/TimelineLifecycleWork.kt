@@ -29,6 +29,7 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
         val receipts = mutableSetOf<LifecycleComponent>()
         var retryAt = 0L
         @Volatile var completed = false
+        @Volatile var foregroundRequested = false
     }
     private data class Registration(
         var running: Boolean = false,
@@ -58,11 +59,15 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
             }
             receives.getOrPut(request.operationId) { Receive() }
         }
+        if (isForeground) {
+            state.foregroundRequested = true
+            transport.promoteReceive(request.operationId)
+        }
         val startWaitAt = System.nanoTime()
         state.mutex.withLock {
             if (!state.started) {
                 checkRetry(state.retryAt)
-                transportAttempt(state, request.operationId, isForeground) {
+                transportAttempt(state, request.operationId) {
                     val started = coordinator.start(request)
                     check(started.operationId == request.operationId && started.lifecycleId == request.lifecycleId)
                     state.started = true
@@ -145,8 +150,8 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
     ): T = if (isLiveSend) transport.withPermit(isLiveSend = true, block) else shortTransport(isForeground, block)
 
     // Background waits outside the shared semaphore, leaving one physical slot for current reads.
-    private suspend fun <T> shortTransport(isForeground: Boolean, isForegroundRead: Boolean = false, block: suspend () -> T): T =
-        if (isForeground) transport.withPermit(isForegroundRead = isForegroundRead) { block() }
+    private suspend fun <T> shortTransport(isForeground: Boolean, block: suspend () -> T): T =
+        if (isForeground) transport.withPermit { block() }
         else backgroundTransport.withPermit { transport.withPermit { block() } }
 
     /**
@@ -182,10 +187,13 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
     @Synchronized
     fun clearOriginatingOperations() = originatingOperations.clear()
 
-    private suspend fun transportAttempt(state: Receive, operationId: String, isForeground: Boolean, block: suspend () -> Unit) {
+    private suspend fun transportAttempt(state: Receive, operationId: String, block: suspend () -> Unit) {
         val waitAt = System.nanoTime()
         try {
-            shortTransport(isForeground, isForegroundRead = isForeground) {
+            // Keep only one background receive in a physical slot, but keep waiting admissions
+            // promotable when a visible reader joins the SAME operation. The owning read still
+            // uses its original release intent and every normal KMS authorization check.
+            transport.withPermit(receiveIdentity = operationId, foregroundRequested = { state.foregroundRequested }) {
                 trace(operationId, "transport_wait", waitAt)
                 val httpAt = System.nanoTime()
                 block()

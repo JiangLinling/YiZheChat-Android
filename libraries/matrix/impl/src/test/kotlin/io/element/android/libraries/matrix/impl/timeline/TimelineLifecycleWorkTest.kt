@@ -78,6 +78,11 @@ class TimelineLifecycleWorkTest {
             work.receive(coordinator, request.copy(operationId = "restored-visible-$index")) { Unit }
         } }
         runCurrent()
+        val initialHistory = async { work.receive(coordinator, request, isForeground = false) {
+            assertThat(currentLifecycleOperationContext()?.operationId).isEqualTo(request.operationId)
+            "original-history-authorized-read"
+        } }
+        runCurrent()
         val fresh = async { work.receive(coordinator, request) {
             assertThat(currentLifecycleOperationContext()?.operationId).isEqualTo(request.operationId)
             "normal-authorized-read"
@@ -87,6 +92,7 @@ class TimelineLifecycleWorkTest {
         runCurrent()
         assertThat(fresh.isCompleted).isTrue()
         assertThat(fresh.await()).isEqualTo("normal-authorized-read")
+        assertThat(initialHistory.await()).isEqualTo("original-history-authorized-read")
         assertThat(started.first()).isEqualTo(request.operationId)
         assertThat(backing.clientReceipts.filter { it.operationId == request.operationId }).hasSize(2)
         occupied.forEach { it.join() }
