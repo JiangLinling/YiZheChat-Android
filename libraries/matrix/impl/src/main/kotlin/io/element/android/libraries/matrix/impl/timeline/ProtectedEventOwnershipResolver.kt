@@ -105,4 +105,9 @@ object ProtectedEventOwnershipResolver {
         else origin.eventId == null || current?.let {
             it.operationId == origin.operationId && it.lifecycleId == origin.lifecycleId
         } == true
+
+    /** A previously acknowledged text binding needs no replay. This never authorizes a read. */
+    internal fun hasRecordedTextBinding(origin: Origin?, current: LifecycleOperationContext?, eventId: String, pendingLineage: Boolean): Boolean =
+        current == null && !pendingLineage && isCanonicalEvent(eventId) && origin != null && origin.eventId == eventId &&
+            origin.lifecycleId == FullAppLifecycleId.LC_13 && origin.contentKind == ContentKind.TEXT
 }

@@ -11,6 +11,17 @@ import org.junit.Test
 import org.junit.Assert.*
 
 class ProtectedEventOwnershipResolverTest {
+    @Test fun `only acknowledged historical text binding can avoid registration replay`() {
+        val bound = origin().copy(lifecycleId = FullAppLifecycleId.LC_13, contentKind = ContentKind.TEXT)
+        assertTrue(ProtectedEventOwnershipResolver.hasRecordedTextBinding(bound, null, "\$event", false))
+        assertFalse(ProtectedEventOwnershipResolver.hasRecordedTextBinding(bound, null, "\$event", true))
+        assertFalse(ProtectedEventOwnershipResolver.hasRecordedTextBinding(bound, LifecycleOperationContext(bound.operationId, bound.lifecycleId), "\$event", false))
+        assertFalse(ProtectedEventOwnershipResolver.hasRecordedTextBinding(bound.copy(eventId = null), null, "\$event", false))
+        assertFalse(ProtectedEventOwnershipResolver.hasRecordedTextBinding(bound, null, "\$different", false))
+        assertFalse(ProtectedEventOwnershipResolver.hasRecordedTextBinding(origin(), null, "\$event", false))
+        assertFalse(ProtectedEventOwnershipResolver.hasRecordedTextBinding(null, null, "\$event", false))
+    }
+
     @Test fun `bound restored sender journal retains owner without becoming a current send`() {
         val restored = origin()
         assertFalse(ProtectedEventOwnershipResolver.needsImmediateEventBinding(restored, null))

@@ -44,6 +44,7 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
     private val transport = TimelineTransportScheduler()
     private val backgroundTransport = Semaphore(1)
     private val historicalRegistration = Semaphore(1)
+    val originRecovery = ProtectedOriginRecovery(now = now)
 
     suspend fun <T> receive(
         coordinator: AppOperationalStateCoordinator,

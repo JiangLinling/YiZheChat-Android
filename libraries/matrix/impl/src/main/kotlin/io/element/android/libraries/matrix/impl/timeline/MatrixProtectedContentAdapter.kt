@@ -3477,6 +3477,14 @@ private class DefaultMatrixProtectedContentAdapter(
                 val carrier = protectedCarrierForContent(message, contentId)
                 val storedOrigin = carrier?.let { matchingStoredSendOrigin(it, contentId, eventId) }
                 val currentOperation = lifecycleWork.originatingOperation(originScopeKey)
+                if (ProtectedEventOwnershipResolver.hasRecordedTextBinding(
+                        storedOrigin, currentOperation, eventId, captionLineageCoordinator.hasPendingContent(contentId),
+                    )) {
+                    // The encrypted journal records an acknowledged exact carrier/event binding.
+                    // Avoid replaying its POST on each process restart; all current KMS read checks remain.
+                    lifecycleWork.finishRegistration(registrationKey, success = true)
+                    return@launch
+                }
                 val originatingOperation = storedOrigin?.let { LifecycleOperationContext(it.operationId, it.lifecycleId) }
                     ?: currentOperation
                 val isLiveSend = ProtectedEventOwnershipResolver.needsImmediateEventBinding(storedOrigin, currentOperation)
@@ -3621,7 +3629,9 @@ private class DefaultMatrixProtectedContentAdapter(
             // A legacy producer journal may be absent after an upgrade. Recover only the
             // original SEND identity, using the current signed authority and live Matrix
             // binding. This request admits no new operation and grants no content lease.
-            val context = lifecycleWork.registrationTransport(
+            val recoveryKey = accountIdHash("origin-recovery:$accountHash:$matrixDeviceHash:${trust.installationId}:$roomHash:" +
+                "$eventIdentity:${header.contentId.value}:${accountIdHash(carrier)}")
+            val context = lifecycleWork.originRecovery.lookup(recoveryKey) { lifecycleWork.registrationTransport(
                 // Signed legacy-origin recovery is metadata repair, including visible old rows.
                 // Keep its queue outside the shared slots used by a current original send.
                 isForeground = false,
@@ -3633,7 +3643,7 @@ private class DefaultMatrixProtectedContentAdapter(
                         header.kmsShareReference.value, header.roomEpoch?.generation,
                     ),
                 )
-            }
+            } }
             if (context != null) {
                 // An existing producer record must reconcile to the SAME original operation.
                 // A signed lookup cannot replace a conflicting owner or relax carrier checks.
