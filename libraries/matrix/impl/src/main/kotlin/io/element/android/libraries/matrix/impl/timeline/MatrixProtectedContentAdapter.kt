@@ -3866,10 +3866,6 @@ private class DefaultMatrixProtectedContentAdapter(
     ): ProtectContentRequest {
         val active = policyProvider.current().policy
         val now = clock.epochMillis()
-        val roomLifecycle = LifecycleStageTiming.measure("send_room_contract", contentId?.value.orEmpty()) {
-            contentProtectionService.resolveRoomLifecycle(roomId.value)
-        }
-        val trust = deviceTrustService.current()
         val activeRoomAudience = LifecycleStageTiming.measure("send_member_projection", contentId?.value.orEmpty()) {
             activeMemberAccountIdHashes() + accountHash
         }
@@ -3879,9 +3875,19 @@ private class DefaultMatrixProtectedContentAdapter(
         require(audienceAccountIdHashes.size in 1..ContentProtectionFormat.MAX_ROOM_AUDIENCE_ACCOUNTS)
         val audienceAccounts = audienceAccountIdHashes.toList()
         val recipientsByInstallation = linkedMapOf<String, io.element.android.security.contentprotection.api.DeviceShareRecipient>()
-        val snapshots = LifecycleStageTiming.measure("send_recipient_registry", contentId?.value.orEmpty()) {
-            recipientRegistry.approvedRecipients(audienceAccountIdHashes)
-        }
+        val (roomLifecycle, snapshots) = readProtectedSendPrerequisites(
+            resolveRoom = {
+                LifecycleStageTiming.measure("send_room_contract", contentId?.value.orEmpty()) {
+                    contentProtectionService.resolveRoomLifecycle(roomId.value)
+                }
+            },
+            resolveRecipients = {
+                LifecycleStageTiming.measure("send_recipient_registry", contentId?.value.orEmpty()) {
+                    recipientRegistry.approvedRecipients(audienceAccountIdHashes)
+                }
+            },
+        )
+        val trust = deviceTrustService.current()
         require(snapshots.keys == audienceAccountIdHashes)
         for (recipientAccountHash in audienceAccounts) {
             val snapshot = requireNotNull(snapshots[recipientAccountHash])

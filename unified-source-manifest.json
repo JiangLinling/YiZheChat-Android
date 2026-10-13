@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "20261013-r17",
-  "frozen_utc": "2026-10-13T00:35:59.091025+00:00",
+  "revision": "unified-20261013-r18",
+  "frozen_utc": "2026-10-13T01:09:49.201044+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -74,6 +74,10 @@
     "room_notification_options_reachable": [
       "features/roomdetails/impl/src/main/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsView.kt",
       "onClick = openRoomNotificationSettings"
+    ],
+    "parallel_original_send_prerequisite_reads": [
+      "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedSendPrerequisiteReads.kt",
+      "readProtectedSendPrerequisites"
     ]
   },
   "sources": {
@@ -154,7 +158,7 @@
     ".tmp-postinstall-home.png": "5241e7ab9164095c39e53bfe1f28ceb4635a6b48d5f809f76e66b289d1e0dfe6",
     "annotations/build.gradle.kts": "c8a2ec0144aec33df0ff14f1a5c29ac53d7c73a83b23ac0e21ff23471eda0755",
     "annotations/src/main/kotlin/io/element/android/annotations/ContributesNode.kt": "52890552c7459490db80093fa1a71a06210d24face9b9ab7d3111774007370a2",
-    "app/build.gradle.kts": "f987932c415bbaa447a770dfbdaba964ac9eef8741bbee44d6572f18182ea17e",
+    "app/build.gradle.kts": "5f24a8145a524c1005a7c696746de037f53dd82444eff93ef935c6c69f736fad",
     "app/common-proguard-rules.pro": "54b157faf5f39f002face256a18e66763f96f2f42f27ad28ce735b5a4ac2174d",
     "app/default-proguard-rules.pro": "48513ed55e34a76ba4667dcd113b07bbb3b0a0018ae31f8cf9a5e38aca7efb58",
     "app/src/androidTestNext/AndroidManifest.xml": "843f3e8f2726bfe3c82af58340ec77b2232dd0df9e08c0d94c42596aefb081a9",
@@ -5773,7 +5777,7 @@
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/EncryptedCaptionPendingStore.kt": "00ecb09b55b69db41a4ab54e7585b1be7b7becf1796e1c0ed61ce9726f1a0235",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/EncryptedProtectedSendOriginStore.kt": "7dae287404cd911310f53b1af9fa5a2ee585b506b85117a0dc94a5c9ccbd963d",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/EventOrTransactionId.kt": "9cbb760c1aeb42bf209ec9fd4df029fc342b3f2390efa62142628b3a65593ee8",
-    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixProtectedContentAdapter.kt": "04913dfabd1e8f19e78b19eb870894cacf715c931edbf961dbc0e592714b735e",
+    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixProtectedContentAdapter.kt": "3d3a8a405c6761e0c1bfa849148bd7b32ba04f92df435c1dbc526fc178b42c1a",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixTimelineDiffProcessor.kt": "ded1c8c21b6034e01f65b8678b9492d29c178e2e7eb6fd3b508732e3616c6e55",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixTimelineItemMapper.kt": "e947f257c88ff65cb24a7bd3b4f95a4cf067420ed1c58913f0e3968d79a2a3d5",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/PreparedAttachmentCleanup.kt": "1773a91ea0319d0412d624513a00b312dcac970de37f1956184e3b26da8e642f",
@@ -5788,6 +5792,7 @@
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedReceiveLifecycle.kt": "a13b42fb431f30338f27380876013a5886c6afe192a09f2d2067688f62e826e7",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedRelayEditPreparation.kt": "f15ddc4a449c0a92a616b15b0248bd42fc30cb25d1840f28881b5c5998427d26",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedRelayReducer.kt": "9e26dc99743e81fd558e2a8800063310cfa4d4fa993daef7734f5ab16e8823f5",
+    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedSendPrerequisiteReads.kt": "7552930c58095b533f87d8ed706ef3c3fc7192f90f176215fed3b2e2b0242558",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ReceiptTypeMapper.kt": "60a132966847927d24d568f32e0e30df5735dbac3aa3c6e708253f1b955058b1",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/RoomTimelineExtensions.kt": "b11e54c8a2de5cf2c04989df69afcd63050cc839e457d7c29559c370b97ccf91",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/RustTimeline.kt": "b82f3c57f8df9d00b21ad9e958350bdfd997459446063bbb027510b32833adb5",
@@ -5994,6 +5999,7 @@
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedReceiveLifecycleTest.kt": "324bad64aa6e965f32e6c086069872ce5478bae47deca1c42e42513b2177bff8",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedRelayEditPreparationTest.kt": "56a87a2c5b5e577f2e29c231a3a15371df28b578349aa2a6f0677477e13a4953",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedRelayReducerTest.kt": "bf3a5e57649d1d6c33c854f477f56ada2d6403e88b35aefce6be3105a906fdac",
+    "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedSendPrerequisiteReadsTest.kt": "db15e0c6c8732648553f20067bece4c71882bcfbff1300f8aacb0a066bcf5ebf",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedTimelineSharedReadTest.kt": "19bf4f450c56df6d065aaaba7e40e41284db51cabd25fa9a7dae6d29d97ab21d",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ReceiptTypeMapperKtTest.kt": "f1ac63fc81650895f15809570c39a3eec6ab5ce596f14c56152f06849f0d555c",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ReceiveLifecycleOperationIdTest.kt": "e5e2046d91aaa3087a7d4281b5425501ed186dfd5ddc1e3f9063cca49f361f5c",
