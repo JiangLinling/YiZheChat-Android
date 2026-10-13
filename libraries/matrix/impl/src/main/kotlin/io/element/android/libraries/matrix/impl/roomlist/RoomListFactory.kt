@@ -38,11 +38,13 @@ internal class RoomListFactory(
     sessionId: SessionId? = null,
     deviceId: DeviceId? = null,
     protectedContentAdapterFactory: MatrixProtectedContentAdapterFactory = DisabledMatrixProtectedContentAdapterFactory,
+    previewTimelines: RoomPreviewTimelineCache? = null,
 ) {
     private val roomSummaryFactory: RoomSummaryFactory = RoomSummaryFactory(
         sessionId = sessionId,
         deviceId = deviceId,
         protectedContentAdapterFactory = protectedContentAdapterFactory,
+        previewTimelines = previewTimelines,
     )
 
     /**

@@ -129,12 +129,15 @@ class RoomSummaryFactoryIdentityTest {
                 return decryptMessageContent(eventIdentity, message, timelineReleaseIntent)
             }
         }
-        val factory = RoomSummaryFactory(sessionId = A_SESSION_ID, deviceId = A_DEVICE_ID, protectedContentAdapterFactory =
+        val cachedTimeline = FakeFfiTimeline()
+        val previewTimelines = RoomPreviewTimelineCache(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.currentCoroutineContext())) {
+            cachedTimeline
+        }
+        val factory = RoomSummaryFactory(sessionId = A_SESSION_ID, deviceId = A_DEVICE_ID, previewTimelines = previewTimelines, protectedContentAdapterFactory =
             object : MatrixProtectedContentAdapterFactory {
                 override fun create(sessionId: SessionId, deviceId: DeviceId, roomId: RoomId, activeMemberAccountIdHashes: suspend () -> Set<String>,
                                     isRoomEncrypted: suspend () -> Boolean): MatrixProtectedContentAdapter = adapter
             })
-        val cachedTimeline = FakeFfiTimeline()
         val room = FakeFfiRoom(timelineLambda = { cachedTimeline }, latestEventLambda = {
             val content = if (attachment) {
                 val media = mockk<org.matrix.rustcomponents.sdk.MediaSource>(relaxed = true) {
@@ -168,6 +171,7 @@ class RoomSummaryFactoryIdentityTest {
             }
         })
         factory.create(room)
+        previewTimelines.close()
         assertThat(owners).isEmpty()
         if (localState == LatestEventValueLocalState.IS_SENDING || localState == LatestEventValueLocalState.CANNOT_BE_SENT) {
             assertThat(cachedTimeline.closeCount).isEqualTo(0)

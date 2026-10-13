@@ -33,14 +33,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import io.element.android.libraries.matrix.impl.timeline.item.event.EventTimelineItemMapper
-import org.matrix.rustcomponents.sdk.TimelineConfiguration
-import org.matrix.rustcomponents.sdk.TimelineFocus
-import org.matrix.rustcomponents.sdk.TimelineFilter
-import org.matrix.rustcomponents.sdk.DateDividerMode
-import uniffi.matrix_sdk_ui.TimelineReadReceiptTracking
 import org.matrix.rustcomponents.sdk.Room
 import org.matrix.rustcomponents.sdk.use
 import timber.log.Timber
@@ -54,6 +47,7 @@ class RoomSummaryFactory(
     private val sessionId: SessionId? = null,
     private val deviceId: DeviceId? = null,
     private val protectedContentAdapterFactory: MatrixProtectedContentAdapterFactory = DisabledMatrixProtectedContentAdapterFactory,
+    private val previewTimelines: RoomPreviewTimelineCache? = null,
 ) {
     private val previewAdapters = java.util.concurrent.ConcurrentHashMap<RoomId, MatrixProtectedContentAdapter>()
     private data class CarrierBinding(val timestamp: Long, val sender: String,
@@ -61,7 +55,6 @@ class RoomSummaryFactory(
                                       val eventId: String)
     // Matrix identity facts only: no plaintext, lease or native timeline is retained.
     private val latestCarrierBindings = java.util.Collections.synchronizedMap(LinkedHashMap<RoomId, CarrierBinding>())
-    private val identityLookups = Semaphore(2)
 
     suspend fun create(room: Room): RoomSummary = create(room, initialSnapshot = false)
 
@@ -173,7 +166,7 @@ class RoomSummaryFactory(
             val canonicalIdentity = adapter.observedRoomSummaryEventIdentity(timestamp, sender, message)
                 ?.takeIf(::isCanonicalProtectedEventIdentity)
                 ?: if (protectedCarrier && !message.isBurnAfterRead) {
-                    resolveLatestCarrier(room, roomId, timestamp, sender, message, isConfirmedOwnSummary)
+                    resolveLatestCarrier(roomId, timestamp, sender, message, isConfirmedOwnSummary)
                 } else null
             // The SDK latest-event projection has no event ID. Only observed Matrix metadata
             // can identify a protected carrier; a timestamp/sender surrogate must never reach LC13.
@@ -216,45 +209,38 @@ class RoomSummaryFactory(
     }
 
     private suspend fun resolveLatestCarrier(
-        room: Room, roomId: RoomId, timestamp: Long, sender: String,
+        roomId: RoomId, timestamp: Long, sender: String,
         message: io.element.android.libraries.matrix.api.timeline.item.event.MessageContent,
         isConfirmedOwnSummary: Boolean,
     ): String? {
         latestCarrierBindings[roomId]?.takeIf { it.timestamp == timestamp && it.sender == sender && it.message == message }
             ?.let { return it.eventId }
-        return identityLookups.withPermit {
-            withTimeoutOrNull(5_000L) {
-                room.timelineWithConfiguration(TimelineConfiguration(
-                    focus = TimelineFocus.Live(hideThreadedEvents = false),
-                    filter = TimelineFilter.All,
-                    internalIdPrefix = "room_preview_identity", dateDividerMode = DateDividerMode.DAILY,
-                    trackReadReceipts = TimelineReadReceiptTracking.DISABLED, reportUtds = false,
-                )).use { timeline ->
-                    val eventId = timeline.latestEventId()?.takeIf(::isCanonicalProtectedEventIdentity) ?: run {
-                        Timber.w("Room preview identity: latest Matrix event unavailable")
-                        return@use null
-                    }
-                    val event = EventTimelineItemMapper(contentMapper).map(timeline.getEventTimelineItemByEventId(eventId))
-                    // A sent local summary may retain its enqueue time after server confirmation.
-                    // Its exact ciphertext and authenticated own author bind the real remote carrier;
-                    // the canonical ID still passes through normal ownership and KMS authorization.
-                    val confirmedOwnCarrier = isConfirmedOwnSummary && sender == sessionId?.value && event.isOwn
-                    if (!event.isRemote || event.eventId?.value != eventId || (!confirmedOwnCarrier && event.timestamp != timestamp) ||
-                        event.sender.value != sender || event.content != message) {
-                        val candidate = event.content as? io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
-                        // Boolean diagnostics only: do not log identifiers, bodies, or ciphertext.
-                        Timber.w("Room preview identity mismatch: remote=%s id=%s time=%s sender=%s body=%s type=%s reply=%s thread=%s",
-                            event.isRemote, event.eventId?.value == eventId, event.timestamp == timestamp,
-                            event.sender.value == sender, candidate?.body == message.body, candidate?.type == message.type,
-                            candidate?.inReplyTo == message.inReplyTo, candidate?.threadInfo == message.threadInfo)
-                        return@use null
-                    }
-                    synchronized(latestCarrierBindings) {
-                        latestCarrierBindings[roomId] = CarrierBinding(timestamp, sender, message, eventId)
-                        while (latestCarrierBindings.size > 512) latestCarrierBindings.remove(latestCarrierBindings.keys.first())
-                    }
-                    eventId
+        return withTimeoutOrNull(5_000L) {
+            previewTimelines?.withTimeline(roomId) { timeline ->
+                val eventId = timeline.latestEventId()?.takeIf(::isCanonicalProtectedEventIdentity) ?: run {
+                    Timber.w("Room preview identity: latest Matrix event unavailable")
+                    return@withTimeline null
                 }
+                val event = EventTimelineItemMapper(contentMapper).map(timeline.getEventTimelineItemByEventId(eventId))
+                // A sent local summary may retain its enqueue time after server confirmation.
+                // Its exact ciphertext and authenticated own author bind the real remote carrier;
+                // the canonical ID still passes through normal ownership and KMS authorization.
+                val confirmedOwnCarrier = isConfirmedOwnSummary && sender == sessionId?.value && event.isOwn
+                if (!event.isRemote || event.eventId?.value != eventId || (!confirmedOwnCarrier && event.timestamp != timestamp) ||
+                    event.sender.value != sender || event.content != message) {
+                    val candidate = event.content as? io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
+                    // Boolean diagnostics only: do not log identifiers, bodies, or ciphertext.
+                    Timber.w("Room preview identity mismatch: remote=%s id=%s time=%s sender=%s body=%s type=%s reply=%s thread=%s",
+                        event.isRemote, event.eventId?.value == eventId, event.timestamp == timestamp,
+                        event.sender.value == sender, candidate?.body == message.body, candidate?.type == message.type,
+                        candidate?.inReplyTo == message.inReplyTo, candidate?.threadInfo == message.threadInfo)
+                    return@withTimeline null
+                }
+                synchronized(latestCarrierBindings) {
+                    latestCarrierBindings[roomId] = CarrierBinding(timestamp, sender, message, eventId)
+                    while (latestCarrierBindings.size > 512) latestCarrierBindings.remove(latestCarrierBindings.keys.first())
+                }
+                eventId
             }
         }
     }

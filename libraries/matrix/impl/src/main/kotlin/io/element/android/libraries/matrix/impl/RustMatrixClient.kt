@@ -81,6 +81,7 @@ import io.element.android.libraries.matrix.impl.room.preview.RoomPreviewInfoMapp
 import io.element.android.libraries.matrix.impl.roomdirectory.RustRoomDirectoryService
 import io.element.android.libraries.matrix.impl.roomdirectory.map
 import io.element.android.libraries.matrix.impl.roomlist.RoomListFactory
+import io.element.android.libraries.matrix.impl.roomlist.createPreviewIdentityTimeline
 import io.element.android.libraries.matrix.impl.roomlist.RustRoomListService
 import io.element.android.libraries.matrix.impl.roomlist.roomOrNull
 import io.element.android.libraries.matrix.impl.spaces.RustSpaceService
@@ -276,6 +277,11 @@ class RustMatrixClient(
             sessionId = sessionId,
             deviceId = deviceId,
             protectedContentAdapterFactory = matrixProtectedContentAdapterFactory,
+            previewTimelines = io.element.android.libraries.matrix.impl.roomlist.RoomPreviewTimelineCache(sessionCoroutineScope) { roomId ->
+                innerClient.getRoom(roomId.value)?.use { room ->
+                    room.createPreviewIdentityTimeline()
+                }
+            },
         ),
         roomSyncSubscriber = roomSyncSubscriber,
     )
