@@ -17,6 +17,8 @@ import org.matrix.rustcomponents.sdk.TimelineFocus
 import org.matrix.rustcomponents.sdk.TimelineFilter
 import org.matrix.rustcomponents.sdk.DateDividerMode
 import uniffi.matrix_sdk_ui.TimelineReadReceiptTracking
+import io.element.android.security.securestorage.api.accountIdHash
+import timber.log.Timber
 
 /** Bounded SDK carrier metadata owners, never cached authorization or decrypted protected content. */
 class RoomPreviewTimelineCache(
@@ -24,7 +26,7 @@ class RoomPreviewTimelineCache(
     private val capacity: Int = 2,
     private val load: suspend (RoomId) -> Timeline?,
 ) {
-    private class Entry {
+    private class Entry(val roomHash: String) {
         lateinit var loading: Deferred<Result<Timeline?>>
         var timeline: Timeline? = null
         var readers = 0
@@ -52,12 +54,14 @@ class RoomPreviewTimelineCache(
                     entries.remove(victim.key)
                     retire(victim.value)
                 }
-                Entry().also { created ->
+                Entry(accountIdHash(roomId.value)).also { created ->
                     // A 300 ms list-preview timeout cancels only the waiter. The one tracked
                     // construction retains its own Room handle until the SDK returns.
                     created.loading = scope.async(start = CoroutineStart.LAZY) {
                         try {
+                            Timber.tag("YiZhePreviewTimeline").d("stage=build_start room=%s", created.roomHash)
                             val timeline = load(roomId)
+                            Timber.tag("YiZhePreviewTimeline").d("stage=build_finish room=%s available=%s", created.roomHash, timeline != null)
                             synchronized(lock) {
                                 created.timeline = timeline
                                 if (created.retired && created.readers == 0) releaseTimeline(created)
@@ -105,6 +109,7 @@ class RoomPreviewTimelineCache(
     }
 
     private fun releaseTimeline(entry: Entry) {
+        if (entry.timeline != null) Timber.tag("YiZhePreviewTimeline").d("stage=release room=%s", entry.roomHash)
         entry.timeline?.destroy()
         entry.timeline = null
     }

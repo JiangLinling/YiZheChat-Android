@@ -1292,7 +1292,7 @@ class RustTimeline(
     }
 
     private fun stableContentId(transactionId: TransactionId): ContentId = ContentId(
-        UUID.nameUUIDFromBytes("${joinedRoom.roomId.value}\u0000${transactionId.value}".encodeToByteArray()).toString(),
+        io.element.android.libraries.matrix.api.timeline.protectedTextTransactionId(joinedRoom.roomId, transactionId).value,
     )
 
     override suspend fun sendVoiceMessage(

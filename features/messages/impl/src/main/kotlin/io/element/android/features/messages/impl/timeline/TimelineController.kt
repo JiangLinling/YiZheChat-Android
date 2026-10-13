@@ -100,6 +100,11 @@ import io.element.android.security.dataprotection.api.AppOperationalStateCoordin
 import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
 import io.element.android.security.dataprotection.api.performMessageWithDeferredReceipts
 import java.util.concurrent.ConcurrentHashMap
+import io.element.android.libraries.matrix.api.room.SendQueueUpdate
+import io.element.android.libraries.matrix.api.timeline.protectedTextTransactionId
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
 
 /**
  * This controller is responsible of using the right timeline to display messages and make associated actions.
@@ -182,6 +187,7 @@ class TimelineController(
 
     init {
         coroutineScope.launch { restoreEncryptedOutbox() }
+        observeTextSendConfirmations()
         messageReferenceStore?.let { store ->
             coroutineScope.launch {
                 runCatching { store.load() }
@@ -190,6 +196,74 @@ class TimelineController(
                         hiddenMessageRecoveryInventory.updateRecoveryStatus(HistoryRecoveryStatus.FAILED_CLOSED)
                         Timber.tag("YiZheHistoryRecovery").e(failure, "Local history suppression index could not be loaded")
                     }
+            }
+        }
+    }
+
+    private fun observeTextSendConfirmations() {
+        val coordinator = appOperationalStateCoordinator ?: return
+        if (!requireContentProtection) return
+        // This small queue signal is independent of history mapping and re-decryption. If the
+        // optional observer is unavailable, the existing authenticated remote handover remains.
+        coroutineScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            room.subscribeToSendQueueUpdates().catch { failure ->
+                if (failure is CancellationException) throw failure
+                Timber.w("TEXT send confirmation observer unavailable")
+            }.collect { update ->
+                if (update !is SendQueueUpdate.SentEvent) return@collect
+                val owned = optimisticLocalEchoes.value.singleOrNull {
+                    it.confirmationBinding?.sdkTransactionId == update.transactionId
+                } ?: return@collect
+                if (owned.nativeConfirmedEventId != null) return@collect
+                val operationId = checkNotNull(owned.confirmationBinding).request.operationId
+                LifecycleStageTiming.point("send_queue_confirmed", update.eventId.value, operationId = operationId)
+                optimisticLocalEchoes.update { echoes -> echoes.map { echo ->
+                    if (echo.item.uniqueId == owned.item.uniqueId) echo.copy(nativeConfirmedEventId = update.eventId) else echo
+                } }
+                // One signed status read for this original send, never a resend, new operation,
+                // or history fetch. Later signed coordinator updates finish a still-pending bind.
+                coroutineScope.launch {
+                    runCatchingExceptions {
+                        LifecycleStageTiming.measure("send_confirmation_status_read", update.eventId.value, operationId = operationId) {
+                            coordinator.operation(operationId)
+                        }
+                    }
+                }
+            }
+        }
+        coroutineScope.launch {
+            combine(optimisticLocalEchoes, coordinator.operations) { echoes, operations ->
+                echoes.mapNotNull { echo ->
+                    val binding = echo.confirmationBinding ?: return@mapNotNull null
+                    val eventId = echo.nativeConfirmedEventId ?: return@mapNotNull null
+                    if (echo.item.event.localSendState is LocalEventSendState.Sent ||
+                        echo.item.event.localSendState is LocalEventSendState.Failed ||
+                        !binding.confirms(eventId, operations[binding.request.operationId] ?: return@mapNotNull null)
+                    ) return@mapNotNull null
+                    echo.item.uniqueId to eventId
+                }
+            }.collect { confirmations ->
+                if (confirmations.isEmpty()) return@collect
+                val confirmed = confirmations.toMap()
+                optimisticLocalEchoes.update { echoes -> echoes.map { echo ->
+                    val eventId = confirmed[echo.item.uniqueId] ?: return@map echo
+                    if (isOptimisticDisplayIdRetired(echo.item.uniqueId) ||
+                        echo.item.event.localSendState is LocalEventSendState.Failed) return@map echo
+                    val item = echo.item.copy(event = echo.item.event.copy(
+                        eventId = eventId, localSendState = LocalEventSendState.Sent(eventId),
+                    ))
+                    rememberConfirmedDisplayId(item, item.uniqueId)
+                    LifecycleStageTiming.observed("send_confirmation_projected", eventId.value,
+                        operationId = echo.confirmationBinding?.request?.operationId.orEmpty())
+                    synchronized(confirmedDisplayIds) {
+                        val sdkTransaction = checkNotNull(echo.confirmationBinding).sdkTransactionId
+                        if (confirmedTransactionDisplayIds[sdkTransaction] == null) {
+                            confirmedTransactionDisplayIds[sdkTransaction] = item.uniqueId
+                            confirmedIdentityGeneration++
+                        }
+                    }
+                    echo.copy(item = item)
+                } }
             }
         }
     }
@@ -303,7 +377,9 @@ class TimelineController(
                             protectedShellReplacements[authenticatedIndex] = localEcho.item.copy(
                                 uniqueId = sdkEvent.uniqueId,
                                 event = localEcho.item.event.copy(
-                                    localSendState = LocalEventSendState.Sending.Event,
+                                    localSendState = localEcho.item.event.localSendState.let {
+                                        if (it is LocalEventSendState.Sent) it else LocalEventSendState.Sending.Event
+                                    },
                                 ),
                             )
                         } else {
@@ -600,7 +676,10 @@ class TimelineController(
                 } else if (failure == null) {
                     localEcho.copy(
                         sendAccepted = true,
-                        item = localEcho.item.copy(event = localEcho.item.event.copy(localSendState = LocalEventSendState.Sending.Event)),
+                        item = localEcho.item.copy(event = localEcho.item.event.copy(localSendState =
+                            localEcho.item.event.localSendState.let {
+                                if (it is LocalEventSendState.Sent) it else LocalEventSendState.Sending.Event
+                            })),
                     )
                 } else {
                     val failedContent = (localEcho.item.event.content as? MessageContent)?.let { content ->
@@ -682,6 +761,20 @@ class TimelineController(
 
     private suspend fun sendCapturedTextIntent(localEcho: OptimisticLocalEcho): Result<Unit> =
         LifecycleStageTiming.measure("send_transaction", localEcho.item.uniqueId.value) {
+            val client = matrixClient
+            val owner = currentLifecycleOperationContext()
+            if (requireContentProtection && client != null && localEcho.repliedToEventId == null) {
+                val transaction = checkNotNull(localEcho.item.event.transactionId)
+                val request = ordinaryMessageLifecycleRequest(room, client, "send", transaction.value)
+                val installation = owner?.let { appOperationalStateCoordinator?.operations?.value?.get(it.operationId) }
+                    ?.subjects?.installationId
+                if (owner?.operationId == request.operationId && owner.lifecycleId == request.lifecycleId && installation != null) {
+                    val binding = TextSendConfirmationBinding(request, protectedTextTransactionId(room.roomId, transaction), installation)
+                    optimisticLocalEchoes.update { echoes -> echoes.map { echo ->
+                        if (echo.item.uniqueId == localEcho.item.uniqueId) echo.copy(confirmationBinding = binding) else echo
+                    } }
+                }
+            }
             currentTimelineFlow.value.sendMessageTransaction(
                 transactionId = checkNotNull(localEcho.item.event.transactionId),
                 body = localEcho.body,
@@ -1034,9 +1127,11 @@ class TimelineController(
 
     private fun rememberConfirmedDisplayId(item: MatrixTimelineItem, displayId: UniqueId) {
         val event = item as? MatrixTimelineItem.Event ?: return
-        val identity = event.serverIdentity()
         synchronized(confirmedDisplayIds) {
             val previousEventId = confirmedEventIds[displayId]
+            // An older SDK local snapshot must not erase the canonical alias learned from
+            // the direct signed send confirmation while ordered sync is still catching up.
+            val identity = (event.eventId ?: previousEventId)?.let { "event:${it.value}" } ?: event.serverIdentity()
             if (previousEventId != null && event.eventId != null && previousEventId != event.eventId) return
             val existingOwner = confirmedDisplayIds[identity]
                 ?: event.transactionId?.let(confirmedTransactionDisplayIds::get)
@@ -1154,6 +1249,8 @@ private data class OptimisticLocalEcho(
     val sendAccepted: Boolean = false,
     val media: OptimisticMedia? = null,
     val restoredFromOutbox: Boolean = false,
+    val confirmationBinding: TextSendConfirmationBinding? = null,
+    val nativeConfirmedEventId: EventId? = null,
 )
 
 private data class LoadedTimelineWindow(
