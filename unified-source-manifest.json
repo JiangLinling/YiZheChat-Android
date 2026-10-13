@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "revision": "unified-next-r30-bounded-preview-timelines-20261013",
-  "frozen_utc": "2026-10-13T11:35:36.912984+00:00",
+  "frozen_utc": "2026-10-13T11:47:23.118741+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -5764,7 +5764,7 @@
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/roomlist/RoomListExtensions.kt": "e68b6131979589cbc7edceca2bf79266d32a1f8eaff061c83191646ebdadab7c",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/roomlist/RoomListFactory.kt": "6e723f8e12a0238989f7f6c7ed7b7ba9eed2b1060834bce6e9ed69563b8486c0",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/roomlist/RoomListFilterMapper.kt": "46a11e3b7d0b16708c5cac14725a9907011895f74ef9b3ee4022edb39f3493cc",
-    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/roomlist/RoomPreviewTimelineCache.kt": "a95e196e41dcee0222e336c9e6e8f96108d3af6265afb474c3b5f7eb36303a7a",
+    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/roomlist/RoomPreviewTimelineCache.kt": "8dd708bfa8e4f5bb3742de70c8797824af1726a6d3216c33384d051ea2547b7b",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/roomlist/RoomSummaryBatch.kt": "97339640b3de0b88d5e872329f888e7bb2c3e9ff38797a30b0f843df1e6812a3",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/roomlist/RoomSummaryFactory.kt": "0060cfc56bb0fc197a88c647d4bf4bf362f15efcc6e400477aabcfea2f4ee0ee",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/roomlist/RoomSummaryListProcessor.kt": "4f71bfee3cc262632c62f44de5479fa2c584b6f83dcb56f77a880a556667f335",

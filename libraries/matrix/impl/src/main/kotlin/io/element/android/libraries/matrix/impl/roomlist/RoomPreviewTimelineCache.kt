@@ -105,7 +105,7 @@ class RoomPreviewTimelineCache(
     }
 
     private fun releaseTimeline(entry: Entry) {
-        entry.timeline?.close()
+        entry.timeline?.destroy()
         entry.timeline = null
     }
 }
