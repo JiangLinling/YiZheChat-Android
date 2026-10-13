@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "revision": "unified-next-r28-bounded-permalinks-20261013",
-  "frozen_utc": "2026-10-13T09:39:36.266454+00:00",
+  "frozen_utc": "2026-10-13T09:43:58.015767+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -2679,6 +2679,7 @@
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/protection/TimelineProtectionPresenterTest.kt": "e2eb196070b54b0a1eb2680970f5be73d50ebc7cbfd19a3338dd017eeca59db4",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/protection/TimelineProtectionStateTest.kt": "761f0f66b6eef14932f0bdf5d7eb22995027227bd7d9c688ad45b582bdf0e4d2",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/typing/TypingNotificationPresenterTest.kt": "46ae75b7cb0257c6591fbbfb5e9ab8727e657163b1c4ce73525baf45885d1644",
+    "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/utils/BoundedLinkifyHelperTest.kt": "6aed6e94fc05a591d8b0a7d6acb3ace47a3036d416d5e002fc888b271828015f",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/utils/DefaultMessageSummaryFormatterTest.kt": "bdcd06dae7da995e0b9053c183b0ed0afb8d947cb08ffc60749d251b724f85ca",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/utils/DefaultTextPillificationHelperTest.kt": "65a09bf240aa2f6537744e00c221bb543001d602826f624480f6fee276d9ece3",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/utils/EmojiTest.kt": "f83734a08b38ca315f97c98808e24c1a53d804c89b83463940c0145388f1167a",
@@ -4414,7 +4415,7 @@
     "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/system/DateTimeObserver.kt": "50038ef5b296dc8918f3c3569e030c7ef087c1138d9d1bceac9e0fec209abcef",
     "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/system/DeviceHasVulkanSupport.kt": "a6d8e9ba9886bdf4c2b6b373bb08ec697b5b7ce9dc25ea3a0bdfc388c683be2f",
     "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/system/SystemUtils.kt": "b886bf7ddd5d72d7c006828dc5f58f1df82bc1f1a5c1f094c0af92baadd50a2a",
-    "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/text/LinkifyHelper.kt": "03502b9ff689038ae1e4c9c279c5b75d3dbfd110280c8b87601e46ac93740453",
+    "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/text/LinkifyHelper.kt": "144fb620d8e07a36b524be95afe09b04f7769e2f045547d3a33da6fd3e40fa5d",
     "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/text/TextUtils.kt": "b7d844f39be44d58035c95a64186ca3c7ca6545704145bc9eff54659731bbb13",
     "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/throttler/FirstThrottler.kt": "e31502822020ca121433e63de70e2899d4ed536e3b5306742cd44f73c325af79",
     "libraries/androidutils/src/main/kotlin/io/element/android/libraries/androidutils/ui/View.kt": "bb34f8c61d7e55018ade92db93674dddf28ea2aa87d1dbdcafc02e8df5b8edf9",

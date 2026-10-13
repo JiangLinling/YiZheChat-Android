@@ -9,6 +9,7 @@
 package io.element.android.libraries.androidutils.text
 
 import android.text.Spannable
+import android.text.SpannableString
 import android.text.style.URLSpan
 import android.text.util.Linkify
 import androidx.core.text.getSpans
@@ -38,7 +39,7 @@ object LinkifyHelper {
             Pair(start, end)
         }
         // Find and set as URLSpans any links present in the text
-        val addedNewLinks = LinkifyCompat.addLinks(spannable, linkifyMask)
+        val addedNewLinks = addBoundedLinks(spannable, linkifyMask)
 
         // Process newly added URL spans
         if (addedNewLinks) {
@@ -90,6 +91,58 @@ object LinkifyHelper {
         }
         return spannable
     }
+
+    private fun addBoundedLinks(text: Spannable, mask: Int): Boolean {
+        var added = false
+        var cursor = 0
+        // Never send an entire message to ICU's WEB_URL matcher. Its native backtracking
+        // stack can grow without Java-heap pressure, including on long non-link text.
+        val webMask = mask and (Linkify.WEB_URLS or Linkify.EMAIL_ADDRESSES)
+        while (cursor < text.length) {
+            if (text[cursor].isWhitespace()) { cursor++; continue }
+            val start = cursor
+            var possibleLink = false
+            while (cursor < text.length && !text[cursor].isWhitespace()) {
+                if (text[cursor] == '.' || text[cursor] == '@' || text[cursor] == ':') possibleLink = true
+                cursor++
+            }
+            if (webMask != 0 && possibleLink && cursor - start <= MAX_LINKIFY_TOKEN_LENGTH) {
+                added = addLinksInRange(text, start, cursor, webMask) || added
+            }
+        }
+        if (mask and Linkify.PHONE_NUMBERS != 0) {
+            cursor = 0
+            while (cursor < text.length) {
+                if (!text[cursor].isDigit() && text[cursor] != '+' && text[cursor] != '(') { cursor++; continue }
+                val start = cursor
+                var digits = 0
+                while (cursor < text.length && (text[cursor].isDigit() || text[cursor] in "+()- .\u00a0")) {
+                    if (text[cursor].isDigit()) digits++
+                    cursor++
+                }
+                if (digits >= 5 && cursor - start <= MAX_LINKIFY_TOKEN_LENGTH) {
+                    added = addLinksInRange(text, start, cursor, Linkify.PHONE_NUMBERS) || added
+                }
+            }
+        }
+        return added
+    }
+
+    private fun addLinksInRange(text: Spannable, start: Int, end: Int, mask: Int): Boolean {
+        val candidate = SpannableString(text.subSequence(start, end))
+        if (!LinkifyCompat.addLinks(candidate, mask)) return false
+        for (span in candidate.getSpans<URLSpan>()) {
+            val spanStart = start + candidate.getSpanStart(span)
+            val spanEnd = start + candidate.getSpanEnd(span)
+            // A phone match inside a URL must not replace or overlap the URL.
+            if (text.getSpans<URLSpan>(spanStart, spanEnd).isEmpty()) {
+                text.setSpan(URLSpan(span.url), spanStart, spanEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+        return true
+    }
+
+    private const val MAX_LINKIFY_TOKEN_LENGTH = 512
 
     private fun adjustLinkifiedUrlSpanEndIndex(spannable: Spannable, start: Int, end: Int): Int {
         var end = end
