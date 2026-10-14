@@ -32,6 +32,7 @@ import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.DataOutputStream
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -120,7 +121,8 @@ class ProtectedContentVersionLineageStoreTest {
         val graph = first.graph(SCOPE, ContentId(ROOT))!!
         assertThat(graph.generation).isEqualTo(3)
         assertThat(graph.versions.map { it.contentId.value }.toSet()).isEqualTo(setOf(ROOT, "concurrent-a", "concurrent-b"))
-        assertThat(files.writtenObjectIds.toSet().size).isEqualTo(3)
+        assertThat(files.writtenObjectIds.toSet().size).isEqualTo(files.writtenObjectIds.size)
+        assertThat(files.writtenObjectIds.size).isAtMost(9)
     }
 
     @Test
@@ -190,11 +192,11 @@ class ProtectedContentVersionLineageStoreTest {
         val result = store.append(SCOPE, child("journal-child", "operation-journal-child", ROOT, 8_000))
 
         assertThat(result.retirementState).isEqualTo(ContentVersionRetirementState.PENDING)
-        assertThat(result.graph.pendingRetirementCount).isEqualTo(1)
+        assertThat(result.graph.pendingRetirementCount).isGreaterThan(0)
         assertThat(result.graph.versions.map { it.contentId.value }).isEqualTo(listOf(ROOT, "journal-child"))
         val reopened = ProtectedContentVersionLineageStore(files, roots).graph(SCOPE, ContentId(ROOT))!!
         assertThat(reopened.versions.map { it.contentId.value }).isEqualTo(listOf(ROOT, "journal-child"))
-        assertThat(reopened.pendingRetirementCount).isEqualTo(1)
+        assertThat(reopened.pendingRetirementCount).isEqualTo(result.graph.pendingRetirementCount)
     }
 
     @Test
@@ -217,17 +219,95 @@ class ProtectedContentVersionLineageStoreTest {
         val roots = roots()
         val store = FailingIndexWriteStore(files, roots, failAtWrite = 4)
         store.append(SCOPE, root())
+        val committedObjectCount = files.objectCount()
 
         assertThat(runCatching {
             store.append(SCOPE, child("orphan-staged", "operation-orphan-staged", ROOT, 8_000))
         }.isFailure).isTrue()
-        assertThat(files.objectCount()).isEqualTo(2)
+        assertThat(files.objectCount()).isEqualTo(committedObjectCount + 1)
 
         val reopened = ProtectedContentVersionLineageStore(files, roots)
         val graph = reopened.graph(SCOPE, ContentId(ROOT))!!
         assertThat(graph.versions.map { it.contentId.value }).isEqualTo(listOf(ROOT))
         assertThat(graph.pendingRetirementCount).isEqualTo(0)
+        assertThat(files.objectCount()).isEqualTo(committedObjectCount)
+    }
+
+    @Test
+    fun `thousand independent messages touch at most three encrypted pages per append and preserve exact lookup`() = runTest {
+        val fixture = fixture()
+        val nodes = (0 until 1_000).map { n ->
+            root().copy(contentId = ContentId("independent-$n"), rootContentId = ContentId("independent-$n"), operationId = "independent-operation-$n")
+        }
+        nodes.forEach { node ->
+            val readsBefore = fixture.files.readCount.get()
+            val writesBefore = fixture.files.writtenObjectIds.size
+            fixture.store.append(SCOPE, node)
+            assertThat(fixture.files.readCount.get() - readsBefore).isAtMost(3)
+            assertThat(fixture.files.writtenObjectIds.size - writesBefore).isAtMost(3)
+        }
+        val reopened = ProtectedContentVersionLineageStore(fixture.files, fixture.roots)
+        for (node in listOf(nodes.first(), nodes[499], nodes.last())) {
+            assertThat(reopened.rootForContent(SCOPE, node.contentId)).isEqualTo(node.rootContentId)
+            assertThat(reopened.graph(SCOPE, node.rootContentId)!!.versions).containsExactly(node)
+        }
+        assertThat(fixture.files.objectCount()).isAtMost(256)
+        assertThat(fixture.files.maximumPlaintextLength).isLessThan(32_768L)
+        assertThat(runCatching {
+            reopened.append(SCOPE, nodes.last().copy(operationId = nodes.first().operationId))
+        }.exceptionOrNull()).isInstanceOf(ContentVersionLineageConflictException::class.java)
+    }
+
+    @Test
+    fun `legacy migration is atomic and preserves cross-root operation uniqueness`() = runTest {
+        val files = FakeSensitiveFileStore()
+        val roots = roots()
+        val original = root()
+        writeLegacy(files, roots, listOf(original))
+        val appended = child("legacy-child", "legacy-child-operation", ROOT, 8_000)
+        val failed = FailingIndexWriteStore(files, roots, failAtWrite = 2)
+        assertThat(runCatching { failed.append(SCOPE, appended) }.isFailure).isTrue()
+        val reopened = ProtectedContentVersionLineageStore(files, roots)
+        assertThat(reopened.graph(SCOPE, ContentId(ROOT))!!.versions).containsExactly(original)
         assertThat(files.objectCount()).isEqualTo(1)
+        reopened.append(SCOPE, appended)
+        assertThat(reopened.graph(SCOPE, ContentId(ROOT))!!.versions).containsExactly(original, appended)
+        assertThat(reopened.rootForContent(SCOPE, appended.contentId)).isEqualTo(original.contentId)
+        assertThat(runCatching {
+            reopened.append(SCOPE, original.copy(contentId = ContentId("other-root"), rootContentId = ContentId("other-root")))
+        }.exceptionOrNull()).isInstanceOf(ContentVersionLineageConflictException::class.java)
+    }
+
+    /** Exact v1 wire fixture, so compatibility is tested independently of the new encoder. */
+    private suspend fun writeLegacy(files: FakeSensitiveFileStore, roots: TestRoots, nodes: List<ContentVersionNode>) {
+        fun hash(text: String) = MessageDigest.getInstance("SHA-256").digest(text.encodeToByteArray())
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        fun DataOutputStream.string(value: String) { val bytes = value.encodeToByteArray(); writeInt(bytes.size); write(bytes) }
+        val graph = ByteArrayOutputStream().also { bytes -> DataOutputStream(bytes).use { output ->
+            output.write("YZLGP001".encodeToByteArray())
+            output.string(SCOPE.vaultId.value); output.string(hash(SCOPE.roomId)); output.writeLong(1)
+            output.writeInt(nodes.size)
+            nodes.forEach { node ->
+                output.string(node.contentId.value); output.string(node.rootContentId.value)
+                output.writeBoolean(node.parentContentId != null); node.parentContentId?.let { output.string(it.value) }
+                output.string(node.operationId); output.string(node.eventIdSha256)
+                output.writeLong(node.createdAtEpochMillis); output.writeLong(node.expiresAtEpochMillis)
+            }
+        } }.toByteArray()
+        val reference = files.write(SecureObjectWriteRequest(
+            objectId = io.element.android.security.securestorage.api.SecureObjectId("content-lineage-v1:legacy-fixture"),
+            vaultId = SCOPE.vaultId, purpose = io.element.android.security.securestorage.api.SecureObjectPurpose.MESSAGE_REFERENCE_INDEX,
+            associatedData = "content-lineage-v1\u0000${SCOPE.vaultId.value}\u0000${hash(SCOPE.roomId)}\u00001".encodeToByteArray(),
+        )) { it.write(graph) }
+        val directory = File(roots.persistentRoot(), "content-version-lineage-v1").apply { mkdirs() }
+        DataOutputStream(File(directory, hash("${SCOPE.vaultId.value}\u0000${SCOPE.roomId}") + ".yzli").outputStream()).use { output ->
+            output.write("YZLIX001".encodeToByteArray()); output.string(SCOPE.vaultId.value); output.string(hash(SCOPE.roomId))
+            output.writeLong(1); output.writeBoolean(true)
+            output.string(reference.objectId.value); output.string(reference.vaultId.value); output.writeInt(reference.purpose.formatCode)
+            output.string(reference.keyEnvelopeId.value); output.writeInt(reference.formatVersion)
+            output.writeLong(reference.plaintextLength); output.writeLong(reference.ciphertextLength); output.string(reference.associatedDataSha256)
+            output.writeInt(0); output.writeInt(0)
+        }
     }
 
     private fun fixture(): Fixture {
@@ -284,12 +364,15 @@ class ProtectedContentVersionLineageStoreTest {
         val failedDeletes = AtomicInteger()
         val failedObjectDeletes = AtomicInteger()
         val writtenObjectIds = mutableListOf<String>()
+        val readCount = AtomicInteger()
+        var maximumPlaintextLength = 0L
 
         override suspend fun write(
             request: SecureObjectWriteRequest,
             writePlaintext: suspend (java.io.OutputStream) -> Unit,
         ): SecureObjectReference {
             val plaintext = ByteArrayOutputStream().also { writePlaintext(it) }.toByteArray()
+            maximumPlaintextLength = maxOf(maximumPlaintextLength, plaintext.size.toLong())
             val envelope = KeyEnvelopeId("envelope-${counter.incrementAndGet()}")
             val reference = SecureObjectReference(
                 objectId = request.objectId,
@@ -312,6 +395,7 @@ class ProtectedContentVersionLineageStoreTest {
             reference: SecureObjectReference,
             readPlaintext: suspend (java.io.InputStream) -> T,
         ): T {
+            readCount.incrementAndGet()
             val stored = objects[reference.keyEnvelopeId]
                 ?.takeIf { it.reference == reference }
                 ?: throw SecureObjectNotFoundException()

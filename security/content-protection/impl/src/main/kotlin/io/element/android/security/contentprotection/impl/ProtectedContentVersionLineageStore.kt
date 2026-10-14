@@ -57,73 +57,52 @@ open class ProtectedContentVersionLineageStore(
         validateScope(scope)
         validateNodeShape(node)
         val index = recoverStagingLocked(indexFile, scope, readIndex(indexFile, scope))
-        val nodes = readNodes(scope, index)
-        validateGraph(nodes)
-        nodes.firstOrNull { it.operationId == node.operationId }?.let { existing ->
-            if (existing != node) conflict("operationId is already bound to different lineage data")
-            val graph = project(node.rootContentId, index.generation, nodes, index.retirements.size + index.staging.size)
-            return@withScopeLock ContentVersionAppendResult(graph, graph.retirementState())
+        val pageNodes: Map<Int, List<ContentVersionNode>>
+        val graphNodes: List<ContentVersionNode>
+        if (!index.partitioned) {
+            // A legacy snapshot is authenticated once and migrated with the same atomic pointer
+            // commit as this append. Until that commit, every old reference remains authoritative.
+            val legacy = readNodes(scope, index).also(::validateGraph)
+            legacy.firstOrNull { it.operationId == node.operationId }?.let { existing ->
+                if (existing != node) conflict("operationId is already bound to different lineage data")
+                val graph = project(node.rootContentId, index.generation, legacy, index.debtCount())
+                return@withScopeLock ContentVersionAppendResult(graph, graph.retirementState())
+            }
+            if (legacy.any { it.contentId == node.contentId }) conflict("contentId already exists in the lineage graph")
+            validateAppend(legacy, node)
+            val updated = legacy + node
+            graphNodes = updated.filter { it.rootContentId == node.rootContentId }
+            validateGraph(graphNodes)
+            val pages = mutableMapOf<Int, MutableList<ContentVersionNode>>()
+            updated.forEach { entry -> buckets(entry).forEach { bucket -> pages.getOrPut(bucket) { mutableListOf() }.add(entry) } }
+            pageNodes = pages
+        } else {
+            // Three exact indexes share encrypted pages: root membership, content identity and
+            // original operation identity. An append touches at most three bounded pages.
+            val pages = buckets(node).associateWith { readPage(scope, index, it) }
+            val existing = pages.getValue(operationBucket(node.operationId)).singleOrNull { it.operationId == node.operationId }
+            val content = pages.getValue(contentBucket(node.contentId)).singleOrNull { it.contentId == node.contentId }
+            val rootNodes = pages.getValue(rootBucket(node.rootContentId)).filter { it.rootContentId == node.rootContentId }
+            validateGraph(rootNodes)
+            if (existing != null) {
+                if (existing != node) conflict("operationId is already bound to different lineage data")
+                if (content != node || rootNodes.singleOrNull { it.contentId == node.contentId } != node) {
+                    corrupt("lineage identity indexes disagree")
+                }
+                val graph = project(node.rootContentId, index.generation, rootNodes, index.debtCount())
+                return@withScopeLock ContentVersionAppendResult(graph, graph.retirementState())
+            }
+            if (content != null) conflict("contentId already exists in the lineage graph")
+            if (rootNodes.any { it.contentId == node.contentId || it.operationId == node.operationId }) {
+                corrupt("lineage identity indexes are incomplete")
+            }
+            validateAppend(rootNodes, node)
+            graphNodes = rootNodes + node
+            validateGraph(graphNodes)
+            pageNodes = pages.mapValues { (_, nodes) -> nodes + node }
         }
-        if (nodes.any { it.contentId == node.contentId }) conflict("contentId already exists in the lineage graph")
-        validateAppend(nodes, node)
-
-        val updatedNodes = nodes + node
-        validateGraph(updatedNodes)
-        val nextGeneration = Math.addExact(index.generation, 1L)
-        val encoded = encodeGraph(scope, nextGeneration, updatedNodes)
-        val binding = binding(scope, nextGeneration)
-        val objectIdentity = SecureObjectIdentity(
-            objectId = SecureObjectId("content-lineage-v1:${UUID.randomUUID()}"),
-            vaultId = scope.vaultId,
-            purpose = SecureObjectPurpose.MESSAGE_REFERENCE_INDEX,
-        )
-        val staged = index.copy(staging = index.staging + objectIdentity)
-        writeIndex(indexFile, scope, staged)
-        val newReference = try {
-            sensitiveFileStore.write(
-                SecureObjectWriteRequest(
-                    objectId = objectIdentity.objectId,
-                    vaultId = scope.vaultId,
-                    purpose = SecureObjectPurpose.MESSAGE_REFERENCE_INDEX,
-                    associatedData = binding,
-                    expectedPlaintextLength = encoded.size.toLong(),
-                )
-            ) { output -> output.write(encoded) }
-        } catch (failure: Exception) {
-            discardStagedLocked(indexFile, scope, staged, objectIdentity)
-            throw failure
-        } finally {
-            encoded.fill(0)
-            binding.fill(0)
-        }
-
-        val committed = LineageIndex(
-            generation = nextGeneration,
-            current = newReference,
-            retirements = index.retirements + listOfNotNull(index.current),
-            staging = index.staging,
-        )
-        try {
-            writeIndex(indexFile, scope, committed)
-        } catch (failure: Exception) {
-            // The new random object was never made authoritative. Best-effort deletion is safe; failure is surfaced
-            // because no caller may treat an uncommitted append as successful.
-            discardStagedLocked(indexFile, scope, staged, objectIdentity)
-            throw failure
-        }
-        // From this point the append is authoritative. Retirement is a separate cleanup fact: a delete or journal
-        // rewrite failure must be returned as debt and must never turn a committed append into an ambiguous throw.
-        val afterRetirement = try {
-            retireLocked(indexFile, scope, committed)
-        } catch (_: Exception) {
-            committed
-        }
-        val graph = project(
-            node.rootContentId,
-            nextGeneration,
-            updatedNodes,
-            afterRetirement.retirements.size + afterRetirement.staging.size,
-        )
+        val committed = commitPages(indexFile, scope, index, pageNodes)
+        val graph = project(node.rootContentId, committed.generation, graphNodes, committed.debtCount())
         ContentVersionAppendResult(graph, graph.retirementState())
     }
 
@@ -133,29 +112,122 @@ open class ProtectedContentVersionLineageStore(
     ): ContentVersionGraph? = withScopeLock(scope) { indexFile ->
         validateScope(scope)
         val index = recoverStagingLocked(indexFile, scope, readIndex(indexFile, scope))
-        val nodes = readNodes(scope, index)
+        val nodes = if (index.partitioned) {
+            readPage(scope, index, rootBucket(rootContentId)).filter { it.rootContentId == rootContentId }
+        } else readNodes(scope, index)
         validateGraph(nodes)
         if (nodes.none { it.rootContentId == rootContentId }) null
-        else project(rootContentId, index.generation, nodes, index.retirements.size + index.staging.size)
+        else project(rootContentId, index.generation, nodes, index.debtCount())
     }
 
     override suspend fun rootForContent(scope: ContentVersionLineageScope, contentId: ContentId): ContentId? =
         withScopeLock(scope) { indexFile ->
             validateScope(scope)
             val index = recoverStagingLocked(indexFile, scope, readIndex(indexFile, scope))
-            val nodes = readNodes(scope, index)
-            validateGraph(nodes)
-            nodes.singleOrNull { it.contentId == contentId }?.rootContentId
+            if (!index.partitioned) {
+                return@withScopeLock readNodes(scope, index).also(::validateGraph).singleOrNull { it.contentId == contentId }?.rootContentId
+            }
+            val node = readPage(scope, index, contentBucket(contentId)).singleOrNull { it.contentId == contentId }
+                ?: return@withScopeLock null
+            val rootNodes = readPage(scope, index, rootBucket(node.rootContentId)).filter { it.rootContentId == node.rootContentId }
+            validateGraph(rootNodes)
+            if (rootNodes.singleOrNull { it.contentId == contentId } != node) corrupt("lineage membership indexes disagree")
+            node.rootContentId
         }
 
     override suspend fun retryPendingRetirements(scope: ContentVersionLineageScope): Int =
         withScopeLock(scope) { indexFile ->
             validateScope(scope)
             val index = recoverStagingLocked(indexFile, scope, readIndex(indexFile, scope))
-            readNodes(scope, index).also(::validateGraph)
-            val retired = retireLocked(indexFile, scope, index)
-            retired.retirements.size + retired.staging.size
+            if (index.partitioned) {
+                // Maintenance may enumerate history; foreground append and lookup never do.
+                index.pages.keys.forEach { bucket ->
+                    readPage(scope, index, bucket).filter { rootBucket(it.rootContentId) == bucket }
+                        .groupBy { it.rootContentId }.values.forEach(::validateGraph)
+                }
+            } else readNodes(scope, index).also(::validateGraph)
+            retireLocked(indexFile, scope, index).debtCount()
         }
+
+    private suspend fun readPage(scope: ContentVersionLineageScope, index: LineageIndex, bucket: Int): List<ContentVersionNode> {
+        val page = index.pages[bucket] ?: return emptyList()
+        requireReference(scope, page.generation, page.reference, bucket)
+        return try {
+            sensitiveFileStore.read(page.reference) { input -> decodeGraph(scope, page.generation, input.readBytes()) }.also { nodes ->
+                nodes.forEach { node ->
+                    validateNodeShape(node)
+                    if (bucket !in buckets(node)) corrupt("lineage node is outside its identity page")
+                }
+                if (nodes.distinctBy { it.contentId }.size != nodes.size || nodes.distinctBy { it.operationId }.size != nodes.size) {
+                    corrupt("lineage page contains duplicate identities")
+                }
+            }
+        } catch (failure: ContentVersionLineageCorruptException) {
+            throw failure
+        } catch (failure: Exception) {
+            throw ContentVersionLineageCorruptException("lineage page is missing or unauthenticated", failure)
+        }
+    }
+
+    private suspend fun commitPages(
+        indexFile: File,
+        scope: ContentVersionLineageScope,
+        index: LineageIndex,
+        nodes: Map<Int, List<ContentVersionNode>>,
+    ): LineageIndex {
+        nodes.values.forEach { if (it.size !in 1..MAX_NODES) corrupt("lineage identity page exceeds its supported bound") }
+        val generation = Math.addExact(index.generation, 1L)
+        val identities = nodes.keys.associateWith {
+            SecureObjectIdentity(SecureObjectId("content-lineage-v1:${UUID.randomUUID()}"), scope.vaultId, SecureObjectPurpose.MESSAGE_REFERENCE_INDEX)
+        }
+        val staged = index.copy(staging = index.staging + identities.values)
+        writeIndex(indexFile, scope, staged)
+        val pages = mutableMapOf<Int, LineagePage>()
+        val committed: LineageIndex
+        try {
+            nodes.forEach { (bucket, entries) ->
+                val encoded = encodeGraph(scope, generation, entries)
+                val associatedData = binding(scope, generation, bucket)
+                val identity = identities.getValue(bucket)
+                try {
+                    val reference = sensitiveFileStore.write(SecureObjectWriteRequest(
+                        objectId = identity.objectId, vaultId = scope.vaultId, purpose = identity.purpose,
+                        associatedData = associatedData, expectedPlaintextLength = encoded.size.toLong(),
+                    )) { it.write(encoded) }
+                    pages[bucket] = LineagePage(generation, reference)
+                } finally {
+                    encoded.fill(0)
+                    associatedData.fill(0)
+                }
+            }
+            committed = LineageIndex(
+                generation = generation, current = null,
+                retirements = index.retirements + listOfNotNull(index.current) + pages.keys.mapNotNull { index.pages[it]?.reference },
+                staging = index.staging, pages = index.pages + pages, partitioned = true,
+            )
+            writeIndex(indexFile, scope, committed)
+        } catch (failure: Exception) {
+            // The old pointer still owns every graph. Preserve any undeleted staged object as
+            // durable cleanup debt; never discard another failed page's identity while cleaning up.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                val remaining = identities.values.filter { identity ->
+                    !runCatching { sensitiveFileStore.deleteObject(identity) }.getOrDefault(false)
+                }
+                runCatching { writeIndex(indexFile, scope, index.copy(staging = index.staging + remaining)) }
+            }
+            throw failure
+        }
+        // Publishing the pointer is the commit. Retirement failure remains explicit cleanup debt.
+        return try { retireLocked(indexFile, scope, committed) } catch (_: Exception) { committed }
+    }
+
+    private fun rootBucket(id: ContentId): Int = bucket("root", id.value)
+    private fun contentBucket(id: ContentId): Int = bucket("content", id.value)
+    private fun operationBucket(id: String): Int = bucket("operation", id)
+    private fun bucket(domain: String, id: String): Int =
+        MessageDigest.getInstance("SHA-256").digest("$domain\u0000$id".encodeToByteArray())[0].toInt() and 0xff
+    private fun buckets(node: ContentVersionNode): Set<Int> = setOf(rootBucket(node.rootContentId), contentBucket(node.contentId), operationBucket(node.operationId))
+    private fun LineageIndex.debtCount(): Int = retirements.size + staging.size
 
     private suspend fun recoverStagingLocked(indexFile: File, scope: ContentVersionLineageScope, index: LineageIndex): LineageIndex {
         if (index.staging.isEmpty()) return index
@@ -168,16 +240,6 @@ open class ProtectedContentVersionLineageStore(
         }
         if (remaining.size == index.staging.size) return index
         return index.copy(staging = remaining).also { writeIndex(indexFile, scope, it) }
-    }
-
-    private suspend fun discardStagedLocked(
-        indexFile: File,
-        scope: ContentVersionLineageScope,
-        index: LineageIndex,
-        identity: SecureObjectIdentity,
-    ) {
-        val deleted = runCatching { sensitiveFileStore.deleteObject(identity) }.getOrDefault(false)
-        if (deleted) runCatching { writeIndex(indexFile, scope, index.copy(staging = index.staging - identity)) }
     }
 
     private suspend fun <T> withScopeLock(
@@ -308,7 +370,7 @@ open class ProtectedContentVersionLineageStore(
     }
 
     private fun readIndex(file: File, scope: ContentVersionLineageScope): LineageIndex {
-        if (!file.exists()) return LineageIndex(0, null, emptyList(), emptyList())
+        if (!file.exists()) return LineageIndex(0, null, emptyList(), emptyList(), partitioned = true)
         if (!file.isFile || file.length() !in 1..MAX_INDEX_BYTES) corrupt("lineage index has an invalid size")
         return try {
             decodeIndex(scope, file.readBytes())
@@ -320,8 +382,12 @@ open class ProtectedContentVersionLineageStore(
     }
 
     private fun writeIndex(file: File, scope: ContentVersionLineageScope, index: LineageIndex) {
+        if (index.retirements.size > MAX_RETIREMENTS || index.staging.size > MAX_RETIREMENTS || index.pages.size > 256) {
+            corrupt("lineage cleanup or page journal exceeds its supported bound")
+        }
         val encoded = encodeIndex(scope, index)
         try {
+            if (encoded.size > MAX_INDEX_BYTES) corrupt("lineage index exceeds its supported size")
             persistIndex(file, encoded)
         } finally {
             encoded.fill(0)
@@ -343,11 +409,11 @@ open class ProtectedContentVersionLineageStore(
         }
     }
 
-    private fun requireReference(scope: ContentVersionLineageScope, generation: Long, reference: SecureObjectReference) {
+    private fun requireReference(scope: ContentVersionLineageScope, generation: Long, reference: SecureObjectReference, bucket: Int? = null) {
         if (
             reference.vaultId != scope.vaultId ||
             reference.purpose != SecureObjectPurpose.MESSAGE_REFERENCE_INDEX ||
-            reference.associatedDataSha256 != sha256Hex(binding(scope, generation))
+            reference.associatedDataSha256 != sha256Hex(binding(scope, generation, bucket))
         ) corrupt("lineage reference is outside its vault, room, or generation binding")
     }
 
@@ -380,7 +446,7 @@ open class ProtectedContentVersionLineageStore(
 
     private fun encodeIndex(scope: ContentVersionLineageScope, index: LineageIndex): ByteArray = ByteArrayOutputStream().use { bytes ->
         DataOutputStream(bytes).use { output ->
-            output.write(INDEX_MAGIC)
+            output.write(if (index.partitioned) PARTITIONED_INDEX_MAGIC else INDEX_MAGIC)
             output.writeString(scope.vaultId.value)
             output.writeString(sha256Hex(scope.roomId))
             output.writeLong(index.generation)
@@ -390,6 +456,14 @@ open class ProtectedContentVersionLineageStore(
             index.retirements.forEach { output.writeReference(it) }
             output.writeInt(index.staging.size)
             index.staging.forEach { output.writeIdentity(it) }
+            if (index.partitioned) {
+                output.writeInt(index.pages.size)
+                index.pages.toSortedMap().forEach { (bucket, page) ->
+                    output.writeInt(bucket)
+                    output.writeLong(page.generation)
+                    output.writeReference(page.reference)
+                }
+            }
         }
         bytes.toByteArray()
     }
@@ -397,7 +471,9 @@ open class ProtectedContentVersionLineageStore(
     private fun decodeIndex(scope: ContentVersionLineageScope, encoded: ByteArray): LineageIndex =
         DataInputStream(ByteArrayInputStream(encoded)).use { input ->
             try {
-                if (!input.readExact(INDEX_MAGIC.size).contentEquals(INDEX_MAGIC)) corrupt("unknown lineage index format")
+                val magic = input.readExact(INDEX_MAGIC.size)
+                val partitioned = magic.contentEquals(PARTITIONED_INDEX_MAGIC)
+                if (!partitioned && !magic.contentEquals(INDEX_MAGIC)) corrupt("unknown lineage index format")
                 if (input.readString(MAX_ID_BYTES) != scope.vaultId.value) corrupt("lineage index vault mismatch")
                 if (input.readString(64) != sha256Hex(scope.roomId)) corrupt("lineage index room mismatch")
                 val generation = input.readLong().also { if (it < 0) corrupt("negative lineage generation") }
@@ -406,8 +482,19 @@ open class ProtectedContentVersionLineageStore(
                 val retirements = List(debtCount) { input.readReference() }
                 val stagingCount = input.readInt().also { if (it !in 0..MAX_RETIREMENTS) corrupt("invalid staging debt count") }
                 val staging = List(stagingCount) { input.readIdentity() }
+                val pages = mutableMapOf<Int, LineagePage>()
+                if (partitioned) {
+                    val pageCount = input.readInt().also { if (it !in 0..256) corrupt("invalid lineage page count") }
+                    repeat(pageCount) {
+                        val bucket = input.readInt().also { if (it !in 0..255) corrupt("invalid lineage bucket") }
+                        val pageGeneration = input.readLong().also { if (it !in 1..generation) corrupt("invalid lineage page generation") }
+                        val reference = input.readReference()
+                        requireReference(scope, pageGeneration, reference, bucket)
+                        if (pages.put(bucket, LineagePage(pageGeneration, reference)) != null) corrupt("duplicate lineage bucket")
+                    }
+                    if (current != null || (generation == 0L) != pages.isEmpty()) corrupt("partitioned lineage pointer is inconsistent")
+                } else if ((generation == 0L) != (current == null)) corrupt("lineage pointer generation is inconsistent")
                 if (input.read() != -1) corrupt("trailing lineage index bytes")
-                if ((generation == 0L) != (current == null)) corrupt("lineage pointer generation is inconsistent")
                 current?.let { requireReference(scope, generation, it) }
                 if (retirements.distinctBy { it.keyEnvelopeId }.size != retirements.size) {
                     corrupt("lineage retirement journal contains duplicates")
@@ -427,7 +514,12 @@ open class ProtectedContentVersionLineageStore(
                     if (identity.vaultId != scope.vaultId || identity.purpose != SecureObjectPurpose.MESSAGE_REFERENCE_INDEX ||
                         !identity.objectId.value.startsWith("content-lineage-v1:")) corrupt("invalid lineage staging identity")
                 }
-                LineageIndex(generation, current, retirements, staging)
+                val live = pages.values.map { it.reference.keyEnvelopeId }.toSet()
+                if (live.size != pages.size || retirements.any { it.keyEnvelopeId in live } ||
+                    staging.any { identity -> pages.values.any { it.reference.objectId == identity.objectId } }) {
+                    corrupt("lineage cleanup journal overlaps an authoritative page")
+                }
+                LineageIndex(generation, current, retirements, staging, pages, partitioned)
             } finally {
                 encoded.fill(0)
             }
@@ -501,14 +593,22 @@ open class ProtectedContentVersionLineageStore(
 
     private fun DataInputStream.readExact(size: Int): ByteArray = ByteArray(size).also(::readFully)
 
-    private fun binding(scope: ContentVersionLineageScope, generation: Long): ByteArray =
-        "content-lineage-v1\u0000${scope.vaultId.value}\u0000${sha256Hex(scope.roomId)}\u0000$generation".encodeToByteArray()
+    private fun binding(scope: ContentVersionLineageScope, generation: Long, bucket: Int? = null): ByteArray =
+        if (bucket == null) {
+            "content-lineage-v1\u0000${scope.vaultId.value}\u0000${sha256Hex(scope.roomId)}\u0000$generation".encodeToByteArray()
+        } else {
+            "content-lineage-v2\u0000${scope.vaultId.value}\u0000${sha256Hex(scope.roomId)}\u0000$bucket\u0000$generation".encodeToByteArray()
+        }
 
     private fun sha256Hex(value: String): String = sha256Hex(value.encodeToByteArray())
 
-    private fun sha256Hex(value: ByteArray): String = MessageDigest.getInstance("SHA-256")
-        .digest(value)
-        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    private fun sha256Hex(value: ByteArray): String = buildString(64) {
+        MessageDigest.getInstance("SHA-256").digest(value).forEach { byte ->
+            val unsigned = byte.toInt() and 0xff
+            append("0123456789abcdef"[unsigned ushr 4])
+            append("0123456789abcdef"[unsigned and 15])
+        }
+    }
 
     private fun conflict(message: String): Nothing = throw ContentVersionLineageConflictException(message)
 
@@ -522,7 +622,11 @@ open class ProtectedContentVersionLineageStore(
         val current: SecureObjectReference?,
         val retirements: List<SecureObjectReference>,
         val staging: List<SecureObjectIdentity>,
+        val pages: Map<Int, LineagePage> = emptyMap(),
+        val partitioned: Boolean = false,
     )
+
+    private data class LineagePage(val generation: Long, val reference: SecureObjectReference)
 
     private companion object {
         const val INDEX_DIRECTORY = "content-version-lineage-v1"
@@ -534,6 +638,7 @@ open class ProtectedContentVersionLineageStore(
         val HEX_SHA256 = Regex("[0-9a-f]{64}")
         val GRAPH_MAGIC = "YZLGP001".encodeToByteArray()
         val INDEX_MAGIC = "YZLIX001".encodeToByteArray()
+        val PARTITIONED_INDEX_MAGIC = "YZLIX002".encodeToByteArray()
         val processMutexes = ConcurrentHashMap<String, Mutex>()
     }
 }
