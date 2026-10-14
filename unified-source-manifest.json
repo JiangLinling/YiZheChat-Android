@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-next-r39-three-message-lanes",
-  "frozen_utc": "2026-10-14T00:21:51.584403+00:00",
+  "revision": "unified-next-r40-independent-message-root-locks",
+  "frozen_utc": "2026-10-14T01:33:51.254686+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -86,6 +86,10 @@
     "bounded_historical_origin_recovery": [
       "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixProtectedContentAdapter.kt",
       "originRecovery.lookup"
+    ],
+    "message_root_lock_isolation": [
+      "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedCaptionLineageCoordinator.kt",
+      "CaptionLineageMutexes"
     ]
   },
   "sources": {
@@ -166,7 +170,7 @@
     ".tmp-postinstall-home.png": "5241e7ab9164095c39e53bfe1f28ceb4635a6b48d5f809f76e66b289d1e0dfe6",
     "annotations/build.gradle.kts": "c8a2ec0144aec33df0ff14f1a5c29ac53d7c73a83b23ac0e21ff23471eda0755",
     "annotations/src/main/kotlin/io/element/android/annotations/ContributesNode.kt": "52890552c7459490db80093fa1a71a06210d24face9b9ab7d3111774007370a2",
-    "app/build.gradle.kts": "fc2722f745bdea48dc115154f3f9caf41b4c89daba158881d4afcb67034def3f",
+    "app/build.gradle.kts": "68cf8254e794c1042102f987612e87a4daa393b41667e73a596bc061c76bce81",
     "app/common-proguard-rules.pro": "54b157faf5f39f002face256a18e66763f96f2f42f27ad28ce735b5a4ac2174d",
     "app/default-proguard-rules.pro": "48513ed55e34a76ba4667dcd113b07bbb3b0a0018ae31f8cf9a5e38aca7efb58",
     "app/src/androidTestNext/AndroidManifest.xml": "843f3e8f2726bfe3c82af58340ec77b2232dd0df9e08c0d94c42596aefb081a9",
@@ -5805,7 +5809,7 @@
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixTimelineItemMapper.kt": "e947f257c88ff65cb24a7bd3b4f95a4cf067420ed1c58913f0e3968d79a2a3d5",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/PreparedAttachmentCleanup.kt": "1773a91ea0319d0412d624513a00b312dcac970de37f1956184e3b26da8e642f",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedAttachmentTransactionBinding.kt": "1704ab6b8f0061ed72ceb7f8f08d3a9d6554099dcd198976cf89ea86c9d87a4a",
-    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedCaptionLineageCoordinator.kt": "f699198b745736231d9d2d2292658a7db469212fd01e540fb85f04355e205e6a",
+    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedCaptionLineageCoordinator.kt": "6810bdab31c70a8e27252695171420c2921e667f865acccedd30b723633f9207",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedCaptionLineageWiring.kt": "340cdd492750724d8ff47ee9fa79fc4bbcb3bf6684b3e29dbe3f590afde73594",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedEventOwnershipResolver.kt": "81d42d8254cf4b5f8dfe43f67a33903d06a272657a5bf65349f92c706bb33948",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedInteractionPreview.kt": "405ac3d82b2a534b2f44a120193d820e0f2b7a1de06ac4bb7761efe440425dc5",
@@ -6017,7 +6021,7 @@
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/PreparedAttachmentCleanupTest.kt": "87df2ba5d79a305fa9d2ecd494cec31d7de3a4c943176e4a05fd269e6ef97a76",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedAttachmentTransactionBindingTest.kt": "8f3b95de590d1f58d4e6cf8980eb2ec5f0e857ca808cfd447ea10b39396ae9ae",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedCaptionDestructionTest.kt": "9b2d00d1472f0398550a68a8483eccbd6ffb0fe330227ed20bdf2040ed067692",
-    "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedCaptionLineageCoordinatorTest.kt": "9aad9055efdf672e7e61e2b715bfd159e190cfe9174a8814ea6c8f234d21602d",
+    "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedCaptionLineageCoordinatorTest.kt": "d59f4ce064ea156e4ff7b48e5ac6e0c4adcf9f80fa0960b7b0b589baf8d1fec7",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedEventOwnershipResolverTest.kt": "bd4484d8dd9449a7c38df622733bef3ab5fb579bc4814d18cea42c0c72a15597",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedInteractionPreviewTest.kt": "4e1894c6e15cf8e95a345146b81b9e934ffa85662c861834cfab114511be62bc",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedLiveLocationOperationIdTest.kt": "081915dc91be6d4c9ee0135d8c279ee80efefe1391444c6e03cbba432bab7023",

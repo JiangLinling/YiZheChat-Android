@@ -36,7 +36,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 interface ProtectedCaptionLineageCoordinatorFactory {
     fun create(sessionId: SessionId, deviceId: DeviceId, roomId: RoomId): ProtectedCaptionLineageCoordinator
@@ -69,10 +68,23 @@ class ProtectedCaptionLineageCoordinator(
     private val lifecycle: AppOperationalStateCoordinator,
     private val kms: KmsShareClient,
 ) : ProtectedCaptionLineageWiring {
-    private val mutex = locks.computeIfAbsent("${scope.vaultId.value}\u0000${scope.roomId}") { Mutex() }
+    private suspend fun <T> withRootLock(root: ContentId, action: suspend () -> T): T =
+        rootLocks.withKey("${scope.vaultId.value}\u0000${scope.roomId}\u0000${root.value}", action)
+
+    private suspend fun withPendingContentLock(content: ContentId, action: suspend () -> Unit) {
+        val root = pending.all(scope).singleOrNull { it.contentId == content.value }?.rootContentId ?: return
+        withRootLock(ContentId(root)) {
+            val current = pending.all(scope).singleOrNull { it.contentId == content.value } ?: return@withRootLock
+            check(current.rootContentId == root) { "Pending version root changed during lock acquisition." }
+            action()
+        }
+    }
 
     /** Finish the exact durable root identity before any KMS share or Matrix send. */
-    suspend fun prepareRoot(contentId: ContentId? = null): ContentId = mutex.withLock {
+    suspend fun prepareRoot(contentId: ContentId? = null): ContentId = operationLocks.withKey(
+        "${scope.vaultId.value}\u0000${(currentLifecycleOperationContext()
+            ?: throw SecurityException("Initial protected caption requires a lifecycle operation.")).operationId}",
+    ) {
         val context = currentLifecycleOperationContext()
             ?: throw SecurityException("Initial protected caption requires a lifecycle operation.")
         require(context.lifecycleId in setOf(FullAppLifecycleId.LC_15, FullAppLifecycleId.LC_13)) {
@@ -88,81 +100,94 @@ class ProtectedCaptionLineageCoordinator(
             require(owner.captionOperationId == context.operationId && owner.roomIdHash == digest(scope.roomId))
             CaptionServiceReceiptOwner(owner.accountIdHash, owner.matrixDeviceIdHash, owner.roomIdHash)
         }
-        val current = pending.all(scope)
         val reservation = pending.reserveRootOperation(scope, context.operationId, contentId?.value)
         val rootContentId = ContentId(reservation.contentId)
-        if (reservation.phase != CaptionRootReservationPhase.RESERVED) {
-            throw SecurityException("Initial caption operation already established a pending or committed root.")
-        }
-        require(contentId == null || contentId == rootContentId)
-        val existing = current.firstOrNull { it.operationId == context.operationId }
-        if (existing != null) {
-            require(existing.contentId == rootContentId.value &&
-                existing.rootContentId == rootContentId.value &&
-                existing.parentContentId == null &&
-                existing.phase == CaptionPendingPhase.AWAITING_BINDING.name &&
-                existing.eventIdSha256 == null && existing.serviceReceiptOwner == receiptOwner) {
-                "Initial caption operation already has a non-replayable pending state."
+        withRootLock(rootContentId) {
+            val currentReservation = pending.reserveRootOperation(scope, context.operationId, rootContentId.value)
+            check(!pending.isDestructionFenced(scope, rootContentId.value)) { "Destroyed root cannot be prepared again." }
+            val current = pending.all(scope)
+            if (currentReservation.phase != CaptionRootReservationPhase.RESERVED) {
+                throw SecurityException("Initial caption operation already established a pending or committed root.")
             }
-            // A previous pending write succeeded but phase publication failed. No protect call ran.
+            require(contentId == null || contentId == rootContentId)
+            val existing = current.firstOrNull { it.operationId == context.operationId }
+            if (existing != null) {
+                require(existing.contentId == rootContentId.value &&
+                    existing.rootContentId == rootContentId.value &&
+                    existing.parentContentId == null &&
+                    existing.phase == CaptionPendingPhase.AWAITING_BINDING.name &&
+                    existing.eventIdSha256 == null && existing.serviceReceiptOwner == receiptOwner) {
+                    "Initial caption operation already has a non-replayable pending state."
+                }
+                // A previous pending write succeeded but phase publication failed. No protect call ran.
+                pending.advanceRootOperation(
+                    scope, context.operationId, rootContentId.value, CaptionRootReservationPhase.PENDING_ESTABLISHED,
+                )
+                textOwner?.delegated = true
+                return@withRootLock rootContentId
+            }
+            require(current.none { it.contentId == rootContentId.value }) {
+                "Initial caption root identity is already pending."
+            }
+            if (reservation.existing) {
+                require(lineage.graph(scope, rootContentId) == null) {
+                    "Initial caption root is already committed locally."
+                }
+            }
+            pending.put(scope, CaptionPending(
+                operationId = context.operationId,
+                targetEventId = "",
+                contentId = rootContentId.value,
+                rootContentId = rootContentId.value,
+                parentContentId = null,
+                originOperationId = context.operationId,
+                lifecycleId = context.lifecycleId.name,
+                parentExpiresAt = 0,
+                serviceReceiptOwner = receiptOwner,
+            ))
+            // If this phase write fails, the pending record remains; the exact retry above finishes it.
             pending.advanceRootOperation(
                 scope, context.operationId, rootContentId.value, CaptionRootReservationPhase.PENDING_ESTABLISHED,
             )
             textOwner?.delegated = true
-            return@withLock rootContentId
+            rootContentId
         }
-        require(current.none { it.contentId == rootContentId.value }) {
-            "Initial caption root identity is already pending."
-        }
-        if (reservation.existing) {
-            require(lineage.graph(scope, rootContentId) == null) {
-                "Initial caption root is already committed locally."
-            }
-        }
-        pending.put(scope, CaptionPending(
-            operationId = context.operationId,
-            targetEventId = "",
-            contentId = rootContentId.value,
-            rootContentId = rootContentId.value,
-            parentContentId = null,
-            originOperationId = context.operationId,
-            lifecycleId = context.lifecycleId.name,
-            parentExpiresAt = 0,
-            serviceReceiptOwner = receiptOwner,
-        ))
-        // If this phase write fails, the pending record remains; the exact retry above finishes it.
-        pending.advanceRootOperation(
-            scope, context.operationId, rootContentId.value, CaptionRootReservationPhase.PENDING_ESTABLISHED,
-        )
-        textOwner?.delegated = true
-        rootContentId
     }
 
     /** Resolve a confirmed current TEXT node, never guess a root from a shared event hash. */
-    suspend fun prepareText(targetEventId: String, contentId: ContentId, expiresAt: Long): ProtectedCaptionEditPlan = mutex.withLock {
-        val context = requireNotNull(currentLifecycleOperationContext())
-        val owner = requireNotNull(currentCoroutineContext()[TextVersionReceiptOwner])
-        require(context.lifecycleId == FullAppLifecycleId.LC_13 && owner.operationId == context.operationId &&
-            owner.roomIdHash == digest(scope.roomId))
-        val current = pending.all(scope)
-        require(current.none { it.operationId == context.operationId || it.targetEventId == targetEventId }) {
-            "TEXT edit outcome is pending; reconcile the original operation before another edit."
+    suspend fun prepareText(targetEventId: String, contentId: ContentId, expiresAt: Long): ProtectedCaptionEditPlan {
+        val operationId = requireNotNull(currentLifecycleOperationContext()).operationId
+        return operationLocks.withKey("${scope.vaultId.value}\u0000$operationId") {
+            val expectedRoot = lineage.rootForContent(scope, contentId)
+                ?: throw SecurityException("TEXT version membership is unknown; historical lineage cannot be inferred.")
+            withRootLock(expectedRoot) {
+                val context = requireNotNull(currentLifecycleOperationContext())
+                val owner = requireNotNull(currentCoroutineContext()[TextVersionReceiptOwner])
+                require(context.lifecycleId == FullAppLifecycleId.LC_13 && owner.operationId == context.operationId &&
+                    owner.roomIdHash == digest(scope.roomId))
+                val current = pending.all(scope)
+                require(current.none { it.operationId == context.operationId || it.targetEventId == targetEventId }) {
+                    "TEXT edit outcome is pending; reconcile the original operation before another edit."
+                }
+                val rootId = lineage.rootForContent(scope, contentId)
+                    ?: throw SecurityException("TEXT version membership is unknown; historical lineage cannot be inferred.")
+                check(rootId == expectedRoot) { "TEXT lineage root changed during lock acquisition." }
+                check(!pending.isDestructionFenced(scope, rootId.value) && !pending.isDestructionFenced(scope, contentId.value))
+                val graph = requireNotNull(lineage.graph(scope, rootId))
+                val node = graph.versions.singleOrNull { it.contentId == contentId }
+                    ?: throw SecurityException("TEXT target is not a registered version.")
+                require(node.eventIdSha256 == digest(targetEventId) && node.expiresAtEpochMillis == expiresAt &&
+                    expiresAt > System.currentTimeMillis())
+                require(graph.versions.none { it.parentContentId == contentId }) { "TEXT projection is not the current leaf." }
+                val child = ContentId(UUID.randomUUID().toString())
+                pending.put(scope, CaptionPending(context.operationId, targetEventId, child.value, rootId.value, contentId.value,
+                    graph.versions.single { it.parentContentId == null }.operationId, FullAppLifecycleId.LC_13.name, expiresAt,
+                    serviceReceiptOwner = CaptionServiceReceiptOwner(requireNotNull(owner.accountIdHash),
+                        requireNotNull(owner.matrixDeviceIdHash), requireNotNull(owner.roomIdHash))))
+                owner.delegated = true
+                ProtectedCaptionEditPlan(targetEventId, context.operationId, child)
+            }
         }
-        val rootId = lineage.rootForContent(scope, contentId)
-            ?: throw SecurityException("TEXT version membership is unknown; historical lineage cannot be inferred.")
-        val graph = requireNotNull(lineage.graph(scope, rootId))
-        val node = graph.versions.singleOrNull { it.contentId == contentId }
-            ?: throw SecurityException("TEXT target is not a registered version.")
-        require(node.eventIdSha256 == digest(targetEventId) && node.expiresAtEpochMillis == expiresAt &&
-            expiresAt > System.currentTimeMillis())
-        require(graph.versions.none { it.parentContentId == contentId }) { "TEXT projection is not the current leaf." }
-        val child = ContentId(UUID.randomUUID().toString())
-        pending.put(scope, CaptionPending(context.operationId, targetEventId, child.value, rootId.value, contentId.value,
-            graph.versions.single { it.parentContentId == null }.operationId, FullAppLifecycleId.LC_13.name, expiresAt,
-            serviceReceiptOwner = CaptionServiceReceiptOwner(requireNotNull(owner.accountIdHash),
-                requireNotNull(owner.matrixDeviceIdHash), requireNotNull(owner.roomIdHash))))
-        owner.delegated = true
-        ProtectedCaptionEditPlan(targetEventId, context.operationId, child)
     }
 
     suspend fun parentExpiry(contentId: ContentId): Long? = pending.all(scope)
@@ -180,38 +205,41 @@ class ProtectedCaptionLineageCoordinator(
         operationId: String,
         targetContentId: ContentId,
         targetExpiresAt: Long,
-    ): ProtectedCaptionEditPlan = mutex.withLock {
-        require(currentLifecycleOperationContext()?.let {
-            it.operationId == operationId && it.lifecycleId == FullAppLifecycleId.LC_15
-        } == true) { "Caption edit requires the active LC-15 operation." }
-        require(targetEventId.isNotBlank() && targetExpiresAt > System.currentTimeMillis())
-        pending.all(scope).firstOrNull { it.operationId == operationId }?.let { existing ->
-            require(existing.targetEventId == targetEventId && existing.parentExpiresAt == targetExpiresAt)
-            throw SecurityException("Caption operation is already pending authoritative sync; Matrix send will not be repeated.")
+    ): ProtectedCaptionEditPlan = operationLocks.withKey("${scope.vaultId.value}\u0000$operationId") {
+        withRootLock(targetContentId) {
+            require(currentLifecycleOperationContext()?.let {
+                it.operationId == operationId && it.lifecycleId == FullAppLifecycleId.LC_15
+            } == true) { "Caption edit requires the active LC-15 operation." }
+            require(targetEventId.isNotBlank() && targetExpiresAt > System.currentTimeMillis())
+            pending.all(scope).firstOrNull { it.operationId == operationId }?.let { existing ->
+                require(existing.targetEventId == targetEventId && existing.parentExpiresAt == targetExpiresAt)
+                throw SecurityException("Caption operation is already pending authoritative sync; Matrix send will not be repeated.")
+            }
+            require(pending.all(scope).none { it.targetEventId == targetEventId }) { "A caption edit for this target is awaiting authoritative sync." }
+            val graph = lineage.graph(scope, targetContentId)
+                ?: throw SecurityException("The target caption lineage root is not registered.")
+            val root = graph.versions.singleOrNull { it.parentContentId == null }
+                ?: throw SecurityException("Caption lineage root is ambiguous.")
+            require(root.contentId == targetContentId && root.eventIdSha256 == digest(targetEventId)) {
+                "Caption target does not match its registered root event."
+            }
+            val parentIds = graph.versions.mapNotNull { it.parentContentId }.toSet()
+            val leaf = graph.versions.filterNot { it.contentId in parentIds }.singleOrNull()
+                ?: throw SecurityException("Caption lineage has competing leaves.")
+            check(!pending.isDestructionFenced(scope, targetContentId.value) && !pending.isDestructionFenced(scope, leaf.contentId.value))
+            require(leaf.expiresAtEpochMillis <= targetExpiresAt) { "Caption target expiry is inconsistent." }
+            val child = ContentId(UUID.randomUUID().toString())
+            pending.put(scope, CaptionPending(
+                operationId = operationId,
+                targetEventId = targetEventId,
+                contentId = child.value,
+                rootContentId = root.contentId.value,
+                parentContentId = leaf.contentId.value,
+                originOperationId = root.operationId,
+                parentExpiresAt = leaf.expiresAtEpochMillis,
+            ))
+            ProtectedCaptionEditPlan(targetEventId, operationId, child)
         }
-        require(pending.all(scope).none { it.targetEventId == targetEventId }) { "A caption edit for this target is awaiting authoritative sync." }
-        val graph = lineage.graph(scope, targetContentId)
-            ?: throw SecurityException("The target caption lineage root is not registered.")
-        val root = graph.versions.singleOrNull { it.parentContentId == null }
-            ?: throw SecurityException("Caption lineage root is ambiguous.")
-        require(root.contentId == targetContentId && root.eventIdSha256 == digest(targetEventId)) {
-            "Caption target does not match its registered root event."
-        }
-        val parentIds = graph.versions.mapNotNull { it.parentContentId }.toSet()
-        val leaf = graph.versions.filterNot { it.contentId in parentIds }.singleOrNull()
-            ?: throw SecurityException("Caption lineage has competing leaves.")
-        require(leaf.expiresAtEpochMillis <= targetExpiresAt) { "Caption target expiry is inconsistent." }
-        val child = ContentId(UUID.randomUUID().toString())
-        pending.put(scope, CaptionPending(
-            operationId = operationId,
-            targetEventId = targetEventId,
-            contentId = child.value,
-            rootContentId = root.contentId.value,
-            parentContentId = leaf.contentId.value,
-            originOperationId = root.operationId,
-            parentExpiresAt = leaf.expiresAtEpochMillis,
-        ))
-        ProtectedCaptionEditPlan(targetEventId, operationId, child)
     }
 
     override suspend fun protectionOutcomeUnknown(plan: ProtectedCaptionEditPlan, failure: Exception) {
@@ -228,7 +256,7 @@ class ProtectedCaptionLineageCoordinator(
     }
 
     /** Protection may have created a KMS share before it failed; retain the identity for reconciliation. */
-    suspend fun protectionOutcomeUnknown(contentId: ContentId) = mutex.withLock {
+    suspend fun protectionOutcomeUnknown(contentId: ContentId) = withPendingContentLock(contentId) {
         pending.all(scope).firstOrNull { it.contentId == contentId.value }
             ?.takeIf { it.phase == CaptionPendingPhase.AWAITING_BINDING.name }
             ?.let { pending.put(scope, it.copy(phase = CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name)) }
@@ -243,11 +271,11 @@ class ProtectedCaptionLineageCoordinator(
         eventId: String,
         authenticatedExpiresAt: Long,
         liveSendOperation: LifecycleOperationContext? = null,
-    ) = mutex.withLock {
+    ) = withPendingContentLock(contentId) {
         LifecycleStageTiming.point("caption_binding_lock_acquired", eventId)
         val item = LifecycleStageTiming.measure("caption_pending_read", eventId) {
             pending.all(scope).firstOrNull { it.contentId == contentId.value }
-        } ?: return@withLock
+        } ?: return@withPendingContentLock
         require(liveSendOperation == null || liveSendOperation.operationId == item.operationId &&
             liveSendOperation.lifecycleId.name == item.lifecycleId) {
             "Live event binding must retain the original operation."
@@ -266,7 +294,7 @@ class ProtectedCaptionLineageCoordinator(
         if (item.phase == CaptionPendingPhase.LINEAGE_COMMITTED.name) {
             require(item.eventIdSha256 == eventHash && item.expiresAt == authenticatedExpiresAt)
             deliverServiceReceipt(item)
-            return@withLock
+            return@withPendingContentLock
         }
         if (item.phase == CaptionPendingPhase.SERVER_REGISTERED.name) {
             if (item.lifecycleId != FullAppLifecycleId.LC_13.name) {
@@ -282,7 +310,7 @@ class ProtectedCaptionLineageCoordinator(
                 result.eventIdSha256 == eventHash && result.expiresAtEpochMillis == authenticatedExpiresAt &&
                 result.createdAtEpochMillis == item.createdAt)
             commitLocal(item)
-            return@withLock
+            return@withPendingContentLock
         }
         require(item.phase in setOf(CaptionPendingPhase.AWAITING_BINDING.name, CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name) &&
             item.eventIdSha256 == null)
@@ -334,15 +362,20 @@ class ProtectedCaptionLineageCoordinator(
      * process death: both journal and fence writes could have failed before KMS erasure.
      * Without a proven destroyed-state API, automatic local append must fail closed.
      */
-    suspend fun reconcileLocalCommits() = mutex.withLock {
-        pending.all(scope).filter { it.phase == CaptionPendingPhase.LINEAGE_COMMITTED.name }.forEach { item ->
-            deliverServiceReceipt(item)
-        }
-        pending.all(scope).filter { it.phase == CaptionPendingPhase.SERVER_REGISTERED.name }.forEach { item ->
-            if (pending.isDestructionFenced(scope, item.contentId)) {
-                pending.put(scope, item.copy(phase = CaptionPendingPhase.DESTRUCTION_PENDING.name))
-            } else {
-                throw SecurityException("Unfenced server-registered caption needs authoritative reconciliation.")
+    suspend fun reconcileLocalCommits() {
+        pending.all(scope).map { it.rootContentId }.distinct().forEach { root ->
+            withRootLock(ContentId(root)) {
+                val current = pending.all(scope).filter { it.rootContentId == root }
+                current.filter { it.phase == CaptionPendingPhase.LINEAGE_COMMITTED.name }.forEach { item ->
+                    deliverServiceReceipt(item)
+                }
+                current.filter { it.phase == CaptionPendingPhase.SERVER_REGISTERED.name }.forEach { item ->
+                    if (pending.isDestructionFenced(scope, item.contentId)) {
+                        pending.put(scope, item.copy(phase = CaptionPendingPhase.DESTRUCTION_PENDING.name))
+                    } else {
+                        throw SecurityException("Unfenced server-registered caption needs authoritative reconciliation.")
+                    }
+                }
             }
         }
     }
@@ -351,33 +384,40 @@ class ProtectedCaptionLineageCoordinator(
      * LC-21 may destroy a share before its Matrix send outcome is known. Retain the encrypted
      * journal as cleanup debt and forbid a later sync from registering that destroyed version.
      */
-    suspend fun markDestructionPending(contentId: ContentId) = mutex.withLock {
-        val matches = pending.all(scope)
-            .filter { it.contentId == contentId.value || it.rootContentId == contentId.value }
-            .filter { it.phase in setOf(
-                CaptionPendingPhase.AWAITING_BINDING.name,
-                CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name,
-                CaptionPendingPhase.SERVER_REGISTERED.name,
-                CaptionPendingPhase.LINEAGE_COMMITTED.name,
-                CaptionPendingPhase.DESTRUCTION_PENDING.name,
-            ) }
-        var failure: Exception? = null
-        for (item in matches) {
-            // Independent encrypted tombstone first; a failed main-journal rewrite cannot erase it.
-            try {
-                pending.fenceDestruction(scope, item.contentId)
-            } catch (error: Exception) {
-                if (failure == null) failure = error else if (failure !== error) failure?.addSuppressed(error)
-            }
-            if (item.phase != CaptionPendingPhase.DESTRUCTION_PENDING.name) {
+    suspend fun markDestructionPending(contentId: ContentId) {
+        val root = pending.all(scope).singleOrNull { it.contentId == contentId.value }?.rootContentId?.let(::ContentId)
+            ?: lineage.rootForContent(scope, contentId) ?: contentId
+        withRootLock(root) {
+            val matches = pending.all(scope)
+                .filter { it.contentId == contentId.value || it.rootContentId == contentId.value }
+                .filter { it.phase in setOf(
+                    CaptionPendingPhase.AWAITING_BINDING.name,
+                    CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name,
+                    CaptionPendingPhase.SERVER_REGISTERED.name,
+                    CaptionPendingPhase.LINEAGE_COMMITTED.name,
+                    CaptionPendingPhase.DESTRUCTION_PENDING.name,
+                ) }
+            check(matches.all { it.rootContentId == root.value }) { "Destruction root changed during lock acquisition." }
+            // A destruction arriving before the first pending write must fence that exact root too.
+            if (matches.isEmpty()) pending.fenceDestruction(scope, contentId.value)
+            var failure: Exception? = null
+            for (item in matches) {
+                // Independent encrypted tombstone first; a failed main-journal rewrite cannot erase it.
                 try {
-                    pending.put(scope, item.copy(phase = CaptionPendingPhase.DESTRUCTION_PENDING.name))
+                    pending.fenceDestruction(scope, item.contentId)
                 } catch (error: Exception) {
                     if (failure == null) failure = error else if (failure !== error) failure?.addSuppressed(error)
                 }
+                if (item.phase != CaptionPendingPhase.DESTRUCTION_PENDING.name) {
+                    try {
+                        pending.put(scope, item.copy(phase = CaptionPendingPhase.DESTRUCTION_PENDING.name))
+                    } catch (error: Exception) {
+                        if (failure == null) failure = error else if (failure !== error) failure?.addSuppressed(error)
+                    }
+                }
             }
+            failure?.let { throw it }
         }
-        failure?.let { throw it }
     }
 
     /** Keep debt visible through LC-21 destruction; no unreceipted local action can erase it. */
@@ -385,7 +425,7 @@ class ProtectedCaptionLineageCoordinator(
         pending.all(scope).any { it.contentId == contentId.value || it.rootContentId == contentId.value }
 
     /** Locally known caption versions and in-flight shares belonging to this exact room root. */
-    suspend fun contentIdsForDestruction(rootContentId: ContentId): Set<ContentId> = mutex.withLock {
+    suspend fun contentIdsForDestruction(rootContentId: ContentId): Set<ContentId> = withRootLock(rootContentId) {
         val graph = lineage.graph(scope, rootContentId)
         check(graph == null || graph.rootContentId == rootContentId) { "Caption lineage returned a different root." }
         buildSet {
@@ -501,5 +541,31 @@ class ProtectedCaptionLineageCoordinator(
     private fun digest(value: String) = MessageDigest.getInstance("SHA-256").digest(value.encodeToByteArray())
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
-    private companion object { val locks = ConcurrentHashMap<String, Mutex>() }
+    private companion object {
+        val rootLocks = CaptionLineageMutexes()
+        val operationLocks = CaptionLineageMutexes()
+    }
+}
+
+/** Entries include waiters and disappear after the last owner; history cannot grow this registry. */
+internal class CaptionLineageMutexes {
+    private class Entry(val mutex: Mutex = Mutex(), var owners: Int = 0)
+    private val entries = mutableMapOf<String, Entry>()
+
+    internal val activeKeys: Int get() = synchronized(entries) { entries.size }
+
+    suspend fun <T> withKey(key: String, action: suspend () -> T): T {
+        val entry = synchronized(entries) { entries.getOrPut(key) { Entry() }.also { it.owners++ } }
+        try {
+            return entry.mutex.withLock { action() }
+        } finally {
+            synchronized(entries) {
+                entry.owners--
+                if (entry.owners == 0) {
+                    check(entries[key] === entry)
+                    entries.remove(key)
+                }
+            }
+        }
+    }
 }

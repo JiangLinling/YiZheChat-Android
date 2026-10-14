@@ -36,6 +36,11 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import org.junit.Rule
@@ -54,6 +59,132 @@ class ProtectedCaptionLineageCoordinatorTest {
     private val expiry = now + 120_000
     private val rootNode = ContentVersionNode(root, root, null, "root-operation-0001", sha(targetEvent), now - 1000, expiry)
     private val graph = ContentVersionGraph(root, 1, listOf(rootNode), 0)
+
+    @Test fun `old root registration does not block a new root in the same room`() = runTest {
+        val store = MemoryPending()
+        val lineage = FakeLineage(graph)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val kms = mockk<KmsShareClient>()
+        coEvery { kms.registerContentVersion(any()) } coAnswers {
+            entered.complete(Unit)
+            release.await()
+            RegisterContentVersionResult(root, root, null, operationId, expiry, sha(targetEvent), now)
+        }
+        val first = ProtectedCaptionLineageCoordinator(scope, store, lineage, lifecycle(), kms)
+        val second = ProtectedCaptionLineageCoordinator(scope, store, lineage, lifecycle(), kms)
+        withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_15)) { first.prepareRoot(root) }
+        val binding = launch { first.observeBoundEvent(root, targetEvent, expiry) }
+        entered.await()
+        val newRoot = ContentId("independent-new-root")
+        val next = async(LifecycleOperationContext("independent-operation", FullAppLifecycleId.LC_15)) { second.prepareRoot(newRoot) }
+        runCurrent()
+        assertThat(next.isCompleted).isTrue()
+        assertThat(next.await()).isEqualTo(newRoot)
+        assertThat(binding.isCompleted).isFalse()
+        release.complete(Unit)
+        binding.join()
+        assertThat(store.all(scope).single().contentId).isEqualTo(newRoot.value)
+    }
+
+    @Test fun `same root binding and destruction stay serialized across coordinator instances`() = runTest {
+        val store = MemoryPending()
+        val lineage = FakeLineage(graph)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val kms = mockk<KmsShareClient>()
+        coEvery { kms.registerContentVersion(any()) } coAnswers {
+            entered.complete(Unit)
+            release.await()
+            RegisterContentVersionResult(root, root, null, operationId, expiry, sha(targetEvent), now)
+        }
+        val first = ProtectedCaptionLineageCoordinator(scope, store, lineage, lifecycle(), kms)
+        val second = ProtectedCaptionLineageCoordinator(scope, store, lineage, lifecycle(), kms)
+        withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_15)) { first.prepareRoot(root) }
+        val binding = launch { first.observeBoundEvent(root, targetEvent, expiry) }
+        entered.await()
+        val duplicate = launch { second.observeBoundEvent(root, targetEvent, expiry) }
+        val destruction = launch { second.markDestructionPending(root) }
+        runCurrent()
+        assertThat(duplicate.isCompleted).isFalse()
+        assertThat(destruction.isCompleted).isFalse()
+        release.complete(Unit)
+        binding.join()
+        duplicate.join()
+        destruction.join()
+        assertThat(lineage.appended).hasSize(1)
+        assertThat(store.isDestructionFenced(scope, root.value)).isTrue()
+        coVerify(exactly = 1) { kms.registerContentVersion(any()) }
+    }
+
+    @Test fun `destruction before initial pending publication forbids preparing that root`() = runTest {
+        val store = MemoryPending()
+        val coordinator = ProtectedCaptionLineageCoordinator(scope, store, FakeLineage(graph), mockk(), mockk())
+        coordinator.markDestructionPending(root)
+        withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_15)) {
+            expectSuspendFailure<IllegalStateException> { coordinator.prepareRoot(root) }
+        }
+        assertThat(store.all(scope)).isEmpty()
+    }
+
+    @Test fun `concurrent root preparation cannot reuse an operation for another content`() = runTest {
+        val delegate = MemoryPending()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val store = object : CaptionPendingStore by delegate {
+            override suspend fun put(scope: ContentVersionLineageScope, pending: CaptionPending) {
+                entered.complete(Unit)
+                release.await()
+                delegate.put(scope, pending)
+            }
+        }
+        val first = ProtectedCaptionLineageCoordinator(scope, store, FakeLineage(graph), mockk(), mockk())
+        val second = ProtectedCaptionLineageCoordinator(scope, store, FakeLineage(graph), mockk(), mockk())
+        val context = LifecycleOperationContext(operationId, FullAppLifecycleId.LC_15)
+        val original = async(context) { first.prepareRoot(root) }
+        entered.await()
+        val conflicting = async(context) { runCatching { second.prepareRoot(ContentId("different-root")) } }
+        runCurrent()
+        assertThat(conflicting.isCompleted).isFalse()
+        release.complete(Unit)
+        assertThat(original.await()).isEqualTo(root)
+        assertThat(conflicting.await().exceptionOrNull()).isInstanceOf(SecurityException::class.java)
+        assertThat(store.all(scope).single().contentId).isEqualTo(root.value)
+    }
+
+    @Test fun `concurrent operations cannot establish the same root twice`() = runTest {
+        val store = MemoryPending()
+        val first = ProtectedCaptionLineageCoordinator(scope, store, FakeLineage(graph), mockk(), mockk())
+        val second = ProtectedCaptionLineageCoordinator(scope, store, FakeLineage(graph), mockk(), mockk())
+        val one = async(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_15)) { runCatching { first.prepareRoot(root) } }
+        val two = async(LifecycleOperationContext("other-operation", FullAppLifecycleId.LC_15)) { runCatching { second.prepareRoot(root) } }
+        assertThat(listOf(one.await(), two.await()).count { it.isSuccess }).isEqualTo(1)
+        assertThat(store.all(scope)).hasSize(1)
+    }
+
+    @Test fun `keyed locks retain waiters and retire after cancellation and completion`() = runTest {
+        val locks = CaptionLineageMutexes()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val first = launch { locks.withKey("root") { entered.complete(Unit); release.await() } }
+        entered.await()
+        val second = launch { locks.withKey("root") { error("Cancelled waiter must never execute") } }
+        runCurrent()
+        assertThat(locks.activeKeys).isEqualTo(1)
+        second.cancelAndJoin()
+        assertThat(locks.activeKeys).isEqualTo(1)
+        release.complete(Unit)
+        first.join()
+        assertThat(locks.activeKeys).isEqualTo(0)
+    }
+
+    @Test fun `keyed locks clean up failed owners and many historical roots`() = runTest {
+        val locks = CaptionLineageMutexes()
+        expectSuspendFailure<IllegalStateException> { locks.withKey("failed") { error("injected") } }
+        assertThat(locks.activeKeys).isEqualTo(0)
+        repeat(2000) { index -> locks.withKey("root-$index") { Unit } }
+        assertThat(locks.activeKeys).isEqualTo(0)
+    }
 
     @Test fun `destruction enumerates committed descendants and encrypted pending child after reopen`() = runTest {
         val files = InMemorySensitiveFileStore()
