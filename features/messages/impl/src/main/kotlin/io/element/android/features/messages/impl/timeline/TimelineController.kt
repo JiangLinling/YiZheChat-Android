@@ -200,6 +200,7 @@ class TimelineController(
         }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun observeTextSendConfirmations() {
         val coordinator = appOperationalStateCoordinator ?: return
         if (!requireContentProtection) return
@@ -242,16 +243,20 @@ class TimelineController(
             }
         }
         coroutineScope.launch {
-            combine(optimisticLocalEchoes, coordinator.operations) { echoes, operations ->
+            optimisticLocalEchoes.map { echoes ->
                 echoes.mapNotNull { echo ->
                     val binding = echo.confirmationBinding ?: return@mapNotNull null
                     val eventId = echo.nativeConfirmedEventId ?: return@mapNotNull null
                     if (echo.item.event.localSendState is LocalEventSendState.Sent ||
-                        echo.item.event.localSendState is LocalEventSendState.Failed ||
-                        !binding.confirms(eventId, operations[binding.request.operationId] ?: return@mapNotNull null)
-                    ) return@mapNotNull null
-                    echo.item.uniqueId to eventId
+                        echo.item.event.localSendState is LocalEventSendState.Failed) return@mapNotNull null
+                    Triple(echo.item.uniqueId, binding, eventId)
                 }
+            }.distinctUntilChanged().flatMapLatest { pending ->
+                if (pending.isEmpty()) flowOf(emptyList()) else combine(pending.map { (id, binding, eventId) ->
+                    coordinator.observeOperation(binding.request.operationId).map { operation ->
+                        if (operation != null && binding.confirms(eventId, operation)) id to eventId else null
+                    }
+                }) { confirmations -> confirmations.filterNotNull() }
             }.collect { confirmations ->
                 if (confirmations.isEmpty()) return@collect
                 val confirmed = confirmations.toMap()

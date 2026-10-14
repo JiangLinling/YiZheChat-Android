@@ -17,6 +17,9 @@ import io.element.android.security.securestorage.api.SecureStorageKeyUnavailable
 import io.element.android.security.securestorage.api.SecureStorageRoots
 import io.element.android.security.securestorage.api.SecureVaultDestroyedException
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Dispatchers
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -395,6 +398,30 @@ class DefaultSensitiveFileStoreTest {
             store.write(aWriteRequest(expectedLength = 0)) { }
         }
         assertThat(failure).isInstanceOf(SecureVaultDestroyedException::class.java)
+    }
+
+    @Test
+    fun `maintenance across many batches cannot retire an object whose writer is still committing`() = runTest {
+        val directory = File(roots.persistentRoot(), "objects/old-cleanup").apply { mkdirs() }
+        repeat(100) { File(directory, ".partial-old-$it").writeBytes(byteArrayOf(1)) }
+        val entered = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val writer = async(Dispatchers.IO) {
+            store.write(aWriteRequest(expectedLength = 3)) { output ->
+                output.write(byteArrayOf(1, 2, 3))
+                entered.complete(Unit)
+                finish.await()
+            }
+        }
+        entered.await()
+        val maintenance = async(Dispatchers.IO) { store.runMaintenance() }
+        finish.complete(Unit)
+        val reference = writer.await()
+        val report = maintenance.await()
+        assertThat(report.partialFilesDeleted).isEqualTo(100)
+        assertThat(report.orphanDataFilesDeleted).isEqualTo(0)
+        assertThat(report.orphanKeyEnvelopesDeleted).isEqualTo(0)
+        assertThat(store.read(reference) { it.readBytes().toList() }).containsExactly(1.toByte(), 2.toByte(), 3.toByte()).inOrder()
     }
 
     @Test

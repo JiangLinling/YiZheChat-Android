@@ -34,6 +34,7 @@ dependencies {
     implementation(libs.network.okhttp)
     implementation(libs.serialization.json)
     implementation(libs.coroutines.core)
+    implementation(libs.kotlinx.collections.immutable)
 
     testCommonDependencies(libs)
     testImplementation(projects.security.secureStorage.test)

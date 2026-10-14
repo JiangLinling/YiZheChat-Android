@@ -139,7 +139,8 @@ class DefaultAppOperationalStateCoordinator internal constructor(
     private val mutableState = MutableStateFlow<AppOperationalCoordinatorState>(
         AppOperationalCoordinatorState.Discovering
     )
-    private val mutableOperations = MutableStateFlow<Map<String, LifecycleOperation>>(emptyMap())
+    private val operationProjections = LifecycleOperationProjections()
+    private val mutableOperations = operationProjections.state
     private val verifiedOperationVersions = mutableMapOf<String, LifecycleOperation>()
     // A bounded snapshot is a projection, not authority to revoke an admitted execution.
     // Count overlapping callers so one cancellation cannot discard another caller's owner.
@@ -173,7 +174,9 @@ class DefaultAppOperationalStateCoordinator internal constructor(
     internal var beforeOwnerCapabilityPublish: (() -> Unit)? = null
 
     override val state: StateFlow<AppOperationalCoordinatorState> = mutableState.asStateFlow()
-    override val operations: StateFlow<Map<String, LifecycleOperation>> = mutableOperations.asStateFlow()
+    override val operations: StateFlow<Map<String, LifecycleOperation>> = mutableOperations
+    override fun observeOperation(operationId: String) = operationProjections.observe(operationId)
+    override fun observeLifecycleOperations(lifecycleId: FullAppLifecycleId) = operationProjections.observeLifecycle(lifecycleId)
     override val uiStates: StateFlow<Map<FullAppLifecycleId, AppLifecycleUiState>> = mutableUiStates.asStateFlow()
 
     init {
@@ -238,7 +241,7 @@ class DefaultAppOperationalStateCoordinator internal constructor(
             if (previousId != null && recovered.none { it.operationId == previousId }) {
                 // Retire only the stale local retry; no server terminal receipt is manufactured.
                 pendingStarts.remove(previousId)
-                mutableOperations.value = mutableOperations.value - previousId
+                operationProjections.replace(mutableOperations.value - previousId)
             }
             recovered.sortedBy(LifecycleOperation::createdAtEpochMillis).forEach(::remember)
         }
@@ -286,7 +289,7 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                 )
                 snapshotRevision += 1
                 mutableState.value = AppOperationalCoordinatorState.Available(snapshot)
-                mutableOperations.value = mutableOperations.value
+                operationProjections.replace(mutableOperations.value
                     .filterValues { operation ->
                         operation.status.isTerminal ||
                             operation.operationId in pendingDraftStarts ||
@@ -294,7 +297,7 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                             pendingClientReceipts.keys.any { it.first == operation.operationId } ||
                             operation.operationId in activeIds ||
                             operation.operationId !in operationsBeforeRefresh
-                    }
+                    })
                 // Operation replies can predate the snapshot or a concurrently applied receipt.
                 // Use the same monotonic authority guard as direct start/resume/receipt replies.
                 recovered.values.forEach(::remember)
@@ -330,7 +333,7 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                     pendingStarts.remove(request.operationId)
                 }
                 if (operation.operationId != request.operationId) {
-                    mutableOperations.value = mutableOperations.value - request.operationId
+                    operationProjections.replace(mutableOperations.value - request.operationId)
                 }
                 remember(operation)
             }
@@ -1570,7 +1573,7 @@ class DefaultAppOperationalStateCoordinator internal constructor(
     private fun rememberProvisional(operation: LifecycleOperation) {
         if (verifiedOperationVersions.containsKey(operation.operationId)) return
         operationIdStore.remember(operation)
-        mutableOperations.value = mutableOperations.value + (operation.operationId to operation)
+        operationProjections.put(operation)
         updateUiStates((mutableState.value as? AppOperationalCoordinatorState.Available)?.snapshot)
     }
 
@@ -1588,7 +1591,7 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                 )) {
             // Rediscovery after projection pruning must restore the newer verified original.
             // A stale reply cannot replace it or authorize a replacement operation.
-            mutableOperations.value = mutableOperations.value + (previous.operationId to previous)
+            operationProjections.put(previous)
             updateUiStates((mutableState.value as? AppOperationalCoordinatorState.Available)?.snapshot)
             return
         }
@@ -1596,12 +1599,15 @@ class DefaultAppOperationalStateCoordinator internal constructor(
         // newest authoritative projection; never invent a merged operation or receipt.
         verifiedOperationVersions[operation.operationId] = operation
         operationIdStore.remember(operation)
-        mutableOperations.value = mutableOperations.value + (operation.operationId to operation)
+        operationProjections.put(operation)
         updateUiStates((mutableState.value as? AppOperationalCoordinatorState.Available)?.snapshot)
     }
 
     private fun updateUiStates(snapshot: AppOperationalSnapshot?) {
-        mutableUiStates.value = AppLifecycleUiProjector.projectAll(snapshot, mutableOperations.value)
+        val latest = operationProjections.latestByLifecycle()
+        mutableUiStates.value = FullAppLifecycleId.entries.associateWith { lifecycleId ->
+            AppLifecycleUiProjector.project(lifecycleId, snapshot, latest[lifecycleId])
+        }
     }
 
     private fun LifecycleOperationRequest.toProvisionalOperation(): LifecycleOperation {

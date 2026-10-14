@@ -460,7 +460,10 @@ class MessageComposerPresenter(
             // initial effect can otherwise start after restoration and then be cancelled
             // by its own false -> true recomposition while consuming the original receipt.
             snapshotFlow { draftRestored }.first { it }
-            appOperationalStateCoordinator.operations.collect {
+            appOperationalStateCoordinator.observeLifecycleOperations(FullAppLifecycleId.LC_13).collect {
+                // Normal sends consume their own captured draft. Only a restored durable version
+                // needs recovery here; historical receives must not repeatedly decrypt an empty draft.
+                if (restoredTextVersion.get() == null) return@collect
                 val revision = composerUserRevision.get()
                 // A restored editor that has been edited is still owned by the user, including
                 // an identical retyped body awaiting its debounce checkpoint.

@@ -194,8 +194,8 @@ class RustTimeline(
         timelineDiffProcessor = timelineDiffProcessor,
         dispatcher = dispatcher,
     )
-    private val preparedMessageMutex = Mutex()
-    private val preparedMessageTransactions = mutableMapOf<String, PreparedProtectedContent>()
+    private val preparedMessageLocks = CaptionLineageMutexes()
+    private val preparedMessageTransactions = java.util.concurrent.ConcurrentHashMap<String, PreparedProtectedContent>()
     private val pendingTimelineSends = PendingSendLifetime {
         coroutineScope.cancel()
         inner.close()
@@ -570,7 +570,7 @@ class RustTimeline(
                     }
                     return@withContext
                 }
-                val prepared = preparedMessageMutex.withLock {
+                val prepared = preparedMessageLocks.withKey(transactionId.value) {
                     preparedMessageTransactions[transactionId.value] ?: if (repliedToEventId == null) {
                         protectedContentAdapter.protectText(
                             body = body,
@@ -591,7 +591,7 @@ class RustTimeline(
                     }.also { preparedMessageTransactions[transactionId.value] = it }
                 }
                 sendPreparedMessage(prepared, intentionalMentions, repliedToEventId, allowServerBinding = true)
-                preparedMessageMutex.withLock {
+                preparedMessageLocks.withKey(transactionId.value) {
                     if (preparedMessageTransactions[transactionId.value] == prepared) {
                         preparedMessageTransactions.remove(transactionId.value)
                     }
@@ -602,7 +602,7 @@ class RustTimeline(
 
     override suspend fun discardMessageTransaction(transactionId: TransactionId): Result<Unit> = withContext(dispatcher) {
         runCatchingExceptions {
-            val prepared = preparedMessageMutex.withLock { preparedMessageTransactions.remove(transactionId.value) }
+            val prepared = preparedMessageLocks.withKey(transactionId.value) { preparedMessageTransactions.remove(transactionId.value) }
                 ?: return@runCatchingExceptions
             check(protectedContentAdapter.destroyPrepared(prepared, ContentAccessDestroyReason.ADMINISTRATIVE_REVOCATION)) {
                 "KMS refused to destroy the prepared message share."

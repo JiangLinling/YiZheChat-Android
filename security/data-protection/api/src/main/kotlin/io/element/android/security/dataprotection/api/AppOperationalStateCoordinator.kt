@@ -14,6 +14,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import kotlin.coroutines.AbstractCoroutineContextElement
@@ -91,6 +94,13 @@ interface AppOperationalStateCoordinator {
     val state: StateFlow<AppOperationalCoordinatorState>
     val operations: StateFlow<Map<String, LifecycleOperation>>
     val uiStates: StateFlow<Map<FullAppLifecycleId, AppLifecycleUiState>>
+
+    /** Observe only this original operation. Absence is unknown, never a successful receipt. */
+    fun observeOperation(operationId: String): Flow<LifecycleOperation?> =
+        operations.map { it[operationId] }.distinctUntilChanged()
+
+    fun observeLifecycleOperations(lifecycleId: FullAppLifecycleId): Flow<Map<String, LifecycleOperation>> =
+        operations.map { entries -> entries.filterValues { it.lifecycleId == lifecycleId } }.distinctUntilChanged()
 
     suspend fun refresh(accountIdHash: String, matrixDeviceIdHash: String): AppOperationalSnapshot
 

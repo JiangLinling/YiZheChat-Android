@@ -601,27 +601,35 @@ class DefaultSensitiveFileStore(
     }
 
     override suspend fun runMaintenance(): SecureStoreMaintenanceReport = withContext(Dispatchers.IO) {
-        operationMutex.withLock {
-            recoverTransientMediaObjectsLocked()
-            val objectsRoot = File(roots.persistentRoot(), OBJECTS_DIRECTORY)
-            if (!objectsRoot.exists()) return@withLock SecureStoreMaintenanceReport(0, 0, 0)
-            val files = objectsRoot.walkTopDown().filter(File::isFile).toList()
-            var partialFilesDeleted = 0
-            var orphanDataFilesDeleted = 0
-            var orphanKeyEnvelopesDeleted = 0
-            files.filter { it.name.startsWith(PARTIAL_FILE_PREFIX) }.forEach { partial ->
-                if (partial.delete()) partialFilesDeleted++
+        operationMutex.withLock { recoverTransientMediaObjectsLocked() }
+        val objectsRoot = File(roots.persistentRoot(), OBJECTS_DIRECTORY)
+        if (!objectsRoot.exists()) return@withContext SecureStoreMaintenanceReport(0, 0, 0)
+        var partialFilesDeleted = 0
+        var orphanDataFilesDeleted = 0
+        var orphanKeyEnvelopesDeleted = 0
+        // Directory enumeration performs no deletion and must not own the foreground I/O lock.
+        // Recheck each bounded batch under the same writer/destruction lock: a key/data pair
+        // being committed can never be mistaken for an orphan, and Vault destruction stays ordered.
+        for (batch in objectsRoot.walkTopDown().filter(File::isFile).chunked(32)) {
+            operationMutex.withLock {
+                batch.forEach { file ->
+                    when {
+                        file.name.startsWith(PARTIAL_FILE_PREFIX) ->
+                            if (file.delete()) partialFilesDeleted++
+                        file.name.endsWith(DATA_FILE_SUFFIX) -> {
+                            val keyFile = File(file.parentFile, file.name.removeSuffix(DATA_FILE_SUFFIX) + KEY_ENVELOPE_FILE_SUFFIX)
+                            if (!keyFile.isFile && file.delete()) orphanDataFilesDeleted++
+                        }
+                        file.name.endsWith(KEY_ENVELOPE_FILE_SUFFIX) -> {
+                            val dataFile = File(file.parentFile, file.name.removeSuffix(KEY_ENVELOPE_FILE_SUFFIX) + DATA_FILE_SUFFIX)
+                            if (!dataFile.isFile && file.delete()) orphanKeyEnvelopesDeleted++
+                        }
+                    }
+                }
             }
-            files.filter { it.name.endsWith(DATA_FILE_SUFFIX) }.forEach { dataFile ->
-                val keyFile = File(dataFile.parentFile, dataFile.name.removeSuffix(DATA_FILE_SUFFIX) + KEY_ENVELOPE_FILE_SUFFIX)
-                if (!keyFile.isFile && dataFile.delete()) orphanDataFilesDeleted++
-            }
-            files.filter { it.name.endsWith(KEY_ENVELOPE_FILE_SUFFIX) }.forEach { keyFile ->
-                val dataFile = File(keyFile.parentFile, keyFile.name.removeSuffix(KEY_ENVELOPE_FILE_SUFFIX) + DATA_FILE_SUFFIX)
-                if (!dataFile.isFile && keyFile.delete()) orphanKeyEnvelopesDeleted++
-            }
-            SecureStoreMaintenanceReport(partialFilesDeleted, orphanDataFilesDeleted, orphanKeyEnvelopesDeleted)
+            kotlinx.coroutines.yield()
         }
+        SecureStoreMaintenanceReport(partialFilesDeleted, orphanDataFilesDeleted, orphanKeyEnvelopesDeleted)
     }
 
     private suspend fun writeEncryptedData(

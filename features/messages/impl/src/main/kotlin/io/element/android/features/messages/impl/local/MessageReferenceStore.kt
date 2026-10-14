@@ -66,7 +66,7 @@ class DefaultMessageReferenceStore(
 
     init {
         sessionCoroutineScope.launch {
-            coordinator.operations.map { operations ->
+            coordinator.observeLifecycleOperations(FullAppLifecycleId.LC_18).map { operations ->
                 operations.values.filter { it.lifecycleId == FullAppLifecycleId.LC_18 && it.status == LifecycleOperationStatus.SUCCEEDED }
                     .map { it.operationId }.toSet()
             }.distinctUntilChanged().collect { if (loaded) refreshFavourites() }
