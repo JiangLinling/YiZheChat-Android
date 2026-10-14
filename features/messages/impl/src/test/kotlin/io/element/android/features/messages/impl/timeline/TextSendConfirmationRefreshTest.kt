@@ -79,4 +79,45 @@ class TextSendConfirmationRefreshTest {
         assertThat(result.exceptionOrNull()).isInstanceOf(IOException::class.java)
         assertThat(reads).isEqualTo(1)
     }
+
+    @Test fun `delayed server confirmation settles independently after fast window`() = runTest {
+        var reads = 0
+        assertThat(awaitTextSendConfirmation(binding, event, { true }, nowEpochMillis = { 0L }) {
+            if (++reads <= 5) committed.copy(steps = emptyList()) else committed
+        }).isTrue()
+        assertThat(reads).isEqualTo(6)
+        assertThat(testScheduler.currentTime).isEqualTo(3_500L)
+    }
+
+    @Test fun `lost response retries only original status and never invents completion`() = runTest {
+        var reads = 0
+        assertThat(awaitTextSendConfirmation(binding, event, { true }, nowEpochMillis = { 0L }) {
+            if (++reads == 1) throw IOException("lost response") else committed
+        }).isTrue()
+        assertThat(reads).isEqualTo(2)
+    }
+
+    @Test fun `original deadline prevents further independent polling`() = runTest {
+        var reads = 0
+        assertThat(awaitTextSendConfirmation(binding, event, { true }, nowEpochMillis = { request.deadlineEpochMillis }) {
+            reads++; committed
+        }).isFalse()
+        assertThat(reads).isEqualTo(0)
+    }
+
+    @Test fun `retired echo cancels independent polling without waiting for history`() = runTest {
+        var pending = true
+        var reads = 0
+        assertThat(awaitTextSendConfirmation(binding, event, { pending }, nowEpochMillis = { 0L }) {
+            reads++; pending = false; committed.copy(steps = emptyList())
+        }).isFalse()
+        assertThat(reads).isEqualTo(1)
+    }
+
+    @Test fun `slow or missing server response remains pending under a finite deadline`() = runTest {
+        assertThat(awaitTextSendConfirmation(binding, event, { true }, nowEpochMillis = { 0L }) {
+            delay(60_000); committed
+        }).isFalse()
+        assertThat(testScheduler.currentTime).isEqualTo(30_000L)
+    }
 }

@@ -26,6 +26,7 @@ import io.element.android.libraries.matrix.impl.paths.getSessionPaths
 import io.element.android.libraries.matrix.impl.proxy.ProxyProvider
 import io.element.android.libraries.matrix.impl.room.TimelineEventFilterFactory
 import io.element.android.libraries.matrix.impl.storage.SqliteStoreBuilderProvider
+import io.element.android.libraries.matrix.impl.storage.EventCacheQueryIndex
 import io.element.android.libraries.matrix.impl.timeline.DisabledMatrixContentProtectionRuntime
 import io.element.android.libraries.matrix.impl.timeline.DisabledMatrixProtectedContentAdapterFactory
 import io.element.android.libraries.matrix.impl.timeline.MatrixProtectedContentAdapterFactory
@@ -311,6 +312,9 @@ class RustMatrixClientFactory(
             }
             .config()
             .build()
+        withContext(coroutineDispatchers.io) {
+            EventCacheQueryIndex.ensure(sessionPaths.cacheDirectory)
+        }
         pendingSessionDelegates[client] = sessionDelegate
         return client
     }

@@ -8,6 +8,7 @@ import io.element.android.security.dataprotection.api.LifecycleOperation
 import io.element.android.security.dataprotection.api.LifecycleOperationStatus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.IOException
 
 /** A bounded read of the original signed status, never another send or lifecycle operation. */
 internal suspend fun refreshTextSendConfirmation(
@@ -26,6 +27,31 @@ internal suspend fun refreshTextSendConfirmation(
         if (operation.status.isTerminal || operation.status in setOf(
                 LifecycleOperationStatus.BLOCKED, LifecycleOperationStatus.RETRYABLE_FAILURE,
             )) return@withTimeoutOrNull false
+    }
+    false
+} ?: false
+
+/** Continue only this original confirmation after a delayed response; history is not its retry trigger. */
+internal suspend fun awaitTextSendConfirmation(
+    binding: TextSendConfirmationBinding,
+    eventId: EventId,
+    isPending: () -> Boolean,
+    nowEpochMillis: () -> Long = System::currentTimeMillis,
+    read: suspend () -> LifecycleOperation,
+): Boolean = withTimeoutOrNull(30_000L) {
+    val waits = listOf(0L, 100L, 200L, 400L, 800L) + List(12) { 2_000L }
+    for (waitMillis in waits) {
+        if (waitMillis > 0) delay(waitMillis)
+        if (!isPending() || nowEpochMillis() >= binding.request.deadlineEpochMillis) return@withTimeoutOrNull false
+        val operation = try {
+            withTimeoutOrNull(2_500L) { read() }
+        } catch (_: IOException) {
+            null // A lost status response does not resend the original message.
+        } ?: continue
+        if (binding.confirms(eventId, operation)) return@withTimeoutOrNull true
+        if (operation.operationId != binding.request.operationId || operation.status.isTerminal ||
+            operation.status == LifecycleOperationStatus.BLOCKED || nowEpochMillis() >= operation.deadlineEpochMillis
+        ) return@withTimeoutOrNull false
     }
     false
 } ?: false

@@ -511,8 +511,8 @@ android {
                 dimension = "store"
                 applicationId = "com.yizhe.chat.next"
                 // Keep cumulative QA upgrades local to Next without invalidating every shared build plugin.
-                versionCode = maxOf(Versions.VERSION_CODE, 20260690)
-                versionName = if (Versions.VERSION_CODE < 20260690) "26.06.90" else Versions.VERSION_NAME
+                versionCode = maxOf(Versions.VERSION_CODE, 20260691)
+                versionName = if (Versions.VERSION_CODE < 20260691) "26.06.91" else Versions.VERSION_NAME
                 signingConfig = nextDebugSigningConfig
                 manifestPlaceholders.putAll(nextManifestValues)
                 manifestPlaceholders["yizheUnifiedSourceManifestSha256"] = unifiedSourceManifestSha256

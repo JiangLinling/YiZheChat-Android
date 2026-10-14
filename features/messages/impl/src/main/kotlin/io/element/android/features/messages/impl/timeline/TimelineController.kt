@@ -224,7 +224,7 @@ class TimelineController(
                 // snapshot race; normal remote handover remains the fallback after its deadline.
                 coroutineScope.launch {
                     runCatchingExceptions {
-                        refreshTextSendConfirmation(checkNotNull(owned.confirmationBinding), update.eventId,
+                        awaitTextSendConfirmation(checkNotNull(owned.confirmationBinding), update.eventId,
                             isPending = {
                                 optimisticLocalEchoes.value.any { echo ->
                                     echo.item.uniqueId == owned.item.uniqueId && !isOptimisticDisplayIdRetired(echo.item.uniqueId) &&
