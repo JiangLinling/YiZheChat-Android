@@ -22,7 +22,10 @@ import io.element.android.security.dataprotection.test.FakeAppOperationalStateCo
 import io.element.android.tests.testutils.lambda.lambdaRecorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -42,6 +45,8 @@ class TextSendConfirmationIntegrationTest {
         var pendingReads = 0
         val coordinator = object : AppOperationalStateCoordinator by FakeAppOperationalStateCoordinator() {
             override val operations = this@Fixture.operations
+            override fun observeOperation(operationId: String): Flow<LifecycleOperation?> =
+                operations.map { it[operationId] }.distinctUntilChanged()
             override suspend fun start(request: LifecycleOperationRequest): LifecycleOperation =
                 committedTextSend(request, EventId("\$not-yet-sent")).copy(steps = emptyList()).also {
                     operations.value = operations.value + (request.operationId to it)

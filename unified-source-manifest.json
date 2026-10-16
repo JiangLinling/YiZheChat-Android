@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "revision": "cumulative-r15-20261016-fc008-fc015-fc017",
-  "frozen_utc": "2026-10-16T14:14:29.923219+00:00",
+  "frozen_utc": "2026-10-16T14:49:09.977410+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -2662,7 +2662,7 @@
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/NewMessageNavigationTest.kt": "20d486ca1c4a2c05e688a7635ce9360edde8c8d8dc378f74bdc662359f48fe37",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/PendingMediaSendPresentationTest.kt": "a31423ec715ca2271984c43129279dae8dcba03680923555ed205b3a2456658f",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/RoomReadReceiptPolicyTest.kt": "dbb0abc8d16ed0810f9e989a1143beea506bf562493dc100217679f8c78d1ecd",
-    "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/TextSendConfirmationIntegrationTest.kt": "7970ff2ee9f2a8d2dc4be3de47b37def5fad1539bdc1e99e73705e9185642935",
+    "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/TextSendConfirmationIntegrationTest.kt": "7a3aee07cfe0dd67b246cd2d30c7546122fa2fcf7eaefd6ceda0bee30d3f04a1",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/TextSendConfirmationRefreshTest.kt": "6f425559e4c0d6ab9984049d73fbd0ce3dc8d427d3fc678d15de1d5aaf8cb2b7",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/TimelineControllerTest.kt": "2ca3d5b20f9393f5c3c1089514ad036fcadaba8ca8012aa2bb7c7ac77ab14e97",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/TimelineItemIndexerTest.kt": "b0f31757291163724da825f43a1d97995abda0034c624961208cc62d34c356cd",
@@ -3506,7 +3506,7 @@
     "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/FakeRoomDetailsNavigator.kt": "e981577250abdf3b36bb0f98e4523b912e93e73d79675f1840e0f8465f8b0103",
     "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/MatrixRoomFixture.kt": "bd533ebf0f006fe6b3c8b45b68308c9885ae7e8740ad839453fd02d33108d375",
     "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsPresenterTest.kt": "5b013eeaf8ecb05db72e2270cf2f3e345957da434eee9156725e54032eee566e",
-    "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsSearchNavigationTest.kt": "44aead91d8bb737e0d80e17cf641a61833efbd6a111461779a58c61f9aa5b2c5",
+    "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsSearchNavigationTest.kt": "3dc46baa6ebefff612996885b915f6e8fa975ece4959efdeeb68655404df465a",
     "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsStateTest.kt": "1c6225253b5966614fb390291d332ae11728506b97e4ff5b457b053bee683dcd",
     "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsViewTest.kt": "d02bebf885125492156e539e0378841ab1e720232e375b56dcce5efa70a1b43c",
     "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/RoomHistorySearchNodeTest.kt": "61ea79d70054fc71fee601b6205e1a1aae0a1f093e3db83065824a17b25c960f",

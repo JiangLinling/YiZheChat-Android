@@ -26,12 +26,16 @@ import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.test.room.FakeBaseRoom
 import io.element.android.libraries.matrix.test.room.FakeJoinedRoom
 import io.element.android.libraries.matrix.test.room.aRoomInfo
+import io.element.android.security.dataprotection.api.ProtectedPreviewAccessState
+import io.element.android.security.dataprotection.api.ProtectedPreviewAuthorizationGate
+import io.element.android.services.appnavstate.api.AppForegroundStateService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.slot
 import io.mockk.unmockkStatic
 import io.mockk.verify
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -138,6 +142,14 @@ class RoomDetailsSearchNavigationTest {
 
     private fun openSearchResult(isDirect: Boolean = false): RoomDetailsFlowNode {
         val messages = mockk<MessagesEntryPoint>()
+        val previewGate = mockk<ProtectedPreviewAuthorizationGate> {
+            every { authorizationRevision } returns MutableStateFlow(1L)
+            every { accessState } returns MutableStateFlow(ProtectedPreviewAccessState(true, true, true))
+            every { canAttemptPreview() } returns true
+        }
+        val foregroundService = mockk<AppForegroundStateService> {
+            every { isInForeground } returns MutableStateFlow(true)
+        }
         every { messages.createNode(any(), any(), capture(messagesParams), capture(messagesCallback)) } answers { node(context) {} }
         val flow = RoomDetailsFlowNode(
             buildContext = context,
@@ -157,6 +169,8 @@ class RoomDetailsSearchNavigationTest {
             securityAndPrivacyEntryPoint = mockk(),
             roomDetailsEditEntryPoint = mockk(),
             friendProfileRepository = mockk(),
+            previewAuthorizationGate = previewGate,
+            appForegroundStateService = foregroundService,
         )
         flow.resolve(NavTarget.RoomDetails, context)
         detailsCallback.navigateToFindChatContent()
