@@ -27,6 +27,7 @@ import io.element.android.libraries.sessionstorage.api.SessionStore
 import io.element.android.libraries.sessionstorage.test.InMemorySessionStore
 import io.element.android.libraries.sessionstorage.test.aSessionData
 import io.element.android.libraries.workmanager.test.FakeWorkManagerScheduler
+import io.element.android.libraries.workmanager.api.WorkManagerScheduler
 import io.element.android.security.dataprotection.api.DeletionReason
 import io.element.android.security.dataprotection.api.AccountActivationReceipt
 import io.element.android.security.dataprotection.api.AccountReactivationAttempt
@@ -66,6 +67,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.AuthData
 import org.matrix.rustcomponents.sdk.Client
@@ -79,6 +81,53 @@ import java.io.File
 private const val TEST_INSTALLATION_ID = "matrix-client-installation-test"
 
 class RustMatrixClientTest {
+    @Test
+    fun `session construction does not wait for the maintenance database query`() = runTest {
+        var checks = 0
+        var submissions = 0
+        createRustMatrixClient(workManagerScheduler = FakeWorkManagerScheduler(
+            hasPendingWorkLambda = { _, _ -> checks++; false },
+            submitLambda = { submissions++ },
+        ))
+        assertThat(checks).isEqualTo(0)
+        runCurrent()
+        assertThat(checks).isEqualTo(1)
+        assertThat(submissions).isEqualTo(1)
+    }
+
+    @Test
+    fun `existing periodic maintenance is not registered twice`() = runTest {
+        var submissions = 0
+        createRustMatrixClient(workManagerScheduler = FakeWorkManagerScheduler(
+            hasPendingWorkLambda = { _, _ -> true },
+            submitLambda = { submissions++ },
+        ))
+        runCurrent()
+        assertThat(submissions).isEqualTo(0)
+    }
+
+    @Test
+    fun `session cancellation during the maintenance query prevents registration`() = runTest {
+        lateinit var client: RustMatrixClient
+        var submissions = 0
+        client = createRustMatrixClient(workManagerScheduler = FakeWorkManagerScheduler(
+            hasPendingWorkLambda = { _, _ -> client.sessionCoroutineScope.cancel(); false },
+            submitLambda = { submissions++ },
+        ))
+        runCurrent()
+        assertThat(submissions).isEqualTo(0)
+    }
+
+    @Test
+    fun `a maintenance query failure does not fail the restored client`() = runTest {
+        val client = createRustMatrixClient(workManagerScheduler = FakeWorkManagerScheduler(
+            hasPendingWorkLambda = { _, _ -> error("Maintenance database unavailable") },
+            submitLambda = { error("Must not enqueue after a failed query") },
+        ))
+        runCurrent()
+        assertThat(client.sessionId).isEqualTo(A_USER_ID)
+    }
+
     @Test
     fun `ensure that sessionId and deviceId can be retrieved from the client`() = runTest {
         createRustMatrixClient().run {
@@ -505,6 +554,7 @@ class RustMatrixClientTest {
         appCoroutineScope: CoroutineScope = backgroundScope,
         sessionDelegateAppCoroutineScope: CoroutineScope = this,
         dispatchers: CoroutineDispatchers = testCoroutineDispatchers(),
+        workManagerScheduler: WorkManagerScheduler = FakeWorkManagerScheduler(submitLambda = {}),
     ) = RustMatrixClient(
         innerClient = client,
         sessionStore = sessionStore,
@@ -520,7 +570,7 @@ class RustMatrixClientTest {
         timelineEventFilterFactory = FakeTimelineEventFilterFactory(),
         featureFlagService = FakeFeatureFlagService(),
         analyticsService = FakeAnalyticsService(),
-        workManagerScheduler = FakeWorkManagerScheduler(submitLambda = {}),
+        workManagerScheduler = workManagerScheduler,
         sensitiveFileStore = InMemorySensitiveFileStore(),
         secureMediaLeaseManager = DisabledSecureMediaLeaseManager,
         secureFileStoreEnabled = false,

@@ -13,6 +13,21 @@ import io.element.android.libraries.matrix.api.verification.SessionVerifiedStatu
 import org.junit.Test
 
 class StartupSecurityStateTest {
+    @Test fun `retained original home permits background receipts but never bypasses known security gates`() {
+        val state = StartupSecurityState(securityReady = true, setupComplete = true,
+            ftueState = FtueState.Complete, verificationStatus = SessionVerifiedStatus.Verified,
+            coreReady = false, sessionInitialized = false, retainedHomeReady = true,
+            coreReadyEnforcement = CoreReadyEnforcement.REQUIRED)
+        assertThat(state.destination()).isEqualTo(StartupDestination.HOME)
+        assertThat(state.copy(retainedHomeReady = false).destination()).isEqualTo(StartupDestination.WAIT)
+        assertThat(state.copy(securityReady = false).destination()).isEqualTo(StartupDestination.SECURITY_SETUP)
+        assertThat(state.copy(setupComplete = false).destination()).isEqualTo(StartupDestination.SECURITY_SETUP)
+        assertThat(state.copy(recoveryRequired = true).destination()).isEqualTo(StartupDestination.SECURITY_SETUP)
+        assertThat(state.copy(verificationStatus = SessionVerifiedStatus.Unknown).destination()).isEqualTo(StartupDestination.WAIT)
+        assertThat(state.copy(failureReasonCode = "POLICY_REVOKED").destination()).isEqualTo(StartupDestination.ERROR)
+        assertThat(state.copy(deletionRecoveryRequired = true).destination()).isEqualTo(StartupDestination.DELETION_RECOVERY)
+    }
+
     @Test fun `signed CORE alone cannot expose home before session services and receipts complete`() {
         val state = StartupSecurityState(securityReady = true, setupComplete = true,
             ftueState = FtueState.Complete, verificationStatus = SessionVerifiedStatus.Verified,

@@ -13,6 +13,7 @@ import io.element.android.libraries.matrix.api.core.RoomId
 
 sealed interface RoomListEvent {
     data class UpdateVisibleRange(val range: IntRange) : RoomListEvent
+    data class UpdatePreviewRooms(val roomIds: List<RoomId>) : RoomListEvent
     data object DismissRequestVerificationPrompt : RoomListEvent
     data object DismissBanner : RoomListEvent
     data object DismissNewNotificationSoundBanner : RoomListEvent

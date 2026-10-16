@@ -67,6 +67,8 @@ class DefaultRoomDetailsEntryPointTest {
                 securityAndPrivacyEntryPoint = FakeSecurityAndPrivacyEntryPoint(),
                 roomDetailsEditEntryPoint = FakeRoomDetailsEditEntryPoint(),
                 friendProfileRepository = FakeFriendProfileRepository(),
+                previewAuthorizationGate = io.mockk.mockk(),
+                appForegroundStateService = io.mockk.mockk(),
             )
         }
         val callback = object : RoomDetailsEntryPoint.Callback {

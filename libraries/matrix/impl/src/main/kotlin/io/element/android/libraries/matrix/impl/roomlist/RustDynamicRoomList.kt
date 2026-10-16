@@ -29,6 +29,10 @@ internal class RustDynamicRoomList(
 ) : DynamicRoomList {
     private val mutex = Mutex()
 
+    override fun updatePreviewRooms(roomIds: List<io.element.android.libraries.matrix.api.core.RoomId>) {
+        processor.updatePreviewRooms(roomIds)
+    }
+
     override suspend fun rebuildSummaries() {
         processor.rebuildRoomSummaries()
     }

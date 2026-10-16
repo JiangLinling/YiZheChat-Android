@@ -22,6 +22,7 @@ import io.element.android.services.toolbox.api.strings.StringProvider
 import io.element.android.services.toolbox.api.systemclock.SystemClock
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -45,11 +46,20 @@ class PushLoopbackTest(
     override val state: StateFlow<NotificationTroubleshootTestState> = delegate.state
 
     override suspend fun run(coroutineScope: CoroutineScope) {
+        diagnosticPushHandler.clearPendingTest()
+        try {
+            runLoopback(coroutineScope)
+        } finally {
+            diagnosticPushHandler.clearPendingTest()
+        }
+    }
+
+    private suspend fun runLoopback(coroutineScope: CoroutineScope) {
         delegate.start()
         val startTime = clock.epochMillis()
         val completable = CompletableDeferred<Long>()
-        val job = coroutineScope.launch {
-            diagnosticPushHandler.state.first()
+        val job = coroutineScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            diagnosticPushHandler.state.first(diagnosticPushHandler::isCurrentTest)
             completable.complete(clock.epochMillis() - startTime)
         }
         val testPushResult = try {

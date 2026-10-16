@@ -208,13 +208,13 @@ class DefaultPushHandlerTest {
 
     @Test
     fun `when diagnostic PushData is received, the diagnostic push handler is informed`() = runTest {
+        val diagnosticPushHandler = DiagnosticPushHandler()
         val aPushData = PushData(
-            eventId = DefaultTestPush.TEST_EVENT_ID,
+            eventId = diagnosticPushHandler.beginTest(),
             roomId = A_ROOM_ID,
             unread = 0,
             clientSecret = A_SECRET,
         )
-        val diagnosticPushHandler = DiagnosticPushHandler()
         val onPushReceivedResult = lambdaRecorder<String, EventId?, RoomId?, SessionId?, Boolean, Boolean, String?, Unit> { _, _, _, _, _, _, _ -> }
         val pushHistoryService = FakePushHistoryService(
             onPushReceivedResult = onPushReceivedResult,

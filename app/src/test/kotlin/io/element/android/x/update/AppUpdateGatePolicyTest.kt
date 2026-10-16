@@ -17,6 +17,16 @@ import org.junit.Test
 
 class AppUpdateGatePolicyTest {
     @Test
+    fun `retained startup preparation preserves mandatory release and production manifest gates`() {
+        assertThat(canPrepareRetainedAppContent(true, false, null)).isTrue()
+        assertThat(canPrepareRetainedAppContent(true, true, release(mandatory = true))).isFalse()
+        assertThat(canPrepareRetainedAppContent(false, false, null)).isFalse()
+        assertThat(canPrepareRetainedAppContent(false, false, release(mandatory = false))).isFalse()
+        assertThat(canPrepareRetainedAppContent(false, true, release(mandatory = false))).isTrue()
+        assertThat(canPrepareRetainedAppContent(false, true, release(mandatory = true))).isFalse()
+    }
+
+    @Test
     fun `known network loss cannot reopen protected content through a fresh online cache`() {
         assertThat(restrictEntryWithoutOfflineGrant(false, true, false)).isTrue()
         assertThat(restrictEntryWithoutOfflineGrant(true, false, false)).isTrue()

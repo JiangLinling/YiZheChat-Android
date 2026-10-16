@@ -618,6 +618,8 @@ interface ManagementControlService {
     /** Verified, subject-bound UI entry permission. It never grants an offline content key. */
     suspend fun offlineEntryStatus(): OfflineEntryStatus? = null
 
+    suspend fun localListEntryStatus(): LocalChatListPermission? = null
+
     suspend fun pendingCommands(): List<VerifiedManagementCommand>
 
     suspend fun reportCommand(report: ManagementCommandExecutionReport): Boolean

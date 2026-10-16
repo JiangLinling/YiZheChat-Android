@@ -64,13 +64,23 @@ class RoomSummaryFactory(
 
     suspend fun create(room: Room): RoomSummary = create(room, initialSnapshot = false)
 
-    // First list population must not wait for every optional message preview. A timed-out
-    // preview remains a protected shell; normal rebuilds still use the full authorization path.
+    // Structural list projection never starts a protected read. Visible previews are hydrated
+    // after publication through create(), with the existing content authorization unchanged.
     suspend fun createInitial(room: Room): RoomSummary = create(room, initialSnapshot = true)
 
     private suspend fun create(room: Room, initialSnapshot: Boolean): RoomSummary {
         val roomInfo = room.roomInfo().let(roomInfoMapper::map)
+        var sourceEventFingerprint: String? = null
         val latestEvent = room.latestEvent().use { event ->
+            val sourceContent = when (event) {
+                is RustLatestEventValue.Local -> contentMapper.map(event.content)
+                is RustLatestEventValue.Remote -> contentMapper.map(event.content)
+                else -> null
+            }
+            sourceEventFingerprint = sourceContent?.let { source ->
+                java.security.MessageDigest.getInstance("SHA-256").digest(source.toString().encodeToByteArray())
+                    .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            }
             when (event) {
                 is RustLatestEventValue.None -> LatestEventValue.None
                 is RustLatestEventValue.Local -> when (event.state) {
@@ -82,7 +92,7 @@ class RoomSummaryFactory(
                             roomId = roomInfo.id,
                             timestamp = event.timestamp.toLong(),
                             sender = event.sender,
-                            content = contentMapper.map(event.content),
+                            content = requireNotNull(sourceContent),
                             isPendingLocalSummary = true,
                             initialSnapshot = initialSnapshot,
                         ),
@@ -98,7 +108,7 @@ class RoomSummaryFactory(
                             roomId = roomInfo.id,
                             timestamp = event.timestamp.toLong(),
                             sender = event.sender,
-                            content = contentMapper.map(event.content),
+                            content = requireNotNull(sourceContent),
                             isConfirmedOwnSummary = true,
                             initialSnapshot = initialSnapshot,
                         ),
@@ -114,7 +124,7 @@ class RoomSummaryFactory(
                         roomId = roomInfo.id,
                         timestamp = event.timestamp.toLong(),
                         sender = event.sender,
-                        content = contentMapper.map(event.content),
+                        content = requireNotNull(sourceContent),
                         isConfirmedOwnSummary = event.isOwn,
                         initialSnapshot = initialSnapshot,
                     ),
@@ -132,6 +142,7 @@ class RoomSummaryFactory(
         return RoomSummary(
             info = roomInfo,
             latestEvent = latestEvent,
+            sourceEventFingerprint = sourceEventFingerprint,
         )
     }
 
@@ -149,12 +160,7 @@ class RoomSummaryFactory(
         val currentSessionId = sessionId ?: return content
         val currentDeviceId = deviceId ?: return content
         if (initialSnapshot) {
-            return withTimeoutOrNull(INITIAL_PREVIEW_TIMEOUT_MILLIS) {
-                authorizeLatestContent(
-                    room, roomId, timestamp, sender, content,
-                    isConfirmedOwnSummary, isPendingLocalSummary, initialSnapshot = false,
-                )
-            } ?: message.withProtectedDisplayState(ProtectedMessageDisplayState.TEMPORARILY_UNAVAILABLE)
+            return message.withProtectedDisplayState(ProtectedMessageDisplayState.TEMPORARILY_UNAVAILABLE)
         }
         return try {
             val adapter = previewAdapters.getOrPut(roomId) {
@@ -262,7 +268,6 @@ class RoomSummaryFactory(
     }
 
     private companion object {
-        const val INITIAL_PREVIEW_TIMEOUT_MILLIS = 300L
         val previewOwnerSequence = AtomicLong()
     }
 }

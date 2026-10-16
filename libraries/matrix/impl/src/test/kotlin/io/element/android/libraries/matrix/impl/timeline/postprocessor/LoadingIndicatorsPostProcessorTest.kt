@@ -18,6 +18,19 @@ import org.junit.Test
 
 class LoadingIndicatorsPostProcessorTest {
     @Test
+    fun `failure keeps cached messages and exposes retry only in failed direction`() {
+        val result = LoadingIndicatorsPostProcessor(FakeSystemClock()).process(
+            items = listOf(messageEvent, messageEvent2),
+            hasMoreToLoadBackward = true, hasMoreToLoadForward = true, backwardRequestFailed = true,
+        )
+        assertThat(result.subList(1, 3)).containsExactly(messageEvent, messageEvent2).inOrder()
+        val backward = (result.first() as MatrixTimelineItem.Virtual).virtual as VirtualTimelineItem.LoadingIndicator
+        val forward = (result.last() as MatrixTimelineItem.Virtual).virtual as VirtualTimelineItem.LoadingIndicator
+        assertThat(backward.lastRequestFailed).isTrue()
+        assertThat(forward.lastRequestFailed).isFalse()
+    }
+
+    @Test
     fun `LoadingIndicatorsPostProcessor adds Loading indicator at the top of the list if hasMoreToLoadBackward is true`() {
         val clock = FakeSystemClock()
         val sut = LoadingIndicatorsPostProcessor(clock)

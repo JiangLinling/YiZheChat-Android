@@ -236,7 +236,12 @@ fun TimelineView(
     }
 
     fun prefetchMoreItems() {
-        state.eventSink(TimelineEvent.LoadMore(Timeline.PaginationDirection.BACKWARDS))
+        val failed = state.timelineItems.any { item ->
+            val loading = (item as? TimelineItem.Virtual)?.model as?
+                io.element.android.features.messages.impl.timeline.model.virtual.TimelineItemLoadingIndicatorModel
+            loading != null && loading.direction == Timeline.PaginationDirection.BACKWARDS && loading.lastRequestFailed
+        }
+        if (!failed) state.eventSink(TimelineEvent.LoadMore(Timeline.PaginationDirection.BACKWARDS))
     }
 
     // Keep the timeline at full opacity. The surrounding navigation transition already covers room

@@ -126,6 +126,8 @@ import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
@@ -463,8 +465,9 @@ class RustMatrixClient(
             getUserProfile()
         }
 
-        // Schedule regular database vacuuming to ensure DB performance remains optimal
-        scheduleDatabaseVacuum()
+        // WorkManager's pending-work query blocks on its database. Maintenance scheduling
+        // belongs to the session lifetime, but must not delay restoring that session's UI.
+        sessionCoroutineScope.launch(sessionDispatcher) { scheduleDatabaseVacuum() }
     }
 
     override fun userIdServerName(): String {
@@ -1280,13 +1283,18 @@ class RustMatrixClient(
         }
     }
 
-    private fun scheduleDatabaseVacuum() {
-        // If there's already a periodic work request, do not schedule another one
-        if (workManagerScheduler.hasPendingWork(sessionId, WorkManagerRequestType.DB_VACUUM)) return
-
-        Timber.i("Scheduling periodic database vacuuming for session $sessionId")
-        val request = PerformDatabaseVacuumRequestBuilder(sessionId)
-        sessionCoroutineScope.launch { workManagerScheduler.submit(request) }
+    private suspend fun scheduleDatabaseVacuum() {
+        runCatchingExceptions {
+            // Preserve the existing duplicate check. A cancelled/removed session must not
+            // enqueue work after a blocking pending-work query completes.
+            if (workManagerScheduler.hasPendingWork(sessionId, WorkManagerRequestType.DB_VACUUM)) return@runCatchingExceptions
+            currentCoroutineContext().ensureActive()
+            Timber.i("Scheduling periodic database vacuuming for session $sessionId")
+            workManagerScheduler.submit(PerformDatabaseVacuumRequestBuilder(sessionId))
+        }.onFailure {
+            // Optional maintenance can retry at the next session restoration.
+            Timber.w(it, "Unable to schedule periodic database vacuuming")
+        }
     }
 
     override fun homeserverCapabilities(): HomeserverCapabilitiesProvider {

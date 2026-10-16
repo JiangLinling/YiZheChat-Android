@@ -10,6 +10,7 @@ package io.element.android.libraries.mediaviewer.impl.local
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
 import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
@@ -164,6 +165,11 @@ class AndroidLocalMediaActions internal constructor(
                 .setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 .putExtra(Intent.EXTRA_STREAM, shareableUri)
                 .setTypeAndNormalize(localMedia.info.mimeType)
+                .apply {
+                    // createChooser propagates this URI and its read grant to the sharesheet.
+                    // Keep the capability opaque; the provider supplies DISPLAY_NAME to recipients.
+                    clipData = ClipData(source.info.filename, arrayOf(type), ClipData.Item(shareableUri))
+                }
             withContext(coroutineDispatchers.main) {
                 if (!policyProvider.current().policy.allowExternalShare) throw DataProtectionActionDeniedException.ExternalShare()
                 ensureSourceReadAuthorized(source)
@@ -264,6 +270,12 @@ class AndroidLocalMediaActions internal constructor(
             withContext(kotlinx.coroutines.NonCancellable + coroutineDispatchers.main) {
                 if (selection.value === request) selection.value = null
             }
+        }
+        // Selection can outlive the original read authorization. Report its actual rejection
+        // before preparing any external operation or grant; never renew the selected source.
+        withContext(coroutineDispatchers.main) {
+            ensureContentExportAllowed()
+            ensureSourceReadAuthorized(localMedia)
         }
         val launch = handoff.prepare(localMedia, recipient)
         try {

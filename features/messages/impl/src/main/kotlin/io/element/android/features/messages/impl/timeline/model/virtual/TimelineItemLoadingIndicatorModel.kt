@@ -13,6 +13,7 @@ import io.element.android.libraries.matrix.api.timeline.Timeline
 data class TimelineItemLoadingIndicatorModel(
     val direction: Timeline.PaginationDirection,
     val timestamp: Long,
+    val lastRequestFailed: Boolean = false,
 ) : TimelineItemVirtualModel {
     override val type: String = "TimelineItemLoadingIndicatorModel"
 }

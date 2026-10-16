@@ -27,6 +27,7 @@ import io.element.android.security.securestorage.api.DeviceTrustService
 import io.element.android.security.securestorage.api.VaultKeyService
 import io.element.android.security.securestorage.api.accountIdHash
 import io.element.android.security.securestorage.api.deriveAccountVaultId
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -108,6 +109,54 @@ class AccountReactivationCoordinator(
                 deviceShareKeyService.descriptor().keyId,
         )
         } == true
+    }
+
+    /** A retained, signed list grant permits only navigation; content and sends keep their own gates. */
+    private val localListDiagnosticBudget = java.util.concurrent.atomic.AtomicInteger(8)
+
+    private fun localListUnavailable(reason: String): Boolean {
+        if (localListDiagnosticBudget.getAndDecrement() > 0) {
+            timber.log.Timber.tag("YiZheStartup").i("[Startup] Startup.localList.account.unavailable reason=%s", reason)
+        }
+        return false
+    }
+
+    // Every admission fact is still freshly read in order. Keep the IO chain off the caller
+    // thread so each nested store does not resume the UI between reads or run the Keystore
+    // descriptor tail there. withContext restores the caller and preserves cancellation.
+    suspend fun canRestoreLocalList(matrixClient: MatrixClient): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val entry = managementControlService.localListEntryStatus()
+            if (entry == null || entry.remainingMillis <= 0) {
+                localListUnavailable("ENTRY_UNAVAILABLE")
+            } else {
+                val trust = deviceTrustService.current()
+                val accountHash = accountIdHash(matrixClient.sessionId.value)
+                val deviceHash = sha256Hex(matrixClient.deviceId.value)
+                val binding = entry.accountBindings.singleOrNull { it.accountIdHash == accountHash && it.matrixDeviceIdHash == deviceHash }
+                val checkpoint = accountReactivationScopeStore.current(accountHash, trust.installationId, deviceHash)
+                val receipt = checkpoint?.receipt
+                when {
+                    !trust.allowsLocalVaultAccess -> localListUnavailable("TRUST")
+                    !vaultKeyService.isUnlocked(deriveAccountVaultId(matrixClient.sessionId.value, matrixClient.deviceId.value)) ->
+                        localListUnavailable("VAULT_LOCKED")
+                    binding == null -> localListUnavailable("ACCOUNT_BINDING")
+                    checkpoint == null -> localListUnavailable("CHECKPOINT_MISSING")
+                    receipt == null -> localListUnavailable("RECEIPT_MISSING")
+                    checkpoint.state != AccountReactivationCheckpointState.COMMITTED -> localListUnavailable("CHECKPOINT_NOT_COMMITTED")
+                    checkpoint.pendingExplicitIdentityReset -> localListUnavailable("IDENTITY_RESET")
+                    receipt.activationId != binding.activationId -> localListUnavailable("ACTIVATION_MISMATCH")
+                    receipt.accountMobileGeneration != binding.accountMobileGeneration -> localListUnavailable("GENERATION_MISMATCH")
+                    !receipt.matchesCurrentSecurityState(accountHash, trust.installationId, deviceHash, trust.attestationVersion,
+                        entry.policyVersion, deviceShareKeyService.descriptor().keyId) -> localListUnavailable("SECURITY_STATE_MISMATCH")
+                    else -> true
+                }
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            localListUnavailable("CHECK_FAILED")
+        }
     }
 
     suspend fun hasCurrentCoreReceipt(matrixClient: MatrixClient): Boolean = runCatching {

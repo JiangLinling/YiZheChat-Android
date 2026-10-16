@@ -89,6 +89,7 @@ class RoomListDataSource(
     private var protectedPreviewRetryJob: Job? = null
     private var protectedPreviewRetrySignature: List<Pair<RoomId, Long>> = emptyList()
     private var protectedPreviewRetryAttempt = 0
+    private var visiblePreviewRoomIds: List<RoomId> = emptyList()
 
     init {
         // Start observers only after roomList and retry state are initialized. Device-trust and
@@ -126,6 +127,11 @@ class RoomListDataSource(
     }
 
     private var currentSubscribeToVisibleRoomsJob: Job? = null
+    fun updatePreviewRooms(roomIds: List<RoomId>) {
+        visiblePreviewRoomIds = roomIds
+        roomList.updatePreviewRooms(roomIds)
+    }
+
     private fun CoroutineScope.subscribeToVisibleRoomsIfNeeded(range: IntRange) {
         currentSubscribeToVisibleRoomsJob?.cancel()
         currentSubscribeToVisibleRoomsJob = launch {
@@ -222,7 +228,7 @@ class RoomListDataSource(
         val retryDelayMillis = PROTECTED_PREVIEW_RETRY_DELAYS_MILLIS[protectedPreviewRetryAttempt++]
         protectedPreviewRetryJob = sessionCoroutineScope.launch {
             delay(retryDelayMillis)
-            roomList.rebuildSummaries()
+            roomList.updatePreviewRooms(visiblePreviewRoomIds)
         }
     }
 

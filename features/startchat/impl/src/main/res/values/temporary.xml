@@ -10,6 +10,7 @@
     <string name="screen_friend_scan_camera_permission">Allow camera access to scan a YiZhe friend QR code</string>
     <string name="screen_friend_scan_my_qr_description">Let a friend scan to add you</string>
     <string name="screen_friend_scan_invalid">This is not a valid YiZhe friend QR code</string>
+    <string name="screen_friend_scan_self">This is your QR code. You cannot add yourself as a friend.</string>
     <string name="screen_friend_scan_again">Scan again</string>
     <string name="screen_friend_scan_from_image">Scan from photo</string>
     <string name="screen_friend_my_qr_title">My QR code</string>

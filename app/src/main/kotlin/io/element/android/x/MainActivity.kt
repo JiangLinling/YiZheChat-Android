@@ -128,6 +128,7 @@ open class MainActivity : NodeActivity() {
     private lateinit var mainNode: MainNode
     private lateinit var appBindings: AppBindings
     @Volatile private var keepSystemSplashVisible = true
+    private val systemSplashRemoved = androidx.compose.runtime.mutableStateOf(false)
     private var startupDestinationPrepared = false
     private var startupLockState: LockScreenLockState = LockScreenLockState.Locked
     private val startupSplashController = StartupSplashController {
@@ -153,6 +154,7 @@ open class MainActivity : NodeActivity() {
                 // Remove the system overlay atomically instead of fading through its background.
                 setOnExitAnimationListener { provider ->
                     provider.remove()
+                    systemSplashRemoved.value = true
                     StartupTrace.mark("MainActivity.SystemSplash.removed")
                 }
             }
@@ -317,6 +319,8 @@ open class MainActivity : NodeActivity() {
         CompositionLocalProvider(
             LocalStartupSplashController provides startupSplashController,
             LocalCompactStartup provides !useAppStartupSplash,
+            io.element.android.libraries.designsystem.utils.LocalLoadingPlaceholdersVisible provides
+                (!useAppStartupSplash || systemSplashRemoved.value),
         ) {
             ElementThemeApp(
                 appPreferencesStore = appBindings.preferencesStore(),
@@ -345,6 +349,7 @@ open class MainActivity : NodeActivity() {
                             securityRefreshService = appBindings.managementControlCoordinator(),
                             appOperationalStateCoordinator = appBindings.appOperationalStateCoordinator(),
                             modifier = Modifier.fillMaxSize(),
+                            allowRetainedStartup = this@MainActivity.javaClass == MainActivity::class.java && intent.action == Intent.ACTION_MAIN,
                         ) {
                             Box(Modifier.fillMaxSize()) {
                                 ExistingAppContent(appBindings)

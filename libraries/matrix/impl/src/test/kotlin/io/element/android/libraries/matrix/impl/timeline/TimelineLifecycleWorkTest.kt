@@ -23,6 +23,20 @@ import java.io.IOException
 
 class TimelineLifecycleWorkTest {
     @Test
+    fun `unowned historical registration releases waiters without reporting completion or blocking later genuine repair`() = runTest {
+        val work = TimelineLifecycleWork { testScheduler.currentTime }
+        assertThat(work.claimRegistration("other-installation")).isTrue()
+        val waiter = async { work.awaitRegistration("other-installation") }
+        runCurrent()
+        work.discardUnownedRegistration("other-installation")
+        assertThat(waiter.await()).isFalse()
+        assertThat(work.awaitRegistration("other-installation")).isNull()
+        assertThat(work.claimRegistration("other-installation")).isTrue()
+        work.finishRegistration("other-installation", true)
+        assertThat(work.awaitRegistration("other-installation")).isTrue()
+    }
+
+    @Test
     fun `hundreds of historical preflights cannot occupy live send origin reads`() = runTest {
         val work = TimelineLifecycleWork { testScheduler.currentTime }
         val release = CompletableDeferred<Unit>()

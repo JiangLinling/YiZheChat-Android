@@ -71,11 +71,8 @@ android {
         buildConfigFieldStr("NEXT_PUSH_REGISTRAR_BASE_URL", nextPushRegistrarBaseUrl)
         buildConfigFieldStr(
             name = "URL_POLICY",
-            value = if (isEnterpriseBuild) {
-                BuildTimeConfig.URL_POLICY ?: ""
-            } else {
-                "https://element.io/cookie-policy"
-            },
+            // Only expose the policy configured for this app; an upstream policy is not ours.
+            value = BuildTimeConfig.URL_POLICY ?: "",
         )
         buildConfigFieldStr(
             name = "BUG_REPORT_URL",

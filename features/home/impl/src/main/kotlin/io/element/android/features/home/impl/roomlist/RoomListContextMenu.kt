@@ -166,9 +166,7 @@ private fun RoomListModalBottomSheetContent(
         ListItem(
             headlineContent = {
                 Text(
-                    text = stringResource(
-                        if (contextMenu.isMuted) R.string.screen_roomlist_unmute else R.string.screen_roomlist_mute
-                    ),
+                    text = stringResource(R.string.screen_roomlist_mute),
                     style = MaterialTheme.typography.bodyLarge,
                 )
             },

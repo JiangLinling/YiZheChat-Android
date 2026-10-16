@@ -19,6 +19,8 @@ class LoadingIndicatorsPostProcessor(private val systemClock: SystemClock) {
         items: List<MatrixTimelineItem>,
         hasMoreToLoadBackward: Boolean,
         hasMoreToLoadForward: Boolean,
+        backwardRequestFailed: Boolean = false,
+        forwardRequestFailed: Boolean = false,
     ): List<MatrixTimelineItem> {
         val shouldAddForwardLoadingIndicator = hasMoreToLoadForward && items.isNotEmpty()
         val currentTimestamp = systemClock.epochMillis()
@@ -28,7 +30,8 @@ class LoadingIndicatorsPostProcessor(private val systemClock: SystemClock) {
                     uniqueId = UniqueId("BackwardLoadingIndicator"),
                     virtual = VirtualTimelineItem.LoadingIndicator(
                         direction = Timeline.PaginationDirection.BACKWARDS,
-                        timestamp = currentTimestamp
+                        timestamp = currentTimestamp,
+                        lastRequestFailed = backwardRequestFailed
                     )
                 )
                 add(backwardLoadingIndicator)
@@ -39,7 +42,8 @@ class LoadingIndicatorsPostProcessor(private val systemClock: SystemClock) {
                     uniqueId = UniqueId("ForwardLoadingIndicator"),
                     virtual = VirtualTimelineItem.LoadingIndicator(
                         direction = Timeline.PaginationDirection.FORWARDS,
-                        timestamp = currentTimestamp
+                        timestamp = currentTimestamp,
+                        lastRequestFailed = forwardRequestFailed
                     )
                 )
                 add(forwardLoadingIndicator)

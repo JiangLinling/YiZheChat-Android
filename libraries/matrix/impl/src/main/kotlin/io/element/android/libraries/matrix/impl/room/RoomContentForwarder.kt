@@ -141,12 +141,16 @@ class RoomContentForwarder(
     }
 
     suspend fun forwardProtected(content: EventContent, toRoomIds: List<RoomId>, timeoutMs: Long = 5_000L) {
+        val source = content as? MessageContent ?: error("Protected source content is unavailable.")
+        check(source.isContentProtectionAuthorized && source.protectedMessageStatus == null && !source.isBurnAfterRead) {
+            "Protected source content is not authorized for forwarding."
+        }
         val adapterFactory = checkNotNull(protectedContentAdapterFactory)
         val activeSessionId = checkNotNull(sessionId)
         val activeDeviceId = checkNotNull(deviceId)
         val failed = mutableSetOf<RoomId>()
-        val sourceMedia = (content as? MessageContent)?.type
-            ?.let { it as? MessageTypeWithAttachment }
+        val sourceMedia = source.type
+            .let { it as? MessageTypeWithAttachment }
             ?.let { materializeProtectedAttachment(it) }
         try {
             toRoomIds.parallelMap { roomId ->

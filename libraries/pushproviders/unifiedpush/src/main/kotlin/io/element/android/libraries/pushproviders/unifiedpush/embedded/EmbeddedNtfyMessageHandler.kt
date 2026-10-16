@@ -72,6 +72,7 @@ class EmbeddedNtfyMessageHandler(
             // A signed failure also retires this push intent. Matrix sync remains
             // message truth; never restart an expired/revoked delivery or forge success.
             check(!admitted.terminalReceiptId.isNullOrBlank()) { "Terminal push delivery requires its original receipt." }
+            Timber.d("Built-in push delivery already terminal: %s", admitted.status)
             fetchPushForegroundServiceManager.stop()
             return false
         }

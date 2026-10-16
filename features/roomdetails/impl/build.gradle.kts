@@ -47,6 +47,7 @@ dependencies {
     implementation(projects.libraries.testtags)
     api(projects.features.roomdetails.api)
     api(projects.libraries.usersearch.api)
+    implementation(projects.services.appnavstate.api)
     api(projects.services.apperror.api)
     implementation(libs.coil.compose)
     implementation(projects.features.call.api)

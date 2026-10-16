@@ -21,12 +21,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -250,6 +252,8 @@ class LoggedInFlowNode(
     private val unifiedSetupComplete = MutableStateFlow(false)
     private val matrixSyncStarted = MutableStateFlow(false)
     private val sessionInitializationComplete = MutableStateFlow(false)
+    // Local service readiness is distinct from the original LC-06 terminal receipts.
+    private val retainedHomeReady = MutableStateFlow(false)
     private val startupSessionInitialization = StartupSessionInitialization()
     private val accountCoreReady = MutableStateFlow(false)
     private val offlineCoreRestored = MutableStateFlow(false)
@@ -326,6 +330,13 @@ class LoggedInFlowNode(
                     try {
                         securitySetupReady.first { it }
                         StartupTrace.mark("Startup.session.securityReady")
+                        // Restoring the existing Home is a local presentation decision. The
+                        // retained grant never starts sync, authorizes content or completes LC-06.
+                        // Admit those side effects below under their original operation identity.
+                        retainedHomeReady.value = StartupTrace.measureSuspend("Startup.retainedHome.presentation.check") {
+                            accountReactivationCoordinator.canRestoreLocalList(matrixClient)
+                        }
+                        if (retainedHomeReady.value) StartupTrace.mark("Startup.retainedHome.presentation.ready")
                         val initializeSession: suspend () -> Unit = {
                             StartupTrace.mark("Session.initialize.begin")
                             check(matrixSessionCache.startSync(matrixClient.sessionId)) {
@@ -339,6 +350,8 @@ class LoggedInFlowNode(
                             matrixClient.sessionVerificationService.setListener(verificationListener)
                             mediaPreviewConfigMigration()
                             setupSendingQueue()
+                            retainedHomeReady.value = accountReactivationCoordinator.canRestoreLocalList(matrixClient)
+                            if (retainedHomeReady.value) StartupTrace.mark("Startup.retainedHome.services.ready")
 
                             // Optional prefetch has no authority over session or list readiness.
                             sessionCoroutineScope.launch {
@@ -414,6 +427,18 @@ class LoggedInFlowNode(
                             Timber.w(failure, "Could not restore the pending identity-reset convergence state.")
                             identityResetConvergenceState.value = IdentityResetConvergenceState.RETRY_REQUIRED
                         }
+                }
+
+                lifecycleScope.launch {
+                    retainedHomeReady.first { it }
+                    while (!sessionInitializationComplete.value || !accountCoreReady.value) {
+                        delay(500L)
+                        if (!accountReactivationCoordinator.canRestoreLocalList(matrixClient)) {
+                            retainedHomeReady.value = false
+                            StartupTrace.mark("Startup.retainedHome.permission.closed")
+                            break
+                        }
+                    }
                 }
 
                 // A list preparation failure must expose recovery instead of an endless Logo.
@@ -519,8 +544,9 @@ class LoggedInFlowNode(
                             coreReadyEnforcement,
                             offlineCoreRestored,
                             sessionInitializationComplete,
-                        ) { ready, enforcement, offline, initialized ->
-                            AccountStartupReadiness(ready, enforcement, offline, initialized)
+                            retainedHomeReady,
+                        ) { ready, enforcement, offline, initialized, retained ->
+                            AccountStartupReadiness(ready, enforcement, offline, initialized, retained)
                         },
                     ) { securityReady, setupComplete, ftueState, verificationStatus, coreState ->
                         StartupSecurityState(
@@ -532,6 +558,7 @@ class LoggedInFlowNode(
                             coreReadyEnforcement = coreState.enforcement,
                             offlineCoreRestored = coreState.offline,
                             sessionInitialized = coreState.sessionInitialized,
+                            retainedHomeReady = coreState.retainedHomeReady,
                         )
                     },
                     startupFailureReasonCode,
@@ -1150,6 +1177,7 @@ class LoggedInFlowNode(
                     },
                     onRetryIdentityReset = ::beginIdentityResetConvergence,
                     canRestoreOffline = { accountReactivationCoordinator.canRestoreOffline(matrixClient) },
+                    canRestoreRetainedList = { accountReactivationCoordinator.canRestoreLocalList(matrixClient) },
                     verifiedStartupReadiness = managementSecurityRefreshService::verifiedOnlineReadiness,
                     onOfflineReady = {
                         offlineCoreRestored.value = true
@@ -1351,6 +1379,23 @@ class LoggedInFlowNode(
 
     @Composable
     override fun View(modifier: Modifier) {
+        val startupSplashController = LocalStartupSplashController.current
+        val startupView = LocalView.current
+        LaunchedEffect(startupSplashController, startupView) {
+            // Home reports readiness from its committed content SideEffect. Observe that signal
+            // directly instead of waiting for a second parent Compose frame behind the splash.
+            // The existing layout path remains the fallback, and MainActivity still checks App lock.
+            combine(homeInitialContentPrepared, visibleStartupDestination, backstack.elements) { prepared, destination, elements ->
+                prepared && destination == StartupDestination.HOME && elements.any {
+                    it.key.navTarget == NavTarget.Home && it.targetState == BackStack.State.ACTIVE
+                }
+            }.collect { prepared ->
+                if (prepared && startupView.isAttachedToWindow && startupView.isLaidOut && startupView.width > 0 && startupView.height > 0) {
+                    StartupTrace.mark("Startup.home.committed.reveal")
+                    startupSplashController.revealPreparedDestination()
+                }
+            }
+        }
         val colors by remember {
             enterpriseService.semanticColorsFlow(sessionId = matrixClient.sessionId)
         }.collectAsState(SemanticColorsLightDark.default)
@@ -1438,6 +1483,7 @@ private data class AccountStartupReadiness(
     val enforcement: CoreReadyEnforcement,
     val offline: Boolean,
     val sessionInitialized: Boolean,
+    val retainedHomeReady: Boolean,
 )
 
 internal data class StartupSecurityState(
@@ -1453,6 +1499,7 @@ internal data class StartupSecurityState(
     val deletionRecoveryRequired: Boolean = false,
     val offlineCoreRestored: Boolean = false,
     val recoveryRequired: Boolean = false,
+    val retainedHomeReady: Boolean = false,
 )
 
 internal enum class CoreReadyEnforcement {
@@ -1473,6 +1520,7 @@ internal fun StartupSecurityState.destination(): StartupDestination = when {
     deletionRecoveryRequired -> StartupDestination.DELETION_RECOVERY
     failureReasonCode != null -> StartupDestination.ERROR
     recoveryRequired || !securityReady || !setupComplete -> StartupDestination.SECURITY_SETUP
+    retainedHomeReady && ftueState is FtueState.Complete && verificationStatus is SessionVerifiedStatus.Verified -> StartupDestination.HOME
     !sessionInitialized -> StartupDestination.WAIT
     offlineCoreRestored && coreReady && coreReadyEnforcement != CoreReadyEnforcement.CHECKING -> StartupDestination.HOME
     ftueState is FtueState.Unknown || verificationStatus is SessionVerifiedStatus.Unknown -> StartupDestination.WAIT

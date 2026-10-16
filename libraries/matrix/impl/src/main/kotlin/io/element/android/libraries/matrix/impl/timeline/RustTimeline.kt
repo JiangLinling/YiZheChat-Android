@@ -374,7 +374,7 @@ class RustTimeline(
         withContext(dispatcher) {
             runCatchingExceptions {
                 if (!canPaginate(direction)) throw TimelineException.CannotPaginate
-                updatePaginationStatus(direction) { it.copy(isPaginating = true) }
+                updatePaginationStatus(direction) { it.copy(isPaginating = true, lastRequestFailed = false) }
                 when (direction) {
                     Timeline.PaginationDirection.BACKWARDS -> inner.paginateBackwards(PAGINATION_SIZE.toUShort())
                     Timeline.PaginationDirection.FORWARDS -> inner.paginateForwards(PAGINATION_SIZE.toUShort())
@@ -383,12 +383,12 @@ class RustTimeline(
                 if (error is TimelineException.CannotPaginate) {
                     Timber.tag(loggerTag).d("Can't paginate $direction on room ${joinedRoom.roomId} with paginationStatus: ${backwardPaginationStatus.value}")
                 } else {
-                    updatePaginationStatus(direction) { it.copy(isPaginating = false) }
+                    updatePaginationStatus(direction) { it.copy(isPaginating = false, lastRequestFailed = true) }
                     Timber.tag(loggerTag).e(error, "Error paginating $direction on room ${joinedRoom.roomId}")
                 }
             }.onSuccess { hasReachedEnd ->
                 Timber.tag(loggerTag).d("Finished paginating $direction on room ${joinedRoom.roomId}, hasReachedEnd: $hasReachedEnd")
-                updatePaginationStatus(direction) { it.copy(isPaginating = false, hasMoreToLoad = !hasReachedEnd) }
+                updatePaginationStatus(direction) { it.copy(isPaginating = false, hasMoreToLoad = !hasReachedEnd, lastRequestFailed = false) }
             }
         }
     }
@@ -439,6 +439,8 @@ class RustTimeline(
                         items = items,
                         hasMoreToLoadBackward = backwardPaginationStatus.hasMoreToLoad,
                         hasMoreToLoadForward = forwardPaginationStatus.hasMoreToLoad,
+                        backwardRequestFailed = backwardPaginationStatus.lastRequestFailed,
+                        forwardRequestFailed = forwardPaginationStatus.lastRequestFailed,
                     )
                 }
                 .let { items ->
@@ -1130,14 +1132,7 @@ class RustTimeline(
     override suspend fun forwardEvent(eventId: EventId, roomIds: List<RoomId>): Result<Unit> = withContext(dispatcher) {
         runCatchingExceptions {
             if (protectedContentAdapter.enabled()) {
-                val targetId = eventId.toEventOrTransactionId()
-                val raw = rawItemsForDestruction(targetId).firstOrNull { item ->
-                    val event = (item as? MatrixTimelineItem.Event)?.event ?: return@firstOrNull false
-                    EventOrTransactionId.from(event.eventId, event.transactionId) == targetId
-                }
-                    ?: error("Protected source event is unavailable.")
-                check(!protectedContentAdapter.isBurnAfterRead(raw)) { "Burn-after-read messages cannot be forwarded." }
-                val content = currentEvent(eventId.value)?.event?.content ?: error("Protected source event is unavailable.")
+                val content = requireForwardableProtectedSource(eventId)
                 roomContentForwarder.forwardProtected(content, roomIds)
             } else {
                 roomContentForwarder.forward(fromTimeline = inner, eventId = eventId, toRoomIds = roomIds)
@@ -1150,13 +1145,7 @@ class RustTimeline(
     override suspend fun forwardEventPair(eventId: EventId, roomId: RoomId, operationId: String): ForwardEventPairResult = withContext(dispatcher) {
         val preflight = runCatchingExceptions {
             if (protectedContentAdapter.enabled()) {
-                val targetId = eventId.toEventOrTransactionId()
-                val raw = rawItemsForDestruction(targetId).firstOrNull { item ->
-                    val event = (item as? MatrixTimelineItem.Event)?.event ?: return@firstOrNull false
-                    EventOrTransactionId.from(event.eventId, event.transactionId) == targetId
-                } ?: error("Protected source event is unavailable.")
-                check(!protectedContentAdapter.isBurnAfterRead(raw)) { "Burn-after-read messages cannot be forwarded." }
-                check(currentEvent(eventId.value)?.event?.content != null) { "Protected source event is unavailable." }
+                requireForwardableProtectedSource(eventId)
                 roomContentForwarder.validateTargetRoom(roomId).getOrThrow()
             } else {
                 roomContentForwarder.validateForwardPair(inner, eventId, roomId).getOrThrow()
@@ -1174,6 +1163,21 @@ class RustTimeline(
                 },
             )
         }
+    }
+
+    private suspend fun requireForwardableProtectedSource(eventId: EventId): MessageContent {
+        val targetId = eventId.toEventOrTransactionId()
+        val raw = rawItemsForDestruction(targetId).firstOrNull { item ->
+            val event = (item as? MatrixTimelineItem.Event)?.event ?: return@firstOrNull false
+            EventOrTransactionId.from(event.eventId, event.transactionId) == targetId
+        } ?: error("Protected source event is unavailable.")
+        check(!protectedContentAdapter.isBurnAfterRead(raw)) { "Burn-after-read messages cannot be forwarded." }
+        val content = currentEvent(eventId.value)?.event?.content as? MessageContent
+            ?: error("Protected source content is unavailable.")
+        check(content.isContentProtectionAuthorized && content.protectedMessageStatus == null && !content.isBurnAfterRead) {
+            "Protected source content is not authorized for forwarding."
+        }
+        return content
     }
 
     override suspend fun sendLocation(

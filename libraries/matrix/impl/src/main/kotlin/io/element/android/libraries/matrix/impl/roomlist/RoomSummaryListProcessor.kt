@@ -9,8 +9,14 @@
 package io.element.android.libraries.matrix.impl.roomlist
 
 import io.element.android.libraries.matrix.api.roomlist.RoomSummary
+import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.services.analytics.api.AnalyticsService
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -30,6 +36,50 @@ class RoomSummaryListProcessor(
     private val analyticsService: AnalyticsService,
 ) {
     private val mutex = Mutex()
+    private val previewSignals = Channel<Unit>(Channel.CONFLATED)
+    @Volatile private var previewRoomIds: List<RoomId> = emptyList()
+    private var previewRevision = 0L
+    // Ciphertext source fingerprints only. Plaintext remains in the existing list projection.
+    private val previewSources = mutableMapOf<RoomId, RoomSummary>()
+
+    fun updatePreviewRooms(roomIds: List<RoomId>) {
+        previewRoomIds = roomIds.distinct().take(12)
+        previewSignals.trySend(Unit)
+    }
+
+    fun launchPreviewsIn(scope: CoroutineScope) = scope.launch(coroutineContext) {
+        for (signal in previewSignals) {
+            // One optional read at a time, outside the structural-diff lock. A newer viewport
+            // replaces queued work; it cannot put every room ahead of an actual room open/send.
+            for (roomId in previewRoomIds) {
+                if (roomId !in previewRoomIds) continue
+                val request = mutex.withLock {
+                    roomSummaries.replayCache.lastOrNull()?.firstOrNull { it.roomId == roomId }
+                        ?.takeUnless { previewSources.containsKey(roomId) }
+                        ?.let { it to previewRevision }
+                } ?: continue
+                val hydrated = try {
+                    withTimeoutOrNull(5_000L) { buildRoomSummaryForIdentifier(roomId.value, structural = false) }
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (failure: Exception) {
+                    Timber.w(failure, "Visible room preview unavailable")
+                    null
+                } ?: continue
+                mutex.withLock {
+                    val current = roomSummaries.replayCache.lastOrNull().orEmpty()
+                    val index = current.indexOfFirst { it.roomId == roomId }
+                    // A late read must never resurrect a removed room, old message or revoked
+                    // projection after a policy-triggered rebuild.
+                    if (request.second == previewRevision && index >= 0 && current[index] == request.first &&
+                        hydrated.sourceEventFingerprint == request.first.sourceEventFingerprint && roomId in previewRoomIds) {
+                        if (hydrated.latestEvent != request.first.latestEvent) previewSources[roomId] = request.first
+                        roomSummaries.emit(current.toMutableList().also { it[index] = hydrated })
+                    }
+                }
+            }
+        }
+    }
 
     suspend fun postUpdate(updates: List<RoomListEntriesUpdate>) {
         updateRoomSummaries(updates) { initialSnapshot ->
@@ -42,6 +92,8 @@ class RoomSummaryListProcessor(
 
     suspend fun rebuildRoomSummaries() {
         updateRoomSummaries(emptyList()) { _ ->
+            previewRevision++
+            previewSources.clear()
             forEachIndexed { i, summary ->
                 val result = buildRoomSummaryForIdentifier(summary.roomId.value)
                 if (result != null) {
@@ -101,9 +153,9 @@ class RoomSummaryListProcessor(
         return entry.use { if (initialSnapshot) roomSummaryFactory.createInitial(it) else roomSummaryFactory.create(room = it) }
     }
 
-    private suspend fun buildRoomSummaryForIdentifier(identifier: String): RoomSummary? {
+    private suspend fun buildRoomSummaryForIdentifier(identifier: String, structural: Boolean = true): RoomSummary? {
         return roomListService.roomOrNull(identifier)?.let { room ->
-            buildSummaryForRoomListEntry(room)
+            buildSummaryForRoomListEntry(room, initialSnapshot = structural)
         }
     }
 
@@ -118,7 +170,21 @@ class RoomSummaryListProcessor(
         mutex.withLock {
             val current = roomSummaries.replayCache.lastOrNull()
             val mutableRoomSummaries = current.orEmpty().toMutableList()
-            block(mutableRoomSummaries, current.isNullOrEmpty())
+            block(mutableRoomSummaries, true)
+
+            // Preserve a still-current authorized preview when only structural metadata changes.
+            // Rebuilds clear these fingerprints before applying an authorization revision.
+            mutableRoomSummaries.forEachIndexed { index, summary ->
+                val source = previewSources[summary.roomId]
+                val previous = current?.firstOrNull { it.roomId == summary.roomId }
+                if (source != null && source.sourceEventFingerprint != null && source.sourceEventFingerprint == summary.sourceEventFingerprint &&
+                    source.latestEvent == summary.latestEvent && previous != null) {
+                    mutableRoomSummaries[index] = summary.copy(latestEvent = previous.latestEvent)
+                } else if (previous != summary) {
+                    previewSources.remove(summary.roomId)
+                }
+            }
+            previewSources.keys.retainAll(mutableRoomSummaries.map { it.roomId }.toSet())
 
             // TODO remove once https://github.com/element-hq/element-x-android/issues/5031 has been confirmed as fixed
             val uniqueRooms = mutableRoomSummaries.distinctBy { it.roomId }
@@ -137,6 +203,7 @@ class RoomSummaryListProcessor(
 
             roomSummaries.emit(uniqueRooms)
         }
+        previewSignals.trySend(Unit)
     }
 }
 

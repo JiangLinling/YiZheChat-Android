@@ -94,7 +94,7 @@ private fun GroupCreationContent(
 ) {
     var confirming by rememberSaveable { mutableStateOf(initialConfirmation) }
     var query by rememberSaveable { mutableStateOf("") }
-    var expandedSetting by rememberSaveable { mutableStateOf<String?>(null) }
+    var expandedSetting by rememberSaveable(confirming) { mutableStateOf<String?>(null) }
     var avatarActionsVisible by rememberSaveable { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val selected = state.config.invites
@@ -102,7 +102,11 @@ private fun GroupCreationContent(
     val back = {
         if (editable) {
             focusManager.clearFocus()
-            if (confirming) confirming = false else onBackClick()
+            when {
+                confirming && expandedSetting != null -> expandedSetting = null
+                confirming -> confirming = false
+                else -> onBackClick()
+            }
         }
     }
     BackHandler(enabled = confirming || !editable, onBack = back)
@@ -238,7 +242,10 @@ private fun GroupCreationContent(
                         )
                     }
                     GroupSettingRow(stringResource(R.string.screen_create_room_group_members),
-                        stringResource(R.string.screen_create_room_members_count, selected.size + 1), editable) { confirming = false }
+                        stringResource(R.string.screen_create_room_members_count, selected.size + 1), editable) {
+                        expandedSetting = null
+                        confirming = false
+                    }
                     GroupDashedDivider()
                     GroupSection(stringResource(R.string.screen_create_room_group_settings), prominent = true)
                     GroupSettingRow(stringResource(R.string.screen_create_room_message_retention_title),

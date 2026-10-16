@@ -410,6 +410,7 @@ class MessageComposerPresenter(
         val captionEditGeneration = remember { AtomicLong(0L) }
         val captionDraftMutationMutex = remember { Mutex() }
         val restoredTextVersion = remember { AtomicReference<String?>(null) }
+        val currentTextSendRevision = remember { MutableStateFlow<Long?>(null) }
         val restoredSourceDraft = remember { AtomicReference<ComposerDraft?>(null) }
         val restoredEditorDraft = remember { AtomicReference<ComposerDraft?>(null) }
         val composerUserRevision = remember { AtomicLong(0L) }
@@ -428,6 +429,7 @@ class MessageComposerPresenter(
                 threadRoot = null,
                 isVolatile = false
             )
+            Timber.d("FC002 draft editor restore room=%s loaded=%s revision=%s", room.roomId, draft != null, restorationRevision)
             val canRestore = composerUserRevision.get() == restorationRevision &&
                 createDraftFromState(markdownTextEditorState, richTextEditorState) == initialEditorDraft
             var editorDraft = createDraftFromState(markdownTextEditorState, richTextEditorState)
@@ -453,6 +455,8 @@ class MessageComposerPresenter(
             lastPersistedEditorRevision.set(restorationRevision)
             lastPersistedDraft.set(if (canRestore) editorDraft else draft)
             draftRestored = true
+            Timber.d("FC002 draft editor ready room=%s applied=%s version=%s revision=%s",
+                room.roomId, draft != null && canRestore, restoredTextVersion.get(), composerUserRevision.get())
         }
 
         LaunchedEffect(Unit) {
@@ -460,18 +464,24 @@ class MessageComposerPresenter(
             // initial effect can otherwise start after restoration and then be cancelled
             // by its own false -> true recomposition while consuming the original receipt.
             snapshotFlow { draftRestored }.first { it }
-            appOperationalStateCoordinator.observeLifecycleOperations(FullAppLifecycleId.LC_13).collect {
-                // Normal sends consume their own captured draft. Only a restored durable version
-                // needs recovery here; historical receives must not repeatedly decrypt an empty draft.
-                if (restoredTextVersion.get() == null) return@collect
+            combine(appOperationalStateCoordinator.observeLifecycleOperations(FullAppLifecycleId.LC_13), currentTextSendRevision) { _, revision -> revision }
+                .collect { currentSendRevision ->
+                // A current send also retains an encrypted draft until its original Matrix receipt.
+                // Recheck when the handoff becomes ready even if the operation map changed first.
+                if (restoredTextVersion.get() == null && currentSendRevision == null) return@collect
                 val revision = composerUserRevision.get()
-                // A restored editor that has been edited is still owned by the user, including
-                // an identical retyped body awaiting its debounce checkpoint.
+                // An unsaved later edit, including identical retyped text, owns the editor.
+                if (currentSendRevision != null && currentSendRevision != revision) return@collect
                 if (restoredTextVersion.get() != null && restoredUserRevision.get() != revision) return@collect
                 val consumed = try { draftService.reconcileSentTextDraft(room.roomId) { composerUserRevision.get() == revision } }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { return@collect }
                 consumed ?: return@collect
+                if (currentSendRevision != null) {
+                    if (currentTextSendRevision.value == revision) currentTextSendRevision.value = null
+                    // The current send already cleared its editor at handoff. A later edit stays visible.
+                    return@collect
+                }
                 if (restoredTextVersion.get() == consumed.version && restoredUserRevision.get() == revision &&
                     composerUserRevision.get() == revision && restoredSourceDraft.get() == consumed.draft &&
                     createDraftFromState(markdownTextEditorState, richTextEditorState) == restoredEditorDraft.get()) {
@@ -537,8 +547,8 @@ class MessageComposerPresenter(
             // An unsaved new edit (even the same text) cannot be cleared by an older send receipt.
             val currentEditorDraft = createDraftFromState(markdownTextEditorState, richTextEditorState)
             if (observedEditorDraft.getAndSet(currentEditorDraft) != currentEditorDraft) composerUserRevision.incrementAndGet()
-            if (event == MessageComposerEvent.SendMessage || event == MessageComposerEvent.SendFlashReadMessage ||
-                event is MessageComposerEvent.SetMode || event is MessageComposerEvent.InsertCommonInfo ||
+            // Send taps do not edit the draft, including taps rejected by the capture guard.
+            if (event is MessageComposerEvent.SetMode || event is MessageComposerEvent.InsertCommonInfo ||
                 event is MessageComposerEvent.InsertSuggestion || event is MessageComposerEvent.ToggleTextFormatting ||
                 event is MessageComposerEvent.RestoreWithdrawnText || event == MessageComposerEvent.ClearWithdrawnText ||
                 event == MessageComposerEvent.CloseSpecialMode || event == MessageComposerEvent.PasteFromInAppClipboard) {
@@ -660,7 +670,15 @@ class MessageComposerPresenter(
                             onBurnAfterReadSent = { isBurnAfterReadEnabled = false },
                             onFlashReadPreparing = { isFlashReadPreparing = it },
                             onVolatileTextConsumed = { containsVolatileWithdrawnText = false },
-                            onTextDraftHandedOff = { lastPersistedDraft.set(null); restoredTextVersion.set(null) },
+                             onTextDraftHandedOff = {
+                                 lastPersistedDraft.set(null)
+                                 restoredTextVersion.set(null)
+                                 // Rich-editor reset is asynchronous. Establish the consumed editor
+                                 // before releasing capture so later taps cannot recapture its old text.
+                                 snapshotFlow { createDraftFromState(markdownTextEditorState, richTextEditorState) }.first { it == null }
+                                 observedEditorDraft.set(null)
+                                 currentTextSendRevision.value = composerUserRevision.get()
+                             },
                             composerUserRevision = composerUserRevision,
                             expectedComposerUserRevision = composerUserRevision.get(),
                             messageSendInProgress = messageSendInProgress,
@@ -1100,6 +1118,8 @@ class MessageComposerPresenter(
                     val draft = if (containsVolatileWithdrawnText) null else createDraftFromState(markdownTextEditorState, richTextEditorState)
                     val expectedCaptionGeneration = captionEditGeneration.get()
                     val editorRevision = composerUserRevision.get()
+                    Timber.d("FC002 draft checkpoint room=%s restored=%s present=%s source_present=%s version=%s revision=%s",
+                        room.roomId, draftRestored, draft != null, restoredSourceDraft.get() != null, restoredTextVersion.get(), editorRevision)
                     // A lifecycle checkpoint is not a new edit. Keep a restored send's exact
                     // storage version so its original authority confirmation can still consume it.
                     if (restoredTextVersion.get() != null && lastPersistedDraft.get() == draft &&
@@ -1215,7 +1235,7 @@ class MessageComposerPresenter(
         onBurnAfterReadSent: () -> Unit,
         onFlashReadPreparing: (Boolean) -> Unit,
         onVolatileTextConsumed: () -> Unit,
-        onTextDraftHandedOff: () -> Unit,
+        onTextDraftHandedOff: suspend () -> Unit,
         composerUserRevision: AtomicLong,
         expectedComposerUserRevision: Long,
         messageSendInProgress: AtomicBoolean,

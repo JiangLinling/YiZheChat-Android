@@ -36,6 +36,7 @@ internal object YiZhePalette {
     val bambooSoftHovered = Color(0xFFD8E6DA)
     val bambooDisabled = Color(0xFFB9C0B6)
     val bambooBorder = Color(0xFF6F8574)
+    val sentBubble = Color(0xFFA6CBAE)
 
     // Supporting mineral colours
     val celadon = Color(0xFF2F6770)

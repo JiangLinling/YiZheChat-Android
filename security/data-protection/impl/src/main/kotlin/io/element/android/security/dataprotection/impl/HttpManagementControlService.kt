@@ -1375,6 +1375,54 @@ class HttpManagementControlService(
         )
     }
 
+    private val localListDiagnosticBudget = java.util.concurrent.atomic.AtomicInteger(8)
+
+    private fun localListUnavailable(reason: String): Nothing? {
+        if (localListDiagnosticBudget.getAndDecrement() > 0) {
+            timber.log.Timber.tag("YiZheStartup").i("[Startup] Startup.localList.service.unavailable reason=%s", reason)
+        }
+        return null
+    }
+
+    override suspend fun localListEntryStatus(): io.element.android.security.dataprotection.api.LocalChatListPermission? = withContext(Dispatchers.IO) {
+        if (!configuration.isConfigured) return@withContext localListUnavailable("NOT_CONFIGURED")
+        val (decision, remaining) = repository.cachedLocalListEntry() ?: return@withContext localListUnavailable("REPOSITORY_UNAVAILABLE")
+        val trust = deviceTrustService.current()
+        if (!trust.allowsLocalVaultAccess || trust.trustState !in setOf(DeviceTrustState.TRUSTED, DeviceTrustState.MANAGED) ||
+            trust.installationId != decision.installationId || trust.attestationVersion != decision.attestationVersion
+        ) {
+            return@withContext localListUnavailable("TRUST_BINDING")
+        }
+        val grant = checkNotNull(decision.localListEntry)
+        if (trust.attestationPublicKeySha256 != grant.devicePublicKeySha256) return@withContext localListUnavailable("DEVICE_KEY_BINDING")
+        if (deviceShareKeyService.descriptor().keyId != grant.contentShareKeyId) return@withContext localListUnavailable("SHARE_KEY_BINDING")
+        val sessions = sessionStore.getAllSessions()
+        val bindings = sessions.map {
+            MatrixDeviceBindingWire(accountIdHash(it.userId), sha256Hex(it.deviceId.encodeToByteArray()))
+        }.toSet()
+        if (bindings.isEmpty() || bindings != grant.accountBindings.map { MatrixDeviceBindingWire(it.accountIdHash, it.matrixDeviceIdHash) }.toSet() ||
+            grant.accountBindings.any { it.accountMobileGeneration <= 0 || it.activationId.isBlank() }
+        ) {
+            return@withContext localListUnavailable("SESSION_BINDING")
+        }
+        if (trust.trustState == DeviceTrustState.MANAGED && trust.managedLicense?.isActive(System.currentTimeMillis()) != true) {
+            return@withContext localListUnavailable("MANAGED_LICENSE")
+        }
+        io.element.android.security.dataprotection.api.LocalChatListPermission(
+            grant.policyVersion,
+            grant.entryPolicyVersion,
+            remaining,
+            grant.accountBindings.map {
+                io.element.android.security.dataprotection.api.OfflineEntryAccountBinding(
+                it.accountIdHash,
+                    it.matrixDeviceIdHash,
+                    it.accountMobileGeneration,
+                    it.activationId,
+            )
+            }
+        )
+    }
+
     override suspend fun reportCommand(report: ManagementCommandExecutionReport): Boolean = withContext(Dispatchers.IO) {
         if (!configuration.isConfigured) return@withContext false
         val expectedLifecycleId = when (report.commandType) {
@@ -2224,8 +2272,10 @@ class HttpManagementControlService(
             repository.pendingCommands().isEmpty()
         ) {
             repository.acceptOfflineEntry(response.deviceTrust)
+            repository.acceptLocalListEntry(response.deviceTrust)
         } else {
             repository.clearOfflineEntry()
+            repository.acceptLocalListEntry(response.deviceTrust, permitted = false)
         }
         return ManagementSyncReport(
             status = if (terminalPolicyError == null) {

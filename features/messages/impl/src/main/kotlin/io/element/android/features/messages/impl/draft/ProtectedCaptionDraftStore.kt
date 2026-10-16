@@ -44,6 +44,7 @@ import org.json.JSONObject
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import timber.log.Timber
 
 /** Persists caption-edit text without passing a synthetic event id through the Matrix SDK. */
 @Inject
@@ -92,8 +93,12 @@ class ProtectedCaptionDraftStore(
         return mutationMutex.withLock {
             recoverTransitionLocked(matrix)
             flushAppliedFactsLocked()
-            consumeSentTextDraftLocked(matrix)
-            loadDraftLocked() ?: matrix.loadDraft(roomId, threadRoot)
+            val hadSendBinding = currentTextSendLocked() != null
+            val consumed = consumeSentTextDraftLocked(matrix)
+            val caption = loadDraftLocked()
+            Timber.d("FC002 draft restore room=%s send_binding=%s sent_consumed=%s caption_present=%s version=%s",
+                roomId, hadSendBinding, consumed != null, caption != null, preferences.getString(textVersionKey, null))
+            caption ?: matrix.loadDraft(roomId, threadRoot)
         }
     }
 
@@ -103,6 +108,8 @@ class ProtectedCaptionDraftStore(
         mutationMutex.withLock {
             recoverTransitionLocked(matrix) // Never replay an old write after a newer write is committed.
             flushAppliedFactsLocked()
+            Timber.d("FC002 draft write room=%s source=protected present=%s send_binding=%s owner_present=%s version=%s",
+                roomId, draft != null, currentTextSendLocked() != null, owner != null, preferences.getString(textVersionKey, null))
             // The automatic empty-editor checkpoint is not a delivery confirmation. Retain the
             // exact pending draft; a nonempty later edit receives a different storage version.
             check(draft != null || currentTextSendLocked() == null) { "The original send draft requires authority reconciliation." }
@@ -204,14 +211,23 @@ class ProtectedCaptionDraftStore(
         // a UI bubble, nor cached operations/terminal projection can authorize consumption.
         val operation = try { lifecycle.operation(operationId) }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-            catch (_: Exception) { return null }
+            catch (_: Exception) {
+                Timber.d("FC002 draft consume room=%s operation=%s authority=unavailable", boundRoomId, operationId)
+                return null
+            }
         if (operation.operationId != operationId ||
             operation.lifecycleId != FullAppLifecycleId.LC_13 ||
             operation.subjects.accountIdHash != accountHash || operation.subjects.matrixDeviceIdHash != deviceHash ||
-            operation.subjects.roomIdHash != roomIdHash) return null
+            operation.subjects.roomIdHash != roomIdHash) {
+            Timber.d("FC002 draft consume room=%s operation=%s authority=identity_mismatch", boundRoomId, operationId)
+            return null
+        }
         val matrixFact = operation.steps.singleOrNull {
             it.component == LifecycleComponent.MATRIX && it.required
-        } ?: return null
+        } ?: run {
+            Timber.d("FC002 draft consume room=%s operation=%s authority=matrix_step_missing", boundRoomId, operationId)
+            return null
+        }
         val queriedMatrixCommit = matrixFact.authorityRevision?.matches(Regex("matrix-event-query:[0-9a-f]{64}")) == true &&
             matrixFact.receiptReference?.matches(Regex("matrix-event-query:[0-9a-f]{64}")) == true
         // The registration endpoint also verifies Matrix storage and sender ownership before signing
@@ -220,11 +236,23 @@ class ProtectedCaptionDraftStore(
             matrixFact.resultCode == "MATRIX_EVENT_VERIFIED" &&
             matrixFact.resultReference?.matches(Regex("[0-9a-f]{64}")) == true &&
             matrixFact.receiptReference?.matches(Regex("matrix-event:[A-Za-z0-9_-]{24}")) == true
-        if (matrixFact.status != LifecycleStepStatus.COMPLETE || !(queriedMatrixCommit || registeredMatrixCommit)) return null
-        val draft = matrix.loadDraft(boundRoomId, null) ?: return null
-        if (draft.draftType != ComposerDraftType.NewMessage) return null
+        if (matrixFact.status != LifecycleStepStatus.COMPLETE || !(queriedMatrixCommit || registeredMatrixCommit)) {
+            Timber.d("FC002 draft consume room=%s operation=%s authority=matrix_unconfirmed", boundRoomId, operationId)
+            return null
+        }
+        val draft = matrix.loadDraft(boundRoomId, null) ?: run {
+            Timber.d("FC002 draft consume room=%s operation=%s authority=confirmed draft=absent", boundRoomId, operationId)
+            return null
+        }
+        if (draft.draftType != ComposerDraftType.NewMessage) {
+            Timber.d("FC002 draft consume room=%s operation=%s authority=confirmed draft=other_mode", boundRoomId, operationId)
+            return null
+        }
         val version = send.getString("version")
-        if (!canConsume()) return null
+        if (!canConsume()) {
+            Timber.d("FC002 draft consume room=%s operation=%s authority=confirmed revision=fenced", boundRoomId, operationId)
+            return null
+        }
         try {
             lifecycle.performLocalDraft(lifecycleOperationRequest(
                 lifecycleId = FullAppLifecycleId.LC_14, trigger = "draft_change",
@@ -250,6 +278,7 @@ class ProtectedCaptionDraftStore(
                 preferences.getString(textSendKey, null) == null && preferences.getString(textVersionKey, null) != version
             if (!locallyCommitted || matrix.loadDraft(boundRoomId, null) != null) throw failure
         }
+        Timber.d("FC002 draft consume room=%s operation=%s authority=confirmed result=consumed version=%s", boundRoomId, operationId, version)
         return ConsumedTextDraft(version, draft)
     }
 

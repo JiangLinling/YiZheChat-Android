@@ -28,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.coroutineScope
+import com.bumble.appyx.core.lifecycle.subscribe
 import com.bumble.appyx.core.modality.BuildContext
 import com.bumble.appyx.core.node.Node
 import io.element.android.compound.tokens.generated.CompoundIcons
@@ -41,7 +43,6 @@ import io.element.android.libraries.designsystem.theme.components.ListItem
 import io.element.android.libraries.designsystem.theme.components.Scaffold
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.designsystem.theme.components.TopAppBar
-import io.element.android.libraries.designsystem.utils.OnLifecycleEvent
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
@@ -52,6 +53,9 @@ import io.element.android.libraries.matrix.api.timeline.item.event.ProfileDetail
 import io.element.android.libraries.matrix.api.timeline.item.event.StickerContent
 import io.element.android.libraries.matrix.api.timeline.item.event.getDisplayName
 import io.element.android.libraries.matrix.api.timeline.item.event.isAuthorizedForUserDisplay
+import io.element.android.security.dataprotection.api.ProtectedPreviewAuthorizationGate
+import io.element.android.services.appnavstate.api.AppForegroundStateService
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
@@ -64,25 +68,53 @@ class RoomHistorySearchNode(
     buildContext: BuildContext,
     private val room: JoinedRoom,
     private val friendProfileRepository: FriendProfileRepository,
+    private val previewAuthorizationGate: ProtectedPreviewAuthorizationGate,
+    private val appForegroundStateService: AppForegroundStateService,
     private val onBack: () -> Unit,
     private val onResult: (EventId) -> Unit,
 ) : Node(buildContext) {
+    // Node-owned memory survives off-screen composition disposal, but is never saved/restored.
+    private var query by mutableStateOf("")
+    private var queryAuthorizationRevision = previewAuthorizationGate.authorizationRevision.value
+
+    override fun onBuilt() {
+        super.onBuilt()
+        lifecycle.subscribe(onDestroy = { query = "" })
+        // Observe for the whole node lifetime, including while a result covers the search page.
+        lifecycle.coroutineScope.launch {
+            combine(
+                appForegroundStateService.isInForeground,
+                previewAuthorizationGate.accessState,
+                previewAuthorizationGate.authorizationRevision,
+            ) { foreground, access, revision -> Triple(foreground, access.allowsPreviewAttempt, revision) }
+                .collect { (foreground, allowed, revision) ->
+                    if (!foreground || !allowed || revision != queryAuthorizationRevision) query = ""
+                    queryAuthorizationRevision = revision
+                }
+        }
+    }
+
+    private fun canSearch(): Boolean = appForegroundStateService.isInForeground.value &&
+        previewAuthorizationGate.canAttemptPreview() &&
+        previewAuthorizationGate.authorizationRevision.value == queryAuthorizationRevision
+
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun View(modifier: Modifier) {
         val timelineItems by room.liveTimeline.timelineItems.collectAsState(initial = emptyList())
         val pagination by room.liveTimeline.backwardPaginationStatus.collectAsState()
         val profiles by friendProfileRepository.profiles.collectAsState()
-        var query by remember { mutableStateOf("") }
+        val foreground by appForegroundStateService.isInForeground.collectAsState()
+        val access by previewAuthorizationGate.accessState.collectAsState()
+        val revision by previewAuthorizationGate.authorizationRevision.collectAsState()
+        // Gate the first returning frame as well as the node-level asynchronous cleanup.
+        val visibleQuery = query.takeIf { foreground && access.allowsPreviewAttempt && revision == queryAuthorizationRevision }.orEmpty()
         val scope = rememberCoroutineScope()
 
         LaunchedEffect(Unit) { friendProfileRepository.load() }
-        OnLifecycleEvent { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) query = ""
-        }
 
-        val results = remember(timelineItems, query, profiles) {
-            val normalized = query.trim()
+        val results = remember(timelineItems, visibleQuery, profiles) {
+            val normalized = visibleQuery.trim()
             if (normalized.isEmpty()) emptyList() else timelineItems
                 .filterIsInstance<MatrixTimelineItem.Event>()
                 .mapNotNull { item ->
@@ -103,9 +135,14 @@ class RoomHistorySearchNode(
             topBar = {
                 TopAppBar(
                     title = { Text(stringResource(R.string.screen_room_details_find_chat)) },
-                    navigationIcon = { BackButton(onClick = onBack) },
+                    navigationIcon = {
+                        BackButton(onClick = {
+                            query = ""
+                            onBack()
+                        })
+                    },
                     actions = {
-                        if (query.isNotEmpty()) {
+                        if (visibleQuery.isNotEmpty()) {
                             IconButton(onClick = { query = "" }) {
                                 Icon(CompoundIcons.Close(), contentDescription = stringResource(R.string.screen_room_details_search_clear))
                             }
@@ -121,8 +158,8 @@ class RoomHistorySearchNode(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
+                    value = visibleQuery,
+                    onValueChange = { query = if (canSearch()) it else "" },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
@@ -130,7 +167,7 @@ class RoomHistorySearchNode(
                     placeholder = { Text(stringResource(R.string.screen_room_details_search_hint)) },
                 )
                 LazyColumn(modifier = Modifier.weight(1f)) {
-                    if (query.isNotBlank() && results.isEmpty()) {
+                    if (visibleQuery.isNotBlank() && results.isEmpty()) {
                         item {
                             Text(
                                 text = stringResource(R.string.screen_room_details_search_empty),
@@ -149,7 +186,7 @@ class RoomHistorySearchNode(
                                     maxLines = 1,
                                 )
                             },
-                            onClick = { onResult(result.eventId) },
+                            onClick = { if (canSearch() && query.isNotBlank()) onResult(result.eventId) },
                             leadingContent = ListItemContent.Icon(
                                 io.element.android.libraries.designsystem.theme.components.IconSource.Vector(CompoundIcons.Chat())
                             ),

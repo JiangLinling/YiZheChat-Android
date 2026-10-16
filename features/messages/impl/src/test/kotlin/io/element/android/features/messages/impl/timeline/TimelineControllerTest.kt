@@ -148,6 +148,7 @@ class TimelineControllerTest {
         val coordinator = FakeAppOperationalStateCoordinator()
         var failSend = true
         val operations = mutableListOf<String>()
+        val transactions = mutableListOf<TransactionId>()
         val timeline = object : Timeline by FakeTimeline() {
             override suspend fun sendMessageTransaction(
                 transactionId: TransactionId,
@@ -159,6 +160,7 @@ class TimelineControllerTest {
                 asPlainText: Boolean,
             ): Result<Unit> {
                 operations += checkNotNull(currentLifecycleOperationContext()).operationId
+                transactions += transactionId
                 return if (failSend) Result.failure(IllegalStateException("transport unavailable")) else Result.success(Unit)
             }
         }
@@ -174,6 +176,8 @@ class TimelineControllerTest {
         assertThat(sut.retryOptimisticLocalEcho(id).isSuccess).isTrue()
         assertThat(operations).hasSize(2)
         assertThat(operations[1]).isEqualTo(operations[0])
+        assertThat(transactions.map { it.value }).containsExactly(id.value, id.value).inOrder()
+        assertThat(coordinator.startedRequests.map { it.operationId }.distinct()).containsExactly(operations.distinct().single())
         assertThat(id.value).isEqualTo(transaction)
         assertThat(outbox.entries).isEmpty()
         assertThat(coordinator.clientReceipts).hasSize(2)

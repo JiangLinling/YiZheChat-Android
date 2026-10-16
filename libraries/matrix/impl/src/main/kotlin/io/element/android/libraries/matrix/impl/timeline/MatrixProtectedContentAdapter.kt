@@ -3499,6 +3499,17 @@ private class DefaultMatrixProtectedContentAdapter(
                     }
                 }
                 val currentOperation = lifecycleWork.originatingOperation(originScopeKey)
+                if (ProtectedEventOwnershipResolver.isHistoricalMediaRegistration(
+                        contentId in (message.type as? MessageTypeWithAttachment)?.filename?.protectedMediaContentIds().orEmpty(),
+                        carrier != null, currentOperation,
+                    )) {
+                    // A filename is not a text SEND journal. The original media upload
+                    // retains its recovery/receipts; this timeline makes no success claim.
+                    // Normal KMS/Matrix checks still gate every subsequent media open.
+                    lifecycleWork.discardUnownedRegistration(registrationKey)
+                    Timber.tag(PROTECTED_DIAGNOSTIC_TAG).d("YZCP_MEDIA_HISTORY_UPLOAD_OWNER key=%s", registrationKey)
+                    return@launch
+                }
                 if (currentOperation == null && ProtectedEventOwnershipResolver.hasRecordedTextBinding(
                         storedOrigin, currentOperation, eventId, captionLineageCoordinator.hasPendingContent(contentId),
                     )) {
@@ -3538,7 +3549,7 @@ private class DefaultMatrixProtectedContentAdapter(
                         } else {
                             // Sender mapping repair cannot supply a receive/decrypt fact. The
                             // server binding worker owns cold recovery; retry until SEND is known.
-                            Timber.tag(PROTECTED_DIAGNOSTIC_TAG).d("YZCP_MAPPING_SEND_OWNER_UNAVAILABLE")
+                            Timber.tag(PROTECTED_DIAGNOSTIC_TAG).d("YZCP_MAPPING_SEND_OWNER_UNAVAILABLE key=%s", registrationKey)
                             false
                         }
                     }

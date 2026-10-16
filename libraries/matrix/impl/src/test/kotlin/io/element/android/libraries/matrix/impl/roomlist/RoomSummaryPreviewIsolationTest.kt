@@ -48,12 +48,74 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
+import io.mockk.coEvery
+import io.mockk.mockk
+import org.matrix.rustcomponents.sdk.RoomListServiceInterface
 import org.matrix.rustcomponents.sdk.ProfileDetails
 import org.matrix.rustcomponents.sdk.RoomListEntriesUpdate
 import org.matrix.rustcomponents.sdk.LatestEventValue as RustLatestEventValue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RoomSummaryPreviewIsolationTest {
+    @Test
+    fun `edited ciphertext at the same timestamp invalidates the previous authorized preview`() = runTest {
+        var body = "yizhe-secure-v1:original"
+        val adapter = PreviewAdapter { message, _ -> authorized(message) }
+        val service = mockk<RoomListServiceInterface>()
+        coEvery { service.roomOrNull(A_ROOM_ID.value) } answers { room(body = body) }
+        val summaries = MutableSharedFlow<List<RoomSummary>>(replay = 1)
+        val processor = RoomSummaryListProcessor(summaries, service, StandardTestDispatcher(testScheduler), factory(adapter), FakeAnalyticsService())
+        processor.launchPreviewsIn(backgroundScope)
+        processor.postUpdate(listOf(RoomListEntriesUpdate.Reset(listOf(room(body = body)))))
+        processor.updatePreviewRooms(listOf(A_ROOM_ID))
+        runCurrent()
+        assertThat(summaries.replayCache.last().single().message().isContentProtectionAuthorized).isTrue()
+        processor.updatePreviewRooms(emptyList())
+        body = "yizhe-secure-v1:edited"
+        processor.postUpdate(listOf(RoomListEntriesUpdate.Set(0u, room(body = body))))
+        assertSafe(summaries.replayCache.last().single().message(), ProtectedMessageStatus.TEMPORARILY_UNAVAILABLE)
+    }
+    @Test
+    fun `slow visible preview cannot block removal or restore a removed room`() = runTest {
+        val release = CompletableDeferred<Unit>()
+        val adapter = PreviewAdapter { message, _ -> release.await(); authorized(message) }
+        val service = mockk<RoomListServiceInterface>()
+        coEvery { service.roomOrNull(A_ROOM_ID.value) } answers { room() }
+        val summaries = MutableSharedFlow<List<RoomSummary>>(replay = 1)
+        val processor = RoomSummaryListProcessor(summaries, service, StandardTestDispatcher(testScheduler), factory(adapter), FakeAnalyticsService())
+        processor.launchPreviewsIn(backgroundScope)
+        processor.postUpdate(listOf(RoomListEntriesUpdate.Reset(listOf(room(), room(A_ROOM_ID_2)))))
+        processor.updatePreviewRooms(listOf(A_ROOM_ID))
+        runCurrent()
+        assertThat(adapter.activeHandles).hasSize(1)
+        withTimeout(100L) { processor.postUpdate(listOf(RoomListEntriesUpdate.Remove(0u))) }
+        assertThat(summaries.replayCache.last().map { it.roomId }).containsExactly(A_ROOM_ID_2)
+        release.complete(Unit)
+        runCurrent()
+        assertThat(summaries.replayCache.last().map { it.roomId }).containsExactly(A_ROOM_ID_2)
+        assertThat(adapter.activeHandles).isEmpty()
+    }
+
+    @Test
+    fun `authorization rebuild rejects an already running preview result`() = runTest {
+        val release = CompletableDeferred<Unit>()
+        val adapter = PreviewAdapter { message, _ -> release.await(); authorized(message) }
+        val service = mockk<RoomListServiceInterface>()
+        coEvery { service.roomOrNull(A_ROOM_ID.value) } answers { room() }
+        val summaries = MutableSharedFlow<List<RoomSummary>>(replay = 1)
+        val processor = RoomSummaryListProcessor(summaries, service, StandardTestDispatcher(testScheduler), factory(adapter), FakeAnalyticsService())
+        processor.launchPreviewsIn(backgroundScope)
+        processor.postUpdate(listOf(RoomListEntriesUpdate.Reset(listOf(room()))))
+        processor.updatePreviewRooms(listOf(A_ROOM_ID))
+        runCurrent()
+        withTimeout(100L) { processor.rebuildRoomSummaries() }
+        processor.updatePreviewRooms(emptyList())
+        release.complete(Unit)
+        runCurrent()
+        assertSafe(summaries.replayCache.last().single().message(), ProtectedMessageStatus.TEMPORARILY_UNAVAILABLE)
+        assertThat(adapter.activeHandles).isEmpty()
+    }
+
     @Test
     fun `two lists previewing the same room do not retire each other`() = runTest {
         assertConcurrentOwners(separateFactories = false)
@@ -157,11 +219,12 @@ class RoomSummaryPreviewIsolationTest {
         assertThat(snapshots[0].map { it.roomId }).containsExactly(A_ROOM_ID, A_ROOM_ID_2).inOrder()
         assertSafe(snapshots[0][1].message(), ProtectedMessageStatus.TEMPORARILY_UNAVAILABLE)
         assertThat(snapshots[1].map { it.roomId }).containsExactly(A_ROOM_ID, A_ROOM_ID_2, A_ROOM_ID_3).inOrder()
-        assertSafe(snapshots[1][2].message(), ProtectedMessageStatus.EXPIRED)
+        assertSafe(snapshots[1][2].message(), ProtectedMessageStatus.TEMPORARILY_UNAVAILABLE)
         assertThat(snapshots[2].map { it.roomId }).containsExactly(A_ROOM_ID, A_ROOM_ID_4, A_ROOM_ID_3).inOrder()
-        assertSafe(snapshots[2][1].message(), ProtectedMessageStatus.REVOKED)
+        assertSafe(snapshots[2][1].message(), ProtectedMessageStatus.TEMPORARILY_UNAVAILABLE)
         assertThat(snapshots.last().map { it.roomId }).containsExactly(A_ROOM_ID_4, A_ROOM_ID_3, A_ROOM_ID).inOrder()
-        assertThat(snapshots.last().last().message().isContentProtectionAuthorized).isTrue()
+        assertThat(snapshots.last().last().message().isContentProtectionAuthorized).isFalse()
+        assertThat(calls).isEqualTo(0)
         assertThat(adapter.activeHandles).isEmpty()
     }
 
@@ -175,11 +238,11 @@ class RoomSummaryPreviewIsolationTest {
         val processor = RoomSummaryListProcessor(
             summaries, FakeFfiRoomListService(), StandardTestDispatcher(testScheduler), factory(adapter), FakeAnalyticsService(),
         )
-        processor.postUpdate(listOf(RoomListEntriesUpdate.Reset(listOf(room()))))
+        summaries.emit(listOf(factory(adapter).create(room())))
         assertThat(summaries.replayCache.last().single().message().isContentProtectionAuthorized).isTrue()
         fail = true
         processor.postUpdate(listOf(RoomListEntriesUpdate.Set(0u, room())))
-        assertSafe(summaries.replayCache.last().single().message(), ProtectedMessageStatus.ACCESS_DENIED)
+        assertSafe(summaries.replayCache.last().single().message(), ProtectedMessageStatus.TEMPORARILY_UNAVAILABLE)
     }
 
     @Test
@@ -202,25 +265,23 @@ class RoomSummaryPreviewIsolationTest {
         val rooms = (1..20).map { room(RoomId("!qa-$it:next")) }
         val startedAt = testScheduler.currentTime
         withTimeout(2_000L) { processor.postUpdate(listOf(RoomListEntriesUpdate.Reset(rooms))) }
-        assertThat(testScheduler.currentTime - startedAt).isAtMost(2_000L)
+        assertThat(testScheduler.currentTime - startedAt).isEqualTo(0L)
         assertThat(summaries.replayCache.last().map { it.roomId }).containsExactlyElementsIn(
             (1..20).map { RoomId("!qa-$it:next") },
         ).inOrder()
         summaries.replayCache.last().forEach { assertSafe(it.message(), ProtectedMessageStatus.TEMPORARILY_UNAVAILABLE) }
-        assertThat(adapter.rawScopes).hasSize(20)
+        assertThat(adapter.rawScopes).isEmpty()
         assertThat(adapter.activeHandles).isEmpty()
     }
 
     @Test
-    fun `parent cancellation during first population publishes no structural or plaintext snapshot`() = runTest {
+    fun `cancelled parent cannot publish a structural snapshot`() = runTest {
         val adapter = PreviewAdapter { _, _ -> awaitCancellation() }
         val summaries = MutableSharedFlow<List<RoomSummary>>(replay = 1)
         val processor = RoomSummaryListProcessor(
             summaries, FakeFfiRoomListService(), StandardTestDispatcher(testScheduler), factory(adapter), FakeAnalyticsService(),
         )
         val parent = async { processor.postUpdate(listOf(RoomListEntriesUpdate.Reset(listOf(room())))) }
-        runCurrent()
-        assertThat(adapter.activeHandles).hasSize(1)
         parent.cancel()
         parent.join()
         assertThat(parent.isCancelled).isTrue()
@@ -271,9 +332,9 @@ class RoomSummaryPreviewIsolationTest {
         },
     )
 
-    private fun room(roomId: RoomId = A_ROOM_ID) = FakeFfiRoom(roomId = roomId, latestEventLambda = {
+    private fun room(roomId: RoomId = A_ROOM_ID, body: String = "yizhe-secure-v1:opaque") = FakeFfiRoom(roomId = roomId, latestEventLambda = {
         RustLatestEventValue.Remote(
-            1000uL, "@qa:next", false, ProfileDetails.Unavailable, aRustTimelineItemContentMsgLike("yizhe-secure-v1:opaque"),
+            1000uL, "@qa:next", false, ProfileDetails.Unavailable, aRustTimelineItemContentMsgLike(body),
         )
     })
 

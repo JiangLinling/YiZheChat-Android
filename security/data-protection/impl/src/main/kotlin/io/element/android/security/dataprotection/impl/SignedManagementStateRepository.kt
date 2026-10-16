@@ -57,6 +57,10 @@ class SignedManagementStateRepository(
     private val stateFile = File(context.noBackupFilesDir, "security/management/control-state-v1.json")
     private val offlineEntryFile = AtomicFile(File(context.noBackupFilesDir, "security/management/offline-entry-v1.json"))
     private val lock = ReentrantLock()
+    // One bounded decoded snapshot, not an authorization cache. Every reader still opens
+    // AtomicFile and compares its complete bytes before reusing this private immutable model.
+    private data class ParsedState(val bytes: ByteArray, val state: PersistedManagementState)
+    private var parsedState: ParsedState? = null
     private val mutableDeletedIdentityRevision = MutableStateFlow(0L)
 
     override val revision: StateFlow<Long> = mutableDeletedIdentityRevision
@@ -516,6 +520,76 @@ class SignedManagementStateRepository(
 
     internal fun clearOfflineEntry() = lock.withLock {
         writeOfflineEntry(null)
+        readLocalListAnchor()?.let { writeLocalListAnchor(it.copy(permitted = false)) }
+    }
+
+    private val localListEntryFile = AtomicFile(File(context.noBackupFilesDir, "security/management/local-list-entry-v1.json"))
+
+    internal fun acceptLocalListEntry(envelope: SignedJsonEnvelopeWire, permitted: Boolean = true) = lock.withLock {
+        check(verifier.verify(envelope))
+        val incoming = json.decodeFromJsonElement(TrustDecisionWire.serializer(), envelope.payload())
+        val previousAnchor = readLocalListAnchor()
+        val previous = previousAnchor?.decision?.let {
+            if (!verifier.verify(it)) null else json.decodeFromJsonElement(TrustDecisionWire.serializer(), it.payload())
+        }
+        // Keep a signed denial/absence as a watermark too: an older success must not reopen it.
+        if (previous != null && (incoming.issuedAtEpochMillis < previous.issuedAtEpochMillis ||
+                incoming.issuedAtEpochMillis == previous.issuedAtEpochMillis && (previous.localListEntry == null || previousAnchor?.permitted != true))) return@withLock
+        if (previous != null && incoming.issuedAtEpochMillis == previous.issuedAtEpochMillis && permitted &&
+            incoming.localListEntry != null && incoming.localListEntry == previous.localListEntry) return@withLock
+        val anchor = LocalListAnchorWire(envelope,
+            android.provider.Settings.Global.getInt(context.contentResolver, "boot_count", -1),
+            android.os.SystemClock.elapsedRealtime(), permitted)
+        writeLocalListAnchor(anchor)
+    }
+
+    private fun writeLocalListAnchor(anchor: LocalListAnchorWire) {
+        localListEntryFile.baseFile.parentFile?.mkdirs()
+        val output = localListEntryFile.startWrite()
+        try {
+            output.write(json.encodeToString(LocalListAnchorWire.serializer(), anchor).encodeToByteArray())
+            localListEntryFile.finishWrite(output)
+        } catch (failure: Exception) {
+            localListEntryFile.failWrite(output)
+            throw failure
+        }
+    }
+
+    private fun readLocalListAnchor(): LocalListAnchorWire? = runCatching {
+        localListEntryFile.openRead().use { json.decodeFromString(LocalListAnchorWire.serializer(), it.readBytes().decodeToString()) }
+    }.getOrNull()
+
+    private val localListDiagnosticBudget = java.util.concurrent.atomic.AtomicInteger(8)
+
+    private fun localListUnavailable(reason: String): Nothing? {
+        if (localListDiagnosticBudget.getAndDecrement() > 0) {
+            timber.log.Timber.tag("YiZheStartup").i("[Startup] Startup.localList.repository.unavailable reason=%s", reason)
+        }
+        return null
+    }
+
+    internal fun cachedLocalListEntry(): Pair<TrustDecisionWire, Long>? = lock.withLock {
+        val anchor = readLocalListAnchor() ?: return localListUnavailable("ANCHOR_MISSING")
+        if (!anchor.permitted || !verifier.verify(anchor.decision)) return localListUnavailable("ANCHOR_DENIED_OR_BAD_SIGNATURE")
+        // The repository lock excludes policy/command writes for this entire decision.
+        // Reuse this call's snapshot only; the next admission must reread durable state.
+        val state = readVerifiedState()
+        val application = verifiedPolicyApplication(state)
+        if (application != null && application.state != "APPLIED") return localListUnavailable("POLICY_NOT_APPLIED")
+        val decision = json.decodeFromJsonElement(TrustDecisionWire.serializer(), anchor.decision.payload())
+        val grant = decision.localListEntry ?: return localListUnavailable("GRANT_ABSENT")
+        val now = boundedOfflineNow(grant.issuedAtEpochMillis, anchor.elapsedRealtimeMillis,
+            android.os.SystemClock.elapsedRealtime(), anchor.bootCount,
+            android.provider.Settings.Global.getInt(context.contentResolver, "boot_count", -1), System.currentTimeMillis()) ?: return localListUnavailable("CLOCK_CONTINUITY")
+        val policy = (currentPolicyState(state, now) as? CurrentPolicyState.Active)?.policy ?: return localListUnavailable("POLICY_INACTIVE")
+        if (grant.protocolVersion != 1 || grant.entryPolicyVersion <= 0 || grant.policyVersion != policy.version ||
+            grant.allowedScopes != listOf("LOCAL_CHAT_LIST") || grant.accountBindings.isEmpty() ||
+            decision.trustState !in setOf("TRUSTED", "MANAGED") || grant.issuedAtEpochMillis != decision.issuedAtEpochMillis ||
+            grant.expiresAtEpochMillis <= grant.issuedAtEpochMillis ||
+            grant.expiresAtEpochMillis - grant.issuedAtEpochMillis > 3_600_000L) return localListUnavailable("GRANT_BINDING_INVALID")
+        val deadline = minOf(grant.expiresAtEpochMillis, decision.expiresAtEpochMillis, policy.expiresAtEpochMillis ?: Long.MAX_VALUE)
+        if (now >= deadline || pendingCommands(state, System.currentTimeMillis()).isNotEmpty()) return localListUnavailable("EXPIRED_OR_PENDING_COMMAND")
+        decision to (deadline - now)
     }
 
     internal fun cachedOfflineEntry(): Pair<TrustDecisionWire, Long>? = lock.withLock {
@@ -656,9 +730,12 @@ class SignedManagementStateRepository(
     }
 
     internal fun pendingCommands(nowEpochMillis: Long = System.currentTimeMillis()): List<VerifiedManagementCommand> = lock.withLock {
-        val state = readVerifiedState()
+        pendingCommands(readVerifiedState(), nowEpochMillis)
+    }
+
+    private fun pendingCommands(state: PersistedManagementState, nowEpochMillis: Long): List<VerifiedManagementCommand> {
         val trustedNow = maxOf(nowEpochMillis, state.trustedTimeEpochMillis)
-        state.commands.asSequence()
+        return state.commands.asSequence()
             .filter { it.state != ManagementCommandState.COMPLETE.name }
             .filter { it.state != ManagementCommandState.FAILED.name }
             .filter { verifier.verify(it.envelope) }
@@ -1082,20 +1159,27 @@ class SignedManagementStateRepository(
         runCatchingExceptions { decodeRelease(envelope) }.getOrNull()
 
     private fun readVerifiedState(): PersistedManagementState {
-        val serialized = try {
-            AtomicFile(stateFile).openRead().use { input -> input.readBytes().decodeToString() }
+        val bytes = try {
+            AtomicFile(stateFile).openRead().use { input -> input.readBytes() }
         } catch (_: FileNotFoundException) {
+            parsedState = null
             return PersistedManagementState()
         } catch (failure: Exception) {
+            parsedState = null
             throw IllegalStateException("Persisted management state is unreadable.", failure)
         }
-        return runCatchingExceptions { json.decodeFromString<PersistedManagementState>(serialized) }
+        parsedState?.takeIf { it.bytes.contentEquals(bytes) }?.let { return it.state }
+        parsedState = null
+        return runCatchingExceptions { json.decodeFromString<PersistedManagementState>(bytes.decodeToString()) }
             .getOrElse { failure ->
                 throw IllegalStateException("Persisted management state is unreadable.", failure)
+            }.also { state ->
+                if (bytes.size <= MAX_PARSED_STATE_BYTES) parsedState = ParsedState(bytes, state)
             }
     }
 
     private fun writeState(state: PersistedManagementState) {
+        parsedState = null
         stateFile.parentFile?.let { directory ->
             check(directory.isDirectory || directory.mkdirs()) { "Unable to create management control state directory." }
         }
@@ -1115,6 +1199,7 @@ class SignedManagementStateRepository(
     }
 
     private companion object {
+        const val MAX_PARSED_STATE_BYTES = 1024 * 1024
         const val MAX_CLOCK_SKEW_MILLIS = 5 * 60 * 1_000L
 
         // Retain enough signed generations for the longest supported message lifetime. This is a
@@ -1188,3 +1273,11 @@ internal fun isOfflineDeadlineExceeded(
     }
     return trustedNow > deadline
 }
+
+@kotlinx.serialization.Serializable
+internal data class LocalListAnchorWire(
+    val decision: SignedJsonEnvelopeWire,
+    val bootCount: Int,
+    val elapsedRealtimeMillis: Long,
+    val permitted: Boolean,
+)

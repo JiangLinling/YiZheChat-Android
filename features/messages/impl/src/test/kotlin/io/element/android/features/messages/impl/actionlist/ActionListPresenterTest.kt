@@ -22,6 +22,7 @@ import io.element.android.features.messages.impl.timeline.model.event.RtcNotific
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRedactedContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRtcNotificationContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemTextContent
+import io.element.android.features.messages.impl.timeline.model.event.TimelineItemEncryptedContent
 import io.element.android.features.messages.impl.timeline.model.event.aTimelineItemImageContent
 import io.element.android.features.messages.impl.timeline.model.event.aTimelineItemPollContent
 import io.element.android.features.messages.impl.timeline.model.event.aTimelineItemStateEventContent
@@ -34,6 +35,7 @@ import io.element.android.libraries.matrix.api.notification.CallIntent
 import io.element.android.libraries.matrix.api.room.BaseRoom
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.api.timeline.item.event.MessageClipboardSource
+import io.element.android.libraries.matrix.api.timeline.item.event.UnableToDecryptContent
 import io.element.android.libraries.matrix.api.timeline.item.event.LocalEventSendState
 import io.element.android.libraries.matrix.test.AN_EVENT_ID
 import io.element.android.libraries.matrix.test.A_CAPTION
@@ -57,6 +59,58 @@ import org.junit.Test
 class ActionListPresenterTest {
     @get:Rule
     val warmUpRule = WarmUpRule()
+
+    @Test
+    fun `access denied shell hides forwarding and content actions`() = runTest {
+        val presenter = createActionListPresenter(isDeveloperModeEnabled = false)
+        presenter.test {
+            val initial = awaitItem()
+            val shell = aMessageEvent(
+                isMine = false,
+                isEditable = false,
+                content = TimelineItemTextContent(
+                    body = "当前设备无权查看此消息。",
+                    htmlDocument = null,
+                    formattedBody = "当前设备无权查看此消息。",
+                    isEdited = false,
+                    isProtectedContentShell = true,
+                ),
+            )
+            initial.eventSink(ActionListEvent.ComputeForMessage(
+                event = shell,
+                userEventPermissions = aUserEventPermissions(
+                    canSendMessage = true,
+                    canSendReaction = true,
+                    canPinUnpin = true,
+                ),
+            ))
+
+            val target = awaitItem().target as ActionListState.Target.Success
+            assertThat(target.actions).containsExactly(TimelineItemAction.DeleteLocal)
+            assertThat(target.displayEmojiReactions).isFalse()
+        }
+    }
+
+    @Test
+    fun `undecryptable event hides content actions and reactions`() = runTest {
+        val presenter = createActionListPresenter(isDeveloperModeEnabled = false)
+        presenter.test {
+            val initial = awaitItem()
+            val unavailable = aMessageEvent(
+                isMine = false,
+                isEditable = false,
+                content = TimelineItemEncryptedContent(UnableToDecryptContent.Data.OlmV1Curve25519AesSha2("synthetic-key")),
+            )
+            initial.eventSink(ActionListEvent.ComputeForMessage(
+                event = unavailable,
+                userEventPermissions = aUserEventPermissions(canSendMessage = true, canSendReaction = true, canPinUnpin = true),
+            ))
+
+            val target = awaitItem().target as ActionListState.Target.Success
+            assertThat(target.actions).containsExactly(TimelineItemAction.DeleteLocal)
+            assertThat(target.displayEmojiReactions).isFalse()
+        }
+    }
 
     @Test
     fun `previous SDK failed message exposes Retry in the action menu`() = runTest {

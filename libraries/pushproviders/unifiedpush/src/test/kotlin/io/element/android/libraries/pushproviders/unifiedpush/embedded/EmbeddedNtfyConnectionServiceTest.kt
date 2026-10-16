@@ -20,9 +20,29 @@ class EmbeddedNtfyConnectionServiceTest {
         assertThat(ntfyWebSocketPingIntervalSeconds("Poco")).isEqualTo(3L)
         assertThat(ntfyLivenessCheckIntervalMillis("Huawei")).isEqualTo(3_000L)
         assertThat(ntfyLivenessCheckIntervalMillis("Xiaomi")).isEqualTo(3_000L)
-        assertThat(ntfyStaleConnectionTimeoutMillis("Xiaomi", isNextDeployment = true)).isEqualTo(12_000L)
-        assertThat(ntfyStaleConnectionTimeoutMillis("HUAWEI", isNextDeployment = true)).isEqualTo(12_000L)
-        assertThat(ntfyStaleConnectionTimeoutMillis("Redmi", isNextDeployment = true)).isEqualTo(12_000L)
+        assertThat(ntfyStaleConnectionTimeoutMillis("Xiaomi", isNextDeployment = true)).isEqualTo(60_000L)
+        assertThat(ntfyStaleConnectionTimeoutMillis("HUAWEI", isNextDeployment = true)).isEqualTo(60_000L)
+        assertThat(ntfyStaleConnectionTimeoutMillis("Redmi", isNextDeployment = true)).isEqualTo(60_000L)
+    }
+
+    @Test
+    fun `established text silent websocket is left to ping pong and failed opening remains bounded`() {
+        val timeout = ntfyStaleConnectionTimeoutMillis("Xiaomi", isNextDeployment = true)
+        assertThat(shouldRefreshNtfyOpening(opened = true, lastActivityAt = 1_000, now = 1_801_000, timeoutMillis = timeout)).isFalse()
+        assertThat(shouldRefreshNtfyOpening(opened = false, lastActivityAt = 1_000, now = 60_999, timeoutMillis = timeout)).isFalse()
+        assertThat(shouldRefreshNtfyOpening(opened = false, lastActivityAt = 1_000, now = 61_000, timeoutMillis = timeout)).isTrue()
+    }
+
+    @Test
+    fun `quiet socket survives ordinary ntfy keepalive interval but missing application heartbeat still recovers`() {
+        val timeout = ntfyStaleConnectionTimeoutMillis("Xiaomi", isNextDeployment = true)
+        for (elapsed in listOf(12_000L, 15_000L, 30_000L, 45_000L, 59_999L)) {
+            assertThat(isConnectionStale(lastActivityAt = 1_000L, now = 1_000L + elapsed, timeoutMillis = timeout)).isFalse()
+        }
+        assertThat(isConnectionStale(lastActivityAt = 1_000L, now = 61_000L, timeoutMillis = timeout)).isTrue()
+        // An actual text keepalive resets application liveness; transport pongs
+        // do not update this timestamp and are checked by OkHttp itself.
+        assertThat(isConnectionStale(lastActivityAt = 46_000L, now = 61_000L, timeoutMillis = timeout)).isFalse()
     }
 
     @Test

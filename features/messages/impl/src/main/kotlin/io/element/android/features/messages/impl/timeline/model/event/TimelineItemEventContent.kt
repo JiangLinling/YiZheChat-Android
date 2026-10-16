@@ -61,7 +61,7 @@ fun TimelineItemEventContent.canBeCopied(): Boolean =
  * Returns true if the event content can be forwarded.
  */
 fun TimelineItemEventContent.canBeForwarded(): Boolean =
-    when (this) {
+    !isProtectedContentShell && !isBurnAfterRead && when (this) {
         is TimelineItemTextBasedContent,
         is TimelineItemImageContent,
         is TimelineItemFileContent,
@@ -80,10 +80,9 @@ fun TimelineItemEventContent.canBeForwarded(): Boolean =
  * This does not take into account the power level of the user.
  */
 fun TimelineItemEventContent.canReact(): Boolean =
-    when (this) {
+    !isProtectedContentShell && !isBurnAfterRead && when (this) {
         is TimelineItemTextBasedContent,
         is TimelineItemAudioContent,
-        is TimelineItemEncryptedContent,
         is TimelineItemFileContent,
         is TimelineItemImageContent,
         is TimelineItemStickerContent,
@@ -91,6 +90,7 @@ fun TimelineItemEventContent.canReact(): Boolean =
         is TimelineItemPollContent,
         is TimelineItemVoiceContent,
         is TimelineItemVideoContent -> true
+        is TimelineItemEncryptedContent,
         is TimelineItemStateContent,
         is TimelineItemRedactedContent,
         is TimelineItemLegacyCallInviteContent,

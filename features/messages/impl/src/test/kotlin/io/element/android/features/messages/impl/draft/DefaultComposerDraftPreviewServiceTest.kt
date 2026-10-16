@@ -16,6 +16,28 @@ import org.junit.Test
 
 class DefaultComposerDraftPreviewServiceTest {
     @Test
+    fun `FC002 room list preview can remain cached after the backing draft changes`() = runTest {
+        var backingDraft: ComposerDraft? = ComposerDraft("sample", null, ComposerDraftType.NewMessage)
+        var loads = 0
+        val room = FakeBaseRoom(loadComposerDraftLambda = {
+            loads++
+            Result.success(backingDraft)
+        })
+        val client = FakeMatrixClient().apply { givenGetRoomResult(A_ROOM_ID, room) }
+        val previews = DefaultComposerDraftPreviewService(client)
+
+        previews.refresh(listOf(A_ROOM_ID))
+        assertThat(previews.previews.value).containsKey(A_ROOM_ID)
+        backingDraft = null
+        previews.refresh(listOf(A_ROOM_ID))
+        assertThat(loads).isEqualTo(1)
+        assertThat(previews.previews.value).containsKey(A_ROOM_ID)
+
+        previews.update(A_ROOM_ID, null)
+        assertThat(previews.previews.value).doesNotContainKey(A_ROOM_ID)
+    }
+
+    @Test
     fun `late initial refresh cannot restore a cleared preview`() = runTest {
         val result = CompletableDeferred<ComposerDraft?>()
         val room = object : BaseRoom by FakeBaseRoom() {

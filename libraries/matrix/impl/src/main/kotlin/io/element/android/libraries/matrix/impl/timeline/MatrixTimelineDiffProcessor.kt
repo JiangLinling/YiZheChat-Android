@@ -1342,13 +1342,18 @@ internal class MatrixTimelineDiffProcessor(
                     revealedDecryptingShells.remove(key)
                 }
                 initialStructuralProjectionBarrier?.let { barrier ->
+                    val initialViewportKeys = barrier.pendingVisibleKeys.toSet()
                     barrier.pendingVisibleKeys.removeAll(appliedKeys)
-                    val hasAuthenticatedRecentArrival = appliedKeys.any { key ->
+                    val hasAuthenticatedFirstContent = appliedKeys.any { key ->
                         candidatesByKey[key]?.let { update ->
-                            (update.recentHistory || update.recentProjection) && update.decryptedItem.hasAuthorizedOrdinaryMessage()
+                            (key in initialViewportKeys || update.recentHistory || update.recentProjection) &&
+                                update.decryptedItem.hasAuthorizedOrdinaryMessage()
                         } == true
                     }
-                    if (barrier.pendingVisibleKeys.isEmpty() || hasAuthenticatedRecentArrival) {
+                    // One current-authority message is enough to leave the empty loading screen.
+                    // Other items remain safe shells; a slow older message must not hide the
+                    // already authorized viewport. Scope, source and revision were checked above.
+                    if (barrier.pendingVisibleKeys.isEmpty() || hasAuthenticatedFirstContent) {
                         initialStructuralProjectionBarrier = null
                     }
                 }
@@ -1494,8 +1499,8 @@ internal class MatrixTimelineDiffProcessor(
                 return@let
             }
             // The first scoped Clear+Reset has no trustworthy prior projection. Keep the UI in its
-            // empty secure-loading state until every visible protected item has produced either an
-            // authorized projection or an explicit fail-closed result. No plaintext is retained or
+            // empty secure-loading state until the first authorized viewport message, or until
+            // every pending item has an explicit fail-closed result. No plaintext is retained or
             // published by this barrier, and hard/terminal transitions clear it synchronously.
             Timber.tag(PERFORMANCE_TAG).d("stage=initial_projection_wait pending_count=%d", barrier.pendingVisibleKeys.size)
             return true

@@ -157,6 +157,10 @@ fun AppUpdateGate(
 
     modifier: Modifier = Modifier,
 
+    onBlockingState: (Boolean) -> Unit = {},
+
+    allowRetainedStartup: Boolean = false,
+
     content: @Composable () -> Unit,
 
 ) {
@@ -184,9 +188,32 @@ fun AppUpdateGate(
 
     var offlineGrantValidated by remember { mutableStateOf(false) }
 
+    var retainedEntryPermitted by remember { mutableStateOf(false) }
+
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
 
 
+
+    LaunchedEffect(state, restriction, allowRetainedStartup, networkDisconnected, isOffline) {
+        retainedEntryPermitted = false
+        if (!allowRetainedStartup || state != AppUpdateGateState.Checking || restriction != null || networkDisconnected || isOffline) return@LaunchedEffect
+        try {
+            val release = managementControlService.cachedAppRelease()
+            val manifest = managementControlService.hasValidCachedAppReleaseManifest()
+            if (!canPrepareRetainedAppContent(BuildConfig.DEBUG, manifest, release)) return@LaunchedEffect
+            while (isActive) {
+                val permitted = managementControlService.localListEntryStatus() != null
+                if (permitted && !retainedEntryPermitted) StartupTrace.mark("Startup.retainedAppContent.ready")
+                retainedEntryPermitted = permitted
+                if (!retainedEntryPermitted) break
+                delay(500L)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            retainedEntryPermitted = false
+        }
+    }
 
     LaunchedEffect(restriction) {
 
@@ -444,7 +471,7 @@ fun AppUpdateGate(
 
 
 
-    BackHandler(enabled = state !is AppUpdateGateState.Allowed) {}
+    // The authenticated retained grant only changes presentation during Checking.
 
 
 
@@ -456,13 +483,32 @@ fun AppUpdateGate(
 
             AppUpdateGateState.CheckFailed(startupGateAccessibilityContract("OFFLINE_ENTRY_EXPIRED"))
 
+        state == AppUpdateGateState.Checking && retainedEntryPermitted && !networkDisconnected && !isOffline -> AppUpdateGateState.Allowed
+
         else -> state
 
     }
 
+    BackHandler(enabled = displayedState !is AppUpdateGateState.Allowed) {}
+
+    LaunchedEffect(displayedState, state, retainedEntryPermitted, restriction, networkDisconnected, isOffline) {
+        StartupTrace.mark(
+            "Startup.appGate display=${displayedState.javaClass.simpleName} state=${state.javaClass.simpleName}" +
+                " retained=$retainedEntryPermitted restricted=${restriction != null}" +
+                " disconnected=$networkDisconnected offline=$isOffline",
+        )
+    }
+
+    androidx.compose.runtime.SideEffect {
+        onBlockingState(displayedState != AppUpdateGateState.Checking && displayedState != AppUpdateGateState.Allowed)
+    }
     when (val current = displayedState) {
 
         AppUpdateGateState.Allowed -> authorizedContentState.SaveableStateProvider("authorized-app-content") {
+            androidx.compose.runtime.DisposableEffect(Unit) {
+                StartupTrace.mark("Startup.appContent.enter")
+                onDispose { StartupTrace.mark("Startup.appContent.dispose") }
+            }
             content()
         }
 
@@ -561,6 +607,12 @@ private fun ManagedAppRelease?.toGateState(): AppUpdateGateState =
         ?: AppUpdateGateState.Allowed
 
 
+
+internal fun canPrepareRetainedAppContent(
+    debugBuild: Boolean,
+    hasValidCachedManifest: Boolean,
+    cachedRelease: ManagedAppRelease?,
+): Boolean = cachedRelease?.mandatory != true && (debugBuild || hasValidCachedManifest)
 
 internal fun canOpenAppShellFromCachedRelease(
 

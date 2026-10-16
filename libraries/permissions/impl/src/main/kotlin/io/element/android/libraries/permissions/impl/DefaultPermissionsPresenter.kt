@@ -84,10 +84,14 @@ class DefaultPermissionsPresenter(
             permissionsStore.isPermissionAsked(permission)
         }.collectAsState(initial = false)
 
+        val showDialog = rememberSaveable { mutableStateOf(false) }
         var permissionState: PermissionState? = null
 
         fun onPermissionResult(result: Boolean) {
             Timber.tag(loggerTag.value).d("onPermissionResult: $result")
+            // A false rationale also occurs when Android silently denies a request.
+            // Explain every denial immediately; history must never stand in for an OS grant.
+            showDialog.value = !result
             appCoroutineScope.launch {
                 val operationId = permissionRequestOperationId.getAndSet(null)
                 var persisted = false
@@ -100,10 +104,7 @@ class DefaultPermissionsPresenter(
                         )
                     ) {
                         permissionsStore.setPermissionAsked(permission, true)
-                        if (!result && permissionState?.status?.shouldShowRationale == true) {
-                            Timber.tag(loggerTag.value).d("onPermissionResult: setPermissionDenied to true")
-                            permissionsStore.setPermissionDenied(permission, true)
-                        }
+                        permissionsStore.setPermissionDenied(permission, !result)
                         persisted = true
                     }
                 } catch (failure: Exception) {
@@ -111,10 +112,7 @@ class DefaultPermissionsPresenter(
                     Timber.tag(loggerTag.value).w(failure, "Unable to bind permission result lifecycle")
                     if (!persisted) {
                         permissionsStore.setPermissionAsked(permission, true)
-                        if (!result && permissionState?.status?.shouldShowRationale == true) {
-                            Timber.tag(loggerTag.value).d("onPermissionResult: setPermissionDenied to true")
-                            permissionsStore.setPermissionDenied(permission, true)
-                        }
+                        permissionsStore.setPermissionDenied(permission, !result)
                     }
                 }
             }
@@ -134,6 +132,7 @@ class DefaultPermissionsPresenter(
                 if (event == Lifecycle.Event.ON_RESUME && operationId != null && settingsWasBackgrounded) {
                     settingsOperationId = null
                     settingsWasBackgrounded = false
+                    showDialog.value = permissionState?.status?.isGranted != true
                     appCoroutineScope.launch {
                         runCatching {
                             appOperationalStateCoordinator.perform(
@@ -165,7 +164,9 @@ class DefaultPermissionsPresenter(
             }
         }
 
-        val showDialog = rememberSaveable { mutableStateOf(false) }
+        LaunchedEffect(permissionState.status.isGranted) {
+            if (permissionState.status.isGranted) showDialog.value = false
+        }
 
         fun handleEvent(event: PermissionsEvent) {
             when (event) {
@@ -173,7 +174,9 @@ class DefaultPermissionsPresenter(
                     showDialog.value = false
                 }
                 PermissionsEvent.RequestPermissions -> {
-                    if (permissionState.status !is PermissionStatus.Granted && isAlreadyDenied) {
+                    if (permissionState.status !is PermissionStatus.Granted &&
+                        (isAlreadyDenied || (isAlreadyAsked && !permissionState.status.shouldShowRationale))
+                    ) {
                         showDialog.value = true
                     } else {
                         val request = lifecycleOperationRequest(FullAppLifecycleId.LC_03, "feature_requires_permission")

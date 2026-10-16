@@ -27,6 +27,8 @@ import io.element.android.libraries.matrix.api.timeline.ForwardEventPairResult
 import io.element.android.libraries.matrix.api.timeline.MsgType
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedMediaAlbum
+import io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
+import io.element.android.libraries.matrix.api.timeline.item.event.ProtectedMessageStatus
 import io.element.android.libraries.matrix.api.timeline.item.event.CallLifecycleState
 import io.element.android.libraries.matrix.api.timeline.item.event.RedactedContent
 import io.element.android.libraries.matrix.api.timeline.item.event.toEventOrTransactionId
@@ -40,6 +42,7 @@ import io.element.android.libraries.matrix.impl.room.RoomContentForwarder
 import io.element.android.libraries.matrix.impl.room.ForwardTargetUnavailableException
 import io.element.android.libraries.matrix.test.room.FakeJoinedRoom
 import io.element.android.libraries.matrix.test.room.aRoomInfo
+import io.element.android.libraries.matrix.test.timeline.aMessageContent
 import io.element.android.security.contentprotection.api.ContentAccessDestroyReason
 import io.element.android.security.contentprotection.api.ContentId
 import io.element.android.security.contentprotection.api.ContentKind
@@ -95,6 +98,24 @@ import org.matrix.rustcomponents.sdk.EventOrTransactionId as RustEventOrTransact
 import org.matrix.rustcomponents.sdk.Timeline as InnerTimeline
 
 class RustTimelineTest {
+    @Test
+    fun `failed pagination retains retry and clears failure on successful retry`() = runTest {
+        val inner = FakeFfiTimeline().apply { paginationFailure = IllegalStateException("storage unavailable") }
+        val sut = createRustTimeline(inner = inner)
+        runCurrent()
+        assertThat(sut.paginate(Timeline.PaginationDirection.BACKWARDS).isFailure).isTrue()
+        assertThat(sut.backwardPaginationStatus.value.lastRequestFailed).isTrue()
+        assertThat(sut.backwardPaginationStatus.value.isPaginating).isFalse()
+        assertThat(sut.backwardPaginationStatus.value.hasMoreToLoad).isTrue()
+        inner.emitPaginationStatus(PaginationStatus.Idle(hitTimelineStart = false))
+        runCurrent()
+        assertThat(sut.backwardPaginationStatus.value.lastRequestFailed).isTrue()
+        inner.paginationFailure = null
+        assertThat(sut.paginate(Timeline.PaginationDirection.BACKWARDS).isSuccess).isTrue()
+        assertThat(sut.backwardPaginationStatus.value.lastRequestFailed).isFalse()
+        assertThat(sut.backwardPaginationStatus.value.hasMoreToLoad).isFalse()
+    }
+
 
     @Test
     fun `ordinary location persists its original LC17 transaction before one encrypted enqueue`() = runTest {
@@ -1014,6 +1035,74 @@ class RustTimelineTest {
 
         assertThat(result).isInstanceOf(ForwardEventPairResult.Failed::class.java)
         assertThat(inner.sentMessageCount).isEqualTo(0)
+    }
+
+    @Test
+    fun `access denied source fails direct forward pair before content construction or Matrix send`() = runTest {
+        val eventId = "\$access-denied:test"
+        val inner = FakeFfiTimeline(failSends = false)
+        val raw = aRustEventTimelineItem(eventOrTransactionId = RustEventOrTransactionId.EventId(eventId))
+        inner.storeEvent(eventId, raw)
+        val denied = aMessageContent(body = "").copy(
+            type = io.element.android.libraries.matrix.api.timeline.item.event.TextMessageType("", null),
+            protectedMessageStatus = ProtectedMessageStatus.ACCESS_DENIED,
+            isContentProtectionAuthorized = false,
+        )
+        val forwarder = mockk<RoomContentForwarder>()
+        val sut = createRustTimeline(inner, roomContentForwarder = forwarder, protectedContentAdapter = ProjectedForwardSourceAdapter(denied))
+
+        sut.timelineItems.test {
+            runCurrent()
+            inner.emitDiff(listOf(TimelineDiff.Reset(listOf(FakeFfiTimelineItem(asEventResult = raw)))))
+            runCurrent()
+            assertThat(expectMostRecentItem().filterIsInstance<MatrixTimelineItem.Event>().single().event.content).isEqualTo(denied)
+
+            val result = sut.forwardEventPair(EventId(eventId), RoomId("!target:test"), "operation-1234567890")
+
+            assertThat(result).isInstanceOf(ForwardEventPairResult.Failed::class.java)
+            assertThat((result as ForwardEventPairResult.Failed).reason).contains("not authorized")
+            assertThat(inner.sentMessageCount).isEqualTo(0)
+            coVerify(exactly = 0) { forwarder.forwardProtected(any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun `protected forwarder rejects failure status even with an inconsistent authorized flag`() = runTest {
+        val denied = aMessageContent(body = "").copy(
+            type = io.element.android.libraries.matrix.api.timeline.item.event.TextMessageType("", null),
+            protectedMessageStatus = ProtectedMessageStatus.ACCESS_DENIED,
+            isContentProtectionAuthorized = true,
+        )
+        val forwarder = RoomContentForwarder(FakeFfiRoomListService())
+
+        val result = runCatching { forwarder.forwardProtected(denied, listOf(RoomId("!target:test"))) }
+
+        assertThat(result.isFailure).isTrue()
+        assertThat(result.exceptionOrNull()).hasMessageThat().contains("not authorized")
+    }
+
+    @Test
+    fun `authorized ordinary message still forwards through protected pair`() = runTest {
+        val eventId = "\$authorized:test"
+        val roomId = RoomId("!target:test")
+        val inner = FakeFfiTimeline(failSends = false)
+        val raw = aRustEventTimelineItem(eventOrTransactionId = RustEventOrTransactionId.EventId(eventId))
+        inner.storeEvent(eventId, raw)
+        val authorized = aMessageContent(body = "ordinary authorized message").copy(isContentProtectionAuthorized = true)
+        val forwarder = mockk<RoomContentForwarder>()
+        coEvery { forwarder.validateTargetRoom(roomId) } returns Result.success(Unit)
+        coEvery { forwarder.forwardProtected(authorized, listOf(roomId), any()) } returns Unit
+        val sut = createRustTimeline(inner, roomContentForwarder = forwarder, protectedContentAdapter = ProjectedForwardSourceAdapter(authorized))
+
+        sut.timelineItems.test {
+            runCurrent()
+            inner.emitDiff(listOf(TimelineDiff.Reset(listOf(FakeFfiTimelineItem(asEventResult = raw)))))
+            runCurrent()
+            assertThat(expectMostRecentItem().filterIsInstance<MatrixTimelineItem.Event>().single().event.content).isEqualTo(authorized)
+
+            assertThat(sut.forwardEventPair(EventId(eventId), roomId, "operation-1234567890")).isEqualTo(ForwardEventPairResult.Success)
+            coVerify(exactly = 1) { forwarder.forwardProtected(authorized, listOf(roomId), any()) }
+        }
     }
 
     @Test
@@ -2032,6 +2121,21 @@ private class BurnOpenProjectionAdapter : MatrixProtectedContentAdapter by Disab
         endCount++
         return true
     }
+}
+
+private class ProjectedForwardSourceAdapter(private val content: MessageContent) :
+    MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
+    override suspend fun enabled(): Boolean = true
+
+    override suspend fun timelineItemsShell(items: List<MatrixTimelineItem>): List<MatrixTimelineItem> =
+        items.map { it.withForwardSourceContent(content) }
+
+    override suspend fun decryptItem(item: MatrixTimelineItem): MatrixTimelineItem = item.withForwardSourceContent(content)
+}
+
+private fun MatrixTimelineItem.withForwardSourceContent(content: MessageContent): MatrixTimelineItem {
+    val eventItem = this as? MatrixTimelineItem.Event ?: return this
+    return eventItem.copy(event = eventItem.event.copy(content = content))
 }
 
 private fun MatrixTimelineItem.withTestText(body: String): MatrixTimelineItem {

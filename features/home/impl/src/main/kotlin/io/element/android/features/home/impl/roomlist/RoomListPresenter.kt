@@ -180,6 +180,7 @@ class RoomListPresenter(
                 is RoomListEvent.UpdateVisibleRange -> coroutineScope.launch {
                     roomListDataSource.updateVisibleRange(event.range)
                 }
+                is RoomListEvent.UpdatePreviewRooms -> roomListDataSource.updatePreviewRooms(event.roomIds)
                 RoomListEvent.DismissRequestVerificationPrompt -> securityBannerDismissed = true
                 RoomListEvent.DismissBanner -> securityBannerDismissed = true
                 RoomListEvent.DismissNewNotificationSoundBanner -> coroutineScope.launch {
@@ -319,18 +320,23 @@ class RoomListPresenter(
         val loadingState by roomListDataSource.loadingState.collectAsState()
         val showEmpty by remember {
             derivedStateOf {
-                (loadingState as? RoomList.LoadingState.Loaded)?.numberOfRooms == 0
+                (loadingState as? RoomList.LoadingState.Loaded)?.numberOfRooms == 0 &&
+                    roomSummaries is AsyncData.Success && roomSummaries.dataOrNull().isNullOrEmpty()
             }
         }
         val showSkeleton by remember {
             derivedStateOf {
-                loadingState == RoomList.LoadingState.NotLoaded || roomSummaries is AsyncData.Loading
+                roomSummaries is AsyncData.Loading ||
+                    (loadingState == RoomList.LoadingState.NotLoaded && roomSummaries.dataOrNull().isNullOrEmpty())
             }
         }
         val securityBannerState by rememberSecurityBannerState(securityBannerDismissed)
         return when {
             showEmpty -> RoomListContentState.Empty(
                 securityBannerState = securityBannerState,
+                fullScreenIntentPermissionsState = fullScreenIntentPermissionsPresenter.present(),
+                batteryOptimizationState = batteryOptimizationPresenter.present(),
+                showNewNotificationSoundBanner = showNewNotificationSoundBanner,
             )
             showSkeleton -> RoomListContentState.Skeleton(count = 16)
             else -> {

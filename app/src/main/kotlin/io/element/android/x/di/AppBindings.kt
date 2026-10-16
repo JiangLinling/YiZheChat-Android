@@ -52,6 +52,8 @@ import kotlinx.coroutines.CoroutineScope
 
 @ContributesTo(AppScope::class)
 interface AppBindings {
+    fun retainedSessionPreparation(): io.element.android.x.RetainedSessionPreparation
+
     fun foregroundNotificationHost(): io.element.android.libraries.push.api.notifications.ForegroundNotificationHost
 
     @AppCoroutineScope

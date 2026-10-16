@@ -6,6 +6,7 @@ package io.element.android.security.securestorage.impl
 
 import android.content.pm.ProviderInfo
 import android.os.ParcelFileDescriptor
+import android.provider.OpenableColumns
 import com.google.common.truth.Truth.assertThat
 import io.element.android.security.securestorage.api.AccountVaultId
 import io.element.android.security.securestorage.api.SecureMediaAuthenticatedReadRejection
@@ -34,6 +35,35 @@ import kotlin.time.Duration.Companion.minutes
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class SecureMediaProviderAdmissionTest {
+    @Test
+    fun `metadata exposes original name without changing capability and fails closed after revoke`() = runTest {
+        val store = InMemorySensitiveFileStore()
+        val reference = store.write(request()) { it.write(ByteArray(68)) }
+        val manager = DefaultSecureMediaLeaseManager(RuntimeEnvironment.getApplication(), backgroundScope, store)
+        val filename = "QA_TC065_20261007.txt"
+        val lease = manager.issue(SecureMediaLeaseRequest(reference, "text/plain", filename, 5.minutes))
+        val provider = provider()
+
+        assertThat(lease.uri.lastPathSegment).matches("[0-9a-f]{48}")
+        assertThat(lease.uri.toString()).doesNotContain(filename)
+        assertThat(provider.getType(lease.uri)).isEqualTo("text/plain")
+        provider.query(lease.uri, null, null, null, null).use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))).isEqualTo(filename)
+            assertThat(cursor.getLong(cursor.getColumnIndexOrThrow(OpenableColumns.SIZE))).isEqualTo(68L)
+            assertThat(cursor.columnNames.toList()).containsExactly(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+        }
+        provider.query(lease.uri, arrayOf(OpenableColumns.SIZE, OpenableColumns.DISPLAY_NAME, "_data"), null, null, null).use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getLong(0)).isEqualTo(68L)
+            assertThat(cursor.getString(1)).isEqualTo(filename)
+            assertThat(cursor.isNull(2)).isTrue()
+        }
+        lease.close()
+        assertThrows(FileNotFoundException::class.java) { provider.query(lease.uri, null, null, null, null) }
+        assertThrows(FileNotFoundException::class.java) { provider.getType(lease.uri) }
+    }
+
     @Test
     fun `live leased source is readable and the same uri is rejected after explicit close`() = runTest {
         val memoryStore = InMemorySensitiveFileStore()

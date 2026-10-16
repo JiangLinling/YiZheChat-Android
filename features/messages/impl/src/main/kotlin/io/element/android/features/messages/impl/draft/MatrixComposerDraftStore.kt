@@ -26,14 +26,18 @@ class MatrixComposerDraftStore(
     private val draftPreviewService: ComposerDraftPreviewService,
 ) : ComposerDraftStore {
     override suspend fun loadDraft(roomId: RoomId, threadRoot: ThreadId?): ComposerDraft? {
-        return client.getRoom(roomId)?.use { room ->
-            room.loadComposerDraft(threadRoot)
+        val room = client.getRoom(roomId)
+        if (room == null) Timber.d("FC002 draft load room=%s source=matrix result=room_unavailable", roomId)
+        return room?.use {
+            it.loadComposerDraft(threadRoot)
                 .onFailure {
                     Timber.e(it, "Failed to load composer draft for room $roomId")
+                    Timber.d("FC002 draft load room=%s source=matrix result=failure", roomId)
                 }
-                .onSuccess {
+                .onSuccess { draft ->
                     // Restoration is a read. Retain the durable copy until an explicit edit/clear/send handoff.
                     Timber.d("Loaded composer draft for room $roomId")
+                    Timber.d("FC002 draft load room=%s source=matrix result=%s", roomId, if (draft == null) "absent" else "present")
                 }
                 .getOrNull()
         }
@@ -53,6 +57,7 @@ class MatrixComposerDraftStore(
                 .onSuccess {
                     if (threadRoot == null) draftPreviewService.update(roomId, draft)
                     Timber.d("Updated composer draft for room $roomId")
+                    Timber.d("FC002 draft write room=%s source=matrix result=committed present=%s", roomId, draft != null)
                 }
                 .getOrThrow()
         }

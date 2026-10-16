@@ -153,11 +153,6 @@
             android:launchMode="singleTask"
             android:theme="@style/Theme.ElementX.Splash"
             android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
             <!-- Handle deep-link for notification ./tools/adb/deeplink.sh -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -258,6 +253,17 @@
                 <data android:scheme="yizhe" android:host="group" android:path="/v1" />
             </intent-filter>
         </activity>
+
+        <!-- Preserve existing desktop shortcuts without a forwarding or transparent activity. -->
+        <activity-alias
+            android:name=".LauncherActivity"
+            android:targetActivity=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <provider
             android:name="androidx.core.content.FileProvider"

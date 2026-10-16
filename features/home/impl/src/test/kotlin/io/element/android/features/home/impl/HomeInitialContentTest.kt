@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import io.element.android.features.home.impl.roomlist.RoomListContentState
 import io.element.android.features.home.impl.roomlist.SecurityBannerState
 import io.element.android.features.home.impl.roomlist.aRoomListState
+import io.element.android.features.home.impl.roomlist.anEmptyContentState
 import org.junit.Test
 
 class HomeInitialContentTest {
@@ -11,7 +12,7 @@ class HomeInitialContentTest {
         assertThat(homeInitialContentReady(aHomeState(roomListState = aRoomListState(
             contentState = RoomListContentState.Skeleton(16))))).isFalse()
         assertThat(homeInitialContentReady(aHomeState(roomListState = aRoomListState(
-            contentState = RoomListContentState.Empty(SecurityBannerState.None))))).isTrue()
+            contentState = anEmptyContentState(SecurityBannerState.None))))).isTrue()
     }
     @Test fun `real room list and restored settings do not block initial entry`() {
         assertThat(homeInitialContentReady(aHomeState())).isTrue()

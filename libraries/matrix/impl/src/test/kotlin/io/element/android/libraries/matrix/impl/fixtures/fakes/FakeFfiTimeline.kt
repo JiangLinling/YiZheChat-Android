@@ -24,6 +24,7 @@ import uniffi.matrix_sdk.PaginationStatus
 class FakeFfiTimeline(
     private val failSends: Boolean = true,
 ) : Timeline(NoHandle) {
+    var paginationFailure: Exception? = null
     val redactedEventIds = mutableListOf<String>()
     val fetchedEventIds = mutableListOf<String>()
     var sentMessageCount = 0
@@ -65,6 +66,7 @@ class FakeFfiTimeline(
     }
 
     override suspend fun paginateBackwards(numEvents: UShort): Boolean {
+        paginationFailure?.let { throw it }
         return true
     }
 

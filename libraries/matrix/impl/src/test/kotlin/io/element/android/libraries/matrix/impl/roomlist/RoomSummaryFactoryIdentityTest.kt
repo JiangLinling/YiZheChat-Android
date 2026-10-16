@@ -100,6 +100,11 @@ class RoomSummaryFactoryIdentityTest {
     }
 
     @Test
+    fun `room summary maps a native media source once before its owner is released`() = runTest {
+        assertThat(createSummary("\$matrix-caption", attachment = true, expectedSourceUrlReads = 1)).isEqualTo("\$matrix-caption")
+    }
+
+    @Test
     fun `attachment caption without a canonical carrier does not open a read owner`() = runTest {
         assertThat(createSummary(null, attachment = true)).isNull()
         assertThat(createSummary("room-summary:1000:sender", attachment = true)).isNull()
@@ -110,9 +115,11 @@ class RoomSummaryFactoryIdentityTest {
                                      summarySender: String = "@qa:next", summaryOwn: Boolean = false,
                                      localState: LatestEventValueLocalState? = null, cachedBody: String? = null,
                                      cachedRemote: Boolean = true, cachedOwn: Boolean = true,
-                                     repeats: Int = 1, expectedNativeReads: Int? = null, observedAfterFirst: Boolean = false): String? {
+                                     repeats: Int = 1, expectedNativeReads: Int? = null, observedAfterFirst: Boolean = false,
+                                     expectedSourceUrlReads: Int? = null): String? {
         var identity: String? = null
         var observations = 0
+        var sourceUrlReads = 0
         val owners = mutableListOf<String>()
         val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
             override fun openTimelineReleaseScope(scopeId: String): String = "preview-owner".also { owners += it }
@@ -155,7 +162,7 @@ class RoomSummaryFactoryIdentityTest {
         val room = FakeFfiRoom(timelineLambda = { cachedTimeline }, latestEventLambda = {
             val content = if (attachment) {
                 val media = mockk<org.matrix.rustcomponents.sdk.MediaSource>(relaxed = true) {
-                    every { url() } returns "mxc://qa/caption"
+                    every { url() } answers { sourceUrlReads++; "mxc://qa/caption" }
                     every { toJson() } returns "\"mxc://qa/caption\""
                 }
                 val message = org.matrix.rustcomponents.sdk.MessageContent(
@@ -185,6 +192,7 @@ class RoomSummaryFactoryIdentityTest {
             }
         })
         repeat(repeats) { factory.create(room) }
+        expectedSourceUrlReads?.let { assertThat(sourceUrlReads).isEqualTo(it) }
         expectedNativeReads?.let { assertThat(cachedTimeline.fetchedEventIds).hasSize(it) }
         previewTimelines.close()
         assertThat(owners).isEmpty()

@@ -25,7 +25,11 @@ import timber.log.Timber
 @ContributesBinding(AppScope::class)
 class RustTracingService(private val buildMeta: BuildMeta) : TracingService {
     override fun createTimberTree(target: String): Timber.Tree {
-        return RustTracingTree(target = target, retrieveFromStackTrace = buildMeta.isDebuggable)
+        return RustTracingTree(
+            target = target,
+            retrieveFromStackTrace = buildMeta.isDebuggable,
+            diagnosticDispatcher = if (buildMeta.isDebuggable) RustDiagnosticLogDispatcher::dispatch else null,
+        )
     }
 
     override fun updateWriteToFilesConfiguration(config: WriteToFilesConfiguration) {

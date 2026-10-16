@@ -11,6 +11,19 @@ import org.junit.Test
 import org.junit.Assert.*
 
 class ProtectedEventOwnershipResolverTest {
+    @Test fun `cold media defers to original upload but live upload and caption retain registration`() {
+        assertTrue(ProtectedEventOwnershipResolver.isHistoricalMediaRegistration(true, false, null))
+        assertFalse(ProtectedEventOwnershipResolver.isHistoricalMediaRegistration(true, true, null))
+        assertFalse(ProtectedEventOwnershipResolver.isHistoricalMediaRegistration(false, false, null))
+        assertFalse(ProtectedEventOwnershipResolver.isHistoricalMediaRegistration(false, true, null))
+        assertFalse(ProtectedEventOwnershipResolver.isHistoricalMediaRegistration(
+            true, false, LifecycleOperationContext("original-upload-operation", FullAppLifecycleId.LC_16),
+        ))
+        // Scheduling must never synthesize the missing original SEND or a read grant.
+        assertNull(ProtectedEventOwnershipResolver.resolve(input, null).sendContext)
+        assertEquals(ProtectedEventOwnershipResolver.Ownership.UNKNOWN, ProtectedEventOwnershipResolver.resolve(input, null).ownership)
+    }
+
     @Test fun `only acknowledged historical text binding can avoid registration replay`() {
         val bound = origin().copy(lifecycleId = FullAppLifecycleId.LC_13, contentKind = ContentKind.TEXT)
         assertTrue(ProtectedEventOwnershipResolver.hasRecordedTextBinding(bound, null, "\$event", false))

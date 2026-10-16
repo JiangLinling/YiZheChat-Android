@@ -124,9 +124,11 @@ class RoomListDataSourceTest {
     @Test
     fun `authorized protected preview is retried after the initial SDK projection`() = runTest {
         var rebuildCount = 0
+        var previewRequests = 0
         val roomList = FakeDynamicRoomList(
             summaries = MutableStateFlow(listOf(aRoomSummary())),
             rebuildSummariesLambda = { rebuildCount += 1 },
+            updatePreviewRoomsLambda = { previewRequests += 1 },
         )
         val roomListDataSource = createRoomListDataSource(
             roomListService = FakeRoomListService(createRoomListLambda = { roomList }),
@@ -134,12 +136,13 @@ class RoomListDataSourceTest {
         )
         roomListDataSource.launchIn(backgroundScope)
         runCurrent()
-        val rebuildCountBeforeRetry = rebuildCount
+        roomListDataSource.updatePreviewRooms(listOf(A_ROOM_ID))
+        val previewRequestsBeforeRetry = previewRequests
 
         advanceTimeBy(501L)
         runCurrent()
 
-        assertThat(rebuildCount).isGreaterThan(rebuildCountBeforeRetry)
+        assertThat(previewRequests).isEqualTo(previewRequestsBeforeRetry + 1)
     }
 
     @Test

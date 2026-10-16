@@ -258,6 +258,224 @@ class Bug036StartupAdmissionTest {
         }
     }
 
+    @Test
+    fun `retained startup reconciles expired terminal predecessor and admits current intent without manual retry`() = runTest {
+        val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
+        val current = request()
+        val old = operation(original)
+        val terminal = old.copy(status = LifecycleOperationStatus.TERMINATED, currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "original-expiry-receipt", updatedAtEpochMillis = old.updatedAtEpochMillis + 1)
+        val fresh = operation(current)
+        val service = service(current, fresh)
+        coEvery { service.startLifecycleOperation(original) } returns old
+        coEvery { service.resumeLifecycleOperation(original.operationId) } returns terminal
+        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(), draftInstallationProvider = { installation },
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        coordinator.start(original)
+
+        assertThat(coordinator.performResuming(current) { it }).isEqualTo(current.operationId)
+
+        assertThat(coordinator.operations.value[original.operationId]).isEqualTo(terminal)
+        coVerify(exactly = 1) { service.resumeLifecycleOperation(original.operationId) }
+        coVerify(exactly = 1) { service.startLifecycleOperation(current) }
+        coVerify(exactly = 0) { service.recordLifecycleClientReceipt(match { it.operationId == original.operationId }) }
+    }
+
+    @Test
+    fun `automatic startup handoff never retries cancellation rejection or missing new intent`() = runTest {
+        for ((status, newIntent) in listOf(
+            LifecycleOperationStatus.CANCELLED to true,
+            LifecycleOperationStatus.FAILED_FINAL to true,
+            LifecycleOperationStatus.TERMINATED to false,
+        )) {
+            val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
+            val current = request()
+            val old = operation(original)
+            val terminal = old.copy(status = status, currentPhase = LifecyclePhase.RECEIPTED,
+                terminalReceiptId = "original-terminal-receipt", updatedAtEpochMillis = old.updatedAtEpochMillis + 1)
+            val service = service(original, old)
+            coEvery { service.resumeLifecycleOperation(original.operationId) } returns terminal
+            val coordinator = DefaultAppOperationalStateCoordinator(service, Store(), pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+            coordinator.start(original)
+
+            assertThat(runCatching {
+                coordinator.performResuming(current, hasNewStartupIntent = newIntent) { error("must stay closed") }
+            }.isFailure).isTrue()
+            coVerify(exactly = 0) { service.startLifecycleOperation(current) }
+            coVerify(exactly = 0) { service.recordLifecycleClientReceipt(any()) }
+        }
+    }
+
+    @Test
+    fun `automatic startup handoff cannot use terminal reply from another installation`() = runTest {
+        val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
+        val current = request()
+        val old = operation(original)
+        val terminal = old.copy(status = LifecycleOperationStatus.TERMINATED, currentPhase = LifecyclePhase.RECEIPTED,
+            subjects = old.subjects.copy(installationId = "wrong-installation-background"),
+            terminalReceiptId = "original-terminal-receipt", updatedAtEpochMillis = old.updatedAtEpochMillis + 1)
+        val service = service(original, old)
+        coEvery { service.resumeLifecycleOperation(original.operationId) } returns terminal
+        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(), draftInstallationProvider = { installation },
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        coordinator.start(original)
+        assertThat(runCatching { coordinator.performResuming(current) { error("must stay closed") } }.isFailure).isTrue()
+        coVerify(exactly = 0) { service.startLifecycleOperation(current) }
+    }
+
+    @Test
+    fun `automatic startup handoff is bounded when index discovers another ended predecessor`() = runTest {
+        val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
+        val another = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
+        val current = request()
+        val old = operation(original)
+        val second = operation(another)
+        fun ended(value: LifecycleOperation) = value.copy(status = LifecycleOperationStatus.TERMINATED,
+            currentPhase = LifecyclePhase.RECEIPTED, terminalReceiptId = "terminal:${value.operationId}",
+            updatedAtEpochMillis = value.updatedAtEpochMillis + 1)
+        val service = service(original, old)
+        coEvery { service.resumeLifecycleOperation(original.operationId) } returns ended(old)
+        coEvery { service.startupLifecycleOperations(account, device, "post_login", null) } returns listOf(second)
+        coEvery { service.resumeLifecycleOperation(another.operationId) } returns ended(second)
+        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(), pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        coordinator.start(original)
+
+        assertThat(runCatching { coordinator.performResuming(current) { error("must stay closed") } }.isFailure).isTrue()
+        coVerify(exactly = 1) { service.resumeLifecycleOperation(original.operationId) }
+        coVerify(exactly = 1) { service.resumeLifecycleOperation(another.operationId) }
+        coVerify(exactly = 0) { service.startLifecycleOperation(current) }
+    }
+
+    @Test
+    fun `expired retained attempt stays unresolved while signed index admits a real new launch`() = runTest {
+        val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
+        val current = request()
+        val old = operation(original)
+        val service = service(current, operation(current))
+        coEvery { service.startLifecycleOperation(original) } returns old
+        coEvery { service.resumeLifecycleOperation(original.operationId) } returns old
+        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(), draftInstallationProvider = { installation },
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        coordinator.start(original)
+
+        assertThat(coordinator.performResuming(current) { it }).isEqualTo(current.operationId)
+
+        assertThat(coordinator.operations.value[original.operationId]).isEqualTo(old)
+        assertThat(coordinator.operations.value[original.operationId]?.terminalReceiptId).isNull()
+        coVerify(exactly = 1) { service.startupLifecycleOperations(account, device, "post_login", null) }
+        coVerify(exactly = 1) { service.startLifecycleOperation(current) }
+        coVerify(exactly = 0) { service.recordLifecycleClientReceipt(match { it.operationId == original.operationId }) }
+    }
+
+    @Test
+    fun `failed index read cannot replace expired original and automatic retry keeps current request`() = runTest {
+        val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
+        val current = request()
+        val old = operation(original)
+        val service = service(current, operation(current))
+        coEvery { service.startLifecycleOperation(original) } returns old
+        coEvery { service.resumeLifecycleOperation(original.operationId) } returns old
+        coEvery { service.startupLifecycleOperations(account, device, "post_login", null) } throws java.io.IOException("offline")
+        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(),
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        coordinator.start(original)
+
+        assertThat(runCatching { coordinator.performResuming(current) { error("must not execute") } }.isFailure).isTrue()
+        coVerify(exactly = 0) { service.startLifecycleOperation(current) }
+        assertThat(coordinator.operations.value[original.operationId]).isEqualTo(old)
+        coEvery { service.startupLifecycleOperations(account, device, "post_login", null) } returns emptyList()
+        assertThat(coordinator.performResuming(current) { it }).isEqualTo(current.operationId)
+        coVerify(exactly = 1) { service.startLifecycleOperation(current) }
+    }
+
+    @Test
+    fun `expiry reconciliation refuses wrong index scope original index entry and outstanding receipts`() = runTest {
+        for (scenario in listOf("account", "installation", "still-indexed", "pending-receipt", "same-intent", "no-intent")) {
+            val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
+            val current = if (scenario == "same-intent") original.copy(deadlineEpochMillis = original.deadlineEpochMillis + 600_000) else request()
+            val old = operation(original)
+            val service = service(original, old)
+            coEvery { service.resumeLifecycleOperation(original.operationId) } returns old
+            val indexEntry = when (scenario) {
+                "account" -> operation(current).copy(subjects = old.subjects.copy(accountIdHash = "c".repeat(64)))
+                "installation" -> operation(current).copy(subjects = old.subjects.copy(installationId = "another-installation"))
+                "still-indexed" -> old
+                else -> null
+            }
+            coEvery { service.startupLifecycleOperations(account, device, "post_login", null) } returns listOfNotNull(indexEntry)
+            val store = Store()
+            val coordinator = DefaultAppOperationalStateCoordinator(service, store, draftInstallationProvider = { installation },
+                pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+            coordinator.start(original)
+            if (scenario == "pending-receipt") coordinator.persistClientReceipts(facts(original))
+
+            assertThat(runCatching {
+                coordinator.performResuming(current, hasNewStartupIntent = scenario != "no-intent") { error("must not execute") }
+            }.isFailure).isTrue()
+            coVerify(exactly = 1) { service.startLifecycleOperation(any()) }
+            coVerify(exactly = 0) { service.recordLifecycleClientReceipt(any()) }
+            assertThat(coordinator.operations.value[original.operationId]).isEqualTo(old)
+            if (scenario == "pending-receipt") assertThat(store.pendingClientReceipts()).hasSize(2)
+        }
+    }
+
+    @Test
+    fun `multiple expired records cannot trap later launches and remain individually unresolved`() = runTest {
+        val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
+        val older = request().copy(deadlineEpochMillis = original.deadlineEpochMillis)
+        val current = request()
+        val old = operation(original)
+        val earlier = operation(older).copy(updatedAtEpochMillis = old.updatedAtEpochMillis - 1)
+        val service = service(current, operation(current))
+        coEvery { service.startLifecycleOperation(original) } returns old
+        coEvery { service.startLifecycleOperation(older) } returns earlier
+        coEvery { service.resumeLifecycleOperation(original.operationId) } returns old
+        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(),
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        coordinator.start(older)
+        coordinator.start(original)
+
+        assertThat(coordinator.performResuming(current) { it }).isEqualTo(current.operationId)
+        assertThat(coordinator.operations.value[older.operationId]).isEqualTo(earlier)
+        assertThat(coordinator.operations.value[original.operationId]).isEqualTo(old)
+        coVerify(exactly = 1) { service.startLifecycleOperation(current) }
+        coVerify(exactly = 0) { service.resumeLifecycleOperation(older.operationId) }
+    }
+
+    @Test
+    fun `transient index transport refreshes automatically before any action with one current admission`() = runTest {
+        val request = request()
+        val service = service(request, operation(request))
+        var calls = 0
+        coEvery { service.startupLifecycleOperations(account, device, "post_login", null) } answers {
+            calls += 1
+            if (calls < 3) throw java.io.IOException("temporary network loss")
+            emptyList()
+        }
+        val coordinator = DefaultAppOperationalStateCoordinator(service, Store())
+        var actions = 0
+        coordinator.performResuming(request) { actions += 1 }
+        assertThat(calls).isEqualTo(3)
+        assertThat(actions).isEqualTo(1)
+        assertThat(testScheduler.currentTime).isEqualTo(3_000L)
+        coVerify(exactly = 1) { service.startLifecycleOperation(request) }
+    }
+
+    @Test
+    fun `transport error after business action begins cannot automatically repeat its effects`() = runTest {
+        val request = request()
+        val service = service(request, operation(request))
+        val coordinator = DefaultAppOperationalStateCoordinator(service, Store())
+        var actions = 0
+        assertThat(runCatching {
+            coordinator.performResuming(request) { actions += 1; throw java.io.IOException("action interrupted") }
+        }.isFailure).isTrue()
+        assertThat(actions).isEqualTo(1)
+        assertThat(testScheduler.currentTime).isEqualTo(0L)
+        coVerify(exactly = 1) { service.startLifecycleOperation(request) }
+        coVerify(exactly = 0) { service.recordLifecycleClientReceipt(any()) }
+    }
+
     private fun request() = lifecycleOperationRequest(FullAppLifecycleId.LC_06, "post_login", accountIdHash = account,
         matrixDeviceIdHash = device, deadlineEpochMillis = System.currentTimeMillis() + 600_000)
 

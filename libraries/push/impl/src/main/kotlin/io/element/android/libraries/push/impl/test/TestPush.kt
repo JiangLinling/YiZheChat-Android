@@ -15,6 +15,7 @@ import io.element.android.appconfig.PushConfig
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.push.impl.pushgateway.PushGatewayNotifyRequest
+import io.element.android.libraries.push.impl.troubleshoot.DiagnosticPushHandler
 import io.element.android.libraries.pushproviders.api.Config
 
 interface TestPush {
@@ -24,6 +25,7 @@ interface TestPush {
 @ContributesBinding(AppScope::class)
 class DefaultTestPush(
     private val pushGatewayNotifyRequest: PushGatewayNotifyRequest,
+    private val diagnosticPushHandler: DiagnosticPushHandler,
 ) : TestPush {
     override suspend fun execute(config: Config) {
         pushGatewayNotifyRequest.execute(
@@ -31,7 +33,9 @@ class DefaultTestPush(
                 url = NextDeploymentConfig.clientReachablePushGatewayUrl(config.url),
                 appId = PushConfig.PUSHER_APP_ID,
                 pushKey = config.pushKey,
-                eventId = TEST_EVENT_ID,
+                // A new explicit self-test is a new delivery. Reusing one event ID causes
+                // legitimate delivery deduplication/terminal receipts to suppress later tests.
+                eventId = diagnosticPushHandler.beginTest(),
                 roomId = TEST_ROOM_ID,
             )
         )

@@ -48,12 +48,16 @@ class RoomListSearchPresenter(
         val searchQuery = rememberTextFieldState()
 
         val coroutineScope = rememberCoroutineScope()
-        val dataSource = remember { dataSourceFactory.create(coroutineScope) }
+        // The ordinary list owns startup. A second native room list is needed only once
+        // search is opened; retain it afterwards to preserve query and close/reopen behavior.
+        val lazyDataSource = remember { lazy(LazyThreadSafetyMode.NONE) { dataSourceFactory.create(coroutineScope) } }
+        val dataSource = if (isSearchActive || lazyDataSource.isInitialized()) lazyDataSource.value else null
 
-        LaunchedEffect(searchQuery.text) {
+        LaunchedEffect(dataSource, searchQuery.text) {
+            val activeDataSource = dataSource ?: return@LaunchedEffect
             val query = searchQuery.text.toString()
             if (query.isBlank()) {
-                dataSource.setSearchQuery(query)
+                activeDataSource.setSearchQuery(query)
             } else {
                 runCatching {
                     appOperationalStateCoordinator.perform(
@@ -64,7 +68,7 @@ class RoomListSearchPresenter(
                             matrixDeviceIdHash = client.deviceId.value.sha256Hex(),
                         )
                     ) {
-                        dataSource.setSearchQuery(query)
+                        activeDataSource.setSearchQuery(query)
                     }
                 }.onFailure { failure ->
                     Timber.w(failure, "Unable to bind room search lifecycle")
@@ -82,12 +86,12 @@ class RoomListSearchPresenter(
                     searchQuery.clearText()
                 }
                 is RoomListSearchEvent.UpdateVisibleRange -> coroutineScope.launch {
-                    dataSource.updateVisibleRange(visibleRange = event.range)
+                    dataSource?.updateVisibleRange(visibleRange = event.range)
                 }
             }
         }
 
-        val searchResults by dataSource.roomSummaries.collectAsState(initial = persistentListOf())
+        val searchResults = dataSource?.roomSummaries?.collectAsState(initial = persistentListOf())?.value ?: persistentListOf()
         val friendProfiles by friendProfileRepository.profiles.collectAsState()
         val contactResults = remember(searchQuery.text, friendProfiles) {
             val query = searchQuery.text.toString().trim()

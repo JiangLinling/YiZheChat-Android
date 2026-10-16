@@ -37,13 +37,61 @@ import org.junit.Test
 class RoomListSearchPresenterTest {
     @Test
     fun `present - initial state`() = runTest {
-        val presenter = createRoomListSearchPresenter()
+        var searchListsCreated = 0
+        val roomList = FakeDynamicRoomList()
+        val presenter = createRoomListSearchPresenter(
+            roomListService = FakeRoomListService(
+                allRooms = FakeDynamicRoomList(),
+                createRoomListLambda = { searchListsCreated++; roomList },
+            )
+        )
         presenter.test {
             awaitItem().let { state ->
                 assertThat(state.isSearchActive).isFalse()
                 assertThat(state.query.text.toString()).isEmpty()
                 assertThat(state.results).isEmpty()
             }
+            testScheduler.advanceUntilIdle()
+            assertThat(searchListsCreated).isEqualTo(0)
+            assertThat(roomList.summaries.subscriptionCount.value).isEqualTo(0)
+            roomList.summaries.emit(listOf(aRoomSummary()))
+            testScheduler.advanceUntilIdle()
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `present - search initializes on demand and is retained across close and reopen`() = runTest {
+        var searchListsCreated = 0
+        val roomList = FakeDynamicRoomList()
+        val presenter = createRoomListSearchPresenter(
+            roomListService = FakeRoomListService(
+                allRooms = FakeDynamicRoomList(),
+                createRoomListLambda = { searchListsCreated++; roomList },
+            )
+        )
+        presenter.test {
+            awaitItem().eventSink(RoomListSearchEvent.ToggleSearchVisibility)
+            val opened = awaitItem()
+            assertThat(opened.isSearchActive).isTrue()
+            assertThat(searchListsCreated).isEqualTo(1)
+            opened.query.edit { append("Search") }
+            val queried = awaitItem()
+            assertThat(roomList.currentFilter.value).isEqualTo(RoomListFilter.NormalizedMatchRoomName("Search"))
+            queried.eventSink(RoomListSearchEvent.ClearQuery)
+            val cleared = awaitItem()
+            assertThat(cleared.query.text.toString()).isEmpty()
+            assertThat(roomList.currentFilter.value).isEqualTo(RoomListFilter.None)
+            cleared.eventSink(RoomListSearchEvent.ToggleSearchVisibility)
+            val closed = awaitItem()
+            assertThat(closed.isSearchActive).isFalse()
+            assertThat(closed.query.text.toString()).isEmpty()
+            assertThat(roomList.currentFilter.value).isEqualTo(RoomListFilter.None)
+            closed.eventSink(RoomListSearchEvent.ToggleSearchVisibility)
+            assertThat(awaitItem().isSearchActive).isTrue()
+            assertThat(searchListsCreated).isEqualTo(1)
+            roomList.summaries.emit(listOf(aRoomSummary()))
+            assertThat(awaitItem().results).hasSize(1)
         }
     }
 
@@ -73,6 +121,7 @@ class RoomListSearchPresenterTest {
         )
         val presenter = createRoomListSearchPresenter(roomListService)
         presenter.test {
+            awaitItem().eventSink(RoomListSearchEvent.ToggleSearchVisibility)
             awaitItem().let { state ->
                 assertThat(
                     roomList.currentFilter.value
@@ -109,6 +158,7 @@ class RoomListSearchPresenterTest {
         )
         val presenter = createRoomListSearchPresenter(roomListService)
         presenter.test {
+            awaitItem().eventSink(RoomListSearchEvent.ToggleSearchVisibility)
             awaitItem().let { state ->
                 assertThat(state.results).isEmpty()
             }
@@ -134,6 +184,7 @@ class RoomListSearchPresenterTest {
             )
         )
         presenter.test {
+            awaitItem().eventSink(RoomListSearchEvent.ToggleSearchVisibility)
             val initialState = awaitItem()
             initialState.query.edit { append("同事") }
             val resultState = awaitItem()
@@ -152,6 +203,7 @@ class RoomListSearchPresenterTest {
             appOperationalStateCoordinator = coordinator,
         )
         presenter.test {
+            awaitItem().eventSink(RoomListSearchEvent.ToggleSearchVisibility)
             val initialState = awaitItem()
             initialState.query.edit { append("Search") }
             awaitItem()
@@ -171,6 +223,7 @@ class RoomListSearchPresenterTest {
         )
         val presenter = createRoomListSearchPresenter(roomListService)
         presenter.test {
+            awaitItem().eventSink(RoomListSearchEvent.ToggleSearchVisibility)
             val initialState = awaitItem()
             // Post some rooms to simulate loaded content
             val rooms = (1..10).map { aRoomSummary() }

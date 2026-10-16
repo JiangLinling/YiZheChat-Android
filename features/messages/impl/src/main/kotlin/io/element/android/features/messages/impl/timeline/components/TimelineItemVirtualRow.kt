@@ -15,6 +15,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import io.element.android.libraries.designsystem.theme.components.TextButton
+import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.features.messages.impl.timeline.TimelineEvent
 import io.element.android.features.messages.impl.timeline.TimelineRoomInfo
 import io.element.android.features.messages.impl.timeline.components.virtual.TimelineItemReadMarkerView
@@ -54,11 +57,21 @@ fun TimelineItemVirtualRow(
                 )
             }
             is TimelineItemLoadingIndicatorModel -> {
-                TimelineLoadingMoreIndicator(virtual.model.direction)
                 val latestEventSink by rememberUpdatedState(eventSink)
-                LaunchedEffect(virtual.model.timestamp) {
-                    Timber.d("Pagination triggered by load more indicator")
-                    latestEventSink(TimelineEvent.LoadMore(virtual.model.direction))
+                if (virtual.model.lastRequestFailed) {
+                    // A failed cache/network read keeps existing messages and the composer alive.
+                    // Only an explicit retry starts another request; timestamp updates must not
+                    // turn a storage failure into an unbounded native/Compose retry loop.
+                    TextButton(
+                        text = stringResource(CommonStrings.action_retry),
+                        onClick = { latestEventSink(TimelineEvent.LoadMore(virtual.model.direction)) },
+                    )
+                } else {
+                    TimelineLoadingMoreIndicator(virtual.model.direction)
+                    LaunchedEffect(virtual.model.timestamp) {
+                        Timber.d("Pagination triggered by load more indicator")
+                        latestEventSink(TimelineEvent.LoadMore(virtual.model.direction))
+                    }
                 }
             }
             // Empty model trick to avoid timeline jumping during forward pagination.

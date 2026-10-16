@@ -29,6 +29,7 @@ import io.element.android.compound.theme.ForcedDarkElementTheme
 import io.element.android.features.enterprise.api.EnterpriseService
 import io.element.android.features.messages.impl.attachments.Attachment
 import io.element.android.libraries.architecture.NodeInputs
+import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.architecture.inputs
 import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
@@ -74,10 +75,15 @@ class AttachmentsPreviewNode(
         val burnAfterRead: Boolean,
     ) : NodeInputs
 
+    interface Callback : Plugin {
+        fun onDone()
+    }
+
     private val inputs: Inputs = inputs()
+    private val callback: Callback = callback()
 
     private val onDoneListener = OnDoneListener {
-        navigateUp()
+        callback.onDone()
     }
 
     private val presenter = presenterFactory.create(

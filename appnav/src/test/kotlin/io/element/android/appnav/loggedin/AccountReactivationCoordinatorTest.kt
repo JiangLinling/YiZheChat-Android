@@ -56,6 +56,117 @@ import java.security.MessageDigest
 
 class AccountReactivationCoordinatorTest {
     @Test
+    fun `retained checks and descriptor run off caller then return to caller in original order`() = runTest {
+        val caller = Thread.currentThread()
+        val calls = mutableListOf<String>()
+        val workers = mutableListOf<Thread>()
+        val management = mockk<ManagementControlService>()
+        coEvery { management.localListEntryStatus() } coAnswers {
+            calls += "permission"
+            workers += Thread.currentThread()
+            listPermission()
+        }
+        val scopeStore = mockk<AccountReactivationScopeStore>()
+        coEvery { scopeStore.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH) } coAnswers {
+            calls += "checkpoint"
+            workers += Thread.currentThread()
+            AccountReactivationCheckpoint(attempt = attempt(), state = AccountReactivationCheckpointState.COMMITTED, receipt = receipt())
+        }
+        val fixture = fixture(management, scopeStore)
+        coEvery { fixture.shareKeyService.descriptor() } coAnswers {
+            calls += "descriptor"
+            workers += Thread.currentThread()
+            shareKey()
+        }
+
+        assertThat(fixture.coordinator.canRestoreLocalList(fixture.matrixClient)).isTrue()
+        assertThat(Thread.currentThread()).isSameInstanceAs(caller)
+        assertThat(calls).containsExactly("permission", "checkpoint", "descriptor").inOrder()
+        workers.forEach { assertThat(it).isNotSameInstanceAs(caller) }
+        coVerify(exactly = 0) { management.synchronize() }
+    }
+
+    @Test
+    fun `cancelling a retained checkpoint read cannot return permission or read the descriptor`() = runTest {
+        val management = mockk<ManagementControlService>()
+        coEvery { management.localListEntryStatus() } returns listPermission()
+        val entered = CompletableDeferred<Unit>()
+        val scopeStore = mockk<AccountReactivationScopeStore>()
+        coEvery { scopeStore.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH) } coAnswers {
+            entered.complete(Unit)
+            kotlinx.coroutines.awaitCancellation()
+        }
+        val fixture = fixture(management, scopeStore)
+        val read = async { fixture.coordinator.canRestoreLocalList(fixture.matrixClient) }
+        entered.await()
+        read.cancel()
+        assertThat(runCatching { read.await() }.exceptionOrNull()).isInstanceOf(kotlinx.coroutines.CancellationException::class.java)
+        read.join()
+        coVerify(exactly = 0) { fixture.shareKeyService.descriptor() }
+        coVerify(exactly = 0) { management.synchronize() }
+    }
+
+    @Test
+    fun `vault locked while checkpoint read is pending remains denied on the worker`() = runTest {
+        val management = mockk<ManagementControlService>()
+        coEvery { management.localListEntryStatus() } returns listPermission()
+        val entered = CompletableDeferred<Unit>()
+        val resume = CompletableDeferred<Unit>()
+        val scopeStore = mockk<AccountReactivationScopeStore>()
+        coEvery { scopeStore.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH) } coAnswers {
+            entered.complete(Unit)
+            resume.await()
+            AccountReactivationCheckpoint(attempt = attempt(), state = AccountReactivationCheckpointState.COMMITTED, receipt = receipt())
+        }
+        val fixture = fixture(management, scopeStore)
+        val read = async { fixture.coordinator.canRestoreLocalList(fixture.matrixClient) }
+        entered.await()
+        coEvery { fixture.vaultKeyService.isUnlocked(any()) } returns false
+        resume.complete(Unit)
+        assertThat(read.await()).isFalse()
+        coVerify(exactly = 0) { fixture.shareKeyService.descriptor() }
+        coVerify(exactly = 0) { management.synchronize() }
+    }
+
+    private fun listPermission() = io.element.android.security.dataprotection.api.LocalChatListPermission(
+        POLICY_VERSION, 7, 5_000,
+        listOf(io.element.android.security.dataprotection.api.OfflineEntryAccountBinding(ACCOUNT_HASH, MATRIX_DEVICE_HASH, 1, ACTIVATION_ID)),
+    )
+
+    @Test
+    fun `retained list requires exact committed identity and cannot perform online activation`() = runTest {
+        val management = mockk<ManagementControlService>()
+        val entry = io.element.android.security.dataprotection.api.LocalChatListPermission(
+            POLICY_VERSION, 7, 5_000,
+            listOf(io.element.android.security.dataprotection.api.OfflineEntryAccountBinding(ACCOUNT_HASH, MATRIX_DEVICE_HASH, 1, ACTIVATION_ID)),
+        )
+        coEvery { management.localListEntryStatus() } returns entry
+        val scopeStore = mockk<AccountReactivationScopeStore>()
+        val checkpoint = AccountReactivationCheckpoint(attempt = attempt(), state = AccountReactivationCheckpointState.COMMITTED, receipt = receipt())
+        coEvery { scopeStore.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH) } returns checkpoint
+        val fixture = fixture(management, scopeStore)
+        assertThat(fixture.coordinator.canRestoreLocalList(fixture.matrixClient)).isTrue()
+        for (invalid in listOf(
+            checkpoint.copy(pendingExplicitIdentityReset = true),
+            checkpoint.copy(state = AccountReactivationCheckpointState.ALLOCATED),
+            checkpoint.copy(receipt = receipt().copy(accountMobileGeneration = 2)),
+            checkpoint.copy(receipt = receipt().copy(policyVersion = POLICY_VERSION + 1)),
+            checkpoint.copy(receipt = receipt().copy(activationId = "different-activation")),
+        )) {
+            coEvery { scopeStore.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH) } returns invalid
+            assertThat(fixture.coordinator.canRestoreLocalList(fixture.matrixClient)).isFalse()
+        }
+        coEvery { scopeStore.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH) } returns checkpoint
+        coEvery { management.localListEntryStatus() } returns entry.copy(remainingMillis = 0)
+        assertThat(fixture.coordinator.canRestoreLocalList(fixture.matrixClient)).isFalse()
+        coEvery { management.localListEntryStatus() } returns entry.copy(accountBindings = emptyList())
+        assertThat(fixture.coordinator.canRestoreLocalList(fixture.matrixClient)).isFalse()
+        coEvery { management.localListEntryStatus() } returns null
+        assertThat(fixture.coordinator.canRestoreLocalList(fixture.matrixClient)).isFalse()
+        coVerify(exactly = 0) { management.synchronize() }
+    }
+
+    @Test
     fun `offline restoration requires matching committed CORE receipt and active entry grant`() = runTest {
         val management = mockk<ManagementControlService>()
         coEvery { management.offlineEntryStatus() } returns io.element.android.security.dataprotection.api.OfflineEntryStatus(
@@ -68,6 +179,22 @@ class AccountReactivationCoordinatorTest {
         val checkpoint = AccountReactivationCheckpoint(attempt = attempt(), state = AccountReactivationCheckpointState.COMMITTED, receipt = receipt())
         coEvery { scopeStore.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH) } returns checkpoint
         val fixture = fixture(management, scopeStore)
+        assertThat(fixture.coordinator.canRestoreOffline(fixture.matrixClient)).isTrue()
+        for (mismatched in listOf(
+            receipt().copy(accountIdHash = "f".repeat(64)),
+            receipt().copy(matrixDeviceIdHash = "e".repeat(64)),
+            receipt().copy(installationId = "different-installation-background"),
+            receipt().copy(activationId = "different-activation-background"),
+            receipt().copy(attestationVersion = 8),
+            receipt().copy(recipientKeyId = "different-recipient-background"),
+        )) {
+            coEvery { scopeStore.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH) } returns checkpoint.copy(receipt = mismatched)
+            assertThat(fixture.coordinator.canRestoreOffline(fixture.matrixClient)).isFalse()
+        }
+        coEvery { scopeStore.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH) } returns checkpoint
+        coEvery { fixture.vaultKeyService.isUnlocked(any()) } returns false
+        assertThat(fixture.coordinator.canRestoreOffline(fixture.matrixClient)).isFalse()
+        coEvery { fixture.vaultKeyService.isUnlocked(any()) } returns true
         assertThat(fixture.coordinator.canRestoreOffline(fixture.matrixClient)).isTrue()
         coEvery { scopeStore.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH) } returns
             checkpoint.copy(receipt = receipt().copy(policyVersion = POLICY_VERSION + 1))
@@ -410,6 +537,8 @@ class AccountReactivationCoordinatorTest {
             ),
             matrixClient = matrixClient,
             recipientRegistry = recipientRegistry,
+            shareKeyService = shareKeyService,
+            vaultKeyService = vault,
         )
     }
 
@@ -479,6 +608,8 @@ class AccountReactivationCoordinatorTest {
         val coordinator: AccountReactivationCoordinator,
         val matrixClient: FakeMatrixClient,
         val recipientRegistry: DeviceRecipientRegistry,
+        val shareKeyService: DeviceShareKeyService,
+        val vaultKeyService: VaultKeyService,
     )
 
     private companion object {

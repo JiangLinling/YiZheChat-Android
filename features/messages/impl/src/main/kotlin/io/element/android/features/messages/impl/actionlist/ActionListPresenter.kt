@@ -32,6 +32,7 @@ import io.element.android.features.messages.impl.timeline.model.TimelineItem
 import io.element.android.features.messages.impl.timeline.model.TimelineItemThreadInfo
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemEventContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemEventContentWithAttachment
+import io.element.android.features.messages.impl.timeline.model.event.TimelineItemEncryptedContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemLegacyCallInviteContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemPollContent
 import io.element.android.features.messages.impl.timeline.model.event.TimelineItemRedactedContent
@@ -279,6 +280,9 @@ class DefaultActionListPresenter(
 private fun Iterable<TimelineItemAction>.postFilter(content: TimelineItemEventContent): Iterable<TimelineItemAction> {
     return filter { action ->
         if (content.isBurnAfterRead && action in BURN_AFTER_READ_FORBIDDEN_ACTIONS) return@filter false
+        if ((content.isProtectedContentShell || content is TimelineItemEncryptedContent) && action in PROTECTED_SHELL_FORBIDDEN_ACTIONS) {
+            return@filter false
+        }
         when (content) {
             is TimelineItemRtcNotificationContent,
             is TimelineItemLegacyCallInviteContent,
@@ -308,4 +312,9 @@ private val BURN_AFTER_READ_FORBIDDEN_ACTIONS = setOf(
     TimelineItemAction.RemoveCaption,
     TimelineItemAction.Pin,
     TimelineItemAction.Unpin,
+)
+
+private val PROTECTED_SHELL_FORBIDDEN_ACTIONS = BURN_AFTER_READ_FORBIDDEN_ACTIONS + setOf(
+    TimelineItemAction.CopyUnavailable,
+    TimelineItemAction.ReportContent,
 )

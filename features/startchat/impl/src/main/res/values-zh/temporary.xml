@@ -10,6 +10,7 @@
     <string name="screen_friend_scan_camera_permission">允许使用相机后即可扫描乙者好友二维码</string>
     <string name="screen_friend_scan_my_qr_description">让朋友扫一扫添加你</string>
     <string name="screen_friend_scan_invalid">这不是有效的乙者好友二维码</string>
+    <string name="screen_friend_scan_self">这是你自己的二维码，不能添加自己为好友</string>
     <string name="screen_friend_scan_again">重新扫描</string>
     <string name="screen_friend_scan_from_image">从相册扫码</string>
     <string name="screen_friend_my_qr_title">我的二维码</string>

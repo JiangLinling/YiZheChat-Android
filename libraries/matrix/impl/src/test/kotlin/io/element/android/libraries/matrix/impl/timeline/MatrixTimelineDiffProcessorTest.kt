@@ -971,7 +971,7 @@ class MatrixTimelineDiffProcessorTest {
     }
 
     @Test
-    fun `initial scoped structural reset publishes visible protected items only after one complete projection`() = runTest {
+    fun `initial scoped structural reset publishes authorized first content while a slower item remains protected`() = runTest {
         val firstDecryptGate = CompletableDeferred<Unit>()
         val secondDecryptGate = CompletableDeferred<Unit>()
         val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
@@ -987,7 +987,9 @@ class MatrixTimelineDiffProcessorTest {
                     "first encrypted" -> firstDecryptGate.await()
                     "second encrypted" -> secondDecryptGate.await()
                 }
-                return item.withText(item.textBody()?.replace(" encrypted", " cleartext").orEmpty())
+                val clear = item.withText(item.textBody()?.replace(" encrypted", " cleartext").orEmpty()) as MatrixTimelineItem.Event
+                val content = clear.event.content as MessageContent
+                return clear.copy(event = clear.event.copy(content = content.copy(isContentProtectionAuthorized = true)))
             }
 
             override suspend fun decryptItem(
@@ -1024,7 +1026,8 @@ class MatrixTimelineDiffProcessorTest {
         runCurrent()
         advanceTimeBy(MatrixTimelineDiffProcessor.VISIBLE_DECRYPT_BATCH_WINDOW_MILLIS + 1)
         runCurrent()
-        assertThat(timelineItems.value).isEmpty()
+        assertThat(timelineItems.value.map { it.textBody() })
+            .containsExactly("first cleartext", "").inOrder()
 
         secondDecryptGate.complete(Unit)
         runCurrent()

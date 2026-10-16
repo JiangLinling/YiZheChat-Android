@@ -41,10 +41,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -93,21 +92,21 @@ internal fun FriendScannerView(
     permissionState: PermissionsState,
     onBack: () -> Unit,
     onMyQrCode: () -> Unit,
-    onScanned: (ByteArray) -> Boolean,
+    onScanned: (ByteArray) -> FriendQrScanResult,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var scanning by remember { mutableStateOf(true) }
-    var invalid by remember { mutableStateOf(false) }
+    val currentOnScanned by rememberUpdatedState(onScanned)
+    val scanner = remember { FriendScannerState { currentOnScanned(it) } }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
-            scanning = false
+            scanner.pause()
             coroutineScope.launch {
                 val bytes = withContext(Dispatchers.IO) {
                     decodeQrCodeFromUri(context.contentResolver, uri)
                 }
-                invalid = bytes == null || !onScanned(bytes)
+                scanner.scanned(bytes)
             }
         }
     }
@@ -120,26 +119,20 @@ internal fun FriendScannerView(
 
     FriendScannerContent(
         permissionGranted = permissionState.permissionGranted,
-        scanning = scanning,
-        invalid = invalid,
+        scanning = scanner.scanning,
+        result = scanner.result,
         onBack = onBack,
         onMyQrCode = onMyQrCode,
         onPickImage = {
             imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         },
-        onScanAgain = {
-            invalid = false
-            scanning = true
-        },
+        onScanAgain = scanner::scanAgain,
         cameraContent = {
             QrCodeCameraView(
                 modifier = Modifier.fillMaxSize(),
-                isScanning = scanning,
+                isScanning = scanner.scanning,
                 onScanQrCode = { bytes ->
-                    if (scanning) {
-                        scanning = false
-                        invalid = !onScanned(bytes)
-                    }
+                    if (scanner.scanning) scanner.scanned(bytes)
                 },
             )
         },
@@ -149,10 +142,10 @@ internal fun FriendScannerView(
 }
 
 @Composable
-private fun FriendScannerContent(
+internal fun FriendScannerContent(
     permissionGranted: Boolean,
     scanning: Boolean,
-    invalid: Boolean,
+    result: FriendQrScanResult?,
     onBack: () -> Unit,
     onMyQrCode: () -> Unit,
     onPickImage: () -> Unit,
@@ -218,7 +211,8 @@ private fun FriendScannerContent(
         Text(
             text = stringResource(
                 when {
-                    invalid -> R.string.screen_friend_scan_invalid
+                    result == FriendQrScanResult.Self -> R.string.screen_friend_scan_self
+                    result == FriendQrScanResult.Invalid -> R.string.screen_friend_scan_invalid
                     permissionGranted -> R.string.screen_friend_scan_description
                     else -> R.string.screen_friend_scan_camera_permission
                 },
@@ -228,12 +222,12 @@ private fun FriendScannerContent(
                 .offset(y = 190.dp)
                 .padding(horizontal = 32.dp),
             style = ElementTheme.typography.fontBodyLgMedium,
-            color = if (invalid) ElementTheme.colors.textCriticalPrimary else Color.White,
+            color = if (result == FriendQrScanResult.Invalid) ElementTheme.colors.textCriticalPrimary else Color.White,
             textAlign = TextAlign.Center,
         )
 
         ScannerBottomPanel(
-            invalid = invalid,
+            canScanAgain = result == FriendQrScanResult.Self || result == FriendQrScanResult.Invalid,
             onMyQrCode = onMyQrCode,
             onPickImage = onPickImage,
             onScanAgain = onScanAgain,
@@ -329,7 +323,7 @@ private fun ScannerMask(
 
 @Composable
 private fun ScannerBottomPanel(
-    invalid: Boolean,
+    canScanAgain: Boolean,
     onMyQrCode: () -> Unit,
     onPickImage: () -> Unit,
     onScanAgain: () -> Unit,
@@ -343,7 +337,7 @@ private fun ScannerBottomPanel(
             .padding(horizontal = 24.dp, vertical = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (invalid) {
+        if (canScanAgain) {
             Button(
                 text = stringResource(R.string.screen_friend_scan_again),
                 onClick = onScanAgain,
@@ -505,11 +499,11 @@ internal fun MyFriendQrCodeView(
 
 @PreviewsDayNight
 @Composable
-private fun FriendScannerContentPreview() = ElementPreview {
+private fun FriendScannerContentPreview(result: FriendQrScanResult? = null) = ElementPreview {
     FriendScannerContent(
         permissionGranted = true,
-        scanning = true,
-        invalid = false,
+        scanning = result == null,
+        result = result,
         onBack = {},
         onMyQrCode = {},
         onPickImage = {},
@@ -533,3 +527,11 @@ private fun FriendScannerContentPreview() = ElementPreview {
 private fun MyFriendQrCodeViewPreview() = ElementPreview {
     MyFriendQrCodeView(user = MatrixUser(io.element.android.libraries.matrix.api.core.UserId("@yizhe:example.org")), onBack = {})
 }
+
+@PreviewsDayNight
+@Composable
+private fun FriendScannerSelfPreview() = FriendScannerContentPreview(FriendQrScanResult.Self)
+
+@PreviewsDayNight
+@Composable
+private fun FriendScannerInvalidPreview() = FriendScannerContentPreview(FriendQrScanResult.Invalid)

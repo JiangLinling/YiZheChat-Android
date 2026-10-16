@@ -62,6 +62,7 @@ class EmbeddedNtfyConnectionService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sockets = ConcurrentHashMap<String, WebSocket>()
+    private val openedSockets = ConcurrentHashMap<String, WebSocket>()
     private val lastSocketActivityAt = ConcurrentHashMap<String, Long>()
     private val reconnectAttempts = ConcurrentHashMap<String, Int>()
     private val connectionRefreshMutex = Mutex()
@@ -135,6 +136,7 @@ class EmbeddedNtfyConnectionService : Service() {
         serviceScope.cancel()
         sockets.values.forEach { it.close(NORMAL_CLOSURE_STATUS, "service stopped") }
         sockets.clear()
+        openedSockets.clear()
         lastSocketActivityAt.clear()
         httpClient.dispatcher.executorService.shutdown()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -194,6 +196,7 @@ class EmbeddedNtfyConnectionService : Service() {
         sockets.entries.toList().forEach { (clientSecret, socket) ->
             if (clientSecret !in activeSecrets) {
                 if (sockets.remove(clientSecret, socket)) {
+                    openedSockets.remove(clientSecret, socket)
                     lastSocketActivityAt.remove(clientSecret)
                     reconnectAttempts.remove(clientSecret)
                     socket.close(NORMAL_CLOSURE_STATUS, "registration removed")
@@ -208,6 +211,7 @@ class EmbeddedNtfyConnectionService : Service() {
             // disconnected.
             sockets.entries.toList().forEach { (clientSecret, socket) ->
                 if (sockets.remove(clientSecret, socket)) {
+                    openedSockets.remove(clientSecret, socket)
                     lastSocketActivityAt.remove(clientSecret)
                     reconnectAttempts.remove(clientSecret)
                     socket.cancel()
@@ -269,7 +273,8 @@ class EmbeddedNtfyConnectionService : Service() {
         staleTimeoutMillis: Long,
     ): Unit = connectionRefreshMutex.withLock {
         val staleClientSecrets = sockets.keys.filter { clientSecret ->
-            isConnectionStale(lastSocketActivityAt[clientSecret], now, staleTimeoutMillis)
+            shouldRefreshNtfyOpening(openedSockets[clientSecret] === sockets[clientSecret],
+                lastSocketActivityAt[clientSecret], now, staleTimeoutMillis)
         }
         if (staleClientSecrets.isEmpty()) return
 
@@ -282,13 +287,15 @@ class EmbeddedNtfyConnectionService : Service() {
         var refreshedConnectionCount = 0
         staleClientSecrets.forEach { clientSecret ->
             val socket = sockets[clientSecret] ?: return@forEach
-            if (!isConnectionStale(
+            if (!shouldRefreshNtfyOpening(
+                    opened = openedSockets[clientSecret] === socket,
                     lastActivityAt = lastSocketActivityAt[clientSecret],
                     now = SystemClock.elapsedRealtime(),
                     timeoutMillis = staleTimeoutMillis,
                 )
             ) return@forEach
             if (sockets.remove(clientSecret, socket)) {
+                openedSockets.remove(clientSecret, socket)
                 lastSocketActivityAt.remove(clientSecret)
                 reconnectAttempts.remove(clientSecret)
                 socket.cancel()
@@ -358,6 +365,7 @@ class EmbeddedNtfyConnectionService : Service() {
         retryAfterHeader: String? = null,
     ) {
         if (!sockets.remove(registration.clientSecret, socket) || !serviceScope.isActive) return
+        openedSockets.remove(registration.clientSecret, socket)
         lastSocketActivityAt.remove(registration.clientSecret)
         val attempt = reconnectAttempts.merge(registration.clientSecret, 1, Int::plus) ?: 1
         val delayMillis = ntfyReconnectDelayMillis(
@@ -381,6 +389,7 @@ class EmbeddedNtfyConnectionService : Service() {
 
     private fun retireInvalidCredential(registration: EmbeddedNtfyRegistration, socket: WebSocket) {
         if (!sockets.remove(registration.clientSecret, socket) || !serviceScope.isActive) return
+        openedSockets.remove(registration.clientSecret, socket)
         lastSocketActivityAt.remove(registration.clientSecret)
         reconnectAttempts.remove(registration.clientSecret)
         socket.cancel()
@@ -407,6 +416,7 @@ class EmbeddedNtfyConnectionService : Service() {
                 return
             }
             reconnectAttempts.remove(registration.clientSecret)
+            openedSockets[registration.clientSecret] = webSocket
             lastSocketActivityAt[registration.clientSecret] = SystemClock.elapsedRealtime()
             Timber.d("Built-in push connection established")
         }
@@ -456,7 +466,10 @@ class EmbeddedNtfyConnectionService : Service() {
         internal const val NETWORK_RECOVERY_REFRESH_INTERVAL_MILLIS = 10_000L
         internal const val AGGRESSIVE_PING_INTERVAL_SECONDS = 3L
         internal const val DEFAULT_PING_INTERVAL_SECONDS = 30L
-        internal const val AGGRESSIVE_STALE_CONNECTION_TIMEOUT_MILLIS = 12_000L
+        // This watchdog bounds opening only. An established ntfy WebSocket can
+        // remain text-silent indefinitely while Ping/Pong is healthy. OkHttp's
+        // configured ping timeout calls onFailure for a lost established socket.
+        internal const val AGGRESSIVE_STALE_CONNECTION_TIMEOUT_MILLIS = 60_000L
         internal const val STALE_CONNECTION_TIMEOUT_MILLIS = 60_000L
 
         fun start(context: Context) {
@@ -506,6 +519,9 @@ internal fun isConnectionStale(
     now: Long,
     timeoutMillis: Long = EmbeddedNtfyConnectionService.STALE_CONNECTION_TIMEOUT_MILLIS,
 ): Boolean = lastActivityAt != null && now - lastActivityAt >= timeoutMillis
+
+internal fun shouldRefreshNtfyOpening(opened: Boolean, lastActivityAt: Long?, now: Long, timeoutMillis: Long): Boolean =
+    !opened && isConnectionStale(lastActivityAt, now, timeoutMillis)
 
 internal fun messageRetryDelayMillis(attempt: Int): Long =
     TimeUnit.SECONDS.toMillis(min(60, 1 shl min(attempt.coerceAtLeast(1), 6)).toLong())

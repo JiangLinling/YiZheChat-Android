@@ -55,6 +55,12 @@ internal fun aSkeletonContentState() = RoomListContentState.Skeleton(16)
 
 internal fun anEmptyContentState(
     securityBannerState: SecurityBannerState = SecurityBannerState.None,
+    fullScreenIntentPermissionsState: FullScreenIntentPermissionsState = aFullScreenIntentPermissionsState(),
+    batteryOptimizationState: BatteryOptimizationState = aBatteryOptimizationState(),
+    showNewNotificationSoundBanner: Boolean = false,
 ) = RoomListContentState.Empty(
     securityBannerState = securityBannerState,
+    fullScreenIntentPermissionsState = fullScreenIntentPermissionsState,
+    batteryOptimizationState = batteryOptimizationState,
+    showNewNotificationSoundBanner = showNewNotificationSoundBanner,
 )

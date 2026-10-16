@@ -26,7 +26,6 @@ import io.element.android.libraries.matrix.impl.paths.getSessionPaths
 import io.element.android.libraries.matrix.impl.proxy.ProxyProvider
 import io.element.android.libraries.matrix.impl.room.TimelineEventFilterFactory
 import io.element.android.libraries.matrix.impl.storage.SqliteStoreBuilderProvider
-import io.element.android.libraries.matrix.impl.storage.EventCacheQueryIndex
 import io.element.android.libraries.matrix.impl.timeline.DisabledMatrixContentProtectionRuntime
 import io.element.android.libraries.matrix.impl.timeline.DisabledMatrixProtectedContentAdapterFactory
 import io.element.android.libraries.matrix.impl.timeline.MatrixProtectedContentAdapterFactory
@@ -312,9 +311,9 @@ class RustMatrixClientFactory(
             }
             .config()
             .build()
-        withContext(coroutineDispatchers.io) {
-            EventCacheQueryIndex.ensure(sessionPaths.cacheDirectory)
-        }
+        // The Rust SDK exclusively owns its SQLite connections, WAL and schema migrations.
+        // Opening this database with Android SQLite while the SDK is alive can unlink
+        // the WAL still held by native connections and cause SQLITE_IOERR_SHORT_READ.
         pendingSessionDelegates[client] = sessionDelegate
         return client
     }

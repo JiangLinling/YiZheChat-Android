@@ -24,6 +24,7 @@ sealed interface VirtualTimelineItem {
     data class LoadingIndicator(
         val direction: Timeline.PaginationDirection,
         val timestamp: Long,
+        val lastRequestFailed: Boolean = false,
     ) : VirtualTimelineItem
 
     data object TypingNotification : VirtualTimelineItem

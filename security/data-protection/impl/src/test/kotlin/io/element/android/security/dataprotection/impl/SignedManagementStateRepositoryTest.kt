@@ -73,6 +73,157 @@ class SignedManagementStateRepositoryTest {
         assertThat(fixture.newRepository().cachedOfflineEntry()).isNull()
     }
 
+    @Test
+    fun `local list preserves online only content policy and cannot turn denial back into permission`() {
+        val fixture = Fixture(temporaryFolder.root)
+        val now = System.currentTimeMillis()
+        android.provider.Settings.Global.putInt(org.robolectric.RuntimeEnvironment.getApplication().contentResolver, "boot_count", 7)
+        fixture.repository.acceptPolicy(fixture.policyEnvelope(version = 1, expiresAtEpochMillis = now + 120_000,
+            maximumOfflineMillis = 0, contentRetentionMillis = 120_000, offlineAccessMode = "ONLINE_REQUIRED"), now)
+        fixture.repository.acceptLocalListEntry(fixture.localListDecision(now))
+        assertThat(fixture.repository.cachedLocalListEntry()).isNotNull()
+        assertThat(fixture.repository.cachedOfflineEntry()).isNull()
+        fixture.repository.acceptLocalListEntry(fixture.localListDecision(now + 1, includeGrant = false))
+        fixture.repository.acceptLocalListEntry(fixture.localListDecision(now))
+        assertThat(fixture.newRepository().cachedLocalListEntry()).isNull()
+    }
+
+    @Test
+    fun `local list fails closed after policy rejection restart expiry and boot change`() {
+        val fixture = Fixture(temporaryFolder.root)
+        val now = System.currentTimeMillis()
+        android.provider.Settings.Global.putInt(org.robolectric.RuntimeEnvironment.getApplication().contentResolver, "boot_count", 7)
+        fixture.repository.acceptPolicy(fixture.policyEnvelope(version = 1, expiresAtEpochMillis = now + 120_000,
+            maximumOfflineMillis = 0, contentRetentionMillis = 120_000, offlineAccessMode = "ONLINE_REQUIRED"), now)
+        fixture.repository.acceptLocalListEntry(fixture.localListDecision(now))
+        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofSeconds(10))
+        fixture.repository.acceptLocalListEntry(fixture.localListDecision(now))
+        assertThat(checkNotNull(fixture.newRepository().cachedLocalListEntry()).second).isAtMost(50_000L)
+        fixture.repository.clearOfflineEntry()
+        fixture.repository.acceptLocalListEntry(fixture.localListDecision(now))
+        assertThat(fixture.newRepository().cachedLocalListEntry()).isNull()
+        fixture.repository.acceptLocalListEntry(fixture.localListDecision(now + 20_000))
+        assertThat(fixture.repository.cachedLocalListEntry()).isNotNull()
+        android.provider.Settings.Global.putInt(org.robolectric.RuntimeEnvironment.getApplication().contentResolver, "boot_count", 8)
+        assertThat(fixture.newRepository().cachedLocalListEntry()).isNull()
+    }
+
+    @Test
+    fun `local list signature and parent policy changes invalidate permission`() {
+        val fixture = Fixture(temporaryFolder.root)
+        val now = System.currentTimeMillis()
+        android.provider.Settings.Global.putInt(org.robolectric.RuntimeEnvironment.getApplication().contentResolver, "boot_count", 7)
+        fixture.repository.acceptPolicy(fixture.policyEnvelope(version = 1, expiresAtEpochMillis = now + 120_000,
+            maximumOfflineMillis = 60_000, contentRetentionMillis = 120_000), now)
+        fixture.repository.acceptLocalListEntry(fixture.localListDecision(now))
+        val file = fixture.stateFile.parentFile.resolve("local-list-entry-v1.json")
+        val valid = file.readText()
+        file.writeText(valid.replace("\"signature_b64\":\"", "\"signature_b64\":\"invalid"))
+        assertThat(fixture.repository.cachedLocalListEntry()).isNull()
+        assertThat(fixture.newRepository().cachedLocalListEntry()).isNull()
+        file.writeText(valid)
+        fixture.repository.acceptPolicy(fixture.policyEnvelope(version = 2, expiresAtEpochMillis = now + 120_000,
+            maximumOfflineMillis = 60_000, contentRetentionMillis = 120_000), now)
+        assertThat(fixture.repository.cachedLocalListEntry()).isNull()
+        assertThat(fixture.newRepository().cachedLocalListEntry()).isNull()
+    }
+
+    @Test
+    fun `local list immediately observes a newly received lock command on the same repository`() {
+        val fixture = Fixture(temporaryFolder.root)
+        val now = System.currentTimeMillis()
+        fixture.prepareLocalList(now)
+        assertThat(fixture.repository.cachedLocalListEntry()).isNotNull()
+
+        fixture.repository.acceptCommand(fixture.lockCommand(now, now, now + 30_000), now)
+
+        assertThat(fixture.repository.cachedLocalListEntry()).isNull()
+        assertThat(fixture.newRepository().cachedLocalListEntry()).isNull()
+    }
+
+    @Test
+    fun `local list reevaluates command activation and expiry without retaining a previous decision`() {
+        val fixture = Fixture(temporaryFolder.root)
+        val now = System.currentTimeMillis()
+        fixture.prepareLocalList(now)
+        fixture.repository.acceptCommand(fixture.lockCommand(now, now + 10_000, now + 20_000), now)
+        assertThat(fixture.repository.cachedLocalListEntry()).isNotNull()
+
+        fixture.repository.updateTrustedTime(now + 10_000)
+        assertThat(fixture.repository.cachedLocalListEntry()).isNull()
+        assertThat(fixture.repository.pendingCommands().single().commandId).isEqualTo("startup-lock-command")
+
+        fixture.repository.updateTrustedTime(now + 20_000)
+        assertThat(fixture.repository.pendingCommands()).isEmpty()
+        assertThat(fixture.repository.cachedLocalListEntry()).isNotNull()
+        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofSeconds(60))
+        assertThat(fixture.repository.cachedLocalListEntry()).isNull()
+    }
+
+    @Test
+    fun `local list rereads corrupt durable state after a successful admission`() {
+        val fixture = Fixture(temporaryFolder.root)
+        fixture.prepareLocalList(System.currentTimeMillis())
+        assertThat(fixture.repository.cachedLocalListEntry()).isNotNull()
+
+        fixture.stateFile.writeText("{broken")
+
+        assertThrows(IllegalStateException::class.java) { fixture.repository.cachedLocalListEntry() }
+    }
+
+    @Test
+    fun `warm reader observes same size and timestamp authority file changes`() {
+        val fixture = Fixture(temporaryFolder.root)
+        fixture.prepareLocalList(System.currentTimeMillis())
+        assertThat(fixture.repository.cachedLocalListEntry()).isNotNull()
+        val original = fixture.stateFile.readText()
+        val timestamp = fixture.stateFile.lastModified()
+        val changed = original.replace("\"highest_policy_version\":1", "\"highest_policy_version\":2")
+        assertThat(changed).isNotEqualTo(original)
+        assertThat(changed.length).isEqualTo(original.length)
+        fixture.stateFile.writeText(changed)
+        check(fixture.stateFile.setLastModified(timestamp))
+
+        assertThat(fixture.repository.cachedLocalListEntry()).isNull()
+        assertThat(fixture.repository.currentPolicyState()).isInstanceOf(CurrentPolicyState.AccessBlocked::class.java)
+    }
+
+    @Test
+    fun `warm reader observes a lock persisted by another repository instance`() {
+        val fixture = Fixture(temporaryFolder.root)
+        val now = System.currentTimeMillis()
+        fixture.prepareLocalList(now)
+        assertThat(fixture.repository.cachedLocalListEntry()).isNotNull()
+        fixture.newRepository().acceptCommand(fixture.lockCommand(now, now, now + 30_000), now)
+
+        assertThat(fixture.repository.cachedLocalListEntry()).isNull()
+        assertThat(fixture.repository.pendingCommands().single().commandId).isEqualTo("startup-lock-command")
+    }
+
+    @Test
+    fun `unchanged serialized state does not retain a policy past its deadline`() {
+        val fixture = Fixture(temporaryFolder.root)
+        val now = System.currentTimeMillis()
+        fixture.repository.acceptPolicy(fixture.policyEnvelope(version = 1, expiresAtEpochMillis = now + 10_000,
+            maximumOfflineMillis = 0, contentRetentionMillis = 120_000, offlineAccessMode = "ONLINE_REQUIRED"), now)
+        assertThat(fixture.repository.currentPolicyState(now)).isInstanceOf(CurrentPolicyState.Active::class.java)
+        val original = fixture.stateFile.readBytes()
+
+        assertThat(fixture.repository.currentPolicyState(now + 10_000)).isInstanceOf(CurrentPolicyState.AccessBlocked::class.java)
+        assertThat(fixture.stateFile.readBytes()).isEqualTo(original)
+    }
+
+    @Test
+    fun `removed authority file cannot reuse the prior parsed admission state`() {
+        val fixture = Fixture(temporaryFolder.root)
+        fixture.prepareLocalList(System.currentTimeMillis())
+        assertThat(fixture.repository.cachedLocalListEntry()).isNotNull()
+        check(fixture.stateFile.delete())
+
+        assertThat(fixture.repository.cachedLocalListEntry()).isNull()
+        assertThat(fixture.repository.currentPolicyState()).isEqualTo(CurrentPolicyState.NoAcceptedPolicy)
+    }
+
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 
@@ -1115,6 +1266,39 @@ class SignedManagementStateRepositoryTest {
         val repository = newRepository()
 
         fun newRepository() = SignedManagementStateRepository(context, verifier)
+
+        fun prepareLocalList(now: Long) {
+            android.provider.Settings.Global.putInt(org.robolectric.RuntimeEnvironment.getApplication().contentResolver, "boot_count", 7)
+            repository.acceptPolicy(policyEnvelope(version = 1, expiresAtEpochMillis = now + 120_000,
+                maximumOfflineMillis = 0, contentRetentionMillis = 120_000, offlineAccessMode = "ONLINE_REQUIRED"), now)
+            repository.acceptLocalListEntry(localListDecision(now))
+        }
+
+        fun lockCommand(now: Long, notBefore: Long, expiresAt: Long): SignedJsonEnvelopeWire {
+            val payload = Json.encodeToJsonElement(CommandWire.serializer(), CommandWire(
+                commandId = "startup-lock-command",
+                installationId = INSTALLATION_ID,
+                commandType = "LOCK",
+                accountIdHash = null,
+                contentId = null,
+                version = 1,
+                issuedAtEpochMillis = now,
+                notBeforeEpochMillis = notBefore,
+                expiresAtEpochMillis = expiresAt,
+                schemaVersion = 1,
+            )).jsonObject
+            return SignedJsonEnvelopeWire(command = payload, keyId = keyId, signatureBase64 = sign(verifier.canonicalJson(payload)))
+        }
+
+        fun localListDecision(now: Long, includeGrant: Boolean = true): SignedJsonEnvelopeWire {
+            val baseline = offlineDecision(now)
+            val original = Json.decodeFromJsonElement(TrustDecisionWire.serializer(), baseline.payload())
+            val payload = Json.encodeToJsonElement(TrustDecisionWire.serializer(), original.copy(
+                offlineEntry = null,
+                localListEntry = if (includeGrant) original.offlineEntry?.copy(protocolVersion = 1, entryPolicyVersion = 1) else null,
+            )).jsonObject
+            return SignedJsonEnvelopeWire(decision = payload, keyId = keyId, signatureBase64 = sign(verifier.canonicalJson(payload)))
+        }
 
         fun offlineDecision(now: Long): SignedJsonEnvelopeWire {
             val payload = Json.encodeToJsonElement(TrustDecisionWire.serializer(), TrustDecisionWire(

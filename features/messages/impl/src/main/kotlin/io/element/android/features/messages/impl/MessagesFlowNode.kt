@@ -21,6 +21,7 @@ import com.bumble.appyx.core.modality.BuildContext
 import com.bumble.appyx.core.node.Node
 import com.bumble.appyx.core.plugin.Plugin
 import com.bumble.appyx.navmodel.backstack.BackStack
+import com.bumble.appyx.navmodel.backstack.active
 import com.bumble.appyx.navmodel.backstack.operation.pop
 import com.bumble.appyx.navmodel.backstack.operation.push
 import dev.zacsweers.metro.Assisted
@@ -428,7 +429,14 @@ class MessagesFlowNode(
                     inReplyToEventId = navTarget.inReplyToEventId,
                     burnAfterRead = navTarget.burnAfterRead,
                 )
-                createNode<AttachmentsPreviewNode>(buildContext, listOf(inputs))
+                val callback = object : AttachmentsPreviewNode.Callback {
+                    override fun onDone() {
+                        if (backstack.active?.key?.navTarget is NavTarget.AttachmentPreview) {
+                            backstack.pop()
+                        }
+                    }
+                }
+                createNode<AttachmentsPreviewNode>(buildContext, listOf(inputs, callback))
             }
             is NavTarget.LocationViewer -> {
                 val inputs = ShowLocationEntryPoint.Inputs(navTarget.mode)

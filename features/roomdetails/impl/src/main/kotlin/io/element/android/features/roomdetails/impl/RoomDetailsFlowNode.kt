@@ -89,6 +89,8 @@ class RoomDetailsFlowNode(
     private val securityAndPrivacyEntryPoint: SecurityAndPrivacyEntryPoint,
     private val roomDetailsEditEntryPoint: RoomDetailsEditEntryPoint,
     private val friendProfileRepository: FriendProfileRepository,
+    private val previewAuthorizationGate: io.element.android.security.dataprotection.api.ProtectedPreviewAuthorizationGate,
+    private val appForegroundStateService: io.element.android.services.appnavstate.api.AppForegroundStateService,
 ) : BaseFlowNode<RoomDetailsFlowNode.NavTarget>(
     backstack = BackStack(
         initialElement = plugins.filterIsInstance<RoomDetailsEntryPoint.Params>().first().initialElement.toNavTarget(),
@@ -138,6 +140,9 @@ class RoomDetailsFlowNode(
         data class ChatSearchResult(val eventId: EventId) : NavTarget
 
         @Parcelize
+        data object ChatSearchRoomDetails : NavTarget
+
+        @Parcelize
         data object AdminSettings : NavTarget
 
         @Parcelize
@@ -182,10 +187,14 @@ class RoomDetailsFlowNode(
 
     override fun resolve(navTarget: NavTarget, buildContext: BuildContext): Node {
         return when (navTarget) {
-            NavTarget.RoomDetails -> {
+            NavTarget.RoomDetails, NavTarget.ChatSearchRoomDetails -> {
                 val roomDetailsCallback = object : RoomDetailsNode.Callback {
                     override fun navigateBack() {
-                        callback.onDone()
+                        if (navTarget == NavTarget.ChatSearchRoomDetails) {
+                            backstack.pop()
+                        } else {
+                            callback.onDone()
+                        }
                     }
 
                     override fun navigateToRoomMemberList() {
@@ -388,6 +397,8 @@ class RoomDetailsFlowNode(
                 buildContext = buildContext,
                 room = room,
                 friendProfileRepository = friendProfileRepository,
+                previewAuthorizationGate = previewAuthorizationGate,
+                appForegroundStateService = appForegroundStateService,
                 onBack = { backstack.pop() },
                 onResult = { backstack.push(NavTarget.ChatSearchResult(it)) },
             )
@@ -396,7 +407,10 @@ class RoomDetailsFlowNode(
                     MessagesEntryPoint.InitialTarget.Messages(navTarget.eventId)
                 )
                 val messagesCallback = object : MessagesEntryPoint.Callback {
-                    override fun navigateToRoomDetails() = Unit
+                    override fun navigateToRoomDetails() {
+                        // Preserve the highlighted message and search page underneath these settings.
+                        backstack.push(NavTarget.ChatSearchRoomDetails)
+                    }
                     override fun navigateToRoomMemberDetails(userId: UserId) = Unit
                     override fun handlePermalinkClick(data: PermalinkData, pushToBackstack: Boolean) {
                         callback.handlePermalinkClick(data, pushToBackstack)

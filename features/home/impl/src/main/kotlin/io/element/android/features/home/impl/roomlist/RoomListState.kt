@@ -74,6 +74,9 @@ sealed interface RoomListContentState {
     data class Skeleton(val count: Int) : RoomListContentState
     data class Empty(
         val securityBannerState: SecurityBannerState,
+        val fullScreenIntentPermissionsState: FullScreenIntentPermissionsState,
+        val batteryOptimizationState: BatteryOptimizationState,
+        val showNewNotificationSoundBanner: Boolean,
     ) : RoomListContentState
 
     data class Rooms(

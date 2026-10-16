@@ -99,6 +99,14 @@ object ProtectedEventOwnershipResolver {
 
     fun isCanonicalEvent(value: String): Boolean = value.length in 2..512 && value.startsWith('$') && value.none(Char::isWhitespace)
 
+    /** Scheduling only. A media filename carries no original upload operation.
+     * Cold media recovery belongs to its original upload journal, not the text-origin retry queue.
+     * A live original owner or a separate caption envelope must still register normally.
+     */
+    internal fun isHistoricalMediaRegistration(
+        isMediaContent: Boolean, hasEnvelopeCarrier: Boolean, current: LifecycleOperationContext?,
+    ): Boolean = isMediaContent && !hasEnvelopeCarrier && current == null
+
     /** Scheduling only. A restored, bound journal retains its owner but is historical work. */
     internal fun needsImmediateEventBinding(origin: Origin?, current: LifecycleOperationContext?): Boolean =
         if (origin == null) current != null

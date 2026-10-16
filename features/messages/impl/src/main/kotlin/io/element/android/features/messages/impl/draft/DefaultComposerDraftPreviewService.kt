@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import timber.log.Timber
 
 @SingleIn(SessionScope::class)
 @ContributesBinding(SessionScope::class)
@@ -38,12 +39,22 @@ class DefaultComposerDraftPreviewService(
         val idsToLoad = synchronized(stateLock) {
             roomIds.filter { loadedRoomIds.add(it) }.map { it to (revisions[it] ?: 0L) }
         }
+        val firstLoadIds = idsToLoad.mapTo(mutableSetOf()) { it.first }
+        val cached = previews.value
+        roomIds.filter { it !in firstLoadIds && it in cached }.forEach { roomId ->
+            Timber.d("FC002 draft preview room=%s source=cache result=present", roomId)
+        }
         if (idsToLoad.isEmpty()) return
         val loaded = coroutineScope {
             idsToLoad.map { (roomId, revision) ->
                 async {
-                    val draft = client.getRoom(roomId)?.use { room ->
-                        room.loadComposerDraft(threadRoot = null).getOrNull()
+                    val room = client.getRoom(roomId)
+                    if (room == null) Timber.d("FC002 draft preview room=%s source=matrix result=room_unavailable", roomId)
+                    val draft = room?.use {
+                        val result = it.loadComposerDraft(threadRoot = null)
+                        Timber.d("FC002 draft preview room=%s source=matrix result=%s", roomId,
+                            if (result.isFailure) "failure" else if (result.getOrNull() == null) "absent" else "present")
+                        result.getOrNull()
                     }
                     Triple(roomId, revision, draft.previewText())
                 }
@@ -61,6 +72,7 @@ class DefaultComposerDraftPreviewService(
 
     override fun update(roomId: RoomId, draft: ComposerDraft?) {
         val preview = draft.previewText()
+        Timber.d("FC002 draft preview room=%s source=committed_write present=%s", roomId, preview != null)
         synchronized(stateLock) {
             // A committed edit/clear supersedes any earlier asynchronous room-list load.
             revisions[roomId] = (revisions[roomId] ?: 0L) + 1L

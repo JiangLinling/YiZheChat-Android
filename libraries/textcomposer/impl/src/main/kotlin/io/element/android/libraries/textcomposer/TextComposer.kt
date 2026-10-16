@@ -20,7 +20,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
@@ -220,8 +219,6 @@ fun TextComposer(
             panelPreferences.edit().putFloat(panelHeightKey, measured.value).apply()
         }
     }
-    BackHandler(showCommonPanel) { showCommonPanel = false }
-
     var pendingKeyboardSwitch by remember { mutableStateOf(false) }
     var voiceInputMode by rememberSaveable { mutableStateOf(false) }
     var sendVoiceWhenReady by remember { mutableStateOf(false) }
@@ -272,6 +269,18 @@ fun TextComposer(
             composerView.hideKeyboard()
         }
     }
+
+    TextComposerBackHandler(
+        showCommonPanel = showCommonPanel,
+        showEmojiPanel = showEmojiPanel,
+        isKeyboardVisible = imeBottom > navBottom,
+        onCloseCommonPanel = { showCommonPanel = false },
+        onCloseEmojiPanel = {
+            cancelKeyboardRequest()
+            showEmojiPanel = false
+        },
+        onHideKeyboard = { dismissComposerKeyboard(force = true) },
+    )
 
     fun requestComposerKeyboard(
         allowWhileEmojiPanelVisible: Boolean = false,

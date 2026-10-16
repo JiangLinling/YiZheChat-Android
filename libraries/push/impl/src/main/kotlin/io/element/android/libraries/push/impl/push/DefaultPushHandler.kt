@@ -21,7 +21,6 @@ import io.element.android.libraries.push.impl.history.onDiagnosticPush
 import io.element.android.libraries.push.impl.history.onInvalidPushReceived
 import io.element.android.libraries.push.impl.history.onUnableToRetrieveSession
 import io.element.android.libraries.push.impl.notifications.NotificationResultProcessor
-import io.element.android.libraries.push.impl.test.DefaultTestPush
 import io.element.android.libraries.push.impl.troubleshoot.DiagnosticPushHandler
 import io.element.android.libraries.push.impl.workmanager.SyncPendingNotificationsRequestBuilder
 import io.element.android.libraries.pushproviders.api.PushData
@@ -85,9 +84,9 @@ class DefaultPushHandler(
         }
 
         // Diagnostic Push
-        if (pushData.eventId == DefaultTestPush.TEST_EVENT_ID) {
+        if (DiagnosticPushHandler.isDiagnosticEvent(pushData.eventId)) {
             pushHistoryService.onDiagnosticPush(providerInfo)
-            diagnosticPushHandler.handlePush()
+            diagnosticPushHandler.handlePush(pushData.eventId)
             false
         } else {
             handleInternal(pushData, providerInfo)

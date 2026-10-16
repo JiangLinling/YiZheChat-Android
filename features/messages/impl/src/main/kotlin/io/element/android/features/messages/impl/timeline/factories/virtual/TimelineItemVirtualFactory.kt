@@ -39,7 +39,8 @@ class TimelineItemVirtualFactory(
             is VirtualTimelineItem.RoomBeginning -> TimelineItemRoomBeginningModel
             is VirtualTimelineItem.LoadingIndicator -> TimelineItemLoadingIndicatorModel(
                 direction = inner.direction,
-                timestamp = inner.timestamp
+                timestamp = inner.timestamp,
+                lastRequestFailed = inner.lastRequestFailed,
             )
             is VirtualTimelineItem.LastForwardIndicator -> TimelineItemLastForwardIndicatorModel
             VirtualTimelineItem.TypingNotification -> TimelineItemTypingNotificationModel

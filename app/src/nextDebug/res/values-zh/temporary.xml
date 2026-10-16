@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_binding_test_label">乙者后台绑定实验</string>
+    <string name="background_binding_test_disclosure">仅 Next Debug 实验，用于对比进程存活与系统恢复。本服务不读取屏幕内容、不点击、不收集事件、不传输数据。启用后增加系统绑定，并可显示前台常驻通知；不保证保活或快速启动。请在系统无障碍设置中开启或关闭。原有 ntfy 通知独立保留。</string>
+    <string name="background_binding_test_settings">打开系统无障碍设置</string>
+    <string name="background_binding_test_foreground">连接后使用前台常驻通知</string>
+    <string name="background_binding_test_overlay">测试 GKD 式 1×1 不接收触摸悬浮窗（默认关闭）</string>
+    <string name="background_binding_test_feedback">仅诊断：对比 GKD 的全部反馈类型声明（默认关闭，尚无对应反馈功能）</string>
+    <string name="background_binding_test_status">进程：%1$d · 已连接：%2$b · 已进入前台：%3$b · 悬浮窗：%4$b · 最近失败：%5$s</string>
+    <string name="background_binding_test_notification">乙者后台绑定实验运行中</string>
+    <string name="background_binding_test_notification_body">点击查看状态和设置；可在系统无障碍设置中关闭。</string>
+    <string name="background_binding_test_refresh">刷新状态</string>
+    <string name="background_binding_test_open_app">打开乙者</string>
+</resources>

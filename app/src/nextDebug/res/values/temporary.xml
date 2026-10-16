@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_binding_test_label">YiZhe background binding experiment</string>
+    <string name="background_binding_test_disclosure">Next Debug experiment comparing process survival and system recovery. This service does not read screen content, click, collect events or transmit data. It adds a system binding and optionally a visible foreground notification. It does not guarantee survival or fast startup. Enable or revoke it in system Accessibility settings. Existing ntfy notifications are independent.</string>
+    <string name="background_binding_test_settings">Open accessibility settings</string>
+    <string name="background_binding_test_foreground">Use foreground notification while connected</string>
+    <string name="background_binding_test_overlay">Test GKD-style 1×1 non-touchable overlay (off by default)</string>
+    <string name="background_binding_test_feedback">Diagnostic only: compare GKD feedbackAllMask classification (default off; no real feedback function)</string>
+    <string name="background_binding_test_status">PID: %1$d · connected: %2$b · foreground: %3$b · overlay: %4$b · latest failure: %5$s</string>
+    <string name="background_binding_test_notification">Background binding experiment is active</string>
+    <string name="background_binding_test_notification_body">Tap for status and controls. Disable through Accessibility settings.</string>
+    <string name="background_binding_test_refresh">Refresh status</string>
+    <string name="background_binding_test_open_app">Open YiZheChat</string>
+</resources>

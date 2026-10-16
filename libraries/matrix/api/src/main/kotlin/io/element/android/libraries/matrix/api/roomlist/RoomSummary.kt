@@ -13,6 +13,8 @@ import io.element.android.libraries.matrix.api.room.RoomInfo
 data class RoomSummary(
     val info: RoomInfo,
     val latestEvent: LatestEventValue,
+    /** Local projection fingerprint only; never an event identity or content authorization. */
+    val sourceEventFingerprint: String? = null,
 ) {
     val roomId = info.id
     val latestEventTimestamp = when (latestEvent) {

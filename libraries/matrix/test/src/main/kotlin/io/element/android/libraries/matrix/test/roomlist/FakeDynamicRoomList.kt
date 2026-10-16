@@ -23,7 +23,9 @@ class FakeDynamicRoomList(
     private val resetLambda: () -> Unit = {},
     private val updateFilterLambda: (RoomListFilter) -> Unit = { filter -> currentFilter.value = filter },
     private val rebuildSummariesLambda: () -> Unit = {},
+    private val updatePreviewRoomsLambda: (List<io.element.android.libraries.matrix.api.core.RoomId>) -> Unit = {},
 ) : DynamicRoomList {
+    override fun updatePreviewRooms(roomIds: List<io.element.android.libraries.matrix.api.core.RoomId>) = updatePreviewRoomsLambda(roomIds)
     override suspend fun loadMore() {
         loadMoreLambda()
     }

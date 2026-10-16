@@ -47,6 +47,7 @@ interface Timeline : AutoCloseable {
     data class PaginationStatus(
         val isPaginating: Boolean,
         val hasMoreToLoad: Boolean,
+        val lastRequestFailed: Boolean = false,
     ) {
         val canPaginate: Boolean = !isPaginating && hasMoreToLoad
     }

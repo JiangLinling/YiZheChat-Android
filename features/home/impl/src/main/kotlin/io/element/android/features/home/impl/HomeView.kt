@@ -633,10 +633,17 @@ private val contactNameTransliterator by lazy {
 
 private val contactNameTransliteratorLock = Any()
 
-private fun contactSortKey(displayName: String): String =
-    synchronized(contactNameTransliteratorLock) {
-        contactNameTransliterator.transliterate(displayName.trim()).lowercase()
+internal fun contactSortKey(displayName: String): String {
+    val trimmed = displayName.trim()
+    // Plain names need no transliteration. Keep punctuation on the original ICU path:
+    // Han-Latin/Names can insert spaces around punctuation even in ASCII identifiers.
+    if (trimmed.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == ' ' || it == '_' }) {
+        return trimmed.lowercase()
     }
+    return synchronized(contactNameTransliteratorLock) {
+        contactNameTransliterator.transliterate(trimmed).lowercase()
+    }
+}
 
 @Composable
 private fun DirectorySectionHeader(title: String) {

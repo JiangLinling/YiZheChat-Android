@@ -8,6 +8,7 @@
 
 package io.element.android.libraries.matrix.impl.tracing
 
+import android.os.Looper
 import android.util.Log
 import org.matrix.rustcomponents.sdk.LogLevel
 import org.matrix.rustcomponents.sdk.logEvent
@@ -30,6 +31,8 @@ internal class RustTracingTree(
     private val target: String,
     private val retrieveFromStackTrace: Boolean,
     private val locationProvider: (() -> LogEventLocation)? = null,
+    private val diagnosticDispatcher: ((() -> Unit) -> Unit)? = null,
+    private val isMainThread: () -> Boolean = { Thread.currentThread() === Looper.getMainLooper().thread },
     private val sink: (LogEventLocation, LogLevel, String, String) -> Unit = { location, level, logTarget, text ->
         logEvent(file = location.file, line = location.line, level = level, target = logTarget, message = text)
     },
@@ -45,7 +48,14 @@ internal class RustTracingTree(
             LogEventLocation("", null)
         }
         val logLevel = priority.toLogLevel()
-        sink(location, logLevel, target, if (tag != null) "[$tag] $message" else message)
+        val text = if (tag != null) "[$tag] $message" else message
+        // Only known debug diagnostics are queued. Capture the source and immutable
+        // payload at the caller; warnings, errors, exceptions and audit tags stay synchronous.
+        if (priority == Log.DEBUG && t == null && tag in DEFERRED_DIAGNOSTIC_TAGS && diagnosticDispatcher != null && isMainThread()) {
+            diagnosticDispatcher.invoke { sink(location, logLevel, target, text) }
+        } else {
+            sink(location, logLevel, target, text)
+        }
     }
 
     /**
@@ -59,6 +69,7 @@ internal class RustTracingTree(
 
     private companion object {
         val TIMING_TAGS = setOf("YiZheMessageStage", "YiZheTimelinePerf", "YiZheDeviceTrust")
+        val DEFERRED_DIAGNOSTIC_TAGS = TIMING_TAGS + setOf("Lifecycle", "Analytics", "Sentry")
     }
 }
 

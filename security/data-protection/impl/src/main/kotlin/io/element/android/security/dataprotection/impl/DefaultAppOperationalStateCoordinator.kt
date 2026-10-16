@@ -597,6 +597,34 @@ class DefaultAppOperationalStateCoordinator internal constructor(
         hasNewStartupIntent: Boolean,
         block: suspend (operationId: String) -> T,
     ): T {
+        var enteredAction = false
+        var retry = 0
+        while (true) {
+            try {
+                return performResuming(request, hasNewStartupIntent, allowTerminalHandoff = true) {
+                    enteredAction = true
+                    block(it)
+                }
+            } catch (failure: java.io.IOException) {
+                // Retry transport before applying any business action, using the exact
+                // same intent. Receipts/actions have their own durable recovery paths.
+                val delayMillis = 1_000L shl retry
+                if (request.lifecycleId != FullAppLifecycleId.LC_06 || enteredAction || retry >= 3 ||
+                    pendingStartRetryClock() + delayMillis >= request.deadlineEpochMillis) throw failure
+                retry += 1
+                timber.log.Timber.tag("YiZheLifecycle").i("YZLC_STARTUP_ADMISSION_RETRY attempt=%d", retry)
+                delay(delayMillis)
+            }
+        }
+    }
+
+    private suspend fun <T> performResuming(
+        request: LifecycleOperationRequest,
+        hasNewStartupIntent: Boolean,
+        allowTerminalHandoff: Boolean,
+        excludedExpiredStartupIds: Set<String> = emptySet(),
+        block: suspend (operationId: String) -> T,
+    ): T {
         val loginAccountIdHash = request.accountIdHash
         val loginMatrixDeviceIdHash = request.matrixDeviceIdHash
         if (request.lifecycleId == FullAppLifecycleId.LC_06 &&
@@ -643,7 +671,8 @@ class DefaultAppOperationalStateCoordinator internal constructor(
             val existing = mutableOperations.value.values
                 .asSequence()
                 .filter {
-                    it.lifecycleId == request.lifecycleId && it.status in NON_TERMINAL_RESUMABLE_STATUSES &&
+                    it.operationId !in excludedExpiredStartupIds &&
+                        it.lifecycleId == request.lifecycleId && it.status in NON_TERMINAL_RESUMABLE_STATUSES &&
                         ((it.operationId == request.operationId && pendingStarts.containsKey(it.operationId)) || (
                         it.subjects.accountIdHash == request.accountIdHash && it.subjects.matrixDeviceIdHash == request.matrixDeviceIdHash &&
                         it.subjects.roomIdHash == request.roomIdHash && it.subjects.eventIdHash == request.eventIdHash &&
@@ -698,6 +727,62 @@ class DefaultAppOperationalStateCoordinator internal constructor(
             require(operation.operationId == resolution.operationId) { "Startup resume must preserve the original operation." }
         }
         val installation = if (request.lifecycleId == FullAppLifecycleId.LC_06) draftInstallationProvider?.invoke() else null
+        // The signed startup index deliberately excludes expired attempts. A retained
+        // process must consult the same authority as a fresh process before admitting
+        // a real new launch. Keep the old unresolved record: expiry is not completion.
+        val expiredPredecessor = mutation.withLock {
+            val latest = verifiedOperationVersions[operation.operationId]
+            latest?.takeIf {
+                allowTerminalHandoff && hasNewStartupIntent && resolution is ResumingResolution.Existing &&
+                    request.lifecycleId == FullAppLifecycleId.LC_06 && request.trigger in setOf("post_login", "reactivation") &&
+                    it.lifecycleId == request.lifecycleId && it.status in NON_TERMINAL_RESUMABLE_STATUSES &&
+                    it.subjects.accountIdHash == request.accountIdHash && it.subjects.matrixDeviceIdHash == request.matrixDeviceIdHash &&
+                    it.subjects.roomIdHash == request.roomIdHash && it.subjects.eventIdHash == request.eventIdHash &&
+                    (installation == null || it.subjects.installationId == installation) &&
+                    it.deadlineEpochMillis <= pendingStartRetryClock() && request.deadlineEpochMillis > pendingStartRetryClock() &&
+                    it.operationId != request.operationId && it.idempotencyKey != request.idempotencyKey &&
+                    it.operationId !in pendingStarts && it.operationId !in resumingOperationUsers &&
+                    pendingClientReceipts.keys.none { key -> key.first == it.operationId }
+            }
+        }
+        if (expiredPredecessor != null) {
+            val recovered = managementControlService.startupLifecycleOperations(
+                checkNotNull(request.accountIdHash), checkNotNull(request.matrixDeviceIdHash), request.trigger,
+            )
+            val expiredIds = mutation.withLock {
+                check(recovered.all {
+                    it.lifecycleId == request.lifecycleId && it.subjects.accountIdHash == request.accountIdHash &&
+                        it.subjects.matrixDeviceIdHash == request.matrixDeviceIdHash &&
+                        it.subjects.roomIdHash == request.roomIdHash && it.subjects.eventIdHash == request.eventIdHash &&
+                        (installation == null || it.subjects.installationId == installation)
+                }) { "Startup index does not match the current intent." }
+                check(recovered.none { it.operationId == expiredPredecessor.operationId }) {
+                    "Original startup remains in the authoritative resumable index."
+                }
+                check(verifiedOperationVersions[expiredPredecessor.operationId] == expiredPredecessor &&
+                    expiredPredecessor.operationId !in pendingStarts && expiredPredecessor.operationId !in resumingOperationUsers &&
+                    pendingClientReceipts.keys.none { it.first == expiredPredecessor.operationId }) {
+                    "Original startup changed while reconciling its eligibility."
+                }
+                recovered.forEach(::remember)
+                // Several completed local sessions may remain nonterminal remotely
+                // (for example an unavailable external participant). Do not rediscover
+                // the oldest expired record on the next launch after reconciling one.
+                // Every excluded record remains available for original receipt recovery.
+                val indexedIds = recovered.mapTo(mutableSetOf()) { it.operationId }
+                mutableOperations.value.values.filter { candidate ->
+                    candidate.lifecycleId == request.lifecycleId && candidate.status in NON_TERMINAL_RESUMABLE_STATUSES &&
+                        candidate.subjects == expiredPredecessor.subjects && candidate.deadlineEpochMillis <= pendingStartRetryClock() &&
+                        candidate.operationId != request.operationId && candidate.idempotencyKey != request.idempotencyKey &&
+                        candidate.operationId !in indexedIds && verifiedOperationVersions[candidate.operationId] == candidate &&
+                        candidate.operationId !in pendingStarts && candidate.operationId !in resumingOperationUsers &&
+                        pendingClientReceipts.keys.none { it.first == candidate.operationId }
+                }.mapTo(mutableSetOf()) { it.operationId }
+            }
+            timber.log.Timber.tag("YiZheLifecycle").i("YZLC_STARTUP_EXPIRED_INDEX_RECONCILED")
+            return performResuming(request, hasNewStartupIntent, allowTerminalHandoff = false,
+                excludedExpiredStartupIds = expiredIds, block = block)
+        }
         val admitted = mutation.withLock {
             val latest = checkNotNull(verifiedOperationVersions[operation.operationId]) { "Lifecycle admission is unavailable." }
             if (request.lifecycleId == FullAppLifecycleId.LC_06) {
@@ -707,13 +792,30 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                     (installation == null || latest.subjects.installationId == installation)) {
                     "Startup admission does not match the current intent."
                 }
+                // A retained process can discover that its old startup finished while it
+                // was in the background. Reconcile that original first, then admit the
+                // current real startup intent once. Never extend the old deadline, retry
+                // a cancellation/rejection, or turn an unknown outcome into a new start.
+                val completedPredecessor = latest.status == LifecycleOperationStatus.SUCCEEDED ||
+                    latest.status == LifecycleOperationStatus.TERMINATED && latest.deadlineEpochMillis <= pendingStartRetryClock()
+                if (allowTerminalHandoff && hasNewStartupIntent && resolution is ResumingResolution.Existing &&
+                    completedPredecessor && !latest.terminalReceiptId.isNullOrBlank() &&
+                    latest.operationId != request.operationId && latest.idempotencyKey != request.idempotencyKey &&
+                    request.deadlineEpochMillis > pendingStartRetryClock()
+                ) {
+                    timber.log.Timber.tag("YiZheLifecycle").i("YZLC_STARTUP_TERMINAL_HANDOFF status=%s", latest.status)
+                    return@withLock null
+                }
                 require(!latest.status.isTerminal && latest.deadlineEpochMillis > pendingStartRetryClock()) {
-                    "Original startup operation is no longer active."
+                    "Original startup operation is no longer active (status=${latest.status}, expired=${latest.deadlineEpochMillis <= pendingStartRetryClock()})."
                 }
             }
             resumingOperationUsers[latest.operationId] = (resumingOperationUsers[latest.operationId] ?: 0) + 1
             remember(latest)
             latest
+        }
+        if (admitted == null) {
+            return performResuming(request, hasNewStartupIntent, allowTerminalHandoff = false, block = block)
         }
         try {
             return withContext(LifecycleOperationContext(admitted.operationId, admitted.lifecycleId)) {

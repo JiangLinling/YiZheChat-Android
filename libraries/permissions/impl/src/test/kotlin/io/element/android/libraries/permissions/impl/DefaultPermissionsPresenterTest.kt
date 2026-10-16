@@ -10,6 +10,7 @@
 
 package io.element.android.libraries.permissions.impl
 
+import android.Manifest
 import androidx.lifecycle.Lifecycle
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.PermissionStatus
@@ -114,56 +115,141 @@ class DefaultPermissionsPresenterTest {
     }
 
     @Test
-    fun `present - user does not grant permission`() = runTest {
-        val permissionState = aFakePermissionState(
-            initialStatus = PermissionStatus.Denied(shouldShowRationale = false)
-        )
-        val permissionStateProvider = FakeComposablePermissionStateProvider(
-            permissionState = permissionState,
-        )
-        val presenter = createPresenter(
-            permissionStateProvider = permissionStateProvider,
-        )
+    fun `camera first denial with rationale explains recovery`() = verifyDeniedCallback(Manifest.permission.CAMERA, rationale = true)
+
+    @Test
+    fun `camera silent system denial without rationale explains recovery`() = verifyDeniedCallback(Manifest.permission.CAMERA, rationale = false)
+
+    @Test
+    fun `microphone first denial with rationale explains recovery`() = verifyDeniedCallback(Manifest.permission.RECORD_AUDIO, rationale = true)
+
+    @Test
+    fun `microphone silent system denial without rationale explains recovery`() = verifyDeniedCallback(Manifest.permission.RECORD_AUDIO, rationale = false)
+
+    private fun verifyDeniedCallback(permission: String, rationale: Boolean) = runTest {
+        val osState = aFakePermissionState(permission, PermissionStatus.Denied(shouldShowRationale = false))
+        val provider = FakeComposablePermissionStateProvider(osState)
+        val presenter = createPresenter(permission = permission, permissionStateProvider = provider)
         presenter.testWithLifecycleOwner {
-            val initialState = awaitItem()
-            assertThat(initialState.showDialog).isFalse()
-            initialState.eventSink.invoke(PermissionsEvent.RequestPermissions)
-            assertThat(permissionState.launchPermissionRequestCalled).isTrue()
-            // User does not grant permission
-            permissionStateProvider.userGiveAnswer(answer = false, firstTime = true)
-            skipItems(1)
-            val state = awaitItem()
-            assertThat(state.permissionGranted).isFalse()
-            assertThat(state.showDialog).isFalse()
-            assertThat(state.permissionAlreadyDenied).isFalse()
-            assertThat(state.permissionAlreadyAsked).isTrue()
+            val initial = awaitItem()
+            assertThat(initial.showDialog).isFalse()
+            initial.eventSink(PermissionsEvent.RequestPermissions)
+            // No history plus rationale=false is still a first request, never permanent denial.
+            assertThat(osState.launchPermissionRequestCalled).isTrue()
+            provider.userGiveAnswer(answer = false, firstTime = rationale)
+            advanceUntilIdle()
+            val denied = expectMostRecentItem()
+            assertThat(denied.permissionGranted).isFalse()
+            assertThat(denied.showDialog).isTrue()
+            assertThat(denied.permissionAlreadyAsked).isTrue()
+            assertThat(denied.permissionAlreadyDenied).isTrue()
+            denied.eventSink(PermissionsEvent.CloseDialog)
+            assertThat(awaitItem().showDialog).isFalse()
+            denied.eventSink(PermissionsEvent.RequestPermissions)
+            assertThat(awaitItem().showDialog).isTrue()
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
-    fun `present - user does not grant permission second time`() = runTest {
-        val permissionState = aFakePermissionState(
-            initialStatus = PermissionStatus.Denied(shouldShowRationale = true)
-        )
-        val permissionStateProvider = FakeComposablePermissionStateProvider(
-            permissionState = permissionState,
-        )
+    fun `legacy asked history with false rationale shows recovery without another OS request`() = runTest {
+        val osState = aFakePermissionState(initialStatus = PermissionStatus.Denied(shouldShowRationale = false))
         val presenter = createPresenter(
-            permissionStateProvider = permissionStateProvider,
+            permissionsStore = InMemoryPermissionsStore(permissionAsked = true),
+            permissionStateProvider = FakeComposablePermissionStateProvider(osState),
         )
         presenter.testWithLifecycleOwner {
-            val initialState = awaitItem()
-            assertThat(initialState.showDialog).isFalse()
-            initialState.eventSink.invoke(PermissionsEvent.RequestPermissions)
-            assertThat(permissionState.launchPermissionRequestCalled).isTrue()
-            // User does not grant permission
-            permissionStateProvider.userGiveAnswer(answer = false, firstTime = false)
-            skipItems(1)
-            val state = awaitItem()
-            assertThat(state.permissionGranted).isFalse()
-            assertThat(state.showDialog).isFalse()
-            assertThat(state.permissionAlreadyDenied).isTrue()
-            assertThat(state.permissionAlreadyAsked).isTrue()
+            awaitItem()
+            advanceUntilIdle()
+            expectMostRecentItem().eventSink(PermissionsEvent.RequestPermissions)
+            assertThat(awaitItem().showDialog).isTrue()
+            assertThat(osState.launchPermissionRequestCalled).isFalse()
+        }
+    }
+
+    @Test
+    fun `asked permission with rationale requests again and second silent denial remains explained`() = runTest {
+        val osState = aFakePermissionState(initialStatus = PermissionStatus.Denied(shouldShowRationale = true))
+        val provider = FakeComposablePermissionStateProvider(osState)
+        val presenter = createPresenter(
+            permissionsStore = InMemoryPermissionsStore(permissionAsked = true),
+            permissionStateProvider = provider,
+        )
+        presenter.testWithLifecycleOwner {
+            awaitItem()
+            advanceUntilIdle()
+            expectMostRecentItem().eventSink(PermissionsEvent.RequestPermissions)
+            assertThat(osState.launchPermissionRequestCalled).isTrue()
+            provider.userGiveAnswer(answer = false, firstTime = false)
+            advanceUntilIdle()
+            val denied = expectMostRecentItem()
+            assertThat(denied.permissionGranted).isFalse()
+            assertThat(denied.showDialog).isTrue()
+            assertThat(denied.permissionAlreadyDenied).isTrue()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `granted permission revoked in settings cannot silently deny after history reset`() = runTest {
+        val store = InMemoryPermissionsStore(permissionAsked = true, permissionDenied = true)
+        val osState = aFakePermissionState()
+        val provider = FakeComposablePermissionStateProvider(osState)
+        val presenter = createPresenter(permissionsStore = store, permissionStateProvider = provider)
+        presenter.testWithLifecycleOwner {
+            awaitItem()
+            advanceUntilIdle()
+            val granted = expectMostRecentItem()
+            assertThat(granted.permissionGranted).isTrue()
+            assertThat(granted.permissionAlreadyAsked).isFalse()
+            assertThat(granted.permissionAlreadyDenied).isFalse()
+            osState.givenPermissionStatus(hasPermission = false, shouldShowRationale = false)
+            awaitItem().eventSink(PermissionsEvent.RequestPermissions)
+            provider.userGiveAnswer(answer = false, firstTime = false)
+            advanceUntilIdle()
+            val denied = expectMostRecentItem()
+            assertThat(denied.permissionGranted).isFalse()
+            assertThat(denied.showDialog).isTrue()
+            assertThat(denied.permissionAlreadyDenied).isTrue()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `settings return still denied restores explanation and later grant clears it`() = runTest {
+        val owner = FakeLifecycleOwner(Lifecycle.State.RESUMED)
+        val osState = aFakePermissionState(initialStatus = PermissionStatus.Denied(shouldShowRationale = false))
+        var settingsOpened = 0
+        val presenter = createPresenter(
+            permissionsStore = InMemoryPermissionsStore(permissionAsked = true, permissionDenied = true),
+            permissionStateProvider = FakeComposablePermissionStateProvider(osState),
+            permissionActions = FakePermissionActions(openSettingsAction = { settingsOpened++ }),
+            appCoroutineScope = this,
+        )
+        presenter.testWithLifecycleOwner(owner) {
+            awaitItem()
+            advanceUntilIdle()
+            expectMostRecentItem().eventSink(PermissionsEvent.RequestPermissions)
+            awaitItem().eventSink(PermissionsEvent.OpenSystemSettingAndCloseDialog)
+            advanceUntilIdle()
+            assertThat(expectMostRecentItem().showDialog).isFalse()
+            owner.givenState(Lifecycle.State.STARTED)
+            owner.givenState(Lifecycle.State.RESUMED)
+            advanceUntilIdle()
+            val denied = expectMostRecentItem()
+            assertThat(denied.permissionGranted).isFalse()
+            assertThat(denied.showDialog).isTrue()
+            denied.eventSink(PermissionsEvent.OpenSystemSettingAndCloseDialog)
+            advanceUntilIdle()
+            owner.givenState(Lifecycle.State.STARTED)
+            osState.givenPermissionStatus(hasPermission = true, shouldShowRationale = false)
+            owner.givenState(Lifecycle.State.RESUMED)
+            advanceUntilIdle()
+            val restored = expectMostRecentItem()
+            assertThat(restored.permissionGranted).isTrue()
+            assertThat(restored.showDialog).isFalse()
+            assertThat(settingsOpened).isEqualTo(2)
+            cancelAndIgnoreRemainingEvents()
         }
     }
 

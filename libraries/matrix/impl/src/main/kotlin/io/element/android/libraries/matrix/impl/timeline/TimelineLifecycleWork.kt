@@ -139,6 +139,12 @@ internal class TimelineLifecycleWork(private val now: () -> Long) {
         if (registrations[key]?.running == true) finishRegistration(key, success = false)
     }
 
+    /** No local SEND owns this carrier. Release bookkeeping without claiming a binding receipt. */
+    @Synchronized
+    fun discardUnownedRegistration(key: String) {
+        registrations.remove(key)?.completion?.complete(false)
+    }
+
     /** Join the real mapping without holding a transport permit or cancelling its producer. */
     suspend fun awaitRegistration(key: String): Boolean? {
         val completion = synchronized(this) { registrations[key]?.completion } ?: return null

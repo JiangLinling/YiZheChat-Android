@@ -66,6 +66,7 @@ import androidx.core.location.LocationCompat
 import androidx.core.location.LocationManagerCompat
 import io.element.android.appnav.R
 import io.element.android.appnav.StartupWaitingView
+import io.element.android.libraries.androidutils.startup.StartupTrace
 import io.element.android.appnav.revealStartupSplashWhenLaidOut
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.securebackup.api.RecoveryKeySubmissionService
@@ -229,6 +230,7 @@ fun SecuritySetupRoute(
     canRestoreOffline: suspend () -> Boolean,
     onOfflineReady: () -> Unit,
     verifiedStartupReadiness: () -> io.element.android.security.dataprotection.api.StartupSecurityReadiness? = { null },
+    canRestoreRetainedList: suspend () -> Boolean = { false },
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -270,7 +272,11 @@ fun SecuritySetupRoute(
         }
         // A committed, authenticated CORE_READY checkpoint already proves completed admission.
         // The process-local LC-05 operation map can be empty after a cold offline start.
-        if (canRestoreOffline()) {
+        if (
+            StartupTrace.measureSuspend("Startup.security.synchronize.offline") { canRestoreOffline() } ||
+            StartupTrace.measureSuspend("Startup.security.synchronize.retainedList") { canRestoreRetainedList() }
+        ) {
+            StartupTrace.mark("Startup.security.synchronize.cachedReady")
             phase = SecuritySetupPhase.READY
             return@runSecuritySetupSynchronization
         }
@@ -431,6 +437,7 @@ fun SecuritySetupRoute(
     }
 
     LaunchedEffect(recoveryCompletionToken, identityResetConvergenceState) {
+        StartupTrace.mark("Startup.security.synchronize.effect")
         if (identityResetConvergenceState != IdentityResetConvergenceState.IDLE) {
             return@LaunchedEffect
         }
@@ -451,33 +458,49 @@ fun SecuritySetupRoute(
         sessionVerificationStatus = sessionVerificationStatus,
         lockScreenSetupRequired = lockScreenSetupRequired,
     )
+    // Auto-requesting completion below must not cancel an admission read already required by
+    // completed setup. Keep the resume key separate: losing that eligibility still cancels
+    // the retained-list path, even when an explicit completion request remains active.
+    val activationRequested = canResumeCompletedSetup || userReadyRequested
     LaunchedEffect(
         phase,
         canResumeCompletedSetup,
         localRequirementsLoaded,
         lockScreenSetupRequired,
-        userReadyRequested,
+        activationRequested,
         sessionVerificationStatus,
         identityResetConvergenceState,
         recoveryKeyAction.value,
         recoveryAwaitingCompletion,
         recoverySessionState,
     ) {
+        StartupTrace.mark("Startup.security.completion.effect phase=$phase local=$localRequirementsLoaded resume=$canResumeCompletedSetup")
         if (identityResetConvergenceState != IdentityResetConvergenceState.IDLE || recoveryAwaitingCompletion || recoverySessionState.requiresGate) {
             return@LaunchedEffect
         }
         if (phase == SecuritySetupPhase.READY) {
-            if (localRequirementsLoaded && !lockScreenSetupRequired && canRestoreOffline()) {
+            if (localRequirementsLoaded && !lockScreenSetupRequired &&
+                StartupTrace.measureSuspend("Startup.security.completion.offline") { canRestoreOffline() }
+            ) {
                 // Publish authenticated offline CORE before waking session initialization.
                 // An immediate dispatcher must not allocate an online startup operation here.
                 onOfflineReady()
                 onApprovalReady()
                 return@LaunchedEffect
             }
+            if (canResumeCompletedSetup &&
+                StartupTrace.measureSuspend("Startup.security.completion.retainedList") { canRestoreRetainedList() }
+            ) {
+                // A matching committed CORE checkpoint proves previous setup completion.
+                // Online LC-02 and LC-06 still run; this does not publish fresh CORE_READY.
+                onApprovalReady()
+                onReady()
+                return@LaunchedEffect
+            }
             // Approval only starts the restricted session initialization. The unified workbench
             // stays visible until the local safeguards and cryptographic session verification are done.
             onApprovalReady()
-            if ((canResumeCompletedSetup || userReadyRequested) && sessionVerificationStatus is SessionVerifiedStatus.Verified) {
+            if (activationRequested && sessionVerificationStatus is SessionVerifiedStatus.Verified) {
                 var pendingActivation = pendingActivation()
                 var activationAlreadyReceipted = hasSuccessfulFirstActivationReceipt(
                     operations = appOperationalStateCoordinator.operations.value.values,
@@ -504,7 +527,7 @@ fun SecuritySetupRoute(
                     activationFailure == null &&
                     pendingActivation == null &&
                     !activationAlreadyReceipted &&
-                    (canResumeCompletedSetup || userReadyRequested)
+                    activationRequested
                 ) {
                     Log.i(SECURITY_SETUP_DIAGNOSTIC_TAG, "YZSETUP_ACTIVATION_RECONCILING=RECONCILED_NEW_INTENT")
                     activationFailure = runCatching {

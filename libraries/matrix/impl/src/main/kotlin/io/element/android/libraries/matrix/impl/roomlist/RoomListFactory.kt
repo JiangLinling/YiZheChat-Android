@@ -60,6 +60,7 @@ internal class RoomListFactory(
         val loadingStateFlow: MutableStateFlow<RoomList.LoadingState> = MutableStateFlow(RoomList.LoadingState.NotLoaded)
         val summariesFlow = MutableSharedFlow<List<RoomSummary>>(replay = 1, extraBufferCapacity = 1)
         val processor = RoomSummaryListProcessor(summariesFlow, innerRoomListService, coroutineContext, roomSummaryFactory, analyticsService)
+        processor.launchPreviewsIn(coroutineScope)
         var innerRoomList: InnerRoomList? = null
         val controllerOwner = RoomListControllerOwner()
 

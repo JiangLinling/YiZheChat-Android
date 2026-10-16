@@ -81,6 +81,15 @@ class ElementXApplication : Application(), DependencyInjectionGraphOwner, Config
                 startVendorPushIfSupported()
                 StartupTrace.mark("Application.ready")
                 _startupState.value = StartupState.Ready
+                startupScope.launch(Dispatchers.IO) {
+                    try {
+                        graph.retainedSessionPreparation().prepare()
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        Timber.w("Background session preparation unavailable: %s", failure.javaClass.simpleName)
+                    }
+                }
             }.onFailure { error ->
                 StartupTrace.mark("Application.failed ${error::class.simpleName}")
                 Timber.e(error, "Application startup initialization failed")

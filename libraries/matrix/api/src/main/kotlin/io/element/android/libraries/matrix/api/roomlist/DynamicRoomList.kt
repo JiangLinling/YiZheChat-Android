@@ -31,6 +31,9 @@ interface DynamicRoomList : RoomList {
      * @param filter the filter to apply.
      */
     suspend fun updateFilter(filter: RoomListFilter)
+
+    /** Prioritize optional previews for real visible rows. Does not mark rooms read. */
+    fun updatePreviewRooms(roomIds: List<io.element.android.libraries.matrix.api.core.RoomId>) = Unit
 }
 
 suspend fun DynamicRoomList.updateVisibleRange(

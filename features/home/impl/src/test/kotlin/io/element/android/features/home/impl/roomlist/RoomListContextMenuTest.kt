@@ -10,11 +10,15 @@
 
 package io.element.android.features.home.impl.roomlist
 
+import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.AndroidComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runAndroidComposeUiTest
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.element.android.features.home.impl.R
 import io.element.android.libraries.matrix.api.core.RoomId
@@ -125,8 +129,27 @@ class RoomListContextMenuTest {
             contextMenu = contextMenu,
             eventSink = eventsRecorder,
         )
+        val muteLabel = ApplicationProvider.getApplicationContext<Context>().getString(R.string.screen_roomlist_mute)
+        onNodeWithText(muteLabel).assertIsOff()
         clickOn(R.string.screen_roomlist_mute)
         eventsRecorder.assertSingle(RoomListEvent.SetRoomMuted(contextMenu.roomId, true))
+    }
+
+    @Test
+    fun `clicking on Mute when already muted disables mute`() = runAndroidComposeUiTest {
+        val eventsRecorder = EventsRecorder<RoomListEvent>()
+        val contextMenu = aContextMenuShown(isMuted = true)
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val muteLabel = context.getString(R.string.screen_roomlist_mute)
+        val unmuteLabel = context.getString(R.string.screen_roomlist_unmute)
+        setRoomListContextMenu(
+            contextMenu = contextMenu,
+            eventSink = eventsRecorder,
+        )
+        onNodeWithText(unmuteLabel).assertDoesNotExist()
+        onNodeWithText(muteLabel).assertIsOn()
+        clickOn(R.string.screen_roomlist_mute)
+        eventsRecorder.assertSingle(RoomListEvent.SetRoomMuted(contextMenu.roomId, false))
     }
 
     private fun AndroidComposeUiTest<ComponentActivity>.setRoomListContextMenu(

@@ -11,6 +11,15 @@ import org.junit.Test
 
 class MatrixComposerDraftStoreTest {
     @Test
+    fun `FC002 failed load is currently returned as an empty draft`() = runTest {
+        val room = FakeBaseRoom(loadComposerDraftLambda = { Result.failure(IllegalStateException("unavailable")) })
+        val client = FakeMatrixClient().apply { givenGetRoomResult(A_ROOM_ID, room) }
+        val store = MatrixComposerDraftStore(client, DefaultComposerDraftPreviewService(client))
+
+        assertThat(store.loadDraft(A_ROOM_ID, null)).isNull()
+    }
+
+    @Test
     fun `failed persistence is surfaced instead of acknowledging a durable draft`() = runTest {
         val error = IllegalStateException("storage unavailable")
         val room = FakeBaseRoom(saveComposerDraftLambda = { Result.failure(error) })

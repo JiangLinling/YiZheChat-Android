@@ -125,7 +125,7 @@ class PushLoopbackTestTest {
         val diagnosticPushHandler = DiagnosticPushHandler()
         val sut = createPushLoopbackTest(
             pushService = FakePushService(testPushBlock = {
-                diagnosticPushHandler.handlePush()
+                diagnosticPushHandler.handlePush(diagnosticPushHandler.beginTest())
                 true
             }),
             diagnosticPushHandler = diagnosticPushHandler,

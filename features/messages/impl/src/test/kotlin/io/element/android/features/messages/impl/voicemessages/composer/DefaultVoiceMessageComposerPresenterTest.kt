@@ -1244,6 +1244,53 @@ class DefaultVoiceMessageComposerPresenterTest {
         }
     }
 
+    @Test
+    fun `microphone denial dismissed before later grant never starts recording`() = runTest {
+        val permissions = createFakePermissionsPresenter(recordPermissionGranted = false)
+        val presenter = createDefaultVoiceMessageComposerPresenter(permissionsPresenter = permissions)
+        presenter.test {
+            awaitItem().eventSink(VoiceMessageComposerEvent.RecorderEvent(VoiceMessageRecorderEvent.Start))
+            advanceUntilIdle()
+            val denied = expectMostRecentItem()
+            assertThat(denied.showPermissionRationaleDialog).isTrue()
+            voiceRecorder.assertCalls(started = 0)
+            denied.eventSink(VoiceMessageComposerEvent.DismissPermissionsRationale)
+            advanceUntilIdle()
+            permissions.setPermissionGranted()
+            advanceUntilIdle()
+            val restored = expectMostRecentItem()
+            assertThat(restored.voiceMessageState).isEqualTo(VoiceMessageState.Idle)
+            assertThat(restored.showPermissionRationaleDialog).isFalse()
+            voiceRecorder.assertCalls(started = 0)
+            testPauseAndDestroy(restored)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `released hold while microphone settings remain denied cannot record after later grant`() = runTest {
+        val permissions = createFakePermissionsPresenter(recordPermissionGranted = false)
+        val presenter = createDefaultVoiceMessageComposerPresenter(permissionsPresenter = permissions)
+        presenter.test {
+            awaitItem().eventSink(VoiceMessageComposerEvent.RecorderEvent(VoiceMessageRecorderEvent.Start))
+            advanceUntilIdle()
+            val denied = expectMostRecentItem()
+            assertThat(denied.showPermissionRationaleDialog).isTrue()
+            denied.eventSink(VoiceMessageComposerEvent.AcceptPermissionRationale)
+            denied.eventSink(VoiceMessageComposerEvent.RecorderEvent(VoiceMessageRecorderEvent.Stop))
+            advanceUntilIdle()
+            assertThat(expectMostRecentItem().voiceMessageState).isEqualTo(VoiceMessageState.Idle)
+            voiceRecorder.assertCalls(started = 0, stopped = 0)
+            permissions.setPermissionGranted()
+            advanceUntilIdle()
+            val restored = expectMostRecentItem()
+            assertThat(restored.voiceMessageState).isEqualTo(VoiceMessageState.Idle)
+            voiceRecorder.assertCalls(started = 0, stopped = 0)
+            testPauseAndDestroy(restored)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private suspend fun TurbineTestContext<VoiceMessageComposerState>.testPauseAndDestroy(
         mostRecentState: VoiceMessageComposerState,
     ) {

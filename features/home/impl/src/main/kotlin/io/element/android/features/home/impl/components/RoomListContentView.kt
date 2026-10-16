@@ -29,6 +29,9 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,6 +69,7 @@ import io.element.android.libraries.designsystem.theme.components.Icon
 import io.element.android.libraries.designsystem.theme.components.IconSource
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.designsystem.utils.OnVisibleRangeChangeEffect
+import io.element.android.libraries.designsystem.utils.LocalLoadingPlaceholdersVisible
 import io.element.android.libraries.matrix.api.room.DirectRoomRelationState
 import io.element.android.libraries.matrix.api.sync.SyncState
 import io.element.android.libraries.ui.strings.CommonStrings
@@ -93,13 +97,41 @@ fun RoomListContentView(
 ) {
     Column(modifier = modifier) {
         NetworkStatusBanner(syncState = syncState, onRetrySync = onRetrySync)
+        val canShowReachabilityGuide = when (contentState) {
+            is RoomListContentState.Skeleton -> false
+            is RoomListContentState.Empty -> contentState.securityBannerState == SecurityBannerState.None
+            is RoomListContentState.Rooms -> contentState.securityBannerState == SecurityBannerState.None
+        }
+        val reachabilityGuideShown = if (canShowReachabilityGuide) ReachabilityGuideBanner() else false
+        if (contentState is RoomListContentState.Empty &&
+            contentState.securityBannerState == SecurityBannerState.None && !reachabilityGuideShown
+        ) {
+            when {
+                contentState.fullScreenIntentPermissionsState.shouldDisplayBanner -> {
+                    FullScreenIntentPermissionBanner(state = contentState.fullScreenIntentPermissionsState)
+                }
+                contentState.batteryOptimizationState.shouldDisplayBanner -> {
+                    BatteryOptimizationBanner(state = contentState.batteryOptimizationState)
+                }
+                contentState.showNewNotificationSoundBanner -> {
+                    NewNotificationSoundBanner(
+                        onDismissClick = { eventSink(RoomListEvent.DismissNewNotificationSoundBanner) },
+                    )
+                }
+            }
+        }
         when (contentState) {
             is RoomListContentState.Skeleton -> {
-                SkeletonView(
-                    modifier = Modifier.weight(1f),
-                    count = contentState.count,
-                    contentPadding = contentPadding,
-                )
+                if (LocalLoadingPlaceholdersVisible.current) {
+                    SkeletonView(
+                        modifier = Modifier.weight(1f),
+                        count = contentState.count,
+                        contentPadding = contentPadding,
+                    )
+                } else {
+                    // The real list still owns readiness; this cannot release the splash.
+                    Spacer(Modifier.weight(1f).fillMaxWidth())
+                }
             }
             is RoomListContentState.Empty -> {
                 PullToRefreshBox(
@@ -139,6 +171,7 @@ fun RoomListContentView(
                         roomDisplayName = roomDisplayName,
                         lazyListState = lazyListState,
                         contentPadding = contentPadding,
+                        reachabilityGuideShown = reachabilityGuideShown,
                     )
                 }
             }
@@ -252,6 +285,7 @@ private fun RoomsView(
     onRoomClick: (RoomListRoomSummary) -> Unit,
     roomDisplayName: (RoomListRoomSummary) -> String?,
     contentPadding: PaddingValues,
+    reachabilityGuideShown: Boolean,
     lazyListState: LazyListState,
     modifier: Modifier = Modifier,
 ) {
@@ -275,6 +309,7 @@ private fun RoomsView(
             onRoomClick = onRoomClick,
             roomDisplayName = roomDisplayName,
             contentPadding = contentPadding,
+            reachabilityGuideShown = reachabilityGuideShown,
             lazyListState = lazyListState,
             modifier = modifier.fillMaxSize(),
         )
@@ -293,6 +328,7 @@ private fun RoomsViewList(
     onRoomClick: (RoomListRoomSummary) -> Unit,
     roomDisplayName: (RoomListRoomSummary) -> String?,
     contentPadding: PaddingValues,
+    reachabilityGuideShown: Boolean,
     lazyListState: LazyListState,
     modifier: Modifier = Modifier,
 ) {
@@ -300,6 +336,22 @@ private fun RoomsViewList(
         eventSink(RoomListEvent.UpdateVisibleRange(visibleRange))
     }
     val isInvitesFilterSelected = filtersState.selectedFilters().contains(RoomListFilter.Invites)
+    val visibleSummaries = if (isInvitesFilterSelected) {
+        state.summaries
+    } else {
+        state.summaries.filter { room ->
+            room.displayType != RoomSummaryDisplayType.INVITE && when (room.directRoomRelationState()) {
+                DirectRoomRelationState.NOT_DIRECT,
+                DirectRoomRelationState.ACCEPTED,
+                DirectRoomRelationState.INVALID -> true
+                DirectRoomRelationState.INCOMING_REQUEST,
+                DirectRoomRelationState.OUTGOING_REQUEST,
+                DirectRoomRelationState.STALE,
+                DirectRoomRelationState.RESOLVING -> false
+            }
+        }
+    }
+
     val visibleInviteIds = state.summaries
         .filter { it.displayType == RoomSummaryDisplayType.INVITE }
         .map { it.roomId }
@@ -308,6 +360,18 @@ private fun RoomsViewList(
         if (isInvitesFilterSelected && visibleInviteIds.isNotEmpty()) {
             eventSink(RoomListEvent.MarkInvitesAsSeen(visibleInviteIds))
         }
+    }
+    // Use rendered row identities, including filtering/favorites and the optional banner.
+    // A numerical SDK range alone can point to a different room after a list reorder.
+    LaunchedEffect(lazyListState, visibleSummaries.map { it.roomId }) {
+        snapshotFlow {
+            val layout = lazyListState.layoutInfo
+            val headerCount = (layout.totalItemsCount - visibleSummaries.size).coerceAtLeast(0)
+            layout.visibleItemsInfo.mapNotNull { visibleSummaries.getOrNull(it.index - headerCount)?.roomId }
+        }.distinctUntilChanged().collect { eventSink(RoomListEvent.UpdatePreviewRooms(it)) }
+    }
+    DisposableEffect(Unit) {
+        onDispose { eventSink(RoomListEvent.UpdatePreviewRooms(emptyList())) }
     }
     LazyColumn(
         state = lazyListState,
@@ -331,41 +395,24 @@ private fun RoomsViewList(
                     )
                 }
             }
-            // Banner precedence (top-to-bottom): full-screen-intent > battery-optimization >
-            // new-notification-sound > sound-unavailable. At most one renders at a time.
+            // Show system call and battery reminders after the reachability guide's current step.
             SecurityBannerState.None -> when {
-                state.fullScreenIntentPermissionsState.shouldDisplayBanner -> {
+                !reachabilityGuideShown && state.fullScreenIntentPermissionsState.shouldDisplayBanner -> {
                     item {
                         FullScreenIntentPermissionBanner(state = state.fullScreenIntentPermissionsState)
                     }
                 }
-                state.batteryOptimizationState.shouldDisplayBanner -> {
+                !reachabilityGuideShown && state.batteryOptimizationState.shouldDisplayBanner -> {
                     item {
                         BatteryOptimizationBanner(state = state.batteryOptimizationState)
                     }
                 }
-                state.showNewNotificationSoundBanner -> {
+                !reachabilityGuideShown && state.showNewNotificationSoundBanner -> {
                     item {
                         NewNotificationSoundBanner(
                             onDismissClick = { eventSink(RoomListEvent.DismissNewNotificationSoundBanner) },
                         )
                     }
-                }
-            }
-        }
-
-        val visibleSummaries = if (isInvitesFilterSelected) {
-            state.summaries
-        } else {
-            state.summaries.filter { room ->
-                room.displayType != RoomSummaryDisplayType.INVITE && when (room.directRoomRelationState()) {
-                    DirectRoomRelationState.NOT_DIRECT,
-                    DirectRoomRelationState.ACCEPTED,
-                    DirectRoomRelationState.INVALID -> true
-                    DirectRoomRelationState.INCOMING_REQUEST,
-                    DirectRoomRelationState.OUTGOING_REQUEST,
-                    DirectRoomRelationState.STALE,
-                    DirectRoomRelationState.RESOLVING -> false
                 }
             }
         }

@@ -135,15 +135,9 @@ class StartChatFlowNode(
                                 setClassName(context.packageName, "io.element.android.x.MainActivity")
                                 addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                             })
-                            return@FriendScannerView true
+                            return@FriendScannerView FriendQrScanResult.Handled
                         }
-                        val userId = FriendQrCode.decode(scanned)
-                        if (userId == null || matrixClient.isMe(userId)) {
-                            false
-                        } else {
-                            callback.navigateToUserProfile(userId)
-                            true
-                        }
+                        handleFriendQrCode(scanned, matrixClient::isMe, callback::navigateToUserProfile)
                     },
                     modifier = modifier,
                 )
