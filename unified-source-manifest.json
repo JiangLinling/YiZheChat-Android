@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "cumulative-r15-20261016-fc008-fc015-fc017",
-  "frozen_utc": "2026-10-16T14:49:09.977410+00:00",
+  "revision": "cumulative-r16-20261017-background-recovery",
+  "frozen_utc": "2026-10-16T16:03:09.683150+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -234,7 +234,8 @@
     "app/src/next/res/values/strings.xml": "e711c026d2bcc4a2af794c965bf19367e2c7e01498ddbd05f2790c511e57126b",
     "app/src/nextDebug/AndroidManifest.xml": "b182408c67ecd43abf6b5591c6d6b88fea731d691c9348f083c83202090dc117",
     "app/src/nextDebug/kotlin/io/element/android/x/backgroundtest/BackgroundBindingTestActivity.kt": "4c70345b95db723ced2adcdb0e03efee8d37fcab1c6efc9c184a05314c9b1922",
-    "app/src/nextDebug/kotlin/io/element/android/x/backgroundtest/BackgroundBindingTestService.kt": "d00efc6d331668fcb759a356c6bb0e9ff64d5e58bf14003a3c0045981312f0fc",
+    "app/src/nextDebug/kotlin/io/element/android/x/backgroundtest/BackgroundBindingTestService.kt": "53db4989714b5175e77aac957d4ea59aa3b74ce8c3ac3e00a2a40f5bb991c2d1",
+    "app/src/nextDebug/kotlin/io/element/android/x/backgroundtest/ConnectedForegroundRetry.kt": "7d7eef259fdef402babfc0435ef9588bfb9d911996c6c77811f5f49531519511",
     "app/src/nextDebug/res/values-zh/temporary.xml": "8987880d2a13c778b930008f64053c2f339246e5097e70dda70b9a6dbfd6d778",
     "app/src/nextDebug/res/values/temporary.xml": "e5dc3d50c54c4bd111540d799c659eded3aee0419c09abfbf6875bb3b6613893",
     "app/src/nextDebug/res/xml/background_binding_test.xml": "c0cbed41523dab76785b8ec182b514cdefd53dee75c71eb8009ee7c9c566dcee",
@@ -246,6 +247,7 @@
     "app/src/test/kotlin/io/element/android/x/security/AccountVaultLifecycleCoordinatorTest.kt": "cf311075c6c4acdbf9d9e53f15159b134e5a9ac11bd3399fe950c87d41db4cfe",
     "app/src/test/kotlin/io/element/android/x/security/ManagementControlCoordinatorTest.kt": "b5181b36a7f09a743ec790dc8344a6eec14496c221a7df5fb35d938d6b090327",
     "app/src/test/kotlin/io/element/android/x/update/AppUpdateGatePolicyTest.kt": "f7fbd08d614fb702ad867998a6632933f16e296170d35794e9307349b5baf0b5",
+    "app/src/testNextDebug/kotlin/io/element/android/x/backgroundtest/ConnectedForegroundRetryTest.kt": "6839ceb8d8e47674be2d63784a20d5b1684cf007fe8bc85f39f1e24a9d2833f9",
     "appconfig/build.gradle.kts": "b79473e7168c36a4e2ef58053766637b02c9aaf89d8c72a8d035e642a7a3f9ce",
     "appconfig/src/main/kotlin/io/element/android/appconfig/AnalyticsConfig.kt": "1432d6d0fa0999dd091c1971e6135ee78d6e310ed4e958f3572eed558d460715",
     "appconfig/src/main/kotlin/io/element/android/appconfig/ApplicationConfig.kt": "69ed853662091f93caf670caae528e9f323aab54e543d5cac044529c65fbb9c3",

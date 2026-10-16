@@ -11,10 +11,14 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.ComponentName
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import android.graphics.PixelFormat
 import android.view.Gravity
 import android.view.View
@@ -34,15 +38,20 @@ class BackgroundBindingTestService : AccessibilityService(), Application.Activit
     private var overlayView: View? = null
     private var callbacksRegistered = false
     private var lastForegroundAttempt = -1_000L
+    private val recoveryHandler = Handler(Looper.getMainLooper())
+    private val foregroundRecovery = ConnectedForegroundRetry(
+        postDelayed = { task, delay -> recoveryHandler.postDelayed(task, delay) },
+        remove = { recoveryHandler.removeCallbacks(it) },
+        canRetry = { instance === this && wantsForeground() && hasSystemAuthorization() },
+        retry = {
+            reconcile(force = true, scheduleRecovery = false)
+            foreground
+        },
+    )
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        // Only own-window events can reach the no-op callback. No cross-app observation.
-        serviceInfo?.let { info ->
-            info.packageNames = arrayOf(packageName)
-            serviceInfo = info
-        }
         if (!callbacksRegistered) {
             application.registerActivityLifecycleCallbacks(this)
             callbacksRegistered = true
@@ -51,8 +60,10 @@ class BackgroundBindingTestService : AccessibilityService(), Application.Activit
         reconcile(force = true)
     }
 
-    /** Event-driven reconciliation; no timer, wake lock, shell or forced permission repair. */
-    fun reconcile(force: Boolean = false) {
+    /** Event-driven reconciliation with a finite foreground retry window; no wake lock or permission writes. */
+    fun reconcile(force: Boolean = false) = reconcile(force, scheduleRecovery = true)
+
+    private fun reconcile(force: Boolean, scheduleRecovery: Boolean) {
         if (instance !== this) return
         // Diagnostic A/B only: public metadata classification, never a permission or OEM API.
         // Keep generic as default; a production declaration must match actual accessibility feedback.
@@ -63,7 +74,10 @@ class BackgroundBindingTestService : AccessibilityService(), Application.Activit
         // A stale Activity callback must not crash the notification process or invent a connection.
         try {
             serviceInfo?.let { info ->
-                if (info.feedbackType != feedback) {
+                // Protect initial connection as well as later callbacks from Binder failures.
+                // Only own-window events can reach the no-op callback. No cross-app observation.
+                if (info.feedbackType != feedback || !info.packageNames.contentEquals(arrayOf(packageName))) {
+                    info.packageNames = arrayOf(packageName)
                     info.feedbackType = feedback
                     serviceInfo = info
                 }
@@ -74,6 +88,19 @@ class BackgroundBindingTestService : AccessibilityService(), Application.Activit
         refreshForegroundState()
         applyForeground(force)
         applyOverlay()
+        if (foreground || !wantsForeground()) foregroundRecovery.cancel()
+        else if (scheduleRecovery) foregroundRecovery.start()
+    }
+
+    private fun wantsForeground(): Boolean = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(FOREGROUND, true)
+
+    private fun hasSystemAuthorization(): Boolean = try {
+        val ownComponent = ComponentName(this, javaClass)
+        Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+            ?.split(':')?.any { ComponentName.unflattenFromString(it) == ownComponent } == true
+    } catch (failure: RuntimeException) {
+        lastFailure = "authorization: ${failure.javaClass.simpleName}"
+        false
     }
 
     @Suppress("DEPRECATION")
@@ -89,7 +116,7 @@ class BackgroundBindingTestService : AccessibilityService(), Application.Activit
     }
 
     private fun applyForeground(force: Boolean) {
-        if (!getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(FOREGROUND, true)) {
+        if (!wantsForeground()) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             foreground = false
             return
@@ -163,6 +190,7 @@ class BackgroundBindingTestService : AccessibilityService(), Application.Activit
     override fun onInterrupt() { Timber.tag(TAG).i("interrupted") }
 
     private fun disconnected() {
+        foregroundRecovery.cancel()
         if (callbacksRegistered) application.unregisterActivityLifecycleCallbacks(this)
         callbacksRegistered = false
         removeOverlay()
