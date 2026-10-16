@@ -282,6 +282,26 @@ class Bug036StartupAdmissionTest {
     }
 
     @Test
+    fun `retained login accepts only verified coordination expiry before new admission`() = runTest {
+        val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
+        val current = request()
+        val old = operation(original)
+        val terminal = old.copy(status = LifecycleOperationStatus.FAILED_FINAL, currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "signed-lc06-coordination-timeout", updatedAtEpochMillis = old.updatedAtEpochMillis + 1)
+        val service = service(current, operation(current))
+        coEvery { service.startLifecycleOperation(original) } returns old
+        coEvery { service.resumeLifecycleOperation(original.operationId) } returns terminal
+        coEvery { service.verifyStartupCoordinationExpiry(terminal, "post_login") } returns true
+        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(), draftInstallationProvider = { installation },
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        coordinator.start(original)
+        assertThat(coordinator.performResuming(current) { it }).isEqualTo(current.operationId)
+        assertThat(coordinator.operations.value[original.operationId]).isEqualTo(terminal)
+        coVerify(exactly = 1) { service.startLifecycleOperation(current) }
+        coVerify(exactly = 0) { service.recordLifecycleClientReceipt(match { it.operationId == original.operationId }) }
+    }
+
+    @Test
     fun `automatic startup handoff never retries cancellation rejection or missing new intent`() = runTest {
         for ((status, newIntent) in listOf(
             LifecycleOperationStatus.CANCELLED to true,

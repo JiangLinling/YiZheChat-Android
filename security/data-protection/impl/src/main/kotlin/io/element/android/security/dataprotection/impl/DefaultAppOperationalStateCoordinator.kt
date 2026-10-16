@@ -723,10 +723,12 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                 }
             }
         }
-        if (request.lifecycleId == FullAppLifecycleId.LC_06 && resolution is ResumingResolution.Existing) {
+        val isProcessStartup = request.lifecycleId == FullAppLifecycleId.LC_02 && request.trigger == "process_create"
+        val isStartup = isProcessStartup || request.lifecycleId == FullAppLifecycleId.LC_06
+        if (isStartup && resolution is ResumingResolution.Existing) {
             require(operation.operationId == resolution.operationId) { "Startup resume must preserve the original operation." }
         }
-        val installation = if (request.lifecycleId == FullAppLifecycleId.LC_06) draftInstallationProvider?.invoke() else null
+        val installation = if (isStartup) draftInstallationProvider?.invoke() else null
         // The signed startup index deliberately excludes expired attempts. A retained
         // process must consult the same authority as a fresh process before admitting
         // a real new launch. Keep the old unresolved record: expiry is not completion.
@@ -783,9 +785,25 @@ class DefaultAppOperationalStateCoordinator internal constructor(
             return performResuming(request, hasNewStartupIntent, allowTerminalHandoff = false,
                 excludedExpiredStartupIds = expiredIds, block = block)
         }
+        // A timeout is not a policy rejection. Only the exact authority-signed expiry receipt
+        // can authorize moving on to a different, explicit launch intent. Old facts remain intact.
+        val expiryCandidate = mutation.withLock {
+            verifiedOperationVersions[operation.operationId]?.takeIf {
+                isStartup && allowTerminalHandoff && hasNewStartupIntent && resolution is ResumingResolution.Existing &&
+                    it.status == LifecycleOperationStatus.FAILED_FINAL && it.deadlineEpochMillis <= pendingStartRetryClock() &&
+                    it.lifecycleId == request.lifecycleId && it.subjects.accountIdHash == request.accountIdHash &&
+                    it.subjects.matrixDeviceIdHash == request.matrixDeviceIdHash && it.subjects.roomIdHash == request.roomIdHash &&
+                    it.subjects.eventIdHash == request.eventIdHash && (installation == null || it.subjects.installationId == installation) &&
+                    it.operationId != request.operationId && it.idempotencyKey != request.idempotencyKey &&
+                    request.deadlineEpochMillis > pendingStartRetryClock()
+            }
+        }
+        val verifiedExpiry = expiryCandidate?.takeIf {
+            managementControlService.verifyStartupCoordinationExpiry(it, request.trigger)
+        }
         val admitted = mutation.withLock {
             val latest = checkNotNull(verifiedOperationVersions[operation.operationId]) { "Lifecycle admission is unavailable." }
-            if (request.lifecycleId == FullAppLifecycleId.LC_06) {
+            if (isStartup) {
                 require(latest.lifecycleId == request.lifecycleId &&
                     latest.subjects.accountIdHash == request.accountIdHash && latest.subjects.matrixDeviceIdHash == request.matrixDeviceIdHash &&
                     latest.subjects.roomIdHash == request.roomIdHash && latest.subjects.eventIdHash == request.eventIdHash &&
@@ -797,7 +815,8 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                 // current real startup intent once. Never extend the old deadline, retry
                 // a cancellation/rejection, or turn an unknown outcome into a new start.
                 val completedPredecessor = latest.status == LifecycleOperationStatus.SUCCEEDED ||
-                    latest.status == LifecycleOperationStatus.TERMINATED && latest.deadlineEpochMillis <= pendingStartRetryClock()
+                    latest.status == LifecycleOperationStatus.TERMINATED && latest.deadlineEpochMillis <= pendingStartRetryClock() ||
+                    verifiedExpiry != null && latest == verifiedExpiry
                 if (allowTerminalHandoff && hasNewStartupIntent && resolution is ResumingResolution.Existing &&
                     completedPredecessor && !latest.terminalReceiptId.isNullOrBlank() &&
                     latest.operationId != request.operationId && latest.idempotencyKey != request.idempotencyKey &&

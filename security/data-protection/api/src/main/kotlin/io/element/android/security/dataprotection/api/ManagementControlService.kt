@@ -573,6 +573,9 @@ interface ManagementControlService {
         request: LifecycleOperationRequest,
     ): LifecycleOperation = throw UnsupportedOperationException("App lifecycle operations are not available.")
 
+    /** Confirms only an immutable signed coordination timeout, never access or successful completion. */
+    suspend fun verifyStartupCoordinationExpiry(operation: LifecycleOperation, trigger: String): Boolean = false
+
     suspend fun lifecycleOperation(operationId: String): LifecycleOperation =
         throw UnsupportedOperationException("App lifecycle operations are not available.")
 

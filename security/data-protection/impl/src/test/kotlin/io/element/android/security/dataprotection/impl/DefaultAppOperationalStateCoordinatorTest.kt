@@ -690,9 +690,62 @@ class DefaultAppOperationalStateCoordinatorTest {
         val coordinator = DefaultAppOperationalStateCoordinator(service, FakeLifecycleOperationIdStore(),
             pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
         assertThat(runCatching { coordinator.start(original) }.isFailure).isTrue()
-        coordinator.performResuming(retry) { it }
+        assertThat(runCatching { coordinator.performResuming(retry) { error("expired admission must not execute") } }.isFailure).isTrue()
+        coVerify(exactly = 0) { service.recordLifecycleClientReceipt(any()) }
         assertThat(coordinator.operations.value.getValue(original.operationId).deadlineEpochMillis).isEqualTo(original.deadlineEpochMillis)
         assertThat(coordinator.operations.value.getValue(original.operationId).status).isNotEqualTo(LifecycleOperationStatus.SUCCEEDED)
+    }
+
+    @Test
+    fun `process retry reconciles terminal timeout and preserves original pending facts`() = runTest {
+        val service = mockk<ManagementControlService>()
+        val original = lifecycleOperationRequest(FullAppLifecycleId.LC_02, "process_create",
+            deadlineEpochMillis = System.currentTimeMillis() + 20_000)
+        val retry = original.copy(operationId = "fresh-process-operation-0002", idempotencyKey = "fresh-process-intent-0002",
+            deadlineEpochMillis = original.deadlineEpochMillis + 60_000)
+        val old = operation(original)
+        val ended = old.copy(status = LifecycleOperationStatus.FAILED_FINAL, currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "signed-process-timeout-receipt", updatedAtEpochMillis = old.updatedAtEpochMillis + 1)
+        val fresh = operation(retry)
+        coEvery { service.startLifecycleOperation(original) } returns old
+        coEvery { service.resumeLifecycleOperation(original.operationId) } returns ended
+        coEvery { service.verifyStartupCoordinationExpiry(ended, "process_create") } returns true
+        coEvery { service.startLifecycleOperation(retry) } returns fresh
+        coEvery { service.recordLifecycleClientReceipt(any()) } returns fresh
+        val store = FakeLifecycleOperationIdStore()
+        val coordinator = DefaultAppOperationalStateCoordinator(service, store,
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        coordinator.start(original)
+        val fact = LifecycleClientReceipt(original.operationId, LifecycleComponent.ANDROID_SERVICE,
+            LifecyclePhase.CLIENT_APPLIED, "ANDROID_SERVICE_APPLIED", "original-local-fact-0001", System.currentTimeMillis())
+        coordinator.persistClientReceipts(listOf(fact))
+        assertThat(coordinator.performResuming(retry) { it }).isEqualTo(retry.operationId)
+        assertThat(coordinator.operations.value[original.operationId]).isEqualTo(ended)
+        assertThat(store.pendingClientReceipts()).containsExactly(fact)
+        coVerify(exactly = 1) { service.startLifecycleOperation(retry) }
+        coVerify(exactly = 0) { service.recordLifecycleClientReceipt(match { it.operationId == original.operationId }) }
+    }
+
+    @Test
+    fun `process rejection or unverifiable expiry never executes startup or creates replacement`() = runTest {
+        for (status in listOf(LifecycleOperationStatus.CANCELLED, LifecycleOperationStatus.FAILED_FINAL)) {
+            val service = mockk<ManagementControlService>()
+            val original = lifecycleOperationRequest(FullAppLifecycleId.LC_02, "process_create",
+                deadlineEpochMillis = System.currentTimeMillis() + 20_000)
+            val retry = original.copy(operationId = "new-rejected-process-0002", idempotencyKey = "new-rejected-intent-0002",
+                deadlineEpochMillis = original.deadlineEpochMillis + 60_000)
+            val old = operation(original)
+            val ended = old.copy(status = status, terminalReceiptId = "rejected-original-receipt-0001")
+            coEvery { service.startLifecycleOperation(original) } returns old
+            coEvery { service.resumeLifecycleOperation(original.operationId) } returns ended
+            coEvery { service.verifyStartupCoordinationExpiry(any(), any()) } returns false
+            val coordinator = DefaultAppOperationalStateCoordinator(service, FakeLifecycleOperationIdStore(),
+                pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+            coordinator.start(original)
+            assertThat(runCatching { coordinator.performResuming(retry) { error("must remain closed") } }.isFailure).isTrue()
+            coVerify(exactly = 0) { service.startLifecycleOperation(retry) }
+            coVerify(exactly = 0) { service.recordLifecycleClientReceipt(any()) }
+        }
     }
 
     @Test

@@ -600,6 +600,18 @@ class HttpManagementControlService(
         }
     }
 
+    override suspend fun verifyStartupCoordinationExpiry(operation: LifecycleOperation, trigger: String): Boolean = withContext(Dispatchers.IO) {
+        val receiptId = operation.terminalReceiptId ?: return@withContext false
+        require(receiptId.matches(Regex("[A-Za-z0-9_-]{8,256}")))
+        val receipt = json.parseToJsonElement(executeSignedGet(
+            "/v1/lifecycle/receipts/$receiptId", operation.operationId,
+        ).decodeToString()).jsonObject
+        verifyStartupExpiryReceipt(receipt, operation, trigger, deviceTrustService.current().installationId,
+            System.currentTimeMillis()) { payload, signature ->
+            signatureVerifier.verifyDetached(payload, configuration.signingKeyId, signature)
+        }
+    }
+
     override suspend fun lifecycleOperation(operationId: String): LifecycleOperation = withContext(Dispatchers.IO) {
         require(operationId.matches(LIFECYCLE_OPERATION_ID_PATTERN))
         json.decodeFromString(
