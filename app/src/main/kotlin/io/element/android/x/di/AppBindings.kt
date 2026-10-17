@@ -37,6 +37,7 @@ import io.element.android.security.dataprotection.api.AppOperationalStateCoordin
 import io.element.android.security.dataprotection.api.DataDeletionCoordinator
 import io.element.android.security.dataprotection.api.DataProtectionPolicyProvider
 import io.element.android.security.dataprotection.api.ManagementControlService
+import io.element.android.security.dataprotection.api.NextInternalCutoverMigration
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionCoordinator
 import io.element.android.security.dataprotection.api.PlaintextMigrationCoordinator
 import io.element.android.security.dataprotection.api.SensitiveAssetCatalog
@@ -110,6 +111,8 @@ interface AppBindings {
     fun networkMonitor(): io.element.android.features.networkmonitor.api.NetworkMonitor
 
     fun managementControlService(): ManagementControlService
+
+    fun nextInternalCutoverMigration(): NextInternalCutoverMigration
 
     fun appOperationalStateCoordinator(): AppOperationalStateCoordinator
 

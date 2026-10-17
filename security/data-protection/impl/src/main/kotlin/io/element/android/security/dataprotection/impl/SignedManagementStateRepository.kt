@@ -803,6 +803,26 @@ class SignedManagementStateRepository(
         readVerifiedState().highestTombstoneSequence
     }
 
+    /** Only an exact, known old-test signer can mark state for the internal cutover. */
+    internal fun hasSignedStateFromAuthority(keyId: String): Boolean = lock.withLock {
+        val state = readVerifiedState()
+        sequenceOf(state.latestRelease, state.latestTombstoneBatch)
+            .filterNotNull()
+            .plus(state.policies.asSequence())
+            .plus(state.commands.asSequence().map { it.envelope })
+            .plus(state.activationReceipts.asSequence())
+            .plus(state.tombstoneBatches.asSequence())
+            .any { it.keyId == keyId }
+    }
+
+    /** Called only after the old internal-test account cleanup is durably complete. */
+    internal fun resetForNextInternalCutover() = lock.withLock {
+        writeState(PersistedManagementState())
+        writeOfflineEntry(null)
+        localListEntryFile.delete()
+        mutableDeletedIdentityRevision.value = 0L
+    }
+
     internal fun acceptAccountTombstoneChanges(
         envelope: SignedJsonEnvelopeWire,
         expectedInstallationId: String,

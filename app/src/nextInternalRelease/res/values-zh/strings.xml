@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">乙者</string>
+    <string name="yizhechat_app_update_channel">乙者应用更新</string>
+    <string name="screen_startup_error_server_rejected_description">安全服务器拒绝了当前设备状态。如果刚从旧内测版升级，请按内测更新说明清除“乙者”的应用数据，再使用新邀请码注册。清除数据会删除旧账号和本机聊天记录。</string>
+</resources>

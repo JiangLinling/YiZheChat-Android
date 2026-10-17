@@ -242,6 +242,22 @@ class SignedManagementStateRepositoryTest {
     }
 
     @Test
+    fun `internal cutover resets only the old authority projection after account cleanup`() {
+        val fixture = Fixture(temporaryFolder.root)
+        val oldBatch = fixture.tombstoneEnvelope(sequence = 1)
+        fixture.repository.acceptAccountTombstoneChanges(oldBatch, INSTALLATION_ID)
+        assertThat(fixture.repository.hasSignedStateFromAuthority(oldBatch.keyId)).isTrue()
+        assertThat(fixture.repository.hasSignedStateFromAuthority("another-authority")).isFalse()
+
+        fixture.repository.resetForNextInternalCutover()
+
+        val restarted = fixture.newRepository()
+        assertThat(restarted.currentTombstoneSequence()).isEqualTo(0)
+        assertThat(restarted.isDeleted(ACCOUNT_HASH)).isFalse()
+        assertThat(restarted.hasSignedStateFromAuthority(oldBatch.keyId)).isFalse()
+    }
+
+    @Test
     fun `tombstone sequence gap and tampered record signature fail closed`() {
         val fixture = Fixture(temporaryFolder.root)
 

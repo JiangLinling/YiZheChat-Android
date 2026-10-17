@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">乙者</string>
+    <string name="yizhechat_app_update_channel">乙者应用更新</string>
+    <string name="screen_startup_error_server_rejected_description">The security service rejected this device state. If you just upgraded from the old internal version, follow the tester notice to clear this app\'s data, then register with a new invite code. Clearing data removes the old local account and chats.</string>
+</resources>

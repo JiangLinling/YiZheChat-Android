@@ -27,6 +27,7 @@ import io.element.android.x.initializer.DeletionRecoveryInitializer
 import io.element.android.x.initializer.DeviceRootKeyInitializer
 import io.element.android.x.initializer.DeviceTrustInitializer
 import io.element.android.x.initializer.ManagementControlInitializer
+import io.element.android.x.initializer.NextInternalCutoverInitializer
 import io.element.android.x.initializer.PlaintextMigrationInitializer
 import io.element.android.x.initializer.PlatformInitializer
 import kotlinx.coroutines.CoroutineScope
@@ -134,6 +135,9 @@ class ElementXApplication : Application(), DependencyInjectionGraphOwner, Config
         }
         StartupTrace.measure("initializer.DeletionRecovery") {
             DeletionRecoveryInitializer().create(this)
+        }
+        StartupTrace.measure("initializer.NextInternalCutover") {
+            NextInternalCutoverInitializer().create(this)
         }
         StartupTrace.measure("initializer.ManagementControl") {
             ManagementControlInitializer().create(this)
