@@ -677,20 +677,27 @@ val verifyYiZheInternalReleaseConfig = tasks.register("verifyYiZheInternalReleas
             "yizhe.officePreview.baseUrl",
             "yizhe.officePreview.certificatePin",
         )
-        val missingProperties = requiredProperties.filter { providers.gradleProperty(it).orNull.isNullOrBlank() }
+        // A Next Internal Release embeds the separately reviewed Next authority, while
+        // the Stable Internal Release continues to use the existing yizhe.* properties.
+        fun internalProperty(name: String): String? = if (isNextBuildRequested) {
+            nextBuildProperties.getProperty(name.replaceFirst("yizhe.", "next."))?.trim()
+        } else {
+            providers.gradleProperty(name).orNull
+        }
+        val missingProperties = requiredProperties.filter { internalProperty(it).isNullOrBlank() }
         check(missingProperties.isEmpty()) {
             "Missing YiZheChat Internal Release security properties: ${missingProperties.joinToString()}"
         }
         listOf("yizhe.control.baseUrl", "yizhe.kms.baseUrl").forEach { name ->
-            check(providers.gradleProperty(name).get().startsWith("https://")) {
+            check(requireNotNull(internalProperty(name)).startsWith("https://")) {
                 "$name must use HTTPS for Internal Release."
             }
         }
-        check(providers.gradleProperty("yizhe.officePreview.baseUrl").get().startsWith("https://")) {
+        check(requireNotNull(internalProperty("yizhe.officePreview.baseUrl")).startsWith("https://")) {
             "yizhe.officePreview.baseUrl must use HTTPS for Internal Release."
         }
-        val controlSigningKey = providers.gradleProperty("yizhe.control.signingKeyDerB64").get()
-        val kmsSigningKey = providers.gradleProperty("yizhe.kms.signingKeyDerB64").get()
+        val controlSigningKey = requireNotNull(internalProperty("yizhe.control.signingKeyDerB64"))
+        val kmsSigningKey = requireNotNull(internalProperty("yizhe.kms.signingKeyDerB64"))
         check(controlSigningKey == kmsSigningKey) {
             "Internal Release control and KMS must pin the same signing public key."
         }
@@ -704,17 +711,22 @@ val verifyYiZheInternalReleaseConfig = tasks.register("verifyYiZheInternalReleas
         val derivedSigningKeyId = HexFormat.of().formatHex(
             MessageDigest.getInstance("SHA-256").digest(requireNotNull(signingKeyBytes)),
         ).take(16)
-        check(providers.gradleProperty("yizhe.control.signingKeyId").get() == derivedSigningKeyId) {
+        check(internalProperty("yizhe.control.signingKeyId") == derivedSigningKeyId) {
             "Internal Release signing key id does not match the pinned public key."
         }
-        check(derivedSigningKeyId == yizheAuthoritySigningKeyId) {
+        val expectedAuthorityKeyId = if (isNextBuildRequested) {
+            nextBuildProperty("next.control.signingKeyId")
+        } else {
+            yizheAuthoritySigningKeyId
+        }
+        check(derivedSigningKeyId == expectedAuthorityKeyId) {
             "Internal Release signing key id does not match the repository-pinned current server authority. " +
                 "Verify /v1/public/signing-key and update the trust anchor only as an explicit key rotation."
         }
         val pins = buildList {
-            add(providers.gradleProperty("yizhe.control.certificatePin").get())
-            addAll(providers.gradleProperty("yizhe.kms.certificatePins").get().split(','))
-            add(providers.gradleProperty("yizhe.officePreview.certificatePin").get())
+            add(requireNotNull(internalProperty("yizhe.control.certificatePin")))
+            addAll(requireNotNull(internalProperty("yizhe.kms.certificatePins")).split(','))
+            add(requireNotNull(internalProperty("yizhe.officePreview.certificatePin")))
         }.map(String::trim).filter(String::isNotEmpty)
         check(pins.isNotEmpty() && pins.all { pin ->
             pin.startsWith("sha256/") && runCatching {
@@ -723,9 +735,9 @@ val verifyYiZheInternalReleaseConfig = tasks.register("verifyYiZheInternalReleas
         }) {
             "Internal Release contains a malformed SHA-256 SPKI pin."
         }
-        val maximumOfflineLeaseMillis = providers.gradleProperty("yizhe.kms.maximumOfflineLeaseMillis").get().toLongOrNull()
-        val maximumOfflineUses = providers.gradleProperty("yizhe.kms.maximumOfflineLicenseUses").get().toIntOrNull()
-        val clockRollbackToleranceMillis = providers.gradleProperty("yizhe.kms.clockRollbackToleranceMillis").get().toLongOrNull()
+        val maximumOfflineLeaseMillis = internalProperty("yizhe.kms.maximumOfflineLeaseMillis")?.toLongOrNull()
+        val maximumOfflineUses = internalProperty("yizhe.kms.maximumOfflineLicenseUses")?.toIntOrNull()
+        val clockRollbackToleranceMillis = internalProperty("yizhe.kms.clockRollbackToleranceMillis")?.toLongOrNull()
         check(maximumOfflineLeaseMillis != null && maximumOfflineLeaseMillis in 1..86_400_000)
         check(maximumOfflineUses != null && maximumOfflineUses in 1..16)
         check(clockRollbackToleranceMillis != null && clockRollbackToleranceMillis in 0..120_000)
@@ -789,6 +801,12 @@ androidComponents {
         "x86" to 3,
         "x86_64" to 4,
     )
+
+    onVariants(selector().withBuildType("internalRelease").withFlavor("store" to "next")) { variant ->
+        // Preserve the existing internal-test installation identity while packaging Next sources.
+        // The internalRelease build type supplies the existing internal signing certificate.
+        variant.applicationId.set("com.yizhe.chat.internal")
+    }
 
     onVariants { variant ->
         // Assigns a different version code for each output APK

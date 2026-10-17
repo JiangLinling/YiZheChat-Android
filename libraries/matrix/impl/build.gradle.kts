@@ -21,7 +21,6 @@ android {
 setupDependencyInjection()
 
 dependencies {
-    releaseImplementation(libs.matrix.sdk)
     val isNextBuild = providers.gradleProperty("yizhe.next.enabled").orNull == "true"
     val localRustSdk = file("${rootDir.path}/libraries/rustsdk/matrix-rust-sdk-next.aar")
     if (isNextBuild) {
@@ -30,8 +29,10 @@ dependencies {
         }
         println("\nNote: Using Next-only local binary of the Rust SDK.\n")
         debugImplementation(projects.libraries.rustsdk)
+        releaseImplementation(projects.libraries.rustsdk)
     } else {
         debugImplementation(libs.matrix.sdk)
+        releaseImplementation(libs.matrix.sdk)
     }
     implementation(projects.libraries.rustlsTls)
 
