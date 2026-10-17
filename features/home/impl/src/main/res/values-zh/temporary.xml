@@ -162,4 +162,11 @@
     <string name="screen_reachability_path_huawei_wake">华为安卓机：在设置里搜索“通知亮屏提示”。</string>
     <string name="screen_reachability_path_generic_wake">在通知设置里搜索“亮屏提醒”；没有这个开关就继续下一项。</string>
     <string name="screen_reachability_path_overlay">如果先看到应用列表，找到乙者；随后允许“显示在其他应用上层”。</string>
+    <string name="screen_reachability_startup">开启启动加速</string>
+    <string name="screen_reachability_startup_detail">开启后，有助于保持后台运行，让下次打开乙者更快。</string>
+    <string name="screen_reachability_startup_open">去开启</string>
+    <string name="screen_reachability_startup_path">在系统页面开启“乙者后台绑定实验”，按提示确认后返回。</string>
+    <string name="screen_reachability_startup_pending">启动加速尚未就绪</string>
+    <string name="screen_reachability_startup_pending_detail">授权已开启，后台服务仍在恢复。可以继续聊天，稍后重新检查。</string>
+    <string name="screen_reachability_startup_recheck">重新检查</string>
 </resources>

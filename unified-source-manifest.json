@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "cumulative-r16-startup-terminal-retry-20261017",
-  "frozen_utc": "2026-10-16T23:29:48.443499+00:00",
+  "revision": "cumulative-r16-startup-acceleration-guide-20261017",
+  "frozen_utc": "2026-10-17T00:28:13.729502+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -90,6 +90,10 @@
     "startup_signed_expiry_retry": [
       "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/StartupExpiryReceipt.kt",
       "verifyStartupExpiryReceipt"
+    ],
+    "startup_acceleration_guidance": [
+      "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/components/StartupAccelerationGuide.kt",
+      "rememberStartupAccelerationState"
     ]
   },
   "sources": {
@@ -934,12 +938,13 @@
     "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/components/FullScreenIntentPermissionBanner.kt": "59f4ddd5bc56b26308ab5d8ae3304e61b65603d7716011ad994e5b34522becc6",
     "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/components/HomeTopBar.kt": "fe6d2014e85e1188950f3c8bf2b929fd81c5393dcbedd147a7ce7ea44315e93d",
     "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/components/NewNotificationSoundBanner.kt": "3d25712bb71b91e9f4a2f5ae878e863b9e0e860875fe1abfdfb8d646bc70cf00",
-    "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/components/ReachabilityGuideBanner.kt": "836de07f87abe26599dfdcd4eb04160a9320f0540357dd0f2bcfb2bb9a159d66",
+    "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/components/ReachabilityGuideBanner.kt": "db1d1e60e17514989d94fc49afffbceb57a944ca75257513cdaec3d36600f33a",
     "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/components/RoomListContentView.kt": "67ada6c558c241477d70c6073d8f13297d19d8801c3b9fbdbf4d75b841006049",
     "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/components/RoomListMenuAction.kt": "a8bd994406540df2973f630c8b8c8513bf50427b1b5b024d4f0b663a515b85ff",
     "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/components/RoomSummaryPlaceholderRow.kt": "00d389e34824e54b622e4accdc6cfdaa7e5942f7cc2a9b9f4334ff3bb256ed16",
     "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/components/RoomSummaryRow.kt": "5f681a90612c4ebc66c2819eddcab17a9d1b1c048539fbfdd52cb00391d5fd51",
     "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/components/SetUpRecoveryKeyBanner.kt": "f1a6de9f8414063cfc8ee8c5b7b0588dad1398f45549a9734dbf8d042c280e60",
+    "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/components/StartupAccelerationGuide.kt": "8e0195205c0cf4ca353b21953322c7475528417f667e38eb541ced2d2d16cb65",
     "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/datasource/ContactsRoomSummaries.kt": "97600ba610cb3c3db27a8e80982a3e71b44a698d54fd329b16497322a7cdd71f",
     "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/datasource/RoomListDataSource.kt": "c389eb7c95d543c2cee7756282919a184027d42d6e957d05b1246ef476387106",
     "features/home/impl/src/main/kotlin/io/element/android/features/home/impl/datasource/RoomListRoomSummaryFactory.kt": "0e2c561d8baaeab94d085a9c62cf2bf6e7809002694cf4765da300f194f41f0e",
@@ -1032,10 +1037,10 @@
     "features/home/impl/src/main/res/values-uz/translations.xml": "81b75c4a4b76e7921db22a6a4f82e90ab2270d77007c98c3ab93c99142c79c06",
     "features/home/impl/src/main/res/values-vi/translations.xml": "8983f455ba36d819eade4dc4d38da45148c89a1463ba46aa0d448ec1d0f1e303",
     "features/home/impl/src/main/res/values-zh-rTW/translations.xml": "32bfb5198fb55b3380d6dadcf20cc7b5ffa6e180e3e1420dab42fcf6806e543c",
-    "features/home/impl/src/main/res/values-zh/temporary.xml": "57836aae792e216964ed9dbcf8d6acadb3873649bce011401fbb51664e833c63",
+    "features/home/impl/src/main/res/values-zh/temporary.xml": "39020831d0df7650c374a053733e8f54f9a04642f78096db0b2e8718d1bdf278",
     "features/home/impl/src/main/res/values-zh/translations.xml": "3176748a4f1df889a3f15f4acfc1d9ad92d43c5add37bbefb1f57e45c317c218",
     "features/home/impl/src/main/res/values/localazy.xml": "e331fac30c0819e1dd3b2541d78d0f7db9e4af0ef137780bdef4ad5e4df88fd5",
-    "features/home/impl/src/main/res/values/temporary.xml": "02718a513427b36073873e1b7f9355d94436f4822ff3ef3bc75fff7389fa5550",
+    "features/home/impl/src/main/res/values/temporary.xml": "468138b3748fd51e6dccf56d412143462a5894734d5d53ca916bd3a4eb735649",
     "features/home/impl/src/test/kotlin/io/element/android/features/home/impl/ContactSortKeyTest.kt": "a863632b5dd76948213f6e20b6b3ba7986420307f329ad128001b916b54a1f4b",
     "features/home/impl/src/test/kotlin/io/element/android/features/home/impl/ContactsDirectoryDataTest.kt": "0749c12d1350229d1d9412145e6ecf117e50e26744aa045ba2866ceaddd9291a",
     "features/home/impl/src/test/kotlin/io/element/android/features/home/impl/CurrentUserWithNeighborsBuilderTest.kt": "d471917445beaa64e74bc60b547cdeb5b28666195a60ddbde4164b751ba1da11",
@@ -1044,6 +1049,7 @@
     "features/home/impl/src/test/kotlin/io/element/android/features/home/impl/HomeInitialContentTest.kt": "d43327a90bbc1ceae148bc570ca65b3685b3e93775cfee56f7e70cc0149e640b",
     "features/home/impl/src/test/kotlin/io/element/android/features/home/impl/HomePresenterTest.kt": "3ff9ccaf0fd16340fe772107536911f770da83907fe9403f31a335511df64186",
     "features/home/impl/src/test/kotlin/io/element/android/features/home/impl/components/ReachabilityGuideBannerTest.kt": "064ab4947cf4e7c56f37796531fad1dda7b0a9391820757593e6107bdc3a6ff8",
+    "features/home/impl/src/test/kotlin/io/element/android/features/home/impl/components/StartupAccelerationGuideTest.kt": "5963c2ace4eca7ae3d4d601273d375e42a5c603e1d2dc2fc04ea53fe895c86c6",
     "features/home/impl/src/test/kotlin/io/element/android/features/home/impl/datasource/ContactsRoomSummariesTest.kt": "286f7389920c73838f91d2ed6c16a970f566dee23f7d2522acabb5bb5b764140",
     "features/home/impl/src/test/kotlin/io/element/android/features/home/impl/datasource/RoomListDataSourceTest.kt": "063cc16bef5b0ef21c1b038d14617ba1f82a8e1e62938ef05b2171c2968df443",
     "features/home/impl/src/test/kotlin/io/element/android/features/home/impl/datasource/RoomListRoomSummaryFactoryTest.kt": "23c470d32aa584f58d3bfa39a63db230987430aa49e7adc9bafc19a1a8e9f371",

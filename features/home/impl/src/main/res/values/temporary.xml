@@ -162,4 +162,11 @@
     <string name="screen_reachability_path_huawei_wake">On Huawei Android: search phone settings for Wake screen for notifications.</string>
     <string name="screen_reachability_path_generic_wake">Search notification settings for Wake screen. If your phone has no such switch, continue.</string>
     <string name="screen_reachability_path_overlay">If an app list opens, select YiZheChat, then allow Display over other apps.</string>
+    <string name="screen_reachability_startup">Enable faster startup</string>
+    <string name="screen_reachability_startup_detail">Allow background operation to help YiZheChat open faster next time.</string>
+    <string name="screen_reachability_startup_open">Enable</string>
+    <string name="screen_reachability_startup_path">Enable YiZhe background binding experiment in system settings, confirm the prompts, then return.</string>
+    <string name="screen_reachability_startup_pending">Faster startup is not ready yet</string>
+    <string name="screen_reachability_startup_pending_detail">Access is enabled, but the background service is still recovering. You can keep chatting and check again later.</string>
+    <string name="screen_reachability_startup_recheck">Check again</string>
 </resources>
