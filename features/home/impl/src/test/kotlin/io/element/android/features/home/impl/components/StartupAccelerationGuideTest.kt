@@ -50,4 +50,18 @@ class StartupAccelerationGuideTest {
         assertThat(intent.getParcelableExtra<ComponentName>(Intent.EXTRA_COMPONENT_NAME)).isEqualTo(service)
         assertThat(intent.component).isNull()
     }
+
+    @Test
+    @Suppress("DEPRECATION")
+    fun `xiaomi entry selects only our service and never changes its authorization`() {
+        val service = ComponentName("com.yizhe.chat.next.debug", "io.element.android.x.backgroundtest.BackgroundBindingTestService")
+        val intent = startupAccelerationXiaomiSettingsIntent(service, "Startup acceleration")
+        assertThat(intent.component).isEqualTo(ComponentName("com.android.settings", "com.android.settings.SubSettings"))
+        assertThat(intent.getStringExtra(":settings:show_fragment"))
+            .isEqualTo("com.android.settings.accessibility.ToggleAccessibilityServicePreferenceFragment")
+        val args = intent.getBundleExtra(":settings:show_fragment_args")!!
+        assertThat(args.getParcelable<ComponentName>("component_name")).isEqualTo(service)
+        assertThat(args.getString("preference_key")).isEqualTo(service.flattenToString())
+        assertThat(args.keySet()).containsExactly("component_name", "preference_key", "title")
+    }
 }

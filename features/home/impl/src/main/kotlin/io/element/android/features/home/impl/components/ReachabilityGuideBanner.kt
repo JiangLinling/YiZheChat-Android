@@ -276,7 +276,11 @@ private fun DeviceFamily.notificationPath(): Int = when (this) {
 
 private fun Context.openReachabilitySettings(step: ReachabilityStep, family: DeviceFamily): Boolean {
     if (step == ReachabilityStep.STARTUP_ACCELERATION) {
-        return startSafely(startupAccelerationSettingsIntent(startupAccelerationComponent())) ||
+        val component = startupAccelerationComponent()
+        if (family == DeviceFamily.XIAOMI && startSafely(
+                startupAccelerationXiaomiSettingsIntent(component, getString(R.string.screen_reachability_startup)),
+            )) return true
+        return startSafely(startupAccelerationSettingsIntent(component)) ||
             startSafely(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
     }
     val appDetails = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$packageName".toUri())

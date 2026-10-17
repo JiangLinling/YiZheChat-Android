@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Bundle
 import android.provider.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -46,6 +47,20 @@ internal fun Context.startupAccelerationComponent() = ComponentName(
 internal fun startupAccelerationSettingsIntent(component: ComponentName): Intent =
     Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
         .putExtra(Intent.EXTRA_COMPONENT_NAME, component)
+
+// MIUI exports SubSettings and permits this accessibility fragment for ordinary
+// callers. Its standard details action instead requires a system-only permission.
+// This only selects our service; the system still owns the switch and consent UI.
+internal fun startupAccelerationXiaomiSettingsIntent(component: ComponentName, title: CharSequence): Intent =
+    Intent(Intent.ACTION_MAIN)
+        .setComponent(ComponentName("com.android.settings", "com.android.settings.SubSettings"))
+        .putExtra(":settings:show_fragment", "com.android.settings.accessibility.ToggleAccessibilityServicePreferenceFragment")
+        .putExtra(":settings:show_fragment_title", title.toString())
+        .putExtra(":settings:show_fragment_args", Bundle().apply {
+            putParcelable("component_name", component)
+            putString("preference_key", component.flattenToString())
+            putString("title", title.toString())
+        })
 
 @Suppress("DEPRECATION")
 private fun Context.readStartupAccelerationState(): StartupAccelerationState {
