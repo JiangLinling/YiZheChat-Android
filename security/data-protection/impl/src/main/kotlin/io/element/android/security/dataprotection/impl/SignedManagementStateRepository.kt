@@ -820,6 +820,9 @@ class SignedManagementStateRepository(
         writeState(PersistedManagementState())
         writeOfflineEntry(null)
         localListEntryFile.delete()
+        check(!localListEntryFile.baseFile.exists()) {
+            "Unable to clear old internal local list entry."
+        }
         mutableDeletedIdentityRevision.value = 0L
     }
 

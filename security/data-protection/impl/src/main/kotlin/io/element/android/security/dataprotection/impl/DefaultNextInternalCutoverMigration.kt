@@ -56,6 +56,10 @@ class DefaultNextInternalCutoverMigration(
         // Keep both identities closed instead of resetting security state for a valid Next account.
         check(sessions.size == oldSessions.size) { "Mixed internal and Next sessions require manual recovery." }
         check(preferences.edit().putBoolean(PENDING, true).commit()) { "Cutover intent was not persisted." }
+        if (pending) {
+            val recovery = deletionCoordinator.resumePending(coldStart = true)
+            check(!recovery.retryRequired) { "Old internal deletion recovery requires retry." }
+        }
 
         oldSessions.forEach { session ->
             val vaultId = deriveAccountVaultId(session.userId, session.deviceId)
