@@ -59,6 +59,9 @@ internal fun ReachabilityGuideBanner(): Boolean {
         }
     } ?: return false
     val accelerationRecovering = next == ReachabilityStep.STARTUP_ACCELERATION && acceleration == StartupAccelerationState.Recovering
+    // A vendor can accept startActivity and then silently redirect/finish. Let the
+    // user explicitly use the plain accessibility home on their next attempt.
+    val accelerationOverview = next == ReachabilityStep.STARTUP_ACCELERATION && openedStep == next.name
     val returnedFromSettings = openedStep == next.name && context.requiresManualConfirmation(next, family)
 
     fun confirmStep() {
@@ -81,6 +84,7 @@ internal fun ReachabilityGuideBanner(): Boolean {
         } else next.description) + if (accelerationRecovering) "" else "\n" + stringResource(family.pathFor(next)),
         actionText = stringResource(when {
             accelerationRecovering -> R.string.screen_reachability_startup_recheck
+            accelerationOverview -> R.string.screen_reachability_startup_open_overview
             next == ReachabilityStep.STARTUP_ACCELERATION -> R.string.screen_reachability_startup_open
             next == ReachabilityStep.RECENTS_LOCK -> R.string.screen_reachability_recents_lock_confirm
             !returnedFromSettings -> R.string.screen_reachability_open
@@ -97,7 +101,11 @@ internal fun ReachabilityGuideBanner(): Boolean {
             } else if (returnedFromSettings || next == ReachabilityStep.RECENTS_LOCK) {
                 confirmStep()
             } else {
-                if (context.openReachabilitySettings(next, family)) {
+                if (context.openReachabilitySettings(next, family, accelerationOverview)) {
+                    openedStep = next.name
+                } else if (next == ReachabilityStep.STARTUP_ACCELERATION) {
+                    // Even when all routes failed, the next attempt offers only the
+                    // plain home; never leave the user retrying a broken OEM route.
                     openedStep = next.name
                 }
             }
@@ -274,14 +282,14 @@ private fun DeviceFamily.notificationPath(): Int = when (this) {
         DeviceFamily.GENERIC -> R.string.screen_reachability_path_generic_notification
 }
 
-private fun Context.openReachabilitySettings(step: ReachabilityStep, family: DeviceFamily): Boolean {
+private fun Context.openReachabilitySettings(step: ReachabilityStep, family: DeviceFamily, accelerationOverview: Boolean = false): Boolean {
     if (step == ReachabilityStep.STARTUP_ACCELERATION) {
-        val component = startupAccelerationComponent()
-        if (family == DeviceFamily.XIAOMI && startSafely(
-                startupAccelerationXiaomiSettingsIntent(component, getString(R.string.screen_reachability_startup)),
-            )) return true
-        return startSafely(startupAccelerationSettingsIntent(component)) ||
-            startSafely(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        return launchStartupAccelerationSettings(
+            startupAccelerationSettingsRoutes(
+                family, startupAccelerationComponent(), getString(R.string.screen_reachability_startup), accelerationOverview,
+            ),
+            launch = { startActivity(it) },
+        ) != null
     }
     val appDetails = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$packageName".toUri())
     val notificationSettings = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)

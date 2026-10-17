@@ -165,7 +165,8 @@
     <string name="screen_reachability_startup">开启启动加速</string>
     <string name="screen_reachability_startup_detail">开启后，有助于保持后台运行，让下次打开乙者更快。</string>
     <string name="screen_reachability_startup_open">去开启</string>
-    <string name="screen_reachability_startup_path">在系统页面开启“乙者后台绑定实验”，按提示确认后返回。</string>
+    <string name="screen_reachability_startup_path">开启“乙者后台绑定实验”并按系统提示确认。如进入无障碍列表，请在“已安装的服务”或“下载的应用”中找到它。</string>
+    <string name="screen_reachability_startup_open_overview">打开无障碍设置</string>
     <string name="screen_reachability_startup_pending">启动加速尚未就绪</string>
     <string name="screen_reachability_startup_pending_detail">授权已开启，后台服务仍在恢复。可以继续聊天，稍后重新检查。</string>
     <string name="screen_reachability_startup_recheck">重新检查</string>
