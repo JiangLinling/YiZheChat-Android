@@ -24,6 +24,8 @@ interface HomeEntryPoint : FeatureEntryPoint {
     ): Node
 
     interface Callback : Plugin {
+        /** The Home shell has committed even if the room list is still loading. */
+        fun onInitialShellRendered() = Unit
         /** Presentation only: the first real home content has committed, including a legitimate empty list. */
         fun onInitialContentReady() = Unit
         fun navigateToRoom(roomId: RoomId, joinedRoom: JoinedRoom?)

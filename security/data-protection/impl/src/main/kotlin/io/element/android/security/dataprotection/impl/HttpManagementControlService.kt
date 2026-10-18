@@ -2299,6 +2299,7 @@ class HttpManagementControlService(
             pendingCommandCount = repository.pendingCommands().size,
             errorCode = terminalPolicyError ?: trustDecision.automaticLicenseErrorCode,
             deviceSecurityState = trustDecision.toManagedDeviceSecurityState(),
+            accountHandoverRequiredAccountHashes = trustDecision.accountHandoverRequiredAccountHashes.toSet(),
             locationEvidenceState = DeviceLocationEvidenceState.valueOf(trustDecision.locationEvidenceState),
             heartbeatIntervalMillis = acceptedAccessTicket?.heartbeatIntervalMillis,
         )
@@ -2457,6 +2458,9 @@ class HttpManagementControlService(
         check(decision.schemaVersion in 1..3)
         check(decision.issuedAtEpochMillis <= serverTimeEpochMillis + MAX_CLOCK_SKEW_MILLIS)
         check(decision.expiresAtEpochMillis > serverTimeEpochMillis)
+        check(decision.accountHandoverRequiredAccountHashes.size <= 32)
+        check(decision.accountHandoverRequiredAccountHashes.distinct().size == decision.accountHandoverRequiredAccountHashes.size)
+        check(decision.accountHandoverRequiredAccountHashes.all { it.matches(Regex("[0-9a-f]{64}")) })
         val current = deviceTrustService.current()
         check(decision.installationId == current.installationId)
         check(decision.attestationVersion == current.attestationVersion)
@@ -2478,7 +2482,8 @@ class HttpManagementControlService(
                             matrixDeviceIdHash = sha256Hex(session.deviceId.encodeToByteArray()),
                         )
                     }.toSet()
-                    check(decision.accountBindings.toSet() == expectedBindings) {
+                    val handoverAccounts = decision.accountHandoverRequiredAccountHashes.toSet()
+                    check(decision.accountBindings.toSet() == expectedBindings.filterNot { it.accountIdHash in handoverAccounts }.toSet()) {
                         "Signed account-device bindings do not match the active Matrix sessions."
                     }
                     acceptManagedLicenseEnvelope(

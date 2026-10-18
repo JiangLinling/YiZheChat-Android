@@ -172,6 +172,7 @@ data class ManagementSyncReport(
     val locationEvidenceState: DeviceLocationEvidenceState? = null,
     val heartbeatIntervalMillis: Long? = null,
     val retryAfterMillis: Long? = null,
+    val accountHandoverRequiredAccountHashes: Set<String> = emptySet(),
 )
 
 enum class ManagementPolicyApplicationState {

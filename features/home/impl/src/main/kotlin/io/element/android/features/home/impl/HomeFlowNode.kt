@@ -100,6 +100,7 @@ class HomeFlowNode(
     }
 
     private val callback: HomeEntryPoint.Callback = callback()
+    private val initialShellReported = AtomicBoolean(false)
     private val initialContentReported = AtomicBoolean(false)
     private val stateFlow = StartupTrace.measure("HomeNode.launchMolecule") {
         launchMolecule { presenter.present() }
@@ -247,6 +248,10 @@ class HomeFlowNode(
             )
             directLogoutView.Render(state.directLogoutState)
             SideEffect {
+                if (initialShellReported.compareAndSet(false, true)) {
+                    StartupTrace.mark("HomeView.initialShell.rendered")
+                    callback.onInitialShellRendered()
+                }
                 if (homeInitialContentReady(state) && initialContentReported.compareAndSet(false, true)) {
                     StartupTrace.mark("HomeView.initialContent.ready")
                     callback.onInitialContentReady()

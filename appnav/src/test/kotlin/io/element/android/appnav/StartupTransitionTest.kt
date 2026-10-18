@@ -6,6 +6,7 @@ import org.junit.Test
 class StartupTransitionTest {
     @Test fun `home skeleton cannot release the startup curtain`() {
         assertThat(shouldRevealLoggedInStartup(StartupDestination.HOME, true, false)).isFalse()
+        assertThat(shouldRevealLoggedInStartup(StartupDestination.HOME, true, false, loadingGraceExpired = true)).isTrue()
         assertThat(shouldRevealLoggedInStartup(StartupDestination.HOME, true, true)).isTrue()
     }
     @Test fun `restored room and deletion recovery do not wait for hidden home list`() {

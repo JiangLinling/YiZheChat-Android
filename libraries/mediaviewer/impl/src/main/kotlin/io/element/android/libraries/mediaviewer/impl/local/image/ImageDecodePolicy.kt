@@ -52,7 +52,9 @@ internal object ImageDecodePolicy {
         val sourcePixels = width.toLong() * height.toLong()
         if (sourcePixels > maxSourcePixels) throw ImageValidationException.PixelCountExceeded()
         val decodedSourceBytes = sourcePixels * BYTES_PER_PIXEL
-        if (decodedSourceBytes > encodedBytes * MAX_DECOMPRESSION_RATIO) {
+        // A highly compressible image within the fixed decode budget cannot expand beyond that budget.
+        // Keep the ratio guard for sources that require sampling, where a small file may hide much larger dimensions.
+        if (decodedSourceBytes > MAX_DECODE_BYTES && decodedSourceBytes > encodedBytes * MAX_DECOMPRESSION_RATIO) {
             throw ImageValidationException.DecompressionRatioExceeded()
         }
 

@@ -120,7 +120,7 @@ class RoomListViewTest {
 
     @Config(qualifiers = "h1024dp")
     @Test
-    fun `displaying the view automatically sends a couple of UpdateVisibleRangeEvents`() = runAndroidComposeUiTest {
+    fun `displaying the view reports preview rooms and visible range`() = runAndroidComposeUiTest {
         val eventsRecorder = EventsRecorder<RoomListEvent>()
         setRoomListView(
             state = aRoomListState(
@@ -132,6 +132,12 @@ class RoomListViewTest {
 
         eventsRecorder.assertList(
             listOf(
+                RoomListEvent.UpdatePreviewRooms(listOf(
+                    RoomId("!roomId5:domain"),
+                    RoomId("!roomId2:domain"),
+                    RoomId("!roomId3:domain"),
+                    RoomId("!roomId4:domain"),
+                )),
                 RoomListEvent.UpdateVisibleRange(0..4),
             )
         )

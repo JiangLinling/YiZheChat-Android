@@ -1668,29 +1668,37 @@ class MessageComposerPresenter(
         fromRecentImages: Boolean = false,
     ): Boolean {
         if (items.isEmpty()) return false
-        val mediaAttachments = items.map { item ->
-            val createdLocalMedia = localMediaFactory.createFromUri(
-                uri = item.uri,
-                mimeType = item.mimeType,
-                name = null,
-                formattedFileSize = null,
-            )
-            val localMedia = createdLocalMedia.copy(
-                lifecycleOperationId = item.operationId ?: createdLocalMedia.lifecycleOperationId,
-                lifecycleRoomIdHash = room.roomId.value.sha256Hex(),
-            )
-            Attachment.Media(
-                localMedia,
-                sendAsFile = sendAsFile,
-                originalPhotos = item.originalPhotos,
-                sendImmediately = item.sendImmediately,
-                fromGallery = fromGallery,
-                initiallySelected = item.initiallySelected,
-                focused = item.focused,
-                openEditor = item.openEditor,
-                fromRecentImages = fromRecentImages,
-            )
-        }.toImmutableList()
+        val mediaAttachments = try {
+            items.map { item ->
+                val createdLocalMedia = localMediaFactory.createFromUri(
+                    uri = item.uri,
+                    mimeType = item.mimeType,
+                    name = null,
+                    formattedFileSize = null,
+                )
+                val localMedia = createdLocalMedia.copy(
+                    lifecycleOperationId = item.operationId ?: createdLocalMedia.lifecycleOperationId,
+                    lifecycleRoomIdHash = room.roomId.value.sha256Hex(),
+                )
+                Attachment.Media(
+                    localMedia,
+                    sendAsFile = sendAsFile,
+                    originalPhotos = item.originalPhotos,
+                    sendImmediately = item.sendImmediately,
+                    fromGallery = fromGallery,
+                    initiallySelected = item.initiallySelected,
+                    focused = item.focused,
+                    openEditor = item.openEditor,
+                    fromRecentImages = fromRecentImages,
+                )
+            }.toImmutableList()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Timber.w(failure, "Unable to prepare selected attachment")
+            snackbarDispatcher.post(SnackbarMessage(io.element.android.libraries.ui.strings.CommonStrings.common_error))
+            return false
+        }
         val inReplyToEventId = (messageComposerContext.composerMode as? MessageComposerMode.Reply)?.eventId
         navigator.navigateToPreviewAttachments(
             attachments = mediaAttachments,

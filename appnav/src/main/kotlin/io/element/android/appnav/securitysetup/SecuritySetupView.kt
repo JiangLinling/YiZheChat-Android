@@ -100,6 +100,7 @@ import io.element.android.security.dataprotection.api.LifecycleOperationContext
 import io.element.android.security.dataprotection.api.LifecycleOperationStatus
 import io.element.android.security.dataprotection.api.ManagedDeviceSecurityState
 import io.element.android.security.dataprotection.api.ManagementControlService
+import io.element.android.security.dataprotection.api.ManagementSyncReport
 import io.element.android.security.dataprotection.api.ManagementSyncStatus
 import io.element.android.security.dataprotection.api.lifecycleOperationRequest
 import io.element.android.security.dataprotection.api.perform
@@ -228,6 +229,7 @@ fun SecuritySetupRoute(
     onRetryIdentityReset: () -> Unit,
     onReady: () -> Unit,
     canRestoreOffline: suspend () -> Boolean,
+    hasCurrentCoreReceipt: suspend () -> Boolean,
     onOfflineReady: () -> Unit,
     verifiedStartupReadiness: () -> io.element.android.security.dataprotection.api.StartupSecurityReadiness? = { null },
     canRestoreRetainedList: suspend () -> Boolean = { false },
@@ -249,6 +251,19 @@ fun SecuritySetupRoute(
     // must not release READY before a successful retry has submitted its real receipts.
     var recoveryAwaitingCompletion by remember { mutableStateOf(false) }
     val recoverySessionState by recoveryKeySubmissionService.recoveryState.collectAsState()
+    var unverifiedStatusSettled by remember { mutableStateOf(false) }
+    LaunchedEffect(phase, sessionVerificationStatus, recoverySessionState) {
+        unverifiedStatusSettled = false
+        if (phase == SecuritySetupPhase.READY &&
+            sessionVerificationStatus is SessionVerifiedStatus.NotVerified &&
+            recoverySessionState == RecoverySessionState.None
+        ) {
+            // The SDK can briefly publish NotVerified while the first device sync settles.
+            // Keep the security gate closed without flashing the recovery form.
+            delay(750L)
+            unverifiedStatusSettled = true
+        }
+    }
 
     fun pendingActivation() = selectPendingFirstActivation(
         operations = appOperationalStateCoordinator.operations.value.values,
@@ -283,7 +298,7 @@ fun SecuritySetupRoute(
         val pendingActivation = pendingActivation()
         // The process startup coordinator already fetched and applied this signed decision.
         // Reuse only its still-valid READY device result; pending LC-05 keeps its own sync context.
-        if (pendingActivation == null && canReuseStartupDeviceReady(verifiedStartupReadiness())) {
+        if (pendingActivation == null && hasCurrentCoreReceipt() && canReuseStartupDeviceReady(verifiedStartupReadiness())) {
             phase = SecuritySetupPhase.READY
             return@runSecuritySetupSynchronization
         }
@@ -306,18 +321,7 @@ fun SecuritySetupRoute(
         retryNotBeforeEpochMillis = report.retryAfterMillis?.let {
             runCatching { Math.addExact(System.currentTimeMillis(), it) }.getOrDefault(Long.MAX_VALUE)
         } ?: 0L
-        phase = when (report.status) {
-            ManagementSyncStatus.SYNCHRONIZED -> when (report.deviceSecurityState) {
-                ManagedDeviceSecurityState.LOCATION_REQUIRED -> SecuritySetupPhase.LOCATION_REQUIRED
-                ManagedDeviceSecurityState.VALIDATION_PENDING -> SecuritySetupPhase.VALIDATION_PENDING
-                ManagedDeviceSecurityState.MANAGED_APPROVAL_PENDING -> SecuritySetupPhase.MANAGED_APPROVAL_PENDING
-                ManagedDeviceSecurityState.READY -> SecuritySetupPhase.READY
-                ManagedDeviceSecurityState.ACTION_REQUIRED, null -> SecuritySetupPhase.ACTION_REQUIRED
-            }
-            ManagementSyncStatus.RETRY_REQUIRED -> SecuritySetupPhase.SERVICE_UNAVAILABLE
-            ManagementSyncStatus.DISABLED,
-            ManagementSyncStatus.SECURITY_REJECTED -> SecuritySetupPhase.ACTION_REQUIRED
-        }
+        phase = report.toSecuritySetupPhase(accountIdHash)
         }
     }
 
@@ -653,10 +657,13 @@ fun SecuritySetupRoute(
         }
     }
 
+    val awaitingVerificationSettlement = shouldWaitForVerificationSettlement(
+        phase, sessionVerificationStatus, recoverySessionState, unverifiedStatusSettled,
+    )
     val identityConfirmationRequired = recoveryAwaitingCompletion || recoveryNeedsUserAction(recoverySessionState) || phase in setOf(
         SecuritySetupPhase.RECOVERY_METHOD_REQUIRED,
         SecuritySetupPhase.RECOVERY_EXPIRED,
-    ) || (phase == SecuritySetupPhase.READY && sessionVerificationStatus is SessionVerifiedStatus.NotVerified)
+    ) || (phase == SecuritySetupPhase.READY && sessionVerificationStatus is SessionVerifiedStatus.NotVerified && !awaitingVerificationSettlement)
 
     LaunchedEffect(
         phase,
@@ -758,6 +765,8 @@ fun SecuritySetupRoute(
             ),
             modifier = modifier.revealStartupSplashWhenLaidOut(),
         )
+    } else if (awaitingVerificationSettlement) {
+        StartupWaitingView(modifier)
     } else if (identityConfirmationRequired || phase == SecuritySetupPhase.SECURITY_BLOCKED) {
         SecuritySetupView(
             state = SecuritySetupState(
@@ -808,6 +817,16 @@ internal fun recoveryNeedsUserAction(state: RecoverySessionState): Boolean = whe
     RecoverySessionState.Discovering, RecoverySessionState.None -> false
     is RecoverySessionState.Pending, is RecoverySessionState.Waiting, is RecoverySessionState.Rejected -> true
 }
+
+internal fun shouldWaitForVerificationSettlement(
+    phase: SecuritySetupPhase,
+    verificationStatus: SessionVerifiedStatus,
+    recoveryState: RecoverySessionState,
+    settled: Boolean,
+): Boolean = phase == SecuritySetupPhase.READY &&
+    verificationStatus is SessionVerifiedStatus.NotVerified &&
+    recoveryState == RecoverySessionState.None &&
+    !settled
 
 private const val PRIVATE_PROFILE_KEY_BYTES = 32
 private const val SECURITY_SETUP_DIAGNOSTIC_TAG = "YiZheSecuritySetup"
@@ -1187,6 +1206,23 @@ internal suspend fun runSecuritySetupSynchronization(
     } catch (failure: Exception) {
         onFailure(failure)
     }
+}
+
+internal fun ManagementSyncReport.toSecuritySetupPhase(accountIdHash: String): SecuritySetupPhase = when (status) {
+    ManagementSyncStatus.SYNCHRONIZED -> when (deviceSecurityState) {
+        ManagedDeviceSecurityState.LOCATION_REQUIRED -> SecuritySetupPhase.LOCATION_REQUIRED
+        ManagedDeviceSecurityState.VALIDATION_PENDING -> SecuritySetupPhase.VALIDATION_PENDING
+        ManagedDeviceSecurityState.MANAGED_APPROVAL_PENDING -> SecuritySetupPhase.MANAGED_APPROVAL_PENDING
+        ManagedDeviceSecurityState.READY -> if (accountIdHash in accountHandoverRequiredAccountHashes) {
+            SecuritySetupPhase.RECOVERY_METHOD_REQUIRED
+        } else {
+            SecuritySetupPhase.READY
+        }
+        ManagedDeviceSecurityState.ACTION_REQUIRED, null -> SecuritySetupPhase.ACTION_REQUIRED
+    }
+    ManagementSyncStatus.RETRY_REQUIRED -> SecuritySetupPhase.SERVICE_UNAVAILABLE
+    ManagementSyncStatus.DISABLED,
+    ManagementSyncStatus.SECURITY_REJECTED -> SecuritySetupPhase.ACTION_REQUIRED
 }
 
 internal fun Throwable.toSecuritySetupPhase(): SecuritySetupPhase = when (this) {

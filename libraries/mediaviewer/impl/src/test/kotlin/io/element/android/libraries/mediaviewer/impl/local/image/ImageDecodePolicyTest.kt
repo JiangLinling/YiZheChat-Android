@@ -67,6 +67,20 @@ class ImageDecodePolicyTest {
     }
 
     @Test
+    fun `highly compressible QR image within decode budget is accepted`() {
+        val result = ImageDecodePolicy.plan(
+            width = 1_440,
+            height = 3_200,
+            encodedBytes = 20_000L,
+            exifOrientation = 1,
+        )
+
+        assertThat(result.sampleSize).isEqualTo(1)
+        assertThat(result.decodeWidth.toLong() * result.decodeHeight * 4L)
+            .isAtMost(ImageDecodePolicy.MAX_DECODE_BYTES)
+    }
+
+    @Test
     fun `encoded image larger than the fixed budget fails closed`() {
         assertThrows(ImageValidationException.EncodedSizeExceeded::class.java) {
             ImageDecodePolicy.plan(

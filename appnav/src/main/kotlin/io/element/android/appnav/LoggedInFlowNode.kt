@@ -261,6 +261,8 @@ class LoggedInFlowNode(
     private val deletionRecoveryRequired = MutableStateFlow(false)
     private val visibleStartupDestination = MutableStateFlow(StartupDestination.WAIT)
     private val homeInitialContentPrepared = MutableStateFlow(false)
+    private val homeInitialShellRendered = MutableStateFlow(false)
+    private val homeLoadingGraceExpired = MutableStateFlow(false)
     private val identityResetConvergenceState = MutableStateFlow(IdentityResetConvergenceState.IDLE)
     private val coreReadyEnforcement = MutableStateFlow(
         if (buildMeta.applicationId == YIZHE_INTERNAL_APPLICATION_ID || buildMeta.applicationId.startsWith("com.yizhe.chat.next")) {
@@ -451,7 +453,13 @@ class LoggedInFlowNode(
                     }.distinctUntilChanged().collectLatest { waitingForHome ->
                         if (!waitingForHome) return@collectLatest
                         delay(7_500L)
-                        startupFailureReasonCode.value = "HOME_CONTENT_NOT_READY"
+                        if (homeInitialShellRendered.value) {
+                            // A slow first Matrix sync is still a valid loading list. Reveal the
+                            // committed shell and let its room projection finish asynchronously.
+                            homeLoadingGraceExpired.value = true
+                        } else {
+                            startupFailureReasonCode.value = "HOME_CONTENT_NOT_READY"
+                        }
                     }
                 }
 
@@ -776,6 +784,9 @@ class LoggedInFlowNode(
             }
             NavTarget.Home -> {
                 val callback = object : HomeEntryPoint.Callback {
+                    override fun onInitialShellRendered() {
+                        homeInitialShellRendered.value = true
+                    }
                     override fun onInitialContentReady() {
                         homeInitialContentPrepared.value = true
                     }
@@ -1177,6 +1188,7 @@ class LoggedInFlowNode(
                     },
                     onRetryIdentityReset = ::beginIdentityResetConvergence,
                     canRestoreOffline = { accountReactivationCoordinator.canRestoreOffline(matrixClient) },
+                    hasCurrentCoreReceipt = { accountReactivationCoordinator.hasCurrentCoreReceipt(matrixClient) },
                     canRestoreRetainedList = { accountReactivationCoordinator.canRestoreLocalList(matrixClient) },
                     verifiedStartupReadiness = managementSecurityRefreshService::verifiedOnlineReadiness,
                     onOfflineReady = {
@@ -1385,8 +1397,8 @@ class LoggedInFlowNode(
             // Home reports readiness from its committed content SideEffect. Observe that signal
             // directly instead of waiting for a second parent Compose frame behind the splash.
             // The existing layout path remains the fallback, and MainActivity still checks App lock.
-            combine(homeInitialContentPrepared, visibleStartupDestination, backstack.elements) { prepared, destination, elements ->
-                prepared && destination == StartupDestination.HOME && elements.any {
+            combine(homeInitialContentPrepared, homeLoadingGraceExpired, visibleStartupDestination, backstack.elements) { prepared, graceExpired, destination, elements ->
+                (prepared || graceExpired) && destination == StartupDestination.HOME && elements.any {
                     it.key.navTarget == NavTarget.Home && it.targetState == BackStack.State.ACTIVE
                 }
             }.collect { prepared ->
@@ -1436,6 +1448,7 @@ class LoggedInFlowNode(
             val isOnline by syncService.isOnline.collectAsState()
             val startupDestination by visibleStartupDestination.collectAsState()
             val homePrepared by homeInitialContentPrepared.collectAsState()
+            val homeLoadingGraceElapsed by homeLoadingGraceExpired.collectAsState()
             val startupElements by backstack.elements.collectAsState()
             val homeIsActive = startupElements.any {
                 it.key.navTarget == NavTarget.Home && it.targetState == BackStack.State.ACTIVE
@@ -1443,7 +1456,7 @@ class LoggedInFlowNode(
             ConnectivityIndicatorContainer(
                 isOnline = isOnline,
                 modifier = modifier.revealStartupSplashWhenLaidOut(
-                    enabled = shouldRevealLoggedInStartup(startupDestination, homeIsActive, homePrepared),
+                    enabled = shouldRevealLoggedInStartup(startupDestination, homeIsActive, homePrepared, homeLoadingGraceElapsed),
                 ),
             ) { contentModifier ->
                 Box(modifier = contentModifier) {
@@ -1463,8 +1476,13 @@ class LoggedInFlowNode(
     }
 }
 
-internal fun shouldRevealLoggedInStartup(destination: StartupDestination, homeIsActive: Boolean, homePrepared: Boolean): Boolean = when (destination) {
-    StartupDestination.HOME -> !homeIsActive || homePrepared
+internal fun shouldRevealLoggedInStartup(
+    destination: StartupDestination,
+    homeIsActive: Boolean,
+    homePrepared: Boolean,
+    loadingGraceExpired: Boolean = false,
+): Boolean = when (destination) {
+    StartupDestination.HOME -> !homeIsActive || homePrepared || loadingGraceExpired
     StartupDestination.DELETION_RECOVERY -> true
     else -> false
 }

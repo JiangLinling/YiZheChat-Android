@@ -15,9 +15,33 @@ import io.element.android.security.dataprotection.api.LifecycleOperation
 import io.element.android.security.dataprotection.api.LifecycleOperationStatus
 import io.element.android.security.dataprotection.api.LifecyclePhase
 import io.element.android.security.dataprotection.api.LifecycleSubjectHashes
+import io.element.android.security.dataprotection.api.ManagedDeviceSecurityState
+import io.element.android.security.dataprotection.api.ManagementSyncReport
+import io.element.android.security.dataprotection.api.ManagementSyncStatus
 import org.junit.Test
 
 class SecuritySetupProgressTest {
+    @Test
+    fun `signed handover for this account opens recovery while another account stays ready`() {
+        val report = ManagementSyncReport(
+            status = ManagementSyncStatus.SYNCHRONIZED,
+            deviceSecurityState = ManagedDeviceSecurityState.READY,
+            accountHandoverRequiredAccountHashes = setOf("a".repeat(64)),
+        )
+        assertThat(report.toSecuritySetupPhase("a".repeat(64))).isEqualTo(SecuritySetupPhase.RECOVERY_METHOD_REQUIRED)
+        assertThat(report.toSecuritySetupPhase("b".repeat(64))).isEqualTo(SecuritySetupPhase.READY)
+    }
+
+    @Test
+    fun `handover hint never overrides a rejected device decision`() {
+        val report = ManagementSyncReport(
+            status = ManagementSyncStatus.SECURITY_REJECTED,
+            deviceSecurityState = ManagedDeviceSecurityState.READY,
+            accountHandoverRequiredAccountHashes = setOf("a".repeat(64)),
+        )
+        assertThat(report.toSecuritySetupPhase("a".repeat(64))).isEqualTo(SecuritySetupPhase.ACTION_REQUIRED)
+    }
+
     @org.junit.Test
     fun `synchronization denial remains recoverable without escaping its caller`() = kotlinx.coroutines.test.runTest {
         var phase = SecuritySetupPhase.READY

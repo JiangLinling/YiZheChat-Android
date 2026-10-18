@@ -3,6 +3,7 @@ package io.element.android.appnav.securitysetup
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.securebackup.api.RecoverySessionState
 import io.element.android.features.securebackup.api.requiresGate
+import io.element.android.libraries.matrix.api.verification.SessionVerifiedStatus
 import org.junit.Test
 
 class StartupRecoveryRenderingTest {
@@ -22,5 +23,17 @@ class StartupRecoveryRenderingTest {
 
     @Test fun `resolved empty recovery state does not show the recovery form`() {
         assertThat(recoveryNeedsUserAction(RecoverySessionState.None)).isFalse()
+    }
+
+    @Test fun `brief unverified SDK state waits while durable recovery remains immediately visible`() {
+        assertThat(shouldWaitForVerificationSettlement(
+            SecuritySetupPhase.READY, SessionVerifiedStatus.NotVerified, RecoverySessionState.None, settled = false,
+        )).isTrue()
+        assertThat(shouldWaitForVerificationSettlement(
+            SecuritySetupPhase.READY, SessionVerifiedStatus.NotVerified, RecoverySessionState.None, settled = true,
+        )).isFalse()
+        assertThat(shouldWaitForVerificationSettlement(
+            SecuritySetupPhase.READY, SessionVerifiedStatus.NotVerified, RecoverySessionState.Pending("operation"), settled = false,
+        )).isFalse()
     }
 }

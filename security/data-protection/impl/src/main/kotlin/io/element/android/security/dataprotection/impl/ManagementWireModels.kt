@@ -58,6 +58,7 @@ internal data class HeartbeatWire(
     @SerialName("managed_license_protocol_version") val managedLicenseProtocolVersion: Int = 3,
     @SerialName("offline_entry_protocol_version") val offlineEntryProtocolVersion: Int = 1,
     @SerialName("local_list_entry_protocol_version") val localListEntryProtocolVersion: Int = 1,
+    @SerialName("account_handover_protocol_version") val accountHandoverProtocolVersion: Int = 1,
     @SerialName("tombstone_sequence") val tombstoneSequence: Long = 0,
 )
 
@@ -362,6 +363,7 @@ internal data class TrustDecisionWire(
     @SerialName("offline_entry") val offlineEntry: OfflineEntryGrantWire? = null,
     @SerialName("local_list_entry") val localListEntry: OfflineEntryGrantWire? = null,
     @SerialName("automatic_license_error_code") val automaticLicenseErrorCode: String? = null,
+    @SerialName("account_handover_required_account_hashes") val accountHandoverRequiredAccountHashes: List<String> = emptyList(),
 )
 
 @Serializable
