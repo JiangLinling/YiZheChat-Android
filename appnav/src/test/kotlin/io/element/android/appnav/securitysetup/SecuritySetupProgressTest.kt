@@ -22,6 +22,17 @@ import org.junit.Test
 
 class SecuritySetupProgressTest {
     @Test
+    fun `managed handover is explicit only for a signed binding conflict and remains closed while running`() {
+        val state = SecuritySetupState(SecuritySetupPhase.ACTION_REQUIRED,
+            errorCode = "COMPATIBILITY_BINDING_CONFLICT", eventSink = {})
+        assertThat(state.managedHandoverAvailable()).isTrue()
+        assertThat(state.copy(phase = SecuritySetupPhase.SERVICE_UNAVAILABLE).managedHandoverAvailable()).isTrue()
+        assertThat(state.copy(phase = SecuritySetupPhase.CHECKING).managedHandoverAvailable()).isFalse()
+        assertThat(state.copy(errorCode = "INVALID_HARDWARE_ATTESTATION").managedHandoverAvailable()).isFalse()
+        assertThat(state.copy(phase = SecuritySetupPhase.READY).managedHandoverAvailable()).isFalse()
+    }
+
+    @Test
     fun `signed handover for this account opens recovery while another account stays ready`() {
         val report = ManagementSyncReport(
             status = ManagementSyncStatus.SYNCHRONIZED,

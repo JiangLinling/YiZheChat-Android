@@ -500,6 +500,10 @@ data class AccountDeletionReceipt(
 )
 
 interface ManagementControlService {
+    /** Explicit account-authenticated certificate transfer. Does not grant account or history access. */
+    suspend fun transferManagedDeviceAuthorization(accountIdHash: String, matrixDeviceIdHash: String): Unit =
+        throw UnsupportedOperationException("Managed authorization handover unavailable")
+
     suspend fun expireRecoveryOperation(record: RecoveryIntentRecord): Unit = throw UnsupportedOperationException("Recovery expiry unavailable")
     /** Signed read-only LC08 inspection; no KMS or client receipt is manufactured by this call. */
     suspend fun resolveRecoveryIntent(record: RecoveryIntentRecord): RecoveryIntentResolution =

@@ -267,6 +267,21 @@ class HttpManagementControlService(
         }
     }
 
+    override suspend fun transferManagedDeviceAuthorization(accountIdHash: String, matrixDeviceIdHash: String) {
+        withContext(Dispatchers.IO) {
+            val token = recoveryMatrixToken(accountIdHash, matrixDeviceIdHash)
+            val request = kotlinx.serialization.json.buildJsonObject {
+                put("account_id_hash", accountIdHash)
+                put("matrix_device_id_hash", matrixDeviceIdHash)
+                put("matrix_access_token", token)
+                put("confirmed", true)
+            }
+            // The caller owns a persisted LC06 intent. HTTP success does not unlock
+            // anything: synchronize must validate the signed license and trust decision.
+            executeSignedPost("/v1/device/managed-license-handover", request.toString().encodeToByteArray())
+        }
+    }
+
     internal suspend fun recoveryMatrixToken(accountHash: String, matrixHash: String): String {
         val matches = sessionStore.getAllSessions().filter {
             it.isTokenValid && accountIdHash(it.userId) == accountHash && sha256Hex(it.deviceId.encodeToByteArray()) == matrixHash

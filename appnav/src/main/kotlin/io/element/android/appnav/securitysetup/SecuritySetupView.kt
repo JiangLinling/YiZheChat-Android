@@ -158,9 +158,14 @@ data class SecuritySetupState(
     val eventSink: (SecuritySetupEvent) -> Unit,
 )
 
+internal fun SecuritySetupState.managedHandoverAvailable(): Boolean =
+    errorCode == "COMPATIBILITY_BINDING_CONFLICT" &&
+        phase in setOf(SecuritySetupPhase.ACTION_REQUIRED, SecuritySetupPhase.SERVICE_UNAVAILABLE)
+
 sealed interface SecuritySetupEvent {
     data object Submit : SecuritySetupEvent
     data object CollectLocation : SecuritySetupEvent
+    data object TransferManagedAuthorization : SecuritySetupEvent
     data object Retry : SecuritySetupEvent
     data object UseAnotherDevice : SecuritySetupEvent
     data class RecoveryKeyChanged(val recoveryKey: String) : SecuritySetupEvent
@@ -395,6 +400,31 @@ fun SecuritySetupRoute(
             coroutineScope.launch { collectAndSubmitLocation() }
         } else {
             permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        }
+    }
+
+    fun transferManagedAuthorization() {
+        if (phase == SecuritySetupPhase.CHECKING || activationFinalizing) return
+        phase = SecuritySetupPhase.CHECKING
+        coroutineScope.launch {
+            runCatching {
+                appOperationalStateCoordinator.performResuming(
+                    lifecycleOperationRequest(
+                        lifecycleId = FullAppLifecycleId.LC_06,
+                        trigger = "reactivation",
+                        accountIdHash = accountIdHash,
+                        matrixDeviceIdHash = matrixDeviceIdHash,
+                    )
+                ) {
+                    managementControlService.transferManagedDeviceAuthorization(accountIdHash, matrixDeviceIdHash)
+                }
+            }.fold(
+                onSuccess = { synchronize() },
+                onFailure = { failure ->
+                    if (failure is CancellationException) throw failure
+                    phase = failure.toSecuritySetupPhase()
+                },
+            )
         }
     }
 
@@ -697,6 +727,7 @@ fun SecuritySetupRoute(
 
     val eventSink: (SecuritySetupEvent) -> Unit = { event ->
         when (event) {
+            SecuritySetupEvent.TransferManagedAuthorization -> transferManagedAuthorization()
             SecuritySetupEvent.Submit -> submitApproval()
             SecuritySetupEvent.CollectLocation -> {
                 if (phase == SecuritySetupPhase.LOCATION_PERMISSION_DENIED) {
@@ -969,8 +1000,15 @@ fun SecuritySetupView(
                     SecuritySetupPhase.ACTION_REQUIRED,
                     SecuritySetupPhase.SERVICE_UNAVAILABLE -> Button(
                         modifier = Modifier.fillMaxWidth(),
-                        text = stringResource(R.string.screen_security_setup_retry),
-                        onClick = { state.eventSink(SecuritySetupEvent.Retry) },
+                        text = stringResource(
+                            if (state.managedHandoverAvailable()) R.string.screen_security_setup_transfer_authorization
+                            else R.string.screen_security_setup_retry
+                        ),
+                        onClick = {
+                            state.eventSink(
+                                if (state.managedHandoverAvailable()) SecuritySetupEvent.TransferManagedAuthorization else SecuritySetupEvent.Retry
+                            )
+                        },
                     )
                     SecuritySetupPhase.RECOVERY_METHOD_REQUIRED,
                     SecuritySetupPhase.RECOVERY_EXPIRED -> Unit
