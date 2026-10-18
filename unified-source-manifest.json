@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "next-internal-debug-202606992-managed-handover",
-  "frozen_utc": "2026-10-18T13:21:36.525852+00:00",
+  "revision": "next-internal-debug-202606992-managed-handover-strings",
+  "frozen_utc": "2026-10-18T13:52:42.459970+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -219,11 +219,11 @@
     "app/src/main/res/resources.properties": "cf73ada578597ddc0ff449d9839344caa9690560e4fb1c947ca2d557c89cb7a4",
     "app/src/main/res/values-night/themes.xml": "2d70cd7819683a14dd555ba29398fc68ebeb0030560a77a0f94c01acaf7bc3f5",
     "app/src/main/res/values-zh/strings.xml": "f0e3e67c64bcd6225503cebd515c0c796fdf0549bf16c96c061d5c2dc2359b0e",
-    "app/src/main/res/values-zh/temporary.xml": "267055e2ecb116604a5962acf4decc2dc9208b8dbd36327209a9e2f5e762550a",
+    "app/src/main/res/values-zh/temporary.xml": "218907c1c8039c0005ae9e9a152d044124b2190f566a95d43e0c8bbcc3a8507a",
     "app/src/main/res/values/colors.xml": "dd1e6fde00cb3202255c665f9066a03334c0a07cb24774d8eb7e01552c75035f",
     "app/src/main/res/values/floating_notification_window.xml": "473dee5699e86b1c3aaa2346f8744f1b701ac3bcd1158bb9b0ec96a2d30c674f",
     "app/src/main/res/values/strings.xml": "42e1f20563c08b2bce306af0e8df64b992019ef59881158f8a601197e0198756",
-    "app/src/main/res/values/temporary.xml": "b8a51348f6ec9873ab1be47dfb699d4bdae222ceb5f2aaa360c50975f44c4753",
+    "app/src/main/res/values/temporary.xml": "e70a1a42d993f3cba050e93727b97c2abc8763464df151ee48eab0ce16bd00e1",
     "app/src/main/res/values/themes.xml": "bbae5c2d0c40c6b638abdda595aef1ebfd95c0a288d53c6564414cffa3995c8f",
     "app/src/main/res/xml/automotive_app_desc.xml": "65cb458ae26fa1c3fefaf54bcc32e4a8cbd3d5bc3e714471d72c2c27c1340ceb",
     "app/src/main/res/xml/backup_rules.xml": "3845a4cf1ffaa5ea31f6b451e5fa4656751785e562419833817e5ee438e6462b",

@@ -96,7 +96,7 @@
     <string name="screen_entry_compatibility_evidence_title">设备安全校验未通过</string>
     <string name="screen_entry_compatibility_evidence_description">设备提供的安全证据未通过验证。请更新应用、检查系统完整性后重试。</string>
     <string name="screen_entry_compatibility_binding_title">账号设备状态冲突</string>
-    <string name="screen_entry_compatibility_binding_description">这个账号存在冲突的有效设备。请完成账号换机处理后重试。</string>
+    <string name="screen_entry_compatibility_binding_description">旧安装仍持有设备授权。继续后，授权将转移到本机，旧安装将停止访问。随后可以恢复聊天，或确认重置加密身份后继续使用原账号。</string>
     <string name="a11y_notification_window_left">按住左下角灰色线条拖动缩放</string>
     <string name="a11y_notification_window_right">按住右下角灰色线条拖动缩放</string>
     <string name="a11y_notification_window_move">移动聊天小窗</string>
