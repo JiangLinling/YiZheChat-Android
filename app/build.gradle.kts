@@ -427,6 +427,22 @@ android {
             )
         }
 
+        // Device-admission QA must be debuggable while preserving the installed
+        // internal application's package and signing identity for data-safe upgrades.
+        register("internalDebug") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".internal"
+            versionNameSuffix = "-internal-debug"
+            isDebuggable = true
+            signingConfig = internalSigningConfig
+            matchingFallbacks += listOf("debug")
+            resValue(
+                "string",
+                "login_redirect_scheme",
+                "$oAuthRedirectSchemeBase.internal",
+            )
+        }
+
         // Next Debug uses the proven startup optimization by default; explicit false remains available for debugging.
         // Debug identity, signing and BuildConfig.DEBUG stay unchanged.
         if (providers.gradleProperty("yizhe.startup.optimizeDebug").map(String::toBoolean).getOrElse(isNextBuildRequested)) {
@@ -511,8 +527,8 @@ android {
                 dimension = "store"
                 applicationId = "com.yizhe.chat.next"
                 // Keep cumulative QA upgrades local to Next without invalidating every shared build plugin.
-                versionCode = maxOf(Versions.VERSION_CODE, 20260696)
-                versionName = if (Versions.VERSION_CODE < 20260696) "26.06.96" else Versions.VERSION_NAME
+                versionCode = maxOf(Versions.VERSION_CODE, 20260698)
+                versionName = if (Versions.VERSION_CODE < 20260698) "26.06.98" else Versions.VERSION_NAME
                 signingConfig = nextDebugSigningConfig
                 manifestPlaceholders.putAll(nextManifestValues)
                 manifestPlaceholders["yizheUnifiedSourceManifestSha256"] = unifiedSourceManifestSha256
@@ -784,6 +800,7 @@ tasks.configureEach {
     if (name.startsWith("assemble") || name.startsWith("bundle")) {
         when {
             name.endsWith("InternalRelease") -> dependsOn(verifyYiZheInternalReleaseConfig)
+            name.endsWith("InternalDebug") -> dependsOn(verifyYiZheInternalReleaseConfig)
             name.endsWith("Release") -> dependsOn(verifyYiZheSecurityReleaseConfig)
         }
     }
@@ -805,6 +822,10 @@ androidComponents {
     onVariants(selector().withBuildType("internalRelease").withFlavor("store" to "next")) { variant ->
         // Preserve the existing internal-test installation identity while packaging Next sources.
         // The internalRelease build type supplies the existing internal signing certificate.
+        variant.applicationId.set("com.yizhe.chat.internal")
+    }
+
+    onVariants(selector().withBuildType("internalDebug").withFlavor("store" to "next")) { variant ->
         variant.applicationId.set("com.yizhe.chat.internal")
     }
 

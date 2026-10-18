@@ -107,7 +107,7 @@
     <string name="screen_device_setup_session_verification_after_approval">管理员通过同一份设备申请后，将在这里继续完成会话加密验证。</string>
     <string name="screen_device_setup_session_verification_action">验证本次会话</string>
     <string name="screen_device_setup_waiting_session_state">正在初始化会话加密验证…</string>
-    <string name="screen_entry_compatibility_preparing">正在为这台设备配置安全访问，完成后会自动继续。</string>
+    <string name="screen_entry_compatibility_preparing">正在由服务器验证本机并签发访问证书，完成后会自动继续。</string>
     <string name="screen_entry_compatibility_policy_title">设备兼容访问受限</string>
     <string name="screen_entry_compatibility_policy_description">当前管理策略不允许自动配置兼容访问。请联系管理员检查设备策略。</string>
     <string name="screen_entry_compatibility_evidence_title">设备安全校验未通过</string>

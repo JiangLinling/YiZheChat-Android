@@ -223,8 +223,9 @@ class HttpManagementControlServiceTest {
     }
 
     @Test
-    fun `only the signed stable device-not-enrolled code permits enrollment bootstrap`() {
+    fun `only stable enrollment and upgrade-attestation codes permit enrollment bootstrap`() {
         assertThat(isStableEnrollmentBootstrapFailure(statusCode = 401, reasonCode = "DEVICE_NOT_ENROLLED")).isTrue()
+        assertThat(isStableEnrollmentBootstrapFailure(statusCode = 401, reasonCode = "DEVICE_ATTESTATION_REFRESH_REQUIRED")).isTrue()
 
         listOf(
             401 to "UNAUTHORIZED",
@@ -233,6 +234,8 @@ class HttpManagementControlServiceTest {
             401 to "INSTALLATION_IDENTITY_MISMATCH",
             403 to "DEVICE_NOT_ENROLLED",
             503 to "DEVICE_NOT_ENROLLED",
+            403 to "DEVICE_ATTESTATION_REFRESH_REQUIRED",
+            503 to "DEVICE_ATTESTATION_REFRESH_REQUIRED",
             401 to null,
         ).forEach { (status, reason) ->
             assertThat(isStableEnrollmentBootstrapFailure(statusCode = status, reasonCode = reason)).isFalse()

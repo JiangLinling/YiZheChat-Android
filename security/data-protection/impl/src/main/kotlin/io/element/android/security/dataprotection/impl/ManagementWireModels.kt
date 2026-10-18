@@ -56,6 +56,7 @@ internal data class HeartbeatWire(
     @SerialName("policy_version") val policyVersion: Long?,
     @SerialName("access_session_protocol_version") val accessSessionProtocolVersion: Int = 2,
     @SerialName("managed_license_protocol_version") val managedLicenseProtocolVersion: Int = 3,
+    @SerialName("attestation_refresh_protocol_version") val attestationRefreshProtocolVersion: Int = 1,
     @SerialName("offline_entry_protocol_version") val offlineEntryProtocolVersion: Int = 1,
     @SerialName("local_list_entry_protocol_version") val localListEntryProtocolVersion: Int = 1,
     @SerialName("account_handover_protocol_version") val accountHandoverProtocolVersion: Int = 1,

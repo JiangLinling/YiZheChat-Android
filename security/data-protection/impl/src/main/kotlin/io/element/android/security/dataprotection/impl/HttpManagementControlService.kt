@@ -3018,7 +3018,7 @@ internal fun managementSyncFailureReasonCode(failure: Throwable): String? {
  * protocol code, never a generic HTTP status or untrusted human-readable text.
  */
 internal fun isStableEnrollmentBootstrapFailure(statusCode: Int, reasonCode: String?): Boolean =
-    statusCode == 401 && reasonCode == "DEVICE_NOT_ENROLLED"
+    statusCode == 401 && reasonCode in setOf("DEVICE_NOT_ENROLLED", "DEVICE_ATTESTATION_REFRESH_REQUIRED")
 
 /**
  * A deletion-scoped bearer is not an account access token. Its entire authorization surface is one
@@ -3060,8 +3060,8 @@ internal enum class DeviceEnrollmentDecision {
 
 /**
  * Local clean-data enrollment is allowed only for an explicit NOT_ENROLLED state. A remote
- * re-enrollment is allowed only after the signed request received the stable DEVICE_NOT_ENROLLED
- * reason. A version advance means another concurrent caller already completed the same work.
+ * re-enrollment is allowed only after the authenticated request received a stable enrollment
+ * or upgrade-attestation reason. A version advance means another caller completed the same work.
  */
 internal fun deviceEnrollmentDecision(
     forceRemoteEnrollment: Boolean,

@@ -107,7 +107,7 @@
     <string name="screen_device_setup_session_verification_after_approval">This check starts here after the administrator approves the same device request.</string>
     <string name="screen_device_setup_session_verification_action">Verify this session</string>
     <string name="screen_device_setup_waiting_session_state">Initializing cryptographic verification…</string>
-    <string name="screen_entry_compatibility_preparing">Configuring secure access for this device. This continues automatically.</string>
+    <string name="screen_entry_compatibility_preparing">The server is verifying this device and issuing an access certificate. This continues automatically.</string>
     <string name="screen_entry_compatibility_policy_title">Device compatibility is restricted</string>
     <string name="screen_entry_compatibility_policy_description">Your organization does not allow automatic compatibility access. Contact your administrator to check the device policy.</string>
     <string name="screen_entry_compatibility_evidence_title">Device security check failed</string>

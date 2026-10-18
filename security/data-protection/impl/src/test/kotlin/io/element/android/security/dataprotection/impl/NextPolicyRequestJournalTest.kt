@@ -17,6 +17,7 @@ import io.element.android.security.securestorage.api.DeviceTrustSnapshot
 import io.element.android.security.securestorage.api.DeviceTrustState
 import io.element.android.security.securestorage.api.DeviceControlRequestSignature
 import io.element.android.security.securestorage.api.HardwareSecurityLevel
+import io.element.android.security.securestorage.api.ManagedDeviceLicense
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -203,6 +204,34 @@ class NextPolicyRequestJournalTest {
             coEvery { f.trust.current() } returns bad
             assertThat(runCatching { f.sign() }.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
         }
+    }
+
+    @Test
+    fun `managed software key signs only with current bound online license`() = runTest {
+        val f = SignerFixture()
+        val license = ManagedDeviceLicense(
+            licenseId = "managed-license-1", installationId = f.context.installationId,
+            devicePublicKeySha256 = f.deviceDigest, contentShareKeyId = "content-key-1",
+            appPackageName = "com.yizhe.chat.internal", appVersionCode = 123, revision = 1,
+            allowedScopes = setOf("PROTECTED_MESSAGES"), offlineAllowed = false,
+            issuedAtEpochMillis = NOW - 1_000, expiresAtEpochMillis = NOW + 60_000,
+            accountIdHashes = setOf(f.context.accountIdHash),
+        )
+        val managed = f.snapshot.copy(
+            trustState = DeviceTrustState.MANAGED, hardwareSecurityLevel = HardwareSecurityLevel.SOFTWARE, managedLicense = license,
+        )
+        coEvery { f.trust.current() } returns managed
+        assertThat(f.sign()["devicePublicKeySha256"]).isEqualTo(JsonPrimitive(f.deviceDigest))
+        listOf(
+            license.copy(expiresAtEpochMillis = NOW), license.copy(offlineAllowed = true),
+            license.copy(installationId = "old-installation"), license.copy(devicePublicKeySha256 = "9".repeat(64)),
+            license.copy(accountIdHashes = setOf("9".repeat(64))), license.copy(issuedAtEpochMillis = NOW + 20_000),
+        ).forEach { invalid ->
+            coEvery { f.trust.current() } returns managed.copy(managedLicense = invalid)
+            assertThat(runCatching { f.sign() }.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
+        }
+        coEvery { f.trust.current() } returnsMany listOf(managed, managed.copy(managedLicense = license.copy(revision = 2)))
+        assertThat(runCatching { f.sign() }.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
     }
 
     @Test

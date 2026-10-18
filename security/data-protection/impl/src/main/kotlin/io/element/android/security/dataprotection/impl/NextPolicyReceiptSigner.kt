@@ -36,13 +36,14 @@ internal class NextPolicyReceiptSigner(
         )
         check(currentContext() == expected) { "Application authority changed before DAK signing." }
         val before = trust.current()
-        requireCurrent(before, expected)
+        requireCurrent(before, expected, trustedServerTimeMs)
         val payload = challenge.receiptPayload(expected, appliedAtMonotonicMs, trustedServerTimeMs, observations)
         val signature = trust.signControlStatement(verifier.canonicalJson(payload))
         val after = trust.current()
-        requireCurrent(after, expected)
+        requireCurrent(after, expected, trustedServerTimeMs)
         check(after.installationId == before.installationId && after.attestationVersion == before.attestationVersion)
         check(after.attestationPublicKeySha256 == before.attestationPublicKeySha256)
+        check(after.trustState == before.trustState && after.managedLicense == before.managedLicense)
         check(signature.installationId == before.installationId && signature.attestationVersion == before.attestationVersion)
         check(currentContext() == expected) { "Application authority changed during DAK signing." }
         check(signature.signature.size in 1..8192)
@@ -56,10 +57,23 @@ internal class NextPolicyReceiptSigner(
         }
     }
 
-    private fun requireCurrent(snapshot: DeviceTrustSnapshot, context: NextPolicyChallengeContext) {
+    private fun requireCurrent(snapshot: DeviceTrustSnapshot, context: NextPolicyChallengeContext, trustedServerTimeMs: Long) {
         check(snapshot.installationId == context.installationId && snapshot.attestationVersion > 0)
         check(snapshot.attestationPublicKeySha256 == context.devicePublicKeySha256)
-        check(snapshot.trustState == DeviceTrustState.TRUSTED && snapshot.riskSignals.none { it.blocksLocalVaultAccess })
-        check(snapshot.hardwareSecurityLevel in setOf(HardwareSecurityLevel.STRONGBOX, HardwareSecurityLevel.TRUSTED_EXECUTION_ENVIRONMENT))
+        check(snapshot.riskSignals.none { it.blocksLocalVaultAccess })
+        when (snapshot.trustState) {
+            DeviceTrustState.TRUSTED -> check(
+                snapshot.hardwareSecurityLevel in setOf(HardwareSecurityLevel.STRONGBOX, HardwareSecurityLevel.TRUSTED_EXECUTION_ENVIRONMENT)
+            )
+            DeviceTrustState.MANAGED -> {
+                // The trust service applies this only after verifying the management
+                // signature and immutable license bindings. Pending is not admission.
+                val license = checkNotNull(snapshot.managedLicense)
+                check(license.isActive(trustedServerTimeMs) && license.issuedAtEpochMillis <= trustedServerTimeMs)
+                check(license.installationId == context.installationId && license.devicePublicKeySha256 == context.devicePublicKeySha256)
+                check(license.allowsAccount(context.accountIdHash))
+            }
+            else -> error("Current device authorization is unavailable.")
+        }
     }
 }

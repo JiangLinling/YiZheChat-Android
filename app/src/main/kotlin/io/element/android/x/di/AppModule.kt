@@ -70,6 +70,7 @@ object AppModule {
     fun providesBuildType(): BuildType {
         return when (BuildConfig.BUILD_TYPE) {
             "startupProfile" -> BuildType.DEBUG
+            "internalDebug" -> BuildType.DEBUG
             // Internal Release uses the complete Release runtime/security path;
             // only its application id and signing identity are isolated.
             "internalRelease" -> BuildType.RELEASE

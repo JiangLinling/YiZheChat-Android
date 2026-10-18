@@ -672,6 +672,15 @@ class LoggedInFlowNode(
         lifecycleScope.launch {
             accountReactivationCoordinator.activate(matrixClient)
                 .onSuccess {
+                    // An explicit reset may leave the local SDK at NotVerified until its first
+                    // sync. Start that sync only after the server has committed CORE_READY; the
+                    // normal security setup and protected-content gates remain closed meanwhile.
+                    if (!matrixSessionCache.startSync(matrixClient.sessionId)) {
+                        Timber.w("Identity reset committed but Matrix sync is unavailable; retry remains possible.")
+                        identityResetConvergenceState.value = IdentityResetConvergenceState.RETRY_REQUIRED
+                        return@onSuccess
+                    }
+                    matrixSyncStarted.value = true
                     identityResetConvergenceState.value = IdentityResetConvergenceState.IDLE
                     securityRecoveryCompletionToken.value += 1L
                 }
