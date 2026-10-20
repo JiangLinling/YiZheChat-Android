@@ -69,8 +69,10 @@ class AccountLocalStateCleanerTest {
         }
         val plaintext = RecordingPlaintextCleaner()
         val leases = RecordingLeaseManager()
-        assertThat(DefaultAccountLocalStateCleaner(context, plaintext, leases, AtomicRecoveryIntentJournal(context))
-            .clear(scope, preserveAccountState = true)).isTrue()
+        assertThat(
+            DefaultAccountLocalStateCleaner(context, plaintext, leases, AtomicRecoveryIntentJournal(context))
+            .clear(scope, preserveAccountState = true)
+        ).isTrue()
         assertThat(leases.revokedVault).isEqualTo(AccountVaultId(scope.vaultId))
         assertThat(plaintext.targets).isEmpty()
         assertThat(preferences.readText()).isEqualTo("replacement-session-preferences")

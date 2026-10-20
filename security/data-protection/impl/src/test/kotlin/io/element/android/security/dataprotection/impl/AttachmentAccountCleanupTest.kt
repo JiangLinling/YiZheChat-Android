@@ -49,7 +49,14 @@ class AttachmentAccountCleanupTest {
             .putString("owner", """{"vault_id":"${aScope().vaultId}","uri_hashes":["${hash(exclusive)}","${hash(shared)}"]}""")
             .putString("other", """{"vault_id":"other","uri_hashes":["${hash(shared)}"]}""")
             .commit()
-        assertThat(DefaultAccountLocalStateCleaner(context, AttachmentRecordingPlaintextCleaner(), AttachmentRecordingLeaseManager(), AtomicRecoveryIntentJournal(context)).clear(aScope())).isTrue()
+        assertThat(
+            DefaultAccountLocalStateCleaner(
+                context,
+                AttachmentRecordingPlaintextCleaner(),
+                AttachmentRecordingLeaseManager(),
+                AtomicRecoveryIntentJournal(context)
+            ).clear(aScope())
+        ).isTrue()
         verify(exactly = 1) { resolver.releasePersistableUriPermission(exclusive, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         verify(exactly = 0) { resolver.releasePersistableUriPermission(shared, any()) }
         assertThat(preferences.contains("owner")).isFalse()

@@ -75,9 +75,20 @@ class Bug036StartupAdmissionTest {
         val release = CompletableDeferred<Unit>()
         coEvery { service.resumeLifecycleOperation(request.operationId) } returns admitted
         coEvery { service.appOperationalSnapshot(account, device) } returns snapshot()
-        val first = async { coordinator.performResuming(request) { firstEntered.complete(Unit); CompletableDeferred<Unit>().await() } }
+        val first = async {
+            coordinator.performResuming(request) {
+            firstEntered.complete(Unit)
+            CompletableDeferred<Unit>().await()
+        }
+        }
         firstEntered.await()
-        val second = async { coordinator.performResuming(request) { secondEntered.complete(Unit); release.await(); "applied" } }
+        val second = async {
+            coordinator.performResuming(request) {
+            secondEntered.complete(Unit)
+            release.await()
+            "applied"
+        }
+        }
         secondEntered.await()
         first.cancel()
         first.join()
@@ -120,8 +131,12 @@ class Bug036StartupAdmissionTest {
     fun `older recovered operation cannot regress authority terminal fact even in newer snapshot`() = runTest {
         val request = request()
         val admitted = operation(request)
-        val terminal = admitted.copy(status = LifecycleOperationStatus.CANCELLED, currentPhase = LifecyclePhase.RECEIPTED,
-            terminalReceiptId = "original-cancellation-receipt", updatedAtEpochMillis = admitted.updatedAtEpochMillis + 10)
+        val terminal = admitted.copy(
+            status = LifecycleOperationStatus.CANCELLED,
+            currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "original-cancellation-receipt",
+            updatedAtEpochMillis = admitted.updatedAtEpochMillis + 10
+        )
         val service = service(request, admitted)
         val coordinator = DefaultAppOperationalStateCoordinator(service, Store())
         coordinator.start(request)
@@ -181,8 +196,11 @@ class Bug036StartupAdmissionTest {
     @Test
     fun `expired original LC06 cannot execute with a newer caller deadline`() = runTest {
         val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() - 1)
-        val retry = original.copy(operationId = "bug036-new-caller-operation", idempotencyKey = "bug036-new-caller-intent",
-            deadlineEpochMillis = System.currentTimeMillis() + 600_000)
+        val retry = original.copy(
+            operationId = "bug036-new-caller-operation",
+            idempotencyKey = "bug036-new-caller-intent",
+            deadlineEpochMillis = System.currentTimeMillis() + 600_000
+        )
         val admitted = operation(original)
         val service = service(retry, admitted)
         coEvery { service.startupLifecycleOperations(account, device, "post_login", null) } returns listOf(admitted)
@@ -202,8 +220,12 @@ class Bug036StartupAdmissionTest {
     fun `authority cancellation during resume cannot run action or manufacture pending Android steps`() = runTest {
         val request = request()
         val admitted = operation(request)
-        val cancelled = admitted.copy(status = LifecycleOperationStatus.CANCELLED, currentPhase = LifecyclePhase.RECEIPTED,
-            terminalReceiptId = "signed-original-cancel-receipt", updatedAtEpochMillis = admitted.updatedAtEpochMillis + 1)
+        val cancelled = admitted.copy(
+            status = LifecycleOperationStatus.CANCELLED,
+            currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "signed-original-cancel-receipt",
+            updatedAtEpochMillis = admitted.updatedAtEpochMillis + 1
+        )
         val service = service(request, admitted)
         coEvery { service.startupLifecycleOperations(account, device, "post_login", null) } returns listOf(admitted)
         coEvery { service.resumeLifecycleOperation(request.operationId) } returns cancelled
@@ -263,14 +285,22 @@ class Bug036StartupAdmissionTest {
         val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
         val current = request()
         val old = operation(original)
-        val terminal = old.copy(status = LifecycleOperationStatus.TERMINATED, currentPhase = LifecyclePhase.RECEIPTED,
-            terminalReceiptId = "original-expiry-receipt", updatedAtEpochMillis = old.updatedAtEpochMillis + 1)
+        val terminal = old.copy(
+            status = LifecycleOperationStatus.TERMINATED,
+            currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "original-expiry-receipt",
+            updatedAtEpochMillis = old.updatedAtEpochMillis + 1
+        )
         val fresh = operation(current)
         val service = service(current, fresh)
         coEvery { service.startLifecycleOperation(original) } returns old
         coEvery { service.resumeLifecycleOperation(original.operationId) } returns terminal
-        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(), draftInstallationProvider = { installation },
-            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        val coordinator = DefaultAppOperationalStateCoordinator(
+            service,
+            Store(),
+            draftInstallationProvider = { installation },
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+        )
         coordinator.start(original)
 
         assertThat(coordinator.performResuming(current) { it }).isEqualTo(current.operationId)
@@ -286,14 +316,22 @@ class Bug036StartupAdmissionTest {
         val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
         val current = request()
         val old = operation(original)
-        val terminal = old.copy(status = LifecycleOperationStatus.FAILED_FINAL, currentPhase = LifecyclePhase.RECEIPTED,
-            terminalReceiptId = "signed-lc06-coordination-timeout", updatedAtEpochMillis = old.updatedAtEpochMillis + 1)
+        val terminal = old.copy(
+            status = LifecycleOperationStatus.FAILED_FINAL,
+            currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "signed-lc06-coordination-timeout",
+            updatedAtEpochMillis = old.updatedAtEpochMillis + 1
+        )
         val service = service(current, operation(current))
         coEvery { service.startLifecycleOperation(original) } returns old
         coEvery { service.resumeLifecycleOperation(original.operationId) } returns terminal
         coEvery { service.verifyStartupCoordinationExpiry(terminal, "post_login") } returns true
-        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(), draftInstallationProvider = { installation },
-            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        val coordinator = DefaultAppOperationalStateCoordinator(
+            service,
+            Store(),
+            draftInstallationProvider = { installation },
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+        )
         coordinator.start(original)
         assertThat(coordinator.performResuming(current) { it }).isEqualTo(current.operationId)
         assertThat(coordinator.operations.value[original.operationId]).isEqualTo(terminal)
@@ -311,8 +349,12 @@ class Bug036StartupAdmissionTest {
             val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
             val current = request()
             val old = operation(original)
-            val terminal = old.copy(status = status, currentPhase = LifecyclePhase.RECEIPTED,
-                terminalReceiptId = "original-terminal-receipt", updatedAtEpochMillis = old.updatedAtEpochMillis + 1)
+            val terminal = old.copy(
+                status = status,
+                currentPhase = LifecyclePhase.RECEIPTED,
+                terminalReceiptId = "original-terminal-receipt",
+                updatedAtEpochMillis = old.updatedAtEpochMillis + 1
+            )
             val service = service(original, old)
             coEvery { service.resumeLifecycleOperation(original.operationId) } returns terminal
             val coordinator = DefaultAppOperationalStateCoordinator(service, Store(), pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
@@ -331,13 +373,21 @@ class Bug036StartupAdmissionTest {
         val original = request().copy(deadlineEpochMillis = System.currentTimeMillis() + 60_000)
         val current = request()
         val old = operation(original)
-        val terminal = old.copy(status = LifecycleOperationStatus.TERMINATED, currentPhase = LifecyclePhase.RECEIPTED,
+        val terminal = old.copy(
+            status = LifecycleOperationStatus.TERMINATED,
+            currentPhase = LifecyclePhase.RECEIPTED,
             subjects = old.subjects.copy(installationId = "wrong-installation-background"),
-            terminalReceiptId = "original-terminal-receipt", updatedAtEpochMillis = old.updatedAtEpochMillis + 1)
+            terminalReceiptId = "original-terminal-receipt",
+            updatedAtEpochMillis = old.updatedAtEpochMillis + 1
+        )
         val service = service(original, old)
         coEvery { service.resumeLifecycleOperation(original.operationId) } returns terminal
-        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(), draftInstallationProvider = { installation },
-            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        val coordinator = DefaultAppOperationalStateCoordinator(
+            service,
+            Store(),
+            draftInstallationProvider = { installation },
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+        )
         coordinator.start(original)
         assertThat(runCatching { coordinator.performResuming(current) { error("must stay closed") } }.isFailure).isTrue()
         coVerify(exactly = 0) { service.startLifecycleOperation(current) }
@@ -350,9 +400,12 @@ class Bug036StartupAdmissionTest {
         val current = request()
         val old = operation(original)
         val second = operation(another)
-        fun ended(value: LifecycleOperation) = value.copy(status = LifecycleOperationStatus.TERMINATED,
-            currentPhase = LifecyclePhase.RECEIPTED, terminalReceiptId = "terminal:${value.operationId}",
-            updatedAtEpochMillis = value.updatedAtEpochMillis + 1)
+        fun ended(value: LifecycleOperation) = value.copy(
+            status = LifecycleOperationStatus.TERMINATED,
+            currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "terminal:${value.operationId}",
+            updatedAtEpochMillis = value.updatedAtEpochMillis + 1
+        )
         val service = service(original, old)
         coEvery { service.resumeLifecycleOperation(original.operationId) } returns ended(old)
         coEvery { service.startupLifecycleOperations(account, device, "post_login", null) } returns listOf(second)
@@ -374,8 +427,12 @@ class Bug036StartupAdmissionTest {
         val service = service(current, operation(current))
         coEvery { service.startLifecycleOperation(original) } returns old
         coEvery { service.resumeLifecycleOperation(original.operationId) } returns old
-        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(), draftInstallationProvider = { installation },
-            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        val coordinator = DefaultAppOperationalStateCoordinator(
+            service,
+            Store(),
+            draftInstallationProvider = { installation },
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+        )
         coordinator.start(original)
 
         assertThat(coordinator.performResuming(current) { it }).isEqualTo(current.operationId)
@@ -396,8 +453,11 @@ class Bug036StartupAdmissionTest {
         coEvery { service.startLifecycleOperation(original) } returns old
         coEvery { service.resumeLifecycleOperation(original.operationId) } returns old
         coEvery { service.startupLifecycleOperations(account, device, "post_login", null) } throws java.io.IOException("offline")
-        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(),
-            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        val coordinator = DefaultAppOperationalStateCoordinator(
+            service,
+            Store(),
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+        )
         coordinator.start(original)
 
         assertThat(runCatching { coordinator.performResuming(current) { error("must not execute") } }.isFailure).isTrue()
@@ -424,8 +484,12 @@ class Bug036StartupAdmissionTest {
             }
             coEvery { service.startupLifecycleOperations(account, device, "post_login", null) } returns listOfNotNull(indexEntry)
             val store = Store()
-            val coordinator = DefaultAppOperationalStateCoordinator(service, store, draftInstallationProvider = { installation },
-                pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+            val coordinator = DefaultAppOperationalStateCoordinator(
+                service,
+                store,
+                draftInstallationProvider = { installation },
+                pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+            )
             coordinator.start(original)
             if (scenario == "pending-receipt") coordinator.persistClientReceipts(facts(original))
 
@@ -450,8 +514,11 @@ class Bug036StartupAdmissionTest {
         coEvery { service.startLifecycleOperation(original) } returns old
         coEvery { service.startLifecycleOperation(older) } returns earlier
         coEvery { service.resumeLifecycleOperation(original.operationId) } returns old
-        val coordinator = DefaultAppOperationalStateCoordinator(service, Store(),
-            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        val coordinator = DefaultAppOperationalStateCoordinator(
+            service,
+            Store(),
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+        )
         coordinator.start(older)
         coordinator.start(original)
 
@@ -488,7 +555,10 @@ class Bug036StartupAdmissionTest {
         val coordinator = DefaultAppOperationalStateCoordinator(service, Store())
         var actions = 0
         assertThat(runCatching {
-            coordinator.performResuming(request) { actions += 1; throw java.io.IOException("action interrupted") }
+            coordinator.performResuming(request) {
+                actions += 1
+                throw java.io.IOException("action interrupted")
+            }
         }.isFailure).isTrue()
         assertThat(actions).isEqualTo(1)
         assertThat(testScheduler.currentTime).isEqualTo(0L)
@@ -496,18 +566,32 @@ class Bug036StartupAdmissionTest {
         coVerify(exactly = 0) { service.recordLifecycleClientReceipt(any()) }
     }
 
-    private fun request() = lifecycleOperationRequest(FullAppLifecycleId.LC_06, "post_login", accountIdHash = account,
-        matrixDeviceIdHash = device, deadlineEpochMillis = System.currentTimeMillis() + 600_000)
+    private fun request() = lifecycleOperationRequest(
+        FullAppLifecycleId.LC_06,
+        "post_login",
+        accountIdHash = account,
+        matrixDeviceIdHash = device,
+        deadlineEpochMillis = System.currentTimeMillis() + 600_000
+    )
 
     private fun operation(request: LifecycleOperationRequest) = LifecycleOperation(
-        operationId = request.operationId, lifecycleId = request.lifecycleId, idempotencyKey = request.idempotencyKey,
+        operationId = request.operationId,
+        lifecycleId = request.lifecycleId,
+        idempotencyKey = request.idempotencyKey,
         subjects = LifecycleSubjectHashes(accountIdHash = account, matrixDeviceIdHash = device, installationId = installation),
-        status = LifecycleOperationStatus.RUNNING, currentPhase = LifecyclePhase.PROJECTED,
-        deadlineEpochMillis = request.deadlineEpochMillis, createdAtEpochMillis = minOf(System.currentTimeMillis(), request.deadlineEpochMillis - 600_000),
+        status = LifecycleOperationStatus.RUNNING,
+        currentPhase = LifecyclePhase.PROJECTED,
+        deadlineEpochMillis = request.deadlineEpochMillis,
+        createdAtEpochMillis = minOf(System.currentTimeMillis(), request.deadlineEpochMillis - 600_000),
         updatedAtEpochMillis = System.currentTimeMillis(),
         steps = listOf(LifecycleComponent.ANDROID_SERVICE, LifecycleComponent.ANDROID_FRONTEND).map {
-            LifecycleStep(stepId = "${request.operationId}:${it.name}", component = it, status = LifecycleStepStatus.PENDING,
-                attemptCount = 0, updatedAtEpochMillis = System.currentTimeMillis())
+            LifecycleStep(
+                stepId = "${request.operationId}:${it.name}",
+                component = it,
+                status = LifecycleStepStatus.PENDING,
+                attemptCount = 0,
+                updatedAtEpochMillis = System.currentTimeMillis()
+            )
         },
     )
 
@@ -518,18 +602,39 @@ class Bug036StartupAdmissionTest {
     }
 
     private fun facts(request: LifecycleOperationRequest) = listOf(LifecycleComponent.ANDROID_SERVICE, LifecycleComponent.ANDROID_FRONTEND).map {
-        LifecycleClientReceipt(request.operationId, it, LifecyclePhase.CLIENT_APPLIED, "${it.name}_APPLIED",
-            "${it.name.lowercase().replace('_', '-')}:${request.operationId}", System.currentTimeMillis())
+        LifecycleClientReceipt(
+            request.operationId,
+            it,
+            LifecyclePhase.CLIENT_APPLIED,
+            "${it.name}_APPLIED",
+            "${it.name.lowercase().replace('_', '-')}:${request.operationId}",
+            System.currentTimeMillis()
+        )
     }
 
     private fun snapshot(ids: List<String> = emptyList()): AppOperationalSnapshot {
         val now = System.currentTimeMillis()
-        return AppOperationalSnapshot(accountIdHash = account, matrixDeviceIdHash = device, installationId = installation,
-            issuedAtEpochMillis = now, expiresAtEpochMillis = now + 60_000, overallStatus = AppOperationalStatus.READY,
+        return AppOperationalSnapshot(
+            accountIdHash = account,
+            matrixDeviceIdHash = device,
+            installationId = installation,
+            issuedAtEpochMillis = now,
+            expiresAtEpochMillis = now + 60_000,
+            overallStatus = AppOperationalStatus.READY,
             components = REQUIRED_OPERATIONAL_COMPONENTS.associateWith {
-                ComponentOperationalState(AppOperationalStatus.READY, it, "mock-revision", now, now + 60_000,
-                    receiptReference = "mock-component-receipt")
-            }, activeOperationIds = ids, signingKeyId = "mock-authority-key", signatureBase64 = "mock-signature-for-test")
+                ComponentOperationalState(
+                    AppOperationalStatus.READY,
+                    it,
+                    "mock-revision",
+                    now,
+                    now + 60_000,
+                    receiptReference = "mock-component-receipt"
+                )
+            },
+            activeOperationIds = ids,
+            signingKeyId = "mock-authority-key",
+            signatureBase64 = "mock-signature-for-test"
+        )
     }
 
     private class Store : LifecycleOperationIdStore {
@@ -537,6 +642,8 @@ class Bug036StartupAdmissionTest {
         override fun latest(lifecycleId: FullAppLifecycleId): String? = null
         override fun remember(operation: LifecycleOperation) = Unit
         override fun pendingClientReceipts() = receipts.toList()
-        override fun savePendingClientReceipts(receipts: List<LifecycleClientReceipt>) { this.receipts = receipts.toList() }
+        override fun savePendingClientReceipts(receipts: List<LifecycleClientReceipt>) {
+            this.receipts = receipts.toList()
+        }
     }
 }
