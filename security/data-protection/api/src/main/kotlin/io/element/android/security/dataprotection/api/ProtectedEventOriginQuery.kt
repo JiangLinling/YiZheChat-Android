@@ -26,6 +26,16 @@ data class ProtectedEventOriginQuery(
     }
 }
 
+/**
+ * Verified routing metadata, deliberately not a coroutine SEND context.
+ * A retired producer identifies historical content for a new, independently admitted receive.
+ */
+data class ProtectedEventOrigin(
+    val operationId: String,
+    val lifecycleId: FullAppLifecycleId,
+    val previousMatrixDeviceIdHash: String? = null,
+)
+
 /** Original producer scope; missing key or carrier observations alone cannot authorize a terminal outcome. */
 data class ProtectedRelayPreparationQuery(
     val accountIdHash: String,

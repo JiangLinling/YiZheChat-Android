@@ -3,13 +3,13 @@
  */
 package io.element.android.libraries.matrix.impl.timeline
 
-import io.element.android.security.dataprotection.api.LifecycleOperationContext
+import io.element.android.security.dataprotection.api.ProtectedEventOrigin
 import kotlinx.coroutines.CompletableDeferred
 
 /** Coalesces legacy identity repair. Stores no completed origin, permission, key or plaintext. */
 internal class ProtectedOriginRecovery(private val capacity: Int = 4096, private val now: () -> Long) {
     private class Attempt {
-        var active: CompletableDeferred<LifecycleOperationContext?>? = null
+        var active: CompletableDeferred<ProtectedEventOrigin?>? = null
         var failures = 0
         var retryAt = 0L
         var invalidated = false
@@ -28,10 +28,10 @@ internal class ProtectedOriginRecovery(private val capacity: Int = 4096, private
         Unit
     }
 
-    suspend fun lookup(key: String, block: suspend () -> LifecycleOperationContext?): LifecycleOperationContext? {
+    suspend fun lookup(key: String, block: suspend () -> ProtectedEventOrigin?): ProtectedEventOrigin? {
         var producer = false
         val state: Attempt
-        val result: CompletableDeferred<LifecycleOperationContext?>
+        val result: CompletableDeferred<ProtectedEventOrigin?>
         synchronized(attempts) {
             if (key !in attempts && attempts.size >= capacity) {
                 attempts.entries.firstOrNull { it.value.active == null }?.let { attempts.remove(it.key) }
@@ -41,7 +41,7 @@ internal class ProtectedOriginRecovery(private val capacity: Int = 4096, private
             result = state.active ?: run {
                 if (now() < state.retryAt) return null
                 producer = true
-                CompletableDeferred<LifecycleOperationContext?>().also { state.active = it }
+                CompletableDeferred<ProtectedEventOrigin?>().also { state.active = it }
             }
         }
         if (!producer) return result.await()

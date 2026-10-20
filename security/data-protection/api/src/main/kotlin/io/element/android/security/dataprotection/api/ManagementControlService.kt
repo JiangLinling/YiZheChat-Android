@@ -627,7 +627,7 @@ interface ManagementControlService {
     suspend fun authorizePreparedRelayRetry(query: ProtectedEventOriginQuery, operationId: String, roomId: String): Unit =
         error("Prepared relay retry authorization is unavailable.")
 
-    suspend fun protectedEventOrigin(query: ProtectedEventOriginQuery): LifecycleOperationContext? = null
+    suspend fun protectedEventOrigin(query: ProtectedEventOriginQuery): io.element.android.security.dataprotection.api.ProtectedEventOrigin? = null
 
     /** Reconcile the original preparation using actual KMS destruction; never prepares or releases a key. */
     suspend fun reconcileRelayPreparation(query: ProtectedRelayPreparationQuery): LifecycleOperation =

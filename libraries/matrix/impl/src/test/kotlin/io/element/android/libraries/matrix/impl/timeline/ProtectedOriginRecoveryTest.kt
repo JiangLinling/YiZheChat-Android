@@ -5,7 +5,7 @@ package io.element.android.libraries.matrix.impl.timeline
 
 import com.google.common.truth.Truth.assertThat
 import io.element.android.security.dataprotection.api.FullAppLifecycleId
-import io.element.android.security.dataprotection.api.LifecycleOperationContext
+import io.element.android.security.dataprotection.api.ProtectedEventOrigin
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.advanceTimeBy
@@ -15,7 +15,7 @@ import org.junit.Test
 import java.io.IOException
 
 class ProtectedOriginRecoveryTest {
-    private val original = LifecycleOperationContext("lc13-send-original", FullAppLifecycleId.LC_13)
+    private val original = ProtectedEventOrigin("lc13-send-original", FullAppLifecycleId.LC_13)
 
     @Test fun `concurrent readers share repair but successful lookup is never cached`() = runTest {
         val work = ProtectedOriginRecovery { testScheduler.currentTime }

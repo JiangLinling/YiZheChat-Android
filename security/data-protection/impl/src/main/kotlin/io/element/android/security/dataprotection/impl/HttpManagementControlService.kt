@@ -865,7 +865,7 @@ class HttpManagementControlService(
 
     override suspend fun protectedEventOrigin(
         query: io.element.android.security.dataprotection.api.ProtectedEventOriginQuery,
-    ): LifecycleOperationContext? = withContext(Dispatchers.IO) {
+    ): io.element.android.security.dataprotection.api.ProtectedEventOrigin? = withContext(Dispatchers.IO) {
         val request = kotlinx.serialization.json.buildJsonObject {
             put("account_id_hash", query.accountIdHash)
             put("matrix_device_id_hash", query.matrixDeviceIdHash)
@@ -903,8 +903,16 @@ class HttpManagementControlService(
         if (raw == kotlinx.serialization.json.JsonNull) return@withContext null
         val origin = raw.jsonObject
         val resolution = origin["scope_resolution"]
-        check(resolution == null || resolution.jsonPrimitive.content == "LEGACY_INSTALLATION_AND_AUTHORITY_FACTS") {
+        check(resolution == null || resolution.jsonPrimitive.content in setOf("LEGACY_INSTALLATION_AND_AUTHORITY_FACTS", "PREVIOUS_MATRIX_SESSION")) {
             "Protected origin scope resolution was rejected."
+        }
+        val previousMatrixDevice = origin["producer_matrix_device_id_hash"]?.jsonPrimitive?.content
+        if (resolution?.jsonPrimitive?.content == "PREVIOUS_MATRIX_SESSION") {
+            check(previousMatrixDevice?.matches(Regex("[0-9a-f]{64}")) == true && previousMatrixDevice != query.matrixDeviceIdHash) {
+                "Historical producer must identify a different Matrix session."
+            }
+        } else {
+            check(previousMatrixDevice == null) { "Unexpected historical producer identity." }
         }
         val operationId = origin.getValue("operation_id").jsonPrimitive.content
         check(operationId.matches(LIFECYCLE_OPERATION_ID_PATTERN))
@@ -913,7 +921,7 @@ class HttpManagementControlService(
             lifecycleId == FullAppLifecycleId.LC_13 || lifecycleId == FullAppLifecycleId.LC_15 ||
             lifecycleId == FullAppLifecycleId.LC_17 && query.contentKind in setOf("LOCATION", "LIVE_LOCATION", "LIVE_LOCATION_OPERATION")
         )
-        LifecycleOperationContext(operationId, lifecycleId)
+        io.element.android.security.dataprotection.api.ProtectedEventOrigin(operationId, lifecycleId, previousMatrixDevice)
     }
 
     override suspend fun resumeLifecycleOperation(operationId: String): LifecycleOperation = withContext(Dispatchers.IO) {

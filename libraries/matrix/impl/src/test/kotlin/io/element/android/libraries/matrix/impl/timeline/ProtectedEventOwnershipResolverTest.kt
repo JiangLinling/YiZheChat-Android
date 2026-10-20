@@ -11,6 +11,23 @@ import org.junit.Test
 import org.junit.Assert.*
 
 class ProtectedEventOwnershipResolverTest {
+    @Test fun `previous session receipt cannot mask conflicting encrypted producer journal`() {
+        val old = origin().copy(matrixDeviceIdHash = "9".repeat(64))
+        val verified = io.element.android.security.dataprotection.api.ProtectedEventOrigin(
+            old.operationId, old.lifecycleId, old.matrixDeviceIdHash,
+        )
+        assertTrue(ProtectedEventOwnershipResolver.matchesPreviousSession(input, old, verified))
+        assertNull(ProtectedEventOwnershipResolver.resolve(input, old).sendContext)
+        listOf(
+            old.copy(eventId = "\$copied"), old.copy(carrierSha256 = "8".repeat(64)),
+            old.copy(accountIdHash = "8".repeat(64)), old.copy(roomIdHash = "8".repeat(64)),
+            old.copy(matrixDeviceIdHash = input.matrixDeviceIdHash), old.copy(contentId = "another"),
+            old.copy(contentKind = ContentKind.TEXT), old.copy(generation = 4),
+            old.copy(installationId = "other"), old.copy(operationId = "other-operation-0001"),
+        ).forEach { assertFalse(ProtectedEventOwnershipResolver.matchesPreviousSession(input, it, verified)) }
+        assertFalse(ProtectedEventOwnershipResolver.matchesPreviousSession(input.copy(eventId = null), old, verified))
+    }
+
     @Test fun `cold media defers to original upload but live upload and caption retain registration`() {
         assertTrue(ProtectedEventOwnershipResolver.isHistoricalMediaRegistration(true, false, null))
         assertFalse(ProtectedEventOwnershipResolver.isHistoricalMediaRegistration(true, true, null))

@@ -412,6 +412,28 @@ class HttpManagementControlServicePolicyReceiptTest {
     }
 
     @Test
+    fun `signed retired producer is metadata for receive and never a SEND context`() = runTest {
+        withFixture { fixture ->
+            fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(fixture.originResponse(previous = true)))
+            val result = fixture.service.protectedEventOrigin(originQuery())
+            assertThat(result?.previousMatrixDeviceIdHash).isEqualTo("9".repeat(64))
+            assertThat(result?.operationId).isEqualTo("original-send-operation-0001")
+            assertThat(fixture.server.takeRequest().getHeader("X-YiZhe-Lifecycle-Operation-Id")).isNull()
+        }
+    }
+
+    @Test
+    fun `retired producer evidence rejects current session missing identity and unsigned edits`() = runTest {
+        for (fault in listOf("same-session", "missing-session", "signature", "query", "expired", "installation")) {
+            withFixture { fixture ->
+                fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(fixture.originResponse(fault, previous = true)))
+                val failure = runCatching { fixture.service.protectedEventOrigin(originQuery()) }.exceptionOrNull()
+                org.junit.Assert.assertNotNull(fault, failure)
+            }
+        }
+    }
+
+    @Test
     fun `signed unknown origin returns no context`() = runTest {
         withFixture { fixture ->
             fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(fixture.originResponse(unknown = true)))
@@ -1239,7 +1261,7 @@ class HttpManagementControlServicePolicyReceiptTest {
 
         fun originResponse(
             fault: String? = null, unknown: Boolean = false, legacy: Boolean = false,
-            kind: String = "RELAY_OPERATION", lifecycle: String = "LC-15",
+            kind: String = "RELAY_OPERATION", lifecycle: String = "LC-15", previous: Boolean = false,
         ): String {
             val now = System.currentTimeMillis()
             val query = JSON.parseToJsonElement("""{
@@ -1260,6 +1282,14 @@ class HttpManagementControlServicePolicyReceiptTest {
                     kotlinx.serialization.json.buildJsonObject {
                     put("operation_id", kotlinx.serialization.json.JsonPrimitive("original-send-operation-0001"))
                     put("lifecycle_id", kotlinx.serialization.json.JsonPrimitive(if (fault == "lifecycle") "LC-14" else lifecycle))
+                    if (previous) {
+                        put("scope_resolution", kotlinx.serialization.json.JsonPrimitive("PREVIOUS_MATRIX_SESSION"))
+                        if (fault != "missing-session") {
+                            put("producer_matrix_device_id_hash", kotlinx.serialization.json.JsonPrimitive(
+                                if (fault == "same-session") "b".repeat(64) else "9".repeat(64)
+                            ))
+                        }
+                    }
                     if (legacy || fault == "resolution") {
                         put(
                             "scope_resolution",

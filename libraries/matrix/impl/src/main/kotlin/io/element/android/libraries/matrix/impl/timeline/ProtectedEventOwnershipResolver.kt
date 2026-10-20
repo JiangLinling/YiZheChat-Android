@@ -99,6 +99,21 @@ object ProtectedEventOwnershipResolver {
 
     fun isCanonicalEvent(value: String): Boolean = value.length in 2..512 && value.startsWith('$') && value.none(Char::isWhitespace)
 
+    /** A signed previous-session lookup must not conceal a conflicting retained producer. */
+    internal fun matchesPreviousSession(
+        input: Input,
+        origin: Origin,
+        verified: io.element.android.security.dataprotection.api.ProtectedEventOrigin,
+    ): Boolean = verified.previousMatrixDeviceIdHash != null &&
+        verified.previousMatrixDeviceIdHash != input.matrixDeviceIdHash &&
+        input.eventId?.let(::isCanonicalEvent) == true &&
+        input.senderAccountIdHash == input.accountIdHash && input.senderInstallationId == input.installationId &&
+        origin.operationId == verified.operationId && origin.lifecycleId == verified.lifecycleId &&
+        origin.accountIdHash == input.accountIdHash && origin.matrixDeviceIdHash == verified.previousMatrixDeviceIdHash &&
+        origin.installationId == input.installationId && origin.roomIdHash == input.roomIdHash &&
+        origin.eventId == input.eventId && origin.contentId == input.contentId && origin.contentKind == input.contentKind &&
+        origin.carrierSha256 == input.carrierSha256 && origin.generation == input.generation
+
     /** Scheduling only. A media filename carries no original upload operation.
      * Cold media recovery belongs to its original upload journal, not the text-origin retry queue.
      * A live original owner or a separate caption envelope must still register normally.

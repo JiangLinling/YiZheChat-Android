@@ -3671,7 +3671,8 @@ private class DefaultMatrixProtectedContentAdapter(
         )
         origin = awaitOriginalSendBinding(input, origin)
         var recoveredOrigin = false
-        if ((origin == null || ProtectedEventOwnershipResolver.isAwaitingEventBinding(input, origin)) &&
+        if ((origin == null || ProtectedEventOwnershipResolver.isAwaitingEventBinding(input, origin) ||
+                origin.matrixDeviceIdHash != matrixDeviceHash) &&
             sender == accountHash && header.senderInstallationId == trust.installationId &&
             ProtectedEventOwnershipResolver.isCanonicalEvent(eventIdentity)
         ) {
@@ -3697,6 +3698,14 @@ private class DefaultMatrixProtectedContentAdapter(
                 // A signed lookup cannot replace a conflicting owner or relax carrier checks.
                 if (origin != null && (origin.operationId != context.operationId || origin.lifecycleId != context.lifecycleId)) {
                     throw ContentProtectionException.AccessDenied()
+                }
+                if (context.previousMatrixDeviceIdHash != null) {
+                    // A fresh login is a new receiver of its own historical event. Never
+                    // rebind the retired SEND to this session or persist a new producer.
+                    if (origin != null && !ProtectedEventOwnershipResolver.matchesPreviousSession(input, origin, context)) {
+                        throw ContentProtectionException.AccessDenied()
+                    }
+                    return withReceiveLifecycleOperation(eventIdentity, releaseIntent, block = read)
                 }
                 origin = ProtectedEventOwnershipResolver.Origin(
                     context.operationId, context.lifecycleId, accountHash, matrixDeviceHash, trust.installationId,
