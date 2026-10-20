@@ -47,6 +47,10 @@ class InMemorySessionStore(
         sessionDataListFlow.value = currentList
     }
 
+    override suspend fun storeAuthenticatedSession(sessionData: SessionData) {
+        addSession(sessionData)
+    }
+
     override suspend fun updateData(sessionData: SessionData) {
         val currentList = sessionDataListFlow.value.toMutableList()
         val index = currentList.indexOfFirst { it.userId == sessionData.userId && it.deviceId == sessionData.deviceId }

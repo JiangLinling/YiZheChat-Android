@@ -28,6 +28,29 @@ class DatabaseSessionStoreTest {
     private val aSessionData = aDbSessionData()
 
     @Test
+    fun `explicit authentication atomically replaces a retired login while old callbacks remain blocked`() = runTest {
+        val old = aSessionData.toApiModel()
+        databaseSessionStore.addSession(old)
+        databaseSessionStore.invalidateSessionIfDeviceMatches(old.userId, old.deviceId)
+        val fresh = old.copy(deviceId = "NEW_LOGIN", sessionPath = "new-files", cachePath = "new-cache", isTokenValid = true)
+
+        databaseSessionStore.storeAuthenticatedSession(fresh)
+
+        val stored = requireNotNull(databaseSessionStore.getSession(old.userId))
+        assertThat(databaseSessionStore.numberOfSessions()).isEqualTo(1)
+        assertThat(stored.deviceId).isEqualTo("NEW_LOGIN")
+        assertThat(stored.isTokenValid).isTrue()
+        assertThat(stored.sessionPath).isEqualTo("new-files")
+        databaseSessionStore.updateData(old)
+        databaseSessionStore.invalidateSessionIfDeviceMatches(old.userId, old.deviceId)
+        databaseSessionStore.removeSessionIfPathsMatch(old.userId, old.sessionPath, old.cachePath)
+        assertThat(databaseSessionStore.getSession(old.userId)).isEqualTo(stored)
+        databaseSessionStore.invalidateSessionIfDeviceMatches(stored.userId, stored.deviceId)
+        databaseSessionStore.updateData(stored)
+        assertThat(databaseSessionStore.getSession(old.userId)?.isTokenValid).isFalse()
+    }
+
+    @Test
     fun `late SDK refresh cannot overwrite replacement or revive revoked login`() = runTest {
         val replacement = aSessionData.copy(deviceId = "NEW", sessionPath = "new-files", cachePath = "new-cache")
         databaseSessionStore.addSession(replacement.toApiModel())

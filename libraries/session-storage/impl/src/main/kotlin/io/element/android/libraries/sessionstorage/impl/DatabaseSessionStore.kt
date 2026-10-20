@@ -66,6 +66,18 @@ class DatabaseSessionStore(
         }
     }
 
+    override suspend fun storeAuthenticatedSession(sessionData: SessionData) {
+        sessionDataMutex.withLock {
+            val lastUsageIndex = getLastUsageIndex()
+            database.sessionDataQueries.storeAuthenticatedSession(
+                sessionData.copy(
+                    position = lastUsageIndex + 1,
+                    lastUsageIndex = lastUsageIndex + 1,
+                ).toDbModel()
+            )
+        }
+    }
+
     override suspend fun updateData(sessionData: SessionData) {
         sessionDataMutex.withLock {
             val result = database.sessionDataQueries.selectByUserId(sessionData.userId)

@@ -151,7 +151,7 @@ class RustMatrixAuthenticationServiceTest {
 
     @Test
     fun `password login replaces an existing invalid session`() = runTest {
-        val oldSession = configuredSessionData(isTokenValid = false)
+        val oldSession = configuredSessionData(isTokenValid = false).copy(deviceId = "RETIRED_DEVICE")
         val sessionStore = InMemorySessionStore(initialList = listOf(oldSession))
         var logoutCount = 0
         var initialDeviceName: String? = null
@@ -175,6 +175,20 @@ class RustMatrixAuthenticationServiceTest {
         assertThat(sessionStore.getAllSessions().single().isTokenValid).isTrue()
         assertThat(logoutCount).isEqualTo(0)
         assertThat(initialDeviceName).isEqualTo("乙者 Android")
+        val replacement = sessionStore.getAllSessions().single()
+        assertThat(replacement.deviceId).isEqualTo(aRustSession().deviceId)
+        assertThat(replacement.passphrase).isNotEmpty()
+        assertThat(replacement.sessionPath).isNotEqualTo(oldSession.sessionPath)
+
+        // A late callback or cleanup owned by the retired login must not touch
+        // the newly authenticated login installed above.
+        sessionStore.updateData(oldSession.copy(isTokenValid = true))
+        sessionStore.invalidateSessionIfDeviceMatches(oldSession.userId, oldSession.deviceId)
+        sessionStore.removeSessionIfPathsMatch(oldSession.userId, oldSession.sessionPath, oldSession.cachePath)
+        assertThat(sessionStore.getAllSessions().single()).isEqualTo(replacement)
+        sessionStore.invalidateSessionIfDeviceMatches(replacement.userId, replacement.deviceId)
+        sessionStore.updateData(replacement)
+        assertThat(sessionStore.getAllSessions().single().isTokenValid).isFalse()
     }
 
     @Test
@@ -264,6 +278,8 @@ class RustMatrixAuthenticationServiceTest {
         assertThat(sessionStore.getAllSessions()).hasSize(1)
         assertThat(sessionStore.getAllSessions().single().isTokenValid).isTrue()
         assertThat(sessionStore.getAllSessions().single().passphrase).isNotEqualTo("existing-database-key")
+        assertThat(sessionStore.getAllSessions().single().deviceId).isEqualTo(aRustSession().deviceId)
+        assertThat(sessionStore.getAllSessions().single().sessionPath).isNotEqualTo(oldSession.sessionPath)
         assertThat(logoutCount).isEqualTo(0)
     }
 

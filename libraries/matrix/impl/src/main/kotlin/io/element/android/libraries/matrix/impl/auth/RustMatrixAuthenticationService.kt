@@ -177,7 +177,7 @@ class RustMatrixAuthenticationService(
                     deviceId = null,
                 )
                 // Ensure that the user is not already logged in with the same account
-                val replaceInvalidSession = ensureNotAlreadyLoggedIn(client, sessionsBeforeLogin)
+                ensureNotAlreadyLoggedIn(client, sessionsBeforeLogin)
                 tryToImportSecretForElementClassicSession(client)
                 val sessionData = client.session()
                     .toSessionData(
@@ -194,7 +194,7 @@ class RustMatrixAuthenticationService(
                     newMatrixClientObservers.forEach { it.invoke(matrixClient) }
                 }
                 loginFinalizationStage("session-persistence") {
-                    persistAuthenticatedSession(sessionData, replaceInvalidSession)
+                    persistAuthenticatedSession(sessionData)
                 }
 
                 // Clean up the strong reference held here since it's no longer necessary
@@ -352,7 +352,7 @@ class RustMatrixAuthenticationService(
                 pendingOAuthAuthorizationData?.close()
                 pendingOAuthAuthorizationData = null
                 // Ensure that the user is not already logged in with the same account
-                val replaceInvalidSession = ensureNotAlreadyLoggedIn(client, sessionsBeforeLogin)
+                ensureNotAlreadyLoggedIn(client, sessionsBeforeLogin)
                 tryToImportSecretForElementClassicSession(client)
                 val sessionData = client.session().toSessionData(
                     isTokenValid = true,
@@ -365,7 +365,7 @@ class RustMatrixAuthenticationService(
                 matrixClient.waitForKnownVerificationState()
 
                 newMatrixClientObservers.forEach { it.invoke(matrixClient) }
-                persistAuthenticatedSession(sessionData, replaceInvalidSession)
+                persistAuthenticatedSession(sessionData)
 
                 // Clean up the strong reference held here since it's no longer necessary
                 currentClient = null
@@ -379,7 +379,7 @@ class RustMatrixAuthenticationService(
     }
 
     @Throws(AuthenticationException.AccountAlreadyLoggedIn::class)
-    private suspend fun ensureNotAlreadyLoggedIn(client: Client, sessionsBeforeLogin: List<SessionData>): Boolean {
+    private suspend fun ensureNotAlreadyLoggedIn(client: Client, sessionsBeforeLogin: List<SessionData>) {
         val newUserId = client.userId()
         val existingSession = sessionsBeforeLogin.firstOrNull { it.userId == newUserId }
         val existingSessionCanBeRestored = existingSession?.isTokenValid == true &&
@@ -395,16 +395,14 @@ class RustMatrixAuthenticationService(
         // A soft-logged-out account must be re-authenticated in place. Rejecting
         // it as a duplicate leaves the user trapped on the login screen while
         // the unusable local row remains present.
-        return existingSession != null
     }
 
-    private suspend fun persistAuthenticatedSession(sessionData: SessionData, replaceInvalidSession: Boolean) {
+    private suspend fun persistAuthenticatedSession(sessionData: SessionData) {
         val protectedSession = rustMatrixClientFactory.protectSessionDataForStorage(sessionData)
-        if (replaceInvalidSession) {
-            sessionStore.updateData(protectedSession)
-        } else {
-            sessionStore.addSession(protectedSession)
-        }
+        // A successful explicit login owns a new Matrix session. Ordinary SDK updates
+        // deliberately cannot replace a device or revive an invalidated login.
+        // Install the authenticated session atomically, without an intermediate logout.
+        sessionStore.storeAuthenticatedSession(protectedSession)
         failedSessionRestorations.remove(sessionData.userId)
     }
 
@@ -445,7 +443,7 @@ class RustMatrixAuthenticationService(
                     )
                 }
                 // Ensure that the user is not already logged in with the same account
-                val replaceInvalidSession = ensureNotAlreadyLoggedIn(client, sessionsBeforeLogin)
+                ensureNotAlreadyLoggedIn(client, sessionsBeforeLogin)
                 val sessionData = client.session()
                     .toSessionData(
                         isTokenValid = true,
@@ -456,7 +454,7 @@ class RustMatrixAuthenticationService(
                 requireConfiguredNextHomeserver(sessionData.homeserverUrl)
                 val matrixClient = rustMatrixClientFactory.create(client)
                 newMatrixClientObservers.forEach { it.invoke(matrixClient) }
-                persistAuthenticatedSession(sessionData, replaceInvalidSession)
+                persistAuthenticatedSession(sessionData)
 
                 // Clean up the strong reference held here since it's no longer necessary
                 currentClient = null

@@ -31,6 +31,12 @@ interface SessionStore {
     suspend fun addSession(sessionData: SessionData)
 
     /**
+     * Atomically install a newly authenticated login, replacing any previous login for this account.
+     * Only the successful explicit authentication flow may call this; SDK refreshes must use [updateData].
+     */
+    suspend fun storeAuthenticatedSession(sessionData: SessionData)
+
+    /**
      * Will update the session data matching the userId, except the value of loginTimestamp.
      * No op if userId is not found in DB.
      * The Matrix device must still match. Updates cannot revive an invalidated login.

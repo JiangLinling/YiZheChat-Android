@@ -55,6 +55,9 @@ SELECT * FROM SessionData WHERE userId = ?;
 insertSessionData:
 INSERT INTO SessionData VALUES ?;
 
+storeAuthenticatedSession:
+INSERT OR REPLACE INTO SessionData VALUES ?;
+
 removeSession:
 DELETE FROM SessionData WHERE userId = ?;
 
