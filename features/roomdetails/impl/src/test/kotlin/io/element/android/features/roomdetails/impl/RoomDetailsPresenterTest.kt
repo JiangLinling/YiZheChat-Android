@@ -27,6 +27,7 @@ import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.api.room.RoomMembersState
+import io.element.android.libraries.matrix.api.room.RoomMembershipState
 import io.element.android.libraries.matrix.api.room.RoomNotificationMode
 import io.element.android.libraries.matrix.api.room.StateEventType
 import io.element.android.libraries.matrix.api.room.join.JoinRule
@@ -213,6 +214,31 @@ class RoomDetailsPresenterTest {
         presenter.testWithLifecycleOwner(lifecycleOwner = fakeLifecycleOwner) {
             val initialState = awaitItem()
             assertThat(initialState.roomType).isEqualTo(RoomDetailsType.Dm(otherMember = otherRoomMember))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `rejected direct invitation retains peer profile without active membership`() = runTest {
+        val self = aRoomMember(A_SESSION_ID)
+        val peer = aRoomMember(A_USER_ID_2, membership = RoomMembershipState.LEAVE)
+        val room = aJoinedRoom(
+            roomPermissions = roomPermissions(),
+            getUpdatedMemberResult = { userId ->
+                when (userId) {
+                    A_SESSION_ID -> Result.success(self)
+                    A_USER_ID_2 -> Result.success(peer)
+                    else -> lambdaError()
+                }
+            },
+        ).apply {
+            givenRoomMembersState(RoomMembersState.Ready(persistentListOf(self, peer)))
+            givenRoomInfo(aRoomInfo(isEncrypted = true, isDm = true))
+        }
+        createRoomDetailsPresenter(room).testWithLifecycleOwner(lifecycleOwner = fakeLifecycleOwner) {
+            val state = awaitItem()
+            assertThat(state.roomType).isEqualTo(RoomDetailsType.Dm(peer))
+            assertThat((state.roomType as RoomDetailsType.Dm).otherMember.membership).isEqualTo(RoomMembershipState.LEAVE)
             cancelAndIgnoreRemainingEvents()
         }
     }

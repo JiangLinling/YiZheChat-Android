@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="screen_message_favourites_unnamed_room">暂时无法获取聊天名称</string>
     <string name="screen_notification_settings_sound_yizhe_default">乙者默认</string>
     <string name="screen_notification_settings_sound_yizhe_fade">乙者渐响</string>
     <string name="screen_chat_security_startup_binding">启动加速（可选）</string>

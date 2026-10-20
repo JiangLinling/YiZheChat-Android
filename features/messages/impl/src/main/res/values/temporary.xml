@@ -314,7 +314,7 @@
     <string name="screen_messages_latest_messages_with_count">Latest messages · %1$s</string>
     <string name="screen_room_relay_submitting">Submitting your entry…</string>
     <string name="screen_room_relay_create_hint">Add a topic and your first entry, then publish to the chat.</string>
-    <string name="screen_room_send_binding_pending">Message status: confirming send…</string>
+    <string name="screen_room_send_binding_pending">Checking the original message status. Its content is not available yet. Please check again later.</string>
 <string name="media_confirm_submission">Check send result</string>
 <string name="media_send_recovered_failure">Sending failed before submission. Your original media and selection are restored; you can retry.</string>
 <string name="media_confirmation_pending">The original send is still unconfirmed. Your draft is retained. Sending it again is blocked until its result can be verified.</string>

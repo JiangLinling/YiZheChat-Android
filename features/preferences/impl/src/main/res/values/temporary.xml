@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="screen_message_favourites_unnamed_room">Conversation name unavailable</string>
     <string name="screen_notification_settings_sound_yizhe_default">YiZheChat default</string>
     <string name="screen_notification_settings_sound_yizhe_fade">YiZheChat fade</string>
     <string name="screen_chat_security_startup_binding">Startup assistance (optional)</string>

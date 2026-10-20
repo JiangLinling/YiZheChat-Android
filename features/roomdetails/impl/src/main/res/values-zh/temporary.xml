@@ -14,6 +14,7 @@
     <string name="screen_room_details_search_clear">清除搜索</string>
     <string name="screen_room_details_chat_settings">聊天设置</string>
     <string name="screen_room_details_view_profile">查看个人资料</string>
+    <string name="screen_room_details_profile_unavailable">暂时无法获取对方资料，请返回联系人查找</string>
     <string name="screen_room_details_chat_media">图片、视频和文件</string>
     <string name="screen_room_details_chat_pinned_messages">置顶消息</string>
     <string name="screen_room_details_do_not_disturb">消息免打扰</string>

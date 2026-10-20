@@ -2,6 +2,6 @@
 <resources>
     <string name="screen_signed_out_current_phone_title">本机已退出登录</string>
     <string name="screen_signed_out_mobile_handover">账号已在另一台手机登录，本机已退出。如需换回本机，请重新登录并完成验证。账号没有被注销。</string>
-    <string name="screen_signed_out_login_expired">本次登录已失效，本机已退出。请重新登录并完成身份验证，再继续使用。</string>
+    <string name="screen_signed_out_login_expired">本机登录已失效，可能是账号在其他手机登录或登录凭证过期。一个账号只支持一台手机在线。如需继续使用本机，请重新登录并完成身份验证。</string>
     <string name="screen_signed_out_cleanup_retry">本次登录已失效，但本机清理准备尚未完成。请点“再次登录”重试。账号没有被注销。</string>
 </resources>

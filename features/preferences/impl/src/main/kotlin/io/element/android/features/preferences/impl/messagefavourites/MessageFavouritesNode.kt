@@ -8,6 +8,12 @@
 package io.element.android.features.preferences.impl.messagefavourites
 
 import android.content.Context
+import io.element.android.libraries.matrix.api.permalink.PermalinkParser
+import io.element.android.libraries.matrix.api.timeline.item.event.TextMessageType
+import io.element.android.libraries.matrix.api.timeline.item.event.NoticeMessageType
+import io.element.android.libraries.matrix.api.timeline.item.event.EmoteMessageType
+import io.element.android.libraries.matrix.ui.messages.toHtmlDocument
+import io.element.android.libraries.matrix.ui.messages.toPlainText
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -107,6 +113,7 @@ class MessageFavouritesNode(
     private val friendProfileRepository: FriendProfileRepository,
     @ApplicationContext private val context: Context,
     private val protectedRuntime: MatrixContentProtectionRuntime,
+    private val permalinkParser: PermalinkParser,
 ) : Node(buildContext, plugins = plugins) {
     interface Callback : Plugin {
         fun navigateToEvent(roomId: RoomId, eventId: EventId)
@@ -243,7 +250,7 @@ class MessageFavouritesNode(
                 eventId = reference.eventId,
                 roomName = dmMember?.userId?.let { friendProfileRepository.profiles.value.privateDirectDisplayName(it, dmMember.displayName) }
                     ?: roomInfo.name.matrixDisplayNameOrNull()
-                    ?: reference.roomId.value,
+                    ?: unnamedRoomText,
                 senderName = friendProfileRepository.profiles.value.privateDisplayName(
                     event.sender,
                     (event.senderProfile as? ProfileDetails.Ready)?.getDisplayName(),
@@ -257,10 +264,18 @@ class MessageFavouritesNode(
     }
 
     private fun unavailableFavourite(reference: MessageReference) = MessageFavourite(reference.roomId, reference.eventId,
-        reference.roomId.value, "", 0, unavailableText)
+        unnamedRoomText, "", 0, unavailableText)
 
     private fun favouritePreview(content: EventContent): String = when (content) {
-        is MessageContent -> if (content.isAuthorizedForUserDisplay()) content.body else unavailableText
+        is MessageContent -> if (content.isAuthorizedForUserDisplay()) {
+            val formatted = when (val type = content.type) {
+                is TextMessageType -> type.formatted
+                is NoticeMessageType -> type.formatted
+                is EmoteMessageType -> type.formatted
+                else -> null
+            }
+            formatted?.toHtmlDocument(permalinkParser)?.toPlainText() ?: content.body
+        } else unavailableText
         is StickerContent -> content.body ?: stickerText
         is PollContent -> content.question
         is LiveLocationContent -> content.description ?: locationText
@@ -271,6 +286,7 @@ class MessageFavouritesNode(
     }
 
     private val unavailableText: String get() = context.getString(R.string.screen_message_favourites_unavailable)
+    private val unnamedRoomText: String get() = context.getString(R.string.screen_message_favourites_unnamed_room)
     private val stickerText: String get() = context.getString(R.string.screen_message_favourites_sticker)
     private val locationText: String get() = context.getString(R.string.screen_message_favourites_location)
     private val callText: String get() = context.getString(R.string.screen_message_favourites_call)

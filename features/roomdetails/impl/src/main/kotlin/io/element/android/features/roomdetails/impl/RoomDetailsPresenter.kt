@@ -46,6 +46,7 @@ import io.element.android.libraries.matrix.api.encryption.identity.IdentityState
 import io.element.android.libraries.matrix.api.notificationsettings.NotificationSettingsService
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.matrix.api.room.RoomMember
+import io.element.android.libraries.matrix.api.room.roomMembers
 import io.element.android.libraries.matrix.api.room.join.JoinRule
 import io.element.android.libraries.matrix.api.room.powerlevels.canEditRolesAndPermissions
 import io.element.android.libraries.matrix.api.room.powerlevels.permissionsAsState
@@ -124,7 +125,12 @@ class RoomDetailsPresenter(
         val canonicalAlias by remember { derivedStateOf { roomInfo.canonicalAlias } }
         val isEncrypted by remember { derivedStateOf { roomInfo.isEncrypted == true } }
         val dmMember by room.getDirectRoomMember(membersState)
-        val resolvedDmMember = dmMember
+        // A rejected invitation leaves a historical member. Profile navigation
+        // can use that identity without treating them as an active chat member.
+        val resolvedDmMember = dmMember ?: membersState.roomMembers()
+            ?.takeIf { isDm }
+            ?.filter { !it.isServiceMember && it.userId != client.sessionId }
+            ?.singleOrNull()
         val roomName = if (isDm && resolvedDmMember != null) {
             friendProfiles.privateDirectDisplayName(resolvedDmMember.userId, resolvedDmMember.displayName)
         } else if (isDm) {
@@ -135,8 +141,8 @@ class RoomDetailsPresenter(
         } else {
             matrixRoomName
         }
-        val roomMemberDetailsPresenter = roomMemberDetailsPresenter(dmMember?.userId)
-        val roomType = getRoomType(dmMember)
+        val roomMemberDetailsPresenter = roomMemberDetailsPresenter(resolvedDmMember?.userId)
+        val roomType = getRoomType(resolvedDmMember)
         val roomCallState = roomCallStatePresenter.present()
         val joinedMemberCount by remember { derivedStateOf { roomInfo.joinedMembersCount } }
 

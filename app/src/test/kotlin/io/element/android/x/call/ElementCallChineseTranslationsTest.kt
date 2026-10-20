@@ -16,6 +16,20 @@ import org.junit.Test
 
 class ElementCallChineseTranslationsTest {
     @Test
+    fun `app asset overlay retains call errors preferences and audio device labels`() {
+        val translations = Json.parseToJsonElement(findTranslationsFile().readText()).jsonObject
+        val errors = translations.getValue("error").jsonObject
+        assertThat(errors.getValue("rtc_admission_failed").jsonPrimitive.content).contains("重新拨号")
+        assertThat(errors.getValue("connection_lost").jsonPrimitive.content).isEqualTo("连接已断开")
+        val settings = translations.getValue("settings").jsonObject
+        assertThat(settings.getValue("devices").jsonObject.getValue("microphone").jsonPrimitive.content)
+            .isEqualTo("麦克风")
+        assertThat(settings.getValue("preferences_tab").jsonObject.getValue("reactions_show_label").jsonPrimitive.content)
+            .isEqualTo("显示回应")
+        assertThat(translations.getValue("login_auth_links").jsonPrimitive.content).doesNotContain(" Or ")
+    }
+
+    @Test
     fun `simplified Chinese call handset labels do not fall back to English`() {
         val translations = Json.parseToJsonElement(findTranslationsFile().readText()).jsonObject
 

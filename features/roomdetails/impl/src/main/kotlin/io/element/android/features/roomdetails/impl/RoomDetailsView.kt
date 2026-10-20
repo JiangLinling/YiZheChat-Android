@@ -167,7 +167,11 @@ private fun ChatSettings(
                     headlineContent = { Text(state.roomName, style = ElementTheme.typography.fontBodyLgMedium) },
                     supportingContent = {
                         Text(stringResource(
-                            if (state.isDirect) R.string.screen_room_details_view_profile else R.string.screen_room_details_group_info
+                            when {
+                                !state.isDirect -> R.string.screen_room_details_group_info
+                                otherMember == null -> R.string.screen_room_details_profile_unavailable
+                                else -> R.string.screen_room_details_view_profile
+                            }
                         ))
                     },
                     leadingContent = ListItemContent.Custom {

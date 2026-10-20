@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="screen_room_details_profile_unavailable">Their profile is unavailable. Return to contacts to find them.</string>
     <string name="screen_room_details_add_members">Add members</string>
     <string name="screen_room_details_starred_conversation">Starred conversation</string>
     <string name="screen_room_details_star_conversation">Star conversation</string>

@@ -127,6 +127,10 @@ class DefaultNotificationCreator(
     private val acceptInvitationActionFactory: AcceptInvitationActionFactory,
     private val rejectInvitationActionFactory: RejectInvitationActionFactory,
 ) : NotificationCreator {
+    private val displayApplicationName: String
+        get() = context.packageManager.getApplicationLabel(context.applicationInfo).toString()
+            .ifBlank { buildMeta.applicationName }
+
     /**
      * Create a notification for a Room.
      */
@@ -216,7 +220,7 @@ class DefaultNotificationCreator(
             .setWhen(lastMessageTimestamp)
             // MESSAGING_STYLE sets title and content for API 16 and above devices.
             .setStyle(presentationStyle)
-            .setContentTitle(if (previewHidden) latestEvent?.senderDisambiguatedDisplayName ?: buildMeta.applicationName else roomInfo.roomDisplayName)
+            .setContentTitle(if (previewHidden) latestEvent?.senderDisambiguatedDisplayName ?: displayApplicationName else roomInfo.roomDisplayName)
             .setContentText(latestEvent?.body)
             .configureWith(notificationAccountParams)
             .setAllowSystemGeneratedContextualActions(false)
@@ -288,7 +292,7 @@ class DefaultNotificationCreator(
         )
         return NotificationCompat.Builder(context, channelId)
             .setOnlyAlertOnce(true)
-            .setContentTitle((inviteNotifiableEvent.roomName ?: buildMeta.applicationName).annotateForDebug(5))
+            .setContentTitle((inviteNotifiableEvent.roomName ?: displayApplicationName).annotateForDebug(5))
             .setContentText(inviteNotifiableEvent.description.annotateForDebug(6))
             .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_ALL)
             .configureWith(notificationAccountParams)
@@ -331,7 +335,7 @@ class DefaultNotificationCreator(
         )
         return NotificationCompat.Builder(context, channelId)
             .setOnlyAlertOnce(true)
-            .setContentTitle(buildMeta.applicationName.annotateForDebug(7))
+            .setContentTitle(displayApplicationName.annotateForDebug(7))
             .setContentText(simpleNotifiableEvent.description.annotateForDebug(8))
             .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_ALL)
             .configureWith(notificationAccountParams)
@@ -373,7 +377,7 @@ class DefaultNotificationCreator(
         val counter = existingCounter + fallbackNotifiableEvents.size
         return NotificationCompat.Builder(context, channelId)
             .setOnlyAlertOnce(true)
-            .setContentTitle(buildMeta.applicationName.annotateForDebug(7))
+            .setContentTitle(displayApplicationName.annotateForDebug(7))
             .setContentText(
                 stringProvider.getQuantityString(R.plurals.notification_fallback_n_content, counter, counter)
                     .annotateForDebug(8)
@@ -438,7 +442,7 @@ class DefaultNotificationCreator(
     ): Notification {
         val intent = pendingIntentFactory.createTestPendingIntent()
         return NotificationCompat.Builder(context, notificationChannels.getChannelIdForTest())
-            .setContentTitle(buildMeta.applicationName)
+            .setContentTitle(displayApplicationName)
             .setContentText(stringProvider.getString(R.string.notification_test_push_notification_content))
             .setSmallIcon(CommonDrawables.ic_notification)
             .setColor(color)
