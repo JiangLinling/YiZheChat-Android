@@ -25,7 +25,8 @@ class LifecycleJournalDecoderCompatibilityTest {
 
     @Test
     fun `legacy receipts retain escaping quoted time unknown fields and last duplicate value`() {
-        val encoded = """{"operation":"original-receipt-0001","component":"ANDROID_SERVICE","phase":"CLIENT_APPLIED","result":"old","reference":"line\n\"quoted\"","occurredAt":"123456","extra":{"ignored":[1,true]},"result":"APPLIED"}"""
+        val encoded = """{"operation":"original-receipt-0001","component":"ANDROID_SERVICE","phase":"CLIENT_APPLIED",""" +
+            """"result":"old","reference":"line\n\"quoted\"","occurredAt":"123456","extra":{"ignored":[1,true]},"result":"APPLIED"}"""
         retained[RECEIPTS] = setOf(encoded)
 
         val fact = SharedPreferencesLifecycleOperationIdStore(context).pendingClientReceipts().single()
@@ -55,7 +56,11 @@ class LifecycleJournalDecoderCompatibilityTest {
 
     @Test
     fun `legacy pending draft restores exact subjects deadline and original escaped idempotency`() {
-        val encoded = """{"operation":"original-draft-0001","idempotency":"original-idempotency\n\"key\"","account":"${"a".repeat(64)}","device":"${"b".repeat(64)}","room":"${"c".repeat(64)}","deadline":"100000","installation":"installation-original-0001","extra":[{"ignored":true}]}"""
+        val encoded = """{"operation":"original-draft-0001","idempotency":"original-idempotency\n\"key\"","account":"${"a".repeat(
+            64
+        )}","device":"${"b".repeat(
+            64
+        )}","room":"${"c".repeat(64)}","deadline":"100000","installation":"installation-original-0001","extra":[{"ignored":true}]}"""
         retained[DRAFTS] = setOf(encoded)
 
         val entry = SharedPreferencesLifecycleOperationIdStore(context).pendingDraftStarts().single()
@@ -73,7 +78,8 @@ class LifecycleJournalDecoderCompatibilityTest {
 
     @Test
     fun `a malformed retained record fails the read and never removes the original batch`() {
-        val valid = """{"operation":"original-receipt-0001","component":"ANDROID_SERVICE","phase":"CLIENT_APPLIED","result":"APPLIED","reference":"original-reference","occurredAt":123456}"""
+        val valid = """{"operation":"original-receipt-0001","component":"ANDROID_SERVICE","phase":"CLIENT_APPLIED",""" +
+            """"result":"APPLIED","reference":"original-reference","occurredAt":123456}"""
         val invalid = valid.replace("\"occurredAt\":123456", "\"occurredAt\":{}")
         retained[RECEIPTS] = linkedSetOf(valid, invalid)
         retained[DRAFTS] = setOf("""{"operation":"missing-original-fields"}""")

@@ -5,13 +5,13 @@ package io.element.android.security.dataprotection.impl
 
 import com.google.common.truth.Truth.assertThat
 import io.element.android.security.dataprotection.api.LifecycleMediaObjectCleanup
-import io.element.android.security.dataprotection.api.LifecycleSubjectHashes
 import io.element.android.security.dataprotection.api.LifecycleMediaOutcome
 import io.element.android.security.dataprotection.api.LifecycleMediaReservation
 import io.element.android.security.dataprotection.api.LifecycleMediaResource
 import io.element.android.security.dataprotection.api.LifecycleMediaResourceType
 import io.element.android.security.dataprotection.api.LifecycleMediaRuntimeCleanup
 import io.element.android.security.dataprotection.api.LifecycleMediaSeal
+import io.element.android.security.dataprotection.api.LifecycleSubjectHashes
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.serialization.json.JsonObject
@@ -35,9 +35,17 @@ class MediaCleanupAcknowledgementTest {
         every { signingPublicKeyDerBase64 } returns Base64.getEncoder().encodeToString(key.public.encoded)
     }
     private val verifier = ManagementSignatureVerifier(configuration)
-    private val fact = LifecycleMediaObjectCleanup("original-operation-0001",
-        LifecycleSubjectHashes(installationId = "original-installation", accountIdHash = "a".repeat(64),
-            matrixDeviceIdHash = "b".repeat(64)), "e".repeat(64), 1234, 1235)
+    private val fact = LifecycleMediaObjectCleanup(
+        "original-operation-0001",
+        LifecycleSubjectHashes(
+            installationId = "original-installation",
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        ),
+        "e".repeat(64),
+        1234,
+        1235
+    )
     private val request = mediaCleanupRequest(fact)
     private val reference = "android-media-object-cleanup:v1:" + digest(verifier.canonicalJson(request))
     private fun payload() = buildJsonObject {
@@ -63,9 +71,13 @@ class MediaCleanupAcknowledgementTest {
     }
 
     @Test fun `valid signature for another fact is not permission to retire this fact`() {
-        val others = listOf(fact.copy(operationId = "another-operation-0001"),
-            fact.copy(confirmedAbsentAtEpochMillis = 9999), fact.copy(leaseQuiescentAtEpochMillis = 9999),
-            fact.copy(recordSha256 = "f".repeat(64)), fact.copy(subjects = fact.subjects.copy(roomIdHash = "c".repeat(64))))
+        val others = listOf(
+            fact.copy(operationId = "another-operation-0001"),
+            fact.copy(confirmedAbsentAtEpochMillis = 9999),
+            fact.copy(leaseQuiescentAtEpochMillis = 9999),
+            fact.copy(recordSha256 = "f".repeat(64)),
+            fact.copy(subjects = fact.subjects.copy(roomIdHash = "c".repeat(64)))
+        )
         for (other in others) {
             val response = signed(JsonObject(payload() + ("observation" to mediaCleanupRequest(other))))
             assertThat(runCatching { requireMediaCleanupAcknowledgement(request, response, verifier) }.isFailure).isTrue()
@@ -73,9 +85,12 @@ class MediaCleanupAcknowledgementTest {
     }
 
     @Test fun `signed wrong acknowledgement purpose revision reference or commit time is rejected`() {
-        val changes = listOf("purpose" to JsonPrimitive("LIFECYCLE_SUCCESS"), "schema_version" to JsonPrimitive(2),
+        val changes = listOf(
+            "purpose" to JsonPrimitive("LIFECYCLE_SUCCESS"),
+            "schema_version" to JsonPrimitive(2),
             "receipt_reference" to JsonPrimitive("android-media-object-cleanup:v1:" + "f".repeat(64)),
-            "accepted_at_ms" to JsonPrimitive(0))
+            "accepted_at_ms" to JsonPrimitive(0)
+        )
         for (change in changes) {
             assertThat(runCatching { requireMediaCleanupAcknowledgement(request, signed(JsonObject(payload() + change)), verifier) }.isFailure).isTrue()
         }
@@ -83,19 +98,28 @@ class MediaCleanupAcknowledgementTest {
 
     @Test fun `unsigned tampered or wrong authority response cannot retire an object`() {
         val response = signed(payload())
-        for (invalid in listOf(payload(), JsonObject(response + ("accepted_at_ms" to JsonPrimitive(9999))),
-            signed(JsonObject(payload() + ("signing_key_id" to JsonPrimitive("another-authority")))))) {
+        for (invalid in listOf(
+                payload(),
+                JsonObject(response + ("accepted_at_ms" to JsonPrimitive(9999))),
+            signed(JsonObject(payload() + ("signing_key_id" to JsonPrimitive("another-authority"))))
+            )) {
             assertThat(runCatching { requireMediaCleanupAcknowledgement(request, invalid, verifier) }.isFailure).isTrue()
         }
     }
 
     @Test fun `resource admission seal and runtime acknowledgements require exact signed original facts`() {
-        val reservation = LifecycleMediaReservation(fact.operationId, fact.subjects,
-            listOf(LifecycleMediaResource(LifecycleMediaResourceType.ANDROID_MEDIA_RUNTIME, fact.recordSha256)))
+        val reservation = LifecycleMediaReservation(
+            fact.operationId,
+            fact.subjects,
+            listOf(LifecycleMediaResource(LifecycleMediaResourceType.ANDROID_MEDIA_RUNTIME, fact.recordSha256))
+        )
         val seal = LifecycleMediaSeal(reservation, "f".repeat(64), 5000, LifecycleMediaOutcome.SUCCEEDED)
         val runtime = LifecycleMediaRuntimeCleanup(fact.operationId, fact.subjects, fact.recordSha256, 5001, true, true, true)
-        val cases = listOf(mediaResourceRequest(reservation) to "MEDIA_RESOURCE_RESERVATION_ACK",
-            mediaSealRequest(seal) to "MEDIA_RESOURCE_SEAL_ACK", mediaRuntimeRequest(runtime) to "ANDROID_MEDIA_RUNTIME_CLEANUP_ACK")
+        val cases = listOf(
+            mediaResourceRequest(reservation) to "MEDIA_RESOURCE_RESERVATION_ACK",
+            mediaSealRequest(seal) to "MEDIA_RESOURCE_SEAL_ACK",
+            mediaRuntimeRequest(runtime) to "ANDROID_MEDIA_RUNTIME_CLEANUP_ACK"
+        )
         for ((original, purpose) in cases) {
             val field = if (purpose == "ANDROID_MEDIA_RUNTIME_CLEANUP_ACK") "observation" else "request"
             val hash = digest(verifier.canonicalJson(original))

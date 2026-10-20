@@ -29,8 +29,11 @@ class LifecycleOperationProjectionsTest {
             assertThat(awaitItem()).isEqualTo(original)
             projections.put(original)
             expectNoEvents()
-            projections.put(original.copy(status = LifecycleOperationStatus.SUCCEEDED, updatedAtEpochMillis = 3_000,
-                terminalReceiptId = "test-terminal-receipt-original"))
+            projections.put(original.copy(
+                status = LifecycleOperationStatus.SUCCEEDED,
+                updatedAtEpochMillis = 3_000,
+                terminalReceiptId = "test-terminal-receipt-original"
+            ))
             assertThat(awaitItem()?.status).isEqualTo(LifecycleOperationStatus.SUCCEEDED)
             assertThat(projections.state.value.size).isEqualTo(2_001)
         }

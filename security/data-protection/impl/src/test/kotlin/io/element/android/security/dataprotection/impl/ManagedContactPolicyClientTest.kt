@@ -4,7 +4,13 @@ import com.google.common.truth.Truth.assertThat
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import org.junit.Test
 import java.security.KeyPairGenerator
 import java.security.MessageDigest
@@ -42,13 +48,20 @@ class ManagedContactPolicyClientTest {
                 if (action == "change") put("operation_id", "contact-${if (damage == "operation") "d".repeat(64) else "c".repeat(64)}")
             }
         }
-        val signature = Signature.getInstance("SHA256withECDSA").run { initSign(key.private); update(verifier.canonicalJson(payload)); sign() }
+        val signature = Signature.getInstance("SHA256withECDSA").run {
+            initSign(key.private)
+            update(verifier.canonicalJson(payload))
+            sign()
+        }
         return JsonObject(payload + ("signature_b64" to JsonPrimitive(Base64.getEncoder().encodeToString(signature))))
     }
 
     @Test fun `change carries the freshly signed prior revision`() = runTest {
         val requests = mutableListOf<JsonObject>()
-        val client = ManagedContactPolicyClient(verifier, { "test-installation" }) { query -> requests.add(query); signed(query) }
+        val client = ManagedContactPolicyClient(verifier, { "test-installation" }) { query ->
+            requests.add(query)
+            signed(query)
+        }
         client.setBlocked("a".repeat(64), "b".repeat(64), "@peer:test", true)
         assertThat(requests.map { it.getValue("action").jsonPrimitive.content }).containsExactly("preview", "change").inOrder()
         assertThat(requests.last().getValue("revision").jsonPrimitive.content).isEqualTo("c".repeat(64))

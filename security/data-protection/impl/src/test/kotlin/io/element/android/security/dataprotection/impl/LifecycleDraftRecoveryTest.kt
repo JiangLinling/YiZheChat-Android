@@ -25,8 +25,8 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import org.junit.Test
 
 class LifecycleDraftRecoveryTest {
@@ -81,7 +81,9 @@ class LifecycleDraftRecoveryTest {
     fun `fact commit failure retains unresolved original and never repeats the product action`() = runTest {
         val base = MemoryStore()
         val store = object : LifecycleOperationIdStore by base {
-            override fun savePendingClientReceipts(receipts: List<LifecycleClientReceipt>) { throw java.io.IOException("TEST_FACT_COMMIT_FAILED") }
+            override fun savePendingClientReceipts(receipts: List<LifecycleClientReceipt>) {
+                throw java.io.IOException("TEST_FACT_COMMIT_FAILED")
+            }
         }
         val coordinator = DefaultAppOperationalStateCoordinator(service(), store, draftInstallationProvider = { INSTALLATION })
         val request = request()
@@ -135,12 +137,15 @@ class LifecycleDraftRecoveryTest {
     fun `authority response cannot change original account room installation identity or deadline`() = runTest {
         val request = request()
         val actual = operation(request)
-        val foreign = listOf(actual.copy(operationId = "other-operation-original-0001"), actual.copy(deadlineEpochMillis = request.deadlineEpochMillis + 1),
+        val foreign = listOf(
+            actual.copy(operationId = "other-operation-original-0001"),
+            actual.copy(deadlineEpochMillis = request.deadlineEpochMillis + 1),
             actual.copy(idempotencyKey = request.idempotencyKey),
             actual.copy(idempotencyKey = "d".repeat(64)),
             actual.copy(subjects = actual.subjects.copy(accountIdHash = "d".repeat(64))),
             actual.copy(subjects = actual.subjects.copy(roomIdHash = "d".repeat(64))),
-            actual.copy(subjects = actual.subjects.copy(installationId = "other-installation-0001")))
+            actual.copy(subjects = actual.subjects.copy(installationId = "other-installation-0001"))
+        )
         for (response in foreign) {
             val store = prepared(request)
             val service = service()
@@ -205,33 +210,59 @@ class LifecycleDraftRecoveryTest {
         coVerify(exactly = 2) { service.recordLifecycleClientReceipt(facts.first { it.component == LifecycleComponent.ANDROID_SERVICE }) }
     }
 
-    private fun request() = lifecycleOperationRequest(FullAppLifecycleId.LC_14, "draft_change", ACCOUNT, DEVICE, ROOM,
-        operationId = "local-draft-original-0001")
+    private fun request() = lifecycleOperationRequest(
+        FullAppLifecycleId.LC_14,
+        "draft_change",
+        ACCOUNT,
+        DEVICE,
+        ROOM,
+        operationId = "local-draft-original-0001"
+    )
     private fun operation(request: LifecycleOperationRequest) = LifecycleOperation(
-        operationId = request.operationId, lifecycleId = request.lifecycleId,
+        operationId = request.operationId,
+        lifecycleId = request.lifecycleId,
         idempotencyKey = java.security.MessageDigest.getInstance("SHA-256").digest(request.idempotencyKey.encodeToByteArray())
             .joinToString("") { "%02x".format(it.toInt() and 0xff) },
         subjects = LifecycleSubjectHashes(ACCOUNT, INSTALLATION, DEVICE, ROOM),
-        status = LifecycleOperationStatus.RUNNING, currentPhase = LifecyclePhase.INTENT_PERSISTED,
-        deadlineEpochMillis = request.deadlineEpochMillis, createdAtEpochMillis = System.currentTimeMillis(), updatedAtEpochMillis = System.currentTimeMillis(),
+        status = LifecycleOperationStatus.RUNNING,
+        currentPhase = LifecyclePhase.INTENT_PERSISTED,
+        deadlineEpochMillis = request.deadlineEpochMillis,
+        createdAtEpochMillis = System.currentTimeMillis(),
+        updatedAtEpochMillis = System.currentTimeMillis(),
     )
     private fun snapshot(): AppOperationalSnapshot {
         val now = System.currentTimeMillis()
-        return AppOperationalSnapshot(accountIdHash = ACCOUNT, installationId = INSTALLATION, matrixDeviceIdHash = DEVICE,
-            issuedAtEpochMillis = now, expiresAtEpochMillis = now + 60_000, overallStatus = AppOperationalStatus.READY,
+        return AppOperationalSnapshot(
+            accountIdHash = ACCOUNT,
+            installationId = INSTALLATION,
+            matrixDeviceIdHash = DEVICE,
+            issuedAtEpochMillis = now,
+            expiresAtEpochMillis = now + 60_000,
+            overallStatus = AppOperationalStatus.READY,
             components = REQUIRED_OPERATIONAL_COMPONENTS.associateWith {
                 ComponentOperationalState(AppOperationalStatus.READY, it, "test", now, now + 60_000, receiptReference = "test:$it")
-            }, signingKeyId = "test-signing-key", signatureBase64 = "test-signature-value")
+            },
+            signingKeyId = "test-signing-key",
+            signatureBase64 = "test-signature-value"
+        )
     }
     private fun service() = mockk<ManagementControlService>().also { service ->
         coEvery { service.appOperationalSnapshot(any(), any()) } answers { snapshot() }
     }
     private fun prepared(request: LifecycleOperationRequest, occurredAt: Long = System.currentTimeMillis()) = MemoryStore().apply {
-        savePendingDraftState(listOf(PendingLifecycleDraftStart(request, INSTALLATION)),
+        savePendingDraftState(
+            listOf(PendingLifecycleDraftStart(request, INSTALLATION)),
             listOf(LifecycleComponent.ANDROID_SERVICE, LifecycleComponent.ANDROID_FRONTEND).map { component ->
-                LifecycleClientReceipt(request.operationId, component, LifecyclePhase.CLIENT_APPLIED, "${component.name}_APPLIED",
-                    "test:${request.operationId}:${component.name}", occurredAt)
-            })
+                LifecycleClientReceipt(
+                    request.operationId,
+                    component,
+                    LifecyclePhase.CLIENT_APPLIED,
+                    "${component.name}_APPLIED",
+                    "test:${request.operationId}:${component.name}",
+                    occurredAt
+                )
+            }
+        )
     }
     private class MemoryStore : LifecycleOperationIdStore {
         private var starts = emptyList<PendingLifecycleDraftStart>()
@@ -240,7 +271,9 @@ class LifecycleDraftRecoveryTest {
         override fun remember(operation: LifecycleOperation) = Unit
         override fun pendingDraftStarts() = starts.toList()
         override fun pendingClientReceipts() = receipts.toList()
-        override fun savePendingClientReceipts(receipts: List<LifecycleClientReceipt>) { this.receipts = receipts.toList() }
+        override fun savePendingClientReceipts(receipts: List<LifecycleClientReceipt>) {
+            this.receipts = receipts.toList()
+        }
         override fun savePendingDraftState(starts: List<PendingLifecycleDraftStart>, receipts: List<LifecycleClientReceipt>) {
             this.starts = starts.toList()
             this.receipts = receipts.toList()

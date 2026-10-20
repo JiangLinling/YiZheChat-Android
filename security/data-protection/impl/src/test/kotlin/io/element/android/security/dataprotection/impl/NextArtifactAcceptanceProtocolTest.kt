@@ -91,9 +91,12 @@ class NextArtifactAcceptanceProtocolTest {
     fun `invalid local package digest build nonce and version cannot form a claim`() {
         val f = Fixture()
         listOf(
-            f.claim.copy(packageName = "invalid/package"), f.claim.copy(appVersionCode = 0),
-            f.claim.copy(appArtifactSha256 = "A".repeat(64)), f.claim.copy(signingCertificateSha256 = "bad"),
-            f.claim.copy(buildId = "bad build"), f.claim.copy(claimNonce = ""),
+            f.claim.copy(packageName = "invalid/package"),
+            f.claim.copy(appVersionCode = 0),
+            f.claim.copy(appArtifactSha256 = "A".repeat(64)),
+            f.claim.copy(signingCertificateSha256 = "bad"),
+            f.claim.copy(buildId = "bad build"),
+            f.claim.copy(claimNonce = ""),
         ).forEach { claim -> reject { claim.payload() } }
         reject { f.verify(f.envelope(JsonObject(f.payload() + ("receiptId" to JsonPrimitive("artifact-acceptance-" + "0".repeat(32)))))) }
     }
@@ -125,8 +128,17 @@ class NextArtifactAcceptanceProtocolTest {
         validateNextPolicyConsumedAcknowledgement(payload, ack, f.verifier)
         ack.keys.forEach { key -> reject { validateNextPolicyConsumedAcknowledgement(payload, JsonObject(ack + (key to JsonPrimitive("other"))), f.verifier) } }
         reject { validateNextPolicyConsumedAcknowledgement(payload, JsonObject(ack + ("extra" to JsonPrimitive(true))), f.verifier) }
-        val wholeEnvelopeDigest = f.digest(f.verifier.canonicalJson(buildJsonObject { put("contract", "next.policy-applied-receipt.v1"); put("payload", payload) }))
-        reject { validateNextPolicyConsumedAcknowledgement(payload, JsonObject(ack + ("receiptDigestSha256" to JsonPrimitive(wholeEnvelopeDigest))), f.verifier) }
+        val wholeEnvelopeDigest = f.digest(f.verifier.canonicalJson(buildJsonObject {
+            put("contract", "next.policy-applied-receipt.v1")
+            put("payload", payload)
+        }))
+        reject {
+            validateNextPolicyConsumedAcknowledgement(
+            payload,
+            JsonObject(ack + ("receiptDigestSha256" to JsonPrimitive(wholeEnvelopeDigest))),
+            f.verifier
+        )
+        }
     }
 
     @Test
@@ -136,13 +148,18 @@ class NextArtifactAcceptanceProtocolTest {
             val original = f.receiptPayload(result)
             val ack = f.ack(original)
             repeat(2) { validateNextPolicyConsumedAcknowledgement(original, ack, f.verifier) }
-            if (result != "APPLIED") reject { validateNextPolicyConsumedAcknowledgement(original, JsonObject(ack + ("projectedState" to JsonPrimitive("APPLIED"))), f.verifier) }
+            if (result !=
+                "APPLIED") {
+                    reject { validateNextPolicyConsumedAcknowledgement(original, JsonObject(ack + ("projectedState" to JsonPrimitive("APPLIED"))), f.verifier) }
+                }
             val later = JsonObject(original + ("trustedServerTimeMs" to JsonPrimitive(NOW + 1)))
             reject { validateNextPolicyConsumedAcknowledgement(later, ack, f.verifier) }
         }
     }
 
-    private fun reject(block: () -> Unit) { assertThrows(IllegalStateException::class.java, block) }
+    private fun reject(block: () -> Unit) {
+        assertThrows(IllegalStateException::class.java, block)
+    }
 
     private class Fixture {
         val pair = KeyPairGenerator.getInstance("EC").apply { initialize(256) }.generateKeyPair()
@@ -152,37 +169,73 @@ class NextArtifactAcceptanceProtocolTest {
             every { signingKeyId } returns keyDigest.take(16)
             every { signingPublicKeyDerBase64 } returns Base64.getEncoder().encodeToString(pair.public.encoded)
         })
-        val claim = NextInstalledArtifactClaim("artifact-op-1", "installation-1", "com.yizhe.chat.next.debug", 123, "a".repeat(64), "b".repeat(64), "build-1", "claim-nonce-1")
+        val claim =
+            NextInstalledArtifactClaim(
+                "artifact-op-1",
+                "installation-1",
+                "com.yizhe.chat.next.debug",
+                123,
+                "a".repeat(64),
+                "b".repeat(64),
+                "build-1",
+                "claim-nonce-1"
+            )
         val dak = NextCurrentArtifactDak(claim.installationId, "c".repeat(64), 7)
         val raw get() = verifier.canonicalJson(claim.payload())
         fun payload(raw: ByteArray = this.raw, accepted: Long = NOW, expiry: Long = NOW + 60_000): JsonObject {
             val digest = digest(raw)
-            val identity = buildJsonObject { put("claim", claim.payload()); put("requestDigestSha256", digest); put("acceptedAtMs", accepted) }
+            val identity = buildJsonObject {
+                put("claim", claim.payload())
+                put("requestDigestSha256", digest)
+                put("acceptedAtMs", accepted)
+            }
             return JsonObject(claim.payload() + buildJsonObject {
                 put("receiptId", "artifact-acceptance-" + digest(verifier.canonicalJson(identity)).take(32))
-                put("devicePublicKeySha256", dak.devicePublicKeySha256); put("attestationVersion", dak.attestationVersion)
-                put("claimRequestDigestSha256", digest); put("acceptedAtMs", accepted); put("expiresAtMs", expiry)
+                put("devicePublicKeySha256", dak.devicePublicKeySha256)
+                put("attestationVersion", dak.attestationVersion)
+                put("claimRequestDigestSha256", digest)
+                put("acceptedAtMs", accepted)
+                put("expiresAtMs", expiry)
                 put("claimProvenance", "CURRENT_DAK_AUTHENTICATED_DEVICE_CLAIM_MATCHED_TO_PUBLISHED_ARTIFACT_NOT_SERVER_INSTALL_INSPECTION")
             })
         }
         fun envelope(payload: JsonObject = payload()): JsonObject {
-            val signature = Signature.getInstance("SHA256withECDSA").run { initSign(pair.private); update(verifier.canonicalJson(payload)); sign() }
+            val signature = Signature.getInstance("SHA256withECDSA").run {
+                initSign(pair.private)
+                update(verifier.canonicalJson(payload))
+                sign()
+            }
             return buildJsonObject {
-                put("contract", "next.installed-artifact-acceptance.v1"); put("payload", payload)
-                put("serverKeyId", keyDigest.take(16)); put("serverSignatureAlgorithm", "SHA256withECDSA")
+                put("contract", "next.installed-artifact-acceptance.v1")
+                put("payload", payload)
+                put("serverKeyId", keyDigest.take(16))
+                put("serverSignatureAlgorithm", "SHA256withECDSA")
                 put("serverSignatureB64", Base64.getEncoder().encodeToString(signature))
             }
         }
         fun verify(envelope: JsonObject = envelope(), raw: ByteArray = this.raw, dak: NextCurrentArtifactDak = this.dak, monotonic: Long = MONOTONIC) =
             VerifiedNextArtifactAcceptance.verify(envelope, claim, raw, dak, NOW, monotonic, verifier)
-        fun request(accepted: VerifiedNextArtifactAcceptance, claim: NextInstalledArtifactClaim = this.claim, dak: NextCurrentArtifactDak = this.dak, monotonic: Long = MONOTONIC + 10, trusted: Long = NOW + 10) =
+        fun request(
+            accepted: VerifiedNextArtifactAcceptance,
+            claim: NextInstalledArtifactClaim = this.claim,
+            dak: NextCurrentArtifactDak = this.dak,
+            monotonic: Long = MONOTONIC + 10,
+            trusted: Long = NOW + 10,
+        ) =
             accepted.challengeRequest("policy-op-1", "d".repeat(64), "boot-1", claim, dak, monotonic, trusted)
-        fun receiptPayload(result: String) = buildJsonObject { put("challengeId", "challenge-1"); put("result", result); put("trustedServerTimeMs", NOW) }
+        fun receiptPayload(result: String) = buildJsonObject {
+            put("challengeId", "challenge-1")
+            put("result", result)
+            put("trustedServerTimeMs", NOW)
+        }
         fun ack(payload: JsonObject): JsonObject {
             val digest = digest(verifier.canonicalJson(payload))
             return buildJsonObject {
-                put("status", "CONSUMED"); put("challengeId", payload.getValue("challengeId"))
-                put("receiptId", "policy-receipt-" + digest.take(32)); put("receiptDigestSha256", digest); put("projectedState", payload.getValue("result"))
+                put("status", "CONSUMED")
+                put("challengeId", payload.getValue("challengeId"))
+                put("receiptId", "policy-receipt-" + digest.take(32))
+                put("receiptDigestSha256", digest)
+                put("projectedState", payload.getValue("result"))
             }
         }
         fun digest(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }

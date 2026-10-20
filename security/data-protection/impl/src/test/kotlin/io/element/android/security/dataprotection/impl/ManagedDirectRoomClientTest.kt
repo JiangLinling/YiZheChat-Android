@@ -4,7 +4,14 @@ import com.google.common.truth.Truth.assertThat
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import org.junit.Test
 import java.security.KeyPairGenerator
 import java.security.MessageDigest
@@ -26,20 +33,39 @@ class ManagedDirectRoomClientTest {
             put("status", if (damage == "status") "FRIEND" else "INVITED")
             put("operation_id", "direct-" + "c".repeat(64))
             put("creation_operation_id", "dmroom-" + (if (damage == "child") "d" else "c").repeat(64))
-            putJsonArray("client_operations") { add("direct-" + (if (damage == "operations") "d" else "c").repeat(64)); add("dmroom-" + "c".repeat(64)) }
+            putJsonArray("client_operations") {
+                add("direct-" + (if (damage == "operations") "d" else "c").repeat(64))
+                add("dmroom-" + "c".repeat(64))
+            }
         }
         val payload = buildJsonObject {
             put("schema_version", 1)
             put("generation", "e".repeat(64))
-            put("purpose", if (damage == "purpose") "FRIENDSHIP_REMOVAL_BEGIN" else "MANAGED_DIRECT_ROOM_${query.getValue("action").jsonPrimitive.content.uppercase()}")
+            put("purpose", if (damage ==
+                "purpose") {
+                    "FRIENDSHIP_REMOVAL_BEGIN"
+                } else {
+                    "MANAGED_DIRECT_ROOM_${query.getValue("action").jsonPrimitive.content.uppercase()}"
+                })
             put("installation_id", if (damage == "installation") "other" else "test-installation")
             put("query", if (damage == "nonce") JsonObject(query + ("request_nonce" to JsonPrimitive("f".repeat(64)))) else query)
             put("result", if (damage == "null") JsonNull else result)
             put("issued_at_ms", if (damage == "future") now + 60000 else now - 1000)
-            put("expires_at_ms", when (damage) { "expired" -> now - 1; "duration" -> now + 60000; else -> now + 10000 })
+            put(
+                "expires_at_ms",
+                when (damage) {
+                "expired" -> now - 1
+                "duration" -> now + 60000
+                else -> now + 10000
+            }
+            )
             put("signing_key_id", keyId)
         }
-        val signature = Signature.getInstance("SHA256withECDSA").run { initSign(key.private); update(verifier.canonicalJson(payload)); sign() }
+        val signature = Signature.getInstance("SHA256withECDSA").run {
+            initSign(key.private)
+            update(verifier.canonicalJson(payload))
+            sign()
+        }
         return JsonObject(payload + ("signature_b64" to JsonPrimitive(Base64.getEncoder().encodeToString(signature))))
     }
     @Test fun `fresh signed invite remains pending and binds parent and child`() = runTest {
