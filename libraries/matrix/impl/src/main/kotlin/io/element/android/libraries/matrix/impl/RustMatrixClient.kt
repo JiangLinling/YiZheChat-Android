@@ -591,13 +591,21 @@ class RustMatrixClient(
 
     override suspend fun ignoreUser(userId: UserId): Result<Unit> = withContext(sessionDispatcher) {
         runCatchingExceptions {
-            innerClient.ignoreUser(userId.value)
+            if (managementControlService?.supportsManagedRoomCreation == true) {
+                managementControlService.setContactBlocked(hashAccountId(sessionId.value), hashAccountId(deviceId.value), userId.value, true)
+            } else {
+                innerClient.ignoreUser(userId.value)
+            }
         }
     }
 
     override suspend fun unignoreUser(userId: UserId): Result<Unit> = withContext(sessionDispatcher) {
         runCatchingExceptions {
-            innerClient.unignoreUser(userId.value)
+            if (managementControlService?.supportsManagedRoomCreation == true) {
+                managementControlService.setContactBlocked(hashAccountId(sessionId.value), hashAccountId(deviceId.value), userId.value, false)
+            } else {
+                innerClient.unignoreUser(userId.value)
+            }
         }
     }
 
@@ -674,7 +682,7 @@ class RustMatrixClient(
     override suspend fun getProfile(userId: UserId): Result<MatrixUser> = withContext(sessionDispatcher) {
         runCatchingExceptions {
             innerClient.getProfile(userId.value).map()
-        }
+        }.mapFailure { it.mapClientException() }
     }
 
     override suspend fun getUserProfile(): Result<MatrixUser> = getProfile(sessionId)

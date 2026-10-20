@@ -28,9 +28,6 @@ import com.bumble.appyx.core.plugin.Plugin
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedInject
 import io.element.android.annotations.ContributesNode
-import io.element.android.compound.theme.ElementTheme
-import io.element.android.libraries.androidutils.browser.openUrlInChromeCustomTab
-import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.di.SessionScope
 import io.element.android.security.dataprotection.api.PreparedAppUpdate
 
@@ -43,16 +40,6 @@ class AboutNode(
 ) : Node(buildContext, plugins = plugins) {
     interface Callback : Plugin {
         fun navigateToOssLicenses()
-    }
-
-    private val callback: Callback = callback()
-
-    private fun onElementLegalClick(
-        activity: Activity,
-        darkTheme: Boolean,
-        elementLegal: ElementLegal,
-    ) {
-        activity.openUrlInChromeCustomTab(null, darkTheme, elementLegal.url)
     }
 
     private fun installUpdate(activity: Activity, prepared: PreparedAppUpdate): Boolean {
@@ -77,26 +64,34 @@ class AboutNode(
     @Composable
     override fun View(modifier: Modifier) {
         val activity = requireNotNull(LocalActivity.current)
-        val isDark = ElementTheme.isLightTheme.not()
         val state = presenter.present()
         val preparedUpdate = state.preparedUpdate.dataOrNull()
         var installRequested by rememberSaveable { mutableStateOf(false) }
+        var installPermissionOpened by rememberSaveable { mutableStateOf(false) }
         LifecycleResumeEffect(preparedUpdate?.apkFile?.absolutePath, installRequested) {
-            // Returning from the Android "install unknown apps" permission screen must
-            // retry only after the user explicitly requested installation.
-            if (installRequested && preparedUpdate != null && installUpdate(activity, preparedUpdate)) {
-                installRequested = false
+            if (installRequested && preparedUpdate != null) {
+                val allowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || activity.packageManager.canRequestPackageInstalls()
+                if (allowed) {
+                    installRequested = false
+                    installUpdate(activity, preparedUpdate)
+                } else if (!installPermissionOpened) {
+                    // One permission visit per explicit install tap. A denied/cancelled
+                    // return must leave About usable instead of reopening settings.
+                    installPermissionOpened = true
+                    installUpdate(activity, preparedUpdate)
+                } else {
+                    installRequested = false
+                }
             }
             onPauseOrDispose { }
         }
         AboutView(
             state = state,
             onBackClick = ::navigateUp,
-            onElementLegalClick = { elementLegal ->
-                onElementLegalClick(activity, isDark, elementLegal)
+            onInstallUpdate = {
+                installPermissionOpened = false
+                installRequested = true
             },
-            onOpenSourceLicensesClick = callback::navigateToOssLicenses,
-            onInstallUpdate = { installRequested = true },
             modifier = modifier
         )
     }

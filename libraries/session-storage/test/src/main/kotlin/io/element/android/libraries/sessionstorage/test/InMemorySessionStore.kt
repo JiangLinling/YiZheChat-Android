@@ -49,9 +49,9 @@ class InMemorySessionStore(
 
     override suspend fun updateData(sessionData: SessionData) {
         val currentList = sessionDataListFlow.value.toMutableList()
-        val index = currentList.indexOfFirst { it.userId == sessionData.userId }
+        val index = currentList.indexOfFirst { it.userId == sessionData.userId && it.deviceId == sessionData.deviceId }
         if (index != -1) {
-            currentList[index] = sessionData
+            currentList[index] = sessionData.copy(isTokenValid = sessionData.isTokenValid && currentList[index].isTokenValid)
             sessionDataListFlow.value = currentList
         }
     }
@@ -82,5 +82,17 @@ class InMemorySessionStore(
 
     override suspend fun removeSession(sessionId: String) {
         sessionDataListFlow.value = sessionDataListFlow.value.filter { it.userId != sessionId }
+    }
+
+    override suspend fun removeSessionIfPathsMatch(sessionId: String, sessionPath: String, cachePath: String) {
+        sessionDataListFlow.value = sessionDataListFlow.value.filterNot {
+            it.userId == sessionId && it.sessionPath == sessionPath && it.cachePath == cachePath
+        }
+    }
+
+    override suspend fun invalidateSessionIfDeviceMatches(sessionId: String, deviceId: String) {
+        sessionDataListFlow.value = sessionDataListFlow.value.map {
+            if (it.userId == sessionId && it.deviceId == deviceId) it.copy(isTokenValid = false) else it
+        }
     }
 }

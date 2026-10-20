@@ -27,6 +27,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -40,6 +41,7 @@ class DefaultElementCallEntryPointTest {
     fun `startCall - starts ElementCallActivity setup with the needed extras`() = runTest {
         val entryPoint = createEntryPoint()
         entryPoint.startCall(CallData(A_SESSION_ID, A_ROOM_ID, isAudioCall = false))
+        runCurrent()
 
         val expectedIntent = Intent(InstrumentationRegistry.getInstrumentation().targetContext, ElementCallActivity::class.java)
         val intent = shadowOf(RuntimeEnvironment.getApplication()).nextStartedActivity
@@ -113,5 +115,6 @@ class DefaultElementCallEntryPointTest {
         context = InstrumentationRegistry.getInstrumentation().targetContext,
         activeCallManager = activeCallManager,
         dataProtectionPolicyProvider = FakeDataProtectionPolicyProvider(),
+        coroutineScope = backgroundScope,
     )
 }

@@ -9,6 +9,7 @@
 package io.element.android.features.rageshake.impl.bugreport
 
 import android.content.res.Configuration
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,121 +77,153 @@ fun BugReportView(
     modifier: Modifier = Modifier,
 ) {
     val eventSink = state.eventSink
+    var showDiagnostics by rememberSaveable { mutableStateOf(false) }
+    val back = { if (showDiagnostics) showDiagnostics = false else onBackClick() }
+    BackHandler(enabled = showDiagnostics, onBack = back)
 
     Box(modifier = modifier) {
         PreferencePage(
-            title = stringResource(id = CommonStrings.common_report_a_problem),
-            onBackClick = onBackClick,
+            title = stringResource(
+                if (showDiagnostics) R.string.screen_bug_report_diagnostics else CommonStrings.common_report_a_problem
+            ),
+            onBackClick = back,
         ) {
             val keyboardController = LocalSoftwareKeyboardController.current
             val isFormEnabled = state.sending !is AsyncAction.Loading
             var descriptionFieldState by textFieldState(stateValue = state.formState.description)
 
-            PreferenceRow {
-                Text(
-                    text = stringResource(R.string.screen_bug_report_intro),
-                    style = ElementTheme.typography.fontBodyMdRegular,
-                    color = ElementTheme.colors.textSecondary,
-                    modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
-                )
-            }
-            PreferenceRow {
-                TextField(
-                    value = descriptionFieldState,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .onTabOrEnterKeyFocusNext(LocalFocusManager.current),
-                    enabled = isFormEnabled,
-                    placeholder = stringResource(id = R.string.screen_bug_report_editor_placeholder),
-                    onValueChange = {
-                        descriptionFieldState = it
-                        eventSink(BugReportEvents.SetDescription(it))
-                    },
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.Sentences,
-                        keyboardType = KeyboardType.Text,
-                        imeAction = ImeAction.Next,
-                    ),
-                    keyboardActions = KeyboardActions(onNext = { keyboardController?.hide() }),
-                    minLines = 4,
-                    validity = if (state.isDescriptionInError) TextFieldValidity.Invalid else TextFieldValidity.None,
-                )
-            }
-
-            SectionTitle(stringResource(R.string.screen_bug_report_attachments_title))
-            PreferenceRow {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        text = stringResource(R.string.screen_bug_report_add_media),
-                        onClick = onAddAttachments,
-                        enabled = state.canAddAttachments,
-                        leadingIcon = IconSource.Vector(CompoundIcons.Attachment()),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+            if (!showDiagnostics) {
+                PreferenceRow {
                     Text(
-                        text = stringResource(
-                            R.string.screen_bug_report_attachments_hint,
-                            state.attachments.size,
-                            MAX_BUG_REPORT_MEDIA_COUNT,
-                        ),
-                        style = ElementTheme.typography.fontBodySmRegular,
+                        text = stringResource(R.string.screen_bug_report_intro),
+                        style = ElementTheme.typography.fontBodyMdRegular,
                         color = ElementTheme.colors.textSecondary,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
                     )
-                    if (state.attachmentNotice == BugReportAttachmentNotice.SelectionTrimmed) {
-                        Text(
-                            text = stringResource(R.string.screen_bug_report_attachment_selection_trimmed),
-                            style = ElementTheme.typography.fontBodySmRegular,
-                            color = ElementTheme.colors.textCriticalPrimary,
+                }
+                PreferenceRow {
+                    TextField(
+                        value = descriptionFieldState,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onTabOrEnterKeyFocusNext(LocalFocusManager.current),
+                        enabled = isFormEnabled,
+                        placeholder = stringResource(id = R.string.screen_bug_report_editor_placeholder),
+                        onValueChange = {
+                            descriptionFieldState = it
+                            eventSink(BugReportEvents.SetDescription(it))
+                        },
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Sentences,
+                            keyboardType = KeyboardType.Text,
+                            imeAction = ImeAction.Next,
+                        ),
+                        keyboardActions = KeyboardActions(onNext = { keyboardController?.hide() }),
+                        minLines = 4,
+                        validity = if (state.isDescriptionInError) TextFieldValidity.Invalid else TextFieldValidity.None,
+                    )
+                }
+
+                SectionTitle(stringResource(R.string.screen_bug_report_attachments_title))
+                PreferenceRow {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            text = stringResource(R.string.screen_bug_report_add_media),
+                            onClick = onAddAttachments,
+                            enabled = state.canAddAttachments,
+                            leadingIcon = IconSource.Vector(CompoundIcons.Attachment()),
+                            modifier = Modifier.fillMaxWidth(),
                         )
+                        Text(
+                            text = stringResource(
+                                R.string.screen_bug_report_attachments_hint,
+                                state.attachments.size,
+                                MAX_BUG_REPORT_MEDIA_COUNT,
+                            ),
+                            style = ElementTheme.typography.fontBodySmRegular,
+                            color = ElementTheme.colors.textSecondary,
+                        )
+                        if (state.attachmentNotice == BugReportAttachmentNotice.SelectionTrimmed) {
+                            Text(
+                                text = stringResource(R.string.screen_bug_report_attachment_selection_trimmed),
+                                style = ElementTheme.typography.fontBodySmRegular,
+                                color = ElementTheme.colors.textCriticalPrimary,
+                            )
+                        }
                     }
                 }
-            }
-            state.attachments.forEach { attachment ->
-                AttachmentRow(
-                    attachment = attachment,
-                    enabled = isFormEnabled && attachment.status !is BugReportAttachmentStatus.Compressing,
-                    onRemove = { eventSink(BugReportEvents.RemoveAttachment(attachment.id)) },
-                )
-            }
-
-            if (state.screenshotUri != null) {
-                PreferenceSwitch(
-                    isChecked = state.formState.sendScreenshot,
-                    onCheckedChange = { eventSink(BugReportEvents.SetSendScreenshot(it)) },
-                    enabled = isFormEnabled,
-                    title = stringResource(R.string.screen_bug_report_current_screenshot),
-                )
-                if (state.formState.sendScreenshot) {
-                    ScreenshotPreview(state.screenshotUri)
+                state.attachments.forEach { attachment ->
+                    AttachmentRow(
+                        attachment = attachment,
+                        enabled = isFormEnabled && attachment.status !is BugReportAttachmentStatus.Compressing,
+                        onRemove = { eventSink(BugReportEvents.RemoveAttachment(attachment.id)) },
+                    )
                 }
+
+                if (state.screenshotUri != null) {
+                    PreferenceSwitch(
+                        icon = CompoundIcons.Image(),
+                        isChecked = state.formState.sendScreenshot,
+                        onCheckedChange = { eventSink(BugReportEvents.SetSendScreenshot(it)) },
+                        enabled = isFormEnabled,
+                        title = stringResource(R.string.screen_bug_report_current_screenshot),
+                    )
+                    if (state.formState.sendScreenshot) {
+                        ScreenshotPreview(state.screenshotUri)
+                    }
+                }
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.screen_bug_report_diagnostics)) },
+                    supportingContent = {
+                        Text(
+                            listOfNotNull(
+                                stringResource(R.string.screen_bug_report_include_logs).takeIf { state.formState.sendLogs },
+                                stringResource(R.string.screen_bug_report_send_notification_settings_title).takeIf { state.formState.sendPushRules },
+                            ).joinToString(" · ").ifEmpty { stringResource(R.string.screen_bug_report_no_diagnostics) }
+                        )
+                    },
+                    leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Document())),
+                    trailingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ChevronRight())),
+                    enabled = isFormEnabled,
+                    onClick = { showDiagnostics = true },
+                )
             }
 
-            SectionTitle(stringResource(R.string.screen_bug_report_include_title))
-            PreferenceSwitch(
-                isChecked = state.formState.sendLogs,
-                onCheckedChange = { eventSink(BugReportEvents.SetSendLog(it)) },
-                enabled = isFormEnabled,
-                title = stringResource(R.string.screen_bug_report_include_logs),
-            )
-            PreferenceSwitch(
-                isChecked = state.formState.sendPushRules,
-                onCheckedChange = { eventSink(BugReportEvents.SetSendPushRules(it)) },
-                enabled = isFormEnabled,
-                title = stringResource(R.string.screen_bug_report_send_notification_settings_title),
-            )
-            PreferenceSwitch(
-                isChecked = state.formState.canContact,
-                onCheckedChange = { eventSink(BugReportEvents.SetCanContact(it)) },
-                enabled = isFormEnabled,
-                title = stringResource(R.string.screen_bug_report_contact_me_title),
-            )
-            PreferenceDivider()
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.screen_bug_report_view_logs)) },
-                leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ListBulleted())),
-                enabled = isFormEnabled,
-                onClick = onViewLogs,
-            )
+            if (showDiagnostics) {
+                SectionTitle(stringResource(R.string.screen_bug_report_include_title))
+                PreferenceSwitch(
+                    icon = CompoundIcons.Document(),
+                    isChecked = state.formState.sendLogs,
+                    onCheckedChange = { eventSink(BugReportEvents.SetSendLog(it)) },
+                    enabled = isFormEnabled,
+                    title = stringResource(R.string.screen_bug_report_include_logs),
+                )
+                PreferenceSwitch(
+                    icon = CompoundIcons.Notifications(),
+                    isChecked = state.formState.sendPushRules,
+                    onCheckedChange = { eventSink(BugReportEvents.SetSendPushRules(it)) },
+                    enabled = isFormEnabled,
+                    title = stringResource(R.string.screen_bug_report_send_notification_settings_title),
+                )
+            }
+            if (!showDiagnostics) {
+                PreferenceSwitch(
+                    icon = CompoundIcons.Chat(),
+                    isChecked = state.formState.canContact,
+                    onCheckedChange = { eventSink(BugReportEvents.SetCanContact(it)) },
+                    enabled = isFormEnabled,
+                    title = stringResource(R.string.screen_bug_report_contact_me_title),
+                )
+            }
+            if (showDiagnostics) {
+                PreferenceDivider()
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.screen_bug_report_view_logs)) },
+                    leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ListBulleted())),
+                    enabled = isFormEnabled,
+                    onClick = onViewLogs,
+                )
+            }
             PreferenceRow {
                 Text(
                     text = stringResource(R.string.screen_bug_report_privacy_notice),
@@ -197,21 +232,23 @@ fun BugReportView(
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
-            PreferenceRow {
-                Button(
-                    text = stringResource(id = CommonStrings.action_send),
-                    onClick = {
-                        // The text field keeps an IME-friendly local value. Reconcile it synchronously before
-                        // submission so process/navigation restoration cannot send a stale presenter value.
-                        eventSink(BugReportEvents.SetDescription(descriptionFieldState))
-                        eventSink(BugReportEvents.SendBugReport)
-                    },
-                    enabled = state.submitEnabled,
-                    showProgress = state.sending.isLoading(),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 16.dp, bottom = 24.dp),
-                )
+            if (!showDiagnostics) {
+                PreferenceRow {
+                    Button(
+                        text = stringResource(id = CommonStrings.action_send),
+                        onClick = {
+                            // The text field keeps an IME-friendly local value. Reconcile it synchronously before
+                            // submission so process/navigation restoration cannot send a stale presenter value.
+                            eventSink(BugReportEvents.SetDescription(descriptionFieldState))
+                            eventSink(BugReportEvents.SendBugReport)
+                        },
+                        enabled = state.submitEnabled,
+                        showProgress = state.sending.isLoading(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp, bottom = 24.dp),
+                    )
+                }
             }
         }
 

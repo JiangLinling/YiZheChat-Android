@@ -23,7 +23,7 @@ class StartupAccelerationGuideTest {
     @Test
     fun `permission alone cannot complete the guide before service recovery`() {
         assertThat(startupAccelerationState(true, true, false)).isEqualTo(StartupAccelerationState.Recovering)
-        assertThat(startupAccelerationState(true, true, null)).isEqualTo(StartupAccelerationState.Recovering)
+        assertThat(startupAccelerationState(true, true, null)).isEqualTo(StartupAccelerationState.Unknown)
         assertThat(startupAccelerationState(true, true, true)).isEqualTo(StartupAccelerationState.Ready)
     }
 

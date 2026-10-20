@@ -120,6 +120,7 @@ class DefaultCallNotificationEventResolverTest {
             )
         )
         val client = FakeMatrixClient().apply {
+            notificationSettingsService.setCallEnabled(true)
             givenGetRoomResult(A_ROOM_ID, room)
         }
 
@@ -133,7 +134,7 @@ class DefaultCallNotificationEventResolverTest {
             senderId = A_USER_ID_2,
             roomName = A_ROOM_NAME,
             editedEventId = null,
-            description = "📹 Incoming call",
+            description = "\uD83D\uDCF9 Incoming call",
             timestamp = 567L,
             canBeReplaced = true,
             isRedacted = false,
@@ -163,6 +164,7 @@ class DefaultCallNotificationEventResolverTest {
             )
         )
         val client = FakeMatrixClient().apply {
+            notificationSettingsService.setCallEnabled(true)
             givenGetRoomResult(A_ROOM_ID, room)
         }
 
@@ -176,7 +178,7 @@ class DefaultCallNotificationEventResolverTest {
             senderId = A_USER_ID_2,
             roomName = A_ROOM_NAME,
             editedEventId = null,
-            body = "📹 Incoming call",
+            body = "\uD83D\uDCF9 Incoming call",
             timestamp = 567L,
             canBeReplaced = false,
             isRedacted = false,
@@ -211,6 +213,7 @@ class DefaultCallNotificationEventResolverTest {
             )
         )
         val client = FakeMatrixClient().apply {
+            notificationSettingsService.setCallEnabled(true)
             givenGetRoomResult(A_ROOM_ID, room)
         }
 
@@ -224,7 +227,7 @@ class DefaultCallNotificationEventResolverTest {
             senderId = A_USER_ID_2,
             roomName = A_ROOM_NAME,
             editedEventId = null,
-            description = "📹 Incoming call",
+            description = "\uD83D\uDCF9 Incoming call",
             timestamp = 567L,
             canBeReplaced = true,
             isRedacted = false,
@@ -262,6 +265,7 @@ class DefaultCallNotificationEventResolverTest {
             )
         )
         val client = FakeMatrixClient().apply {
+            notificationSettingsService.setCallEnabled(true)
             givenGetRoomResult(A_ROOM_ID, room)
         }
 
@@ -275,7 +279,7 @@ class DefaultCallNotificationEventResolverTest {
             senderId = A_USER_ID_2,
             roomName = A_ROOM_NAME,
             editedEventId = null,
-            body = "📹 Incoming call",
+            body = "\uD83D\uDCF9 Incoming call",
             timestamp = 567L,
             canBeReplaced = false,
             isRedacted = false,
@@ -306,6 +310,7 @@ class DefaultCallNotificationEventResolverTest {
             )
         )
         val client = FakeMatrixClient().apply {
+            notificationSettingsService.setCallEnabled(true)
             givenGetRoomResult(A_ROOM_ID, room)
         }
 
@@ -319,7 +324,7 @@ class DefaultCallNotificationEventResolverTest {
             senderId = A_USER_ID_2,
             roomName = A_ROOM_NAME,
             editedEventId = null,
-            body = "📹 Incoming call",
+            body = "\uD83D\uDCF9 Incoming call",
             timestamp = 567L,
             canBeReplaced = false,
             isRedacted = false,
@@ -337,6 +342,31 @@ class DefaultCallNotificationEventResolverTest {
         )
         val result = resolver.resolveEvent(A_SESSION_ID, notificationData)
         assertThat(result.getOrNull()).isEqualTo(expectedResult)
+    }
+
+    @Test
+    fun `explicit RTC mentions still obey disabled calls muted room and ignored sender`() = runTest {
+        for (denial in listOf("calls", "mute", "ignored")) {
+            val client = FakeMatrixClient(
+                ignoredUsersFlow = kotlinx.coroutines.flow.MutableStateFlow(
+                    if (denial == "ignored") kotlinx.collections.immutable.persistentListOf(A_USER_ID_2)
+                    else kotlinx.collections.immutable.persistentListOf(),
+                ),
+            )
+            client.notificationSettingsService.setCallEnabled(denial != "calls")
+            if (denial == "mute") client.notificationSettingsService.muteRoom(A_ROOM_ID)
+            val foreground = FakeAppForegroundStateService()
+            val resolver = createDefaultNotifiableEventResolver(
+                appForegroundStateService = foreground,
+                clientProvider = FakeMatrixClientProvider { Result.success(client) },
+            )
+            val data = aNotificationData(content = NotificationContent.MessageLike.RtcNotification(
+                A_USER_ID_2, RtcNotificationType.RING, CallIntent.AUDIO, System.currentTimeMillis() + 60_000,
+            ))
+            assertThat(resolver.resolveEvent(A_SESSION_ID, data).exceptionOrNull())
+                .isEqualTo(io.element.android.libraries.matrix.api.exception.NotificationResolverException.EventFilteredOut)
+            assertThat(foreground.hasRingingCall.value).isFalse()
+        }
     }
 
     private fun createDefaultNotifiableEventResolver(

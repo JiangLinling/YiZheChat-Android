@@ -155,6 +155,8 @@ data class SecuritySetupState(
     val recoveryKeyAction: AsyncAction<Unit> = AsyncAction.Uninitialized,
     val recoverySessionState: RecoverySessionState = RecoverySessionState.None,
     val errorCode: String? = null,
+    val identityVerified: Boolean = false,
+    val locationAccepted: Boolean = false,
     val eventSink: (SecuritySetupEvent) -> Unit,
 )
 
@@ -238,12 +240,15 @@ fun SecuritySetupRoute(
     onOfflineReady: () -> Unit,
     verifiedStartupReadiness: () -> io.element.android.security.dataprotection.api.StartupSecurityReadiness? = { null },
     canRestoreRetainedList: suspend () -> Boolean = { false },
+    completeAccountHandover: suspend () -> Unit = { error("Account handover is unavailable") },
+    startRecoveryVerification: suspend () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var phase by remember { mutableStateOf(SecuritySetupPhase.CHECKING) }
     var errorCode by remember { mutableStateOf<String?>(null) }
+    var locationAccepted by remember { mutableStateOf(false) }
     var userReadyRequested by remember { mutableStateOf(false) }
     var activationFinalizing by remember { mutableStateOf(false) }
     var retryNotBeforeEpochMillis by remember { mutableStateOf(0L) }
@@ -277,6 +282,7 @@ fun SecuritySetupRoute(
     )
 
     suspend fun synchronize() {
+        var diagnosticStage = "CHECKPOINT"
         runSecuritySetupSynchronization(onFailure = { failure ->
             // Authority denial and unavailable transport retain the safety gate.
             // No failed synchronization may escape a Compose effect and kill the app.
@@ -284,6 +290,8 @@ fun SecuritySetupRoute(
                 "YZSETUP_SYNC_FAILURE type=%s", failure.javaClass.simpleName
             )
             activationFinalizing = false
+            errorCode = (failure as? io.element.android.appnav.loggedin.AccountEntryPrerequisiteFailure)?.reasonCode
+                ?: "ENTRY_${diagnosticStage}_" + failure.javaClass.simpleName.uppercase().take(40)
             phase = failure.toSecuritySetupPhase()
         }) {
         if (System.currentTimeMillis() < retryNotBeforeEpochMillis) {
@@ -307,22 +315,43 @@ fun SecuritySetupRoute(
             phase = SecuritySetupPhase.READY
             return@runSecuritySetupSynchronization
         }
-        val report = if (pendingActivation == null) {
-            managementControlService.synchronize()
-        } else {
+        diagnosticStage = "DEVICE_SYNC"
+        var report = synchronizeBeforeActivationResume(
+            accountIdHash = accountIdHash,
+            hasPendingActivation = pendingActivation != null,
+            identityVerified = sessionVerificationStatus is SessionVerifiedStatus.Verified,
+            readDevice = { managementControlService.synchronize() },
+            resumeActivation = {
+            diagnosticStage = "FIRST_ACTIVATION_RESUME"
             // Login starts LC-05 before the authenticated Matrix client exists. Once the logged-in
             // flow is available, resume that exact operation so the real device-sync path can bind
             // its Matrix authority receipt to the original login operation.
-            appOperationalStateCoordinator.resume(pendingActivation.operationId)
-            withContext(LifecycleOperationContext(pendingActivation.operationId, FullAppLifecycleId.LC_05)) {
+            val operationId = checkNotNull(pendingActivation).operationId
+            appOperationalStateCoordinator.resume(operationId)
+            withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_05)) {
                 managementControlService.synchronize()
             }
+            },
+        )
+        // Preserve independently accepted evidence even if account commit still needs retry.
+        locationAccepted = report.locationEvidenceState == DeviceLocationEvidenceState.ACCEPTED
+        if (sessionVerificationStatus is SessionVerifiedStatus.Verified &&
+            report.deviceSecurityState == ManagedDeviceSecurityState.READY &&
+            accountIdHash in report.accountHandoverRequiredAccountHashes
+        ) {
+            // A verified candidate must commit ownership before the active recipient registry
+            // can contain it. Full content initialization stays behind the ordinary gates.
+            diagnosticStage = "ACCOUNT_HANDOVER"
+            completeAccountHandover()
+            diagnosticStage = "POST_HANDOVER_SYNC"
+            report = managementControlService.synchronize()
         }
         Log.i(
             SECURITY_SETUP_DIAGNOSTIC_TAG,
             "YZSETUP_SYNC status=${report.status.name} device_state=${report.deviceSecurityState?.name ?: "NONE"}",
         )
         errorCode = report.errorCode
+        locationAccepted = report.locationEvidenceState == DeviceLocationEvidenceState.ACCEPTED
         retryNotBeforeEpochMillis = report.retryAfterMillis?.let {
             runCatching { Math.addExact(System.currentTimeMillis(), it) }.getOrDefault(Long.MAX_VALUE)
         } ?: 0L
@@ -350,33 +379,28 @@ fun SecuritySetupRoute(
         )
         var diagnosticStage = "OPERATION_SELECT"
         phase = runCatching {
-            val activation = pendingActivation()
-            if (activation == null) {
-                diagnosticStage = "OPERATION_START"
-                appOperationalStateCoordinator.perform(
-                    firstActivationOperationRequest(accountIdHash, matrixDeviceIdHash)
-                ) {
-                    diagnosticStage = "LOCATION_SUBMIT"
-                    managementControlService.submitDeviceLocation(evidence)
-                }
-            } else {
-                diagnosticStage = "OPERATION_RESUME"
-                appOperationalStateCoordinator.resume(activation.operationId)
-                withContext(LifecycleOperationContext(activation.operationId, FullAppLifecycleId.LC_05)) {
-                    diagnosticStage = "LOCATION_SUBMIT"
-                    managementControlService.submitDeviceLocation(evidence)
-                }
+            // Location is candidate admission evidence, not an already-verified
+            // account activation. Keep it in the durable LC06 bootstrap operation.
+            appOperationalStateCoordinator.performResuming(
+                lifecycleOperationRequest(FullAppLifecycleId.LC_06, "reactivation",
+                    accountIdHash = accountIdHash, matrixDeviceIdHash = matrixDeviceIdHash),
+            ) {
+                diagnosticStage = "LOCATION_SUBMIT"
+                managementControlService.submitDeviceLocation(evidence)
             }
         }.fold(
             onSuccess = { state ->
                 Log.i(SECURITY_SETUP_DIAGNOSTIC_TAG, "YZSETUP_LOCATION_RESULT=${state.name}")
                 if (state == DeviceLocationEvidenceState.ACCEPTED) {
+                    locationAccepted = true
                     SecuritySetupPhase.VALIDATION_PENDING
                 } else {
                     SecuritySetupPhase.LOCATION_REQUIRED
                 }
             },
             onFailure = { failure ->
+                if (failure is CancellationException) throw failure
+                errorCode = "LOCATION_" + diagnosticStage
                 val failureType = failure.javaClass.simpleName.ifBlank { "AnonymousFailure" }
                 Log.w(SECURITY_SETUP_DIAGNOSTIC_TAG, "YZSETUP_LOCATION_FAILURE=$diagnosticStage type=$failureType")
                 SecuritySetupPhase.SERVICE_UNAVAILABLE
@@ -428,37 +452,44 @@ fun SecuritySetupRoute(
         }
     }
 
+    var automaticCandidateAttempted by remember { mutableStateOf(false) }
+    var recoveryVerificationStarted by remember { mutableStateOf(false) }
+    LaunchedEffect(phase, sessionVerificationStatus) {
+        if (!recoveryVerificationStarted &&
+            phase in setOf(SecuritySetupPhase.READY, SecuritySetupPhase.RECOVERY_METHOD_REQUIRED) &&
+            sessionVerificationStatus !is SessionVerifiedStatus.Verified
+        ) {
+            try {
+                startRecoveryVerification()
+                recoveryVerificationStarted = true
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                errorCode = "RECOVERY_SYNC_" + failure.javaClass.simpleName.uppercase().take(64)
+                phase = SecuritySetupPhase.SERVICE_UNAVAILABLE
+            }
+        }
+        if (phase == SecuritySetupPhase.RECOVERY_METHOD_REQUIRED && sessionVerificationStatus is SessionVerifiedStatus.Verified) {
+            synchronize()
+        }
+    }
+    LaunchedEffect(errorCode, phase) {
+        if (!automaticCandidateAttempted && errorCode == "COMPATIBILITY_BINDING_CONFLICT" &&
+            phase in setOf(SecuritySetupPhase.ACTION_REQUIRED, SecuritySetupPhase.SERVICE_UNAVAILABLE)
+        ) {
+            automaticCandidateAttempted = true
+            transferManagedAuthorization()
+        }
+    }
+
     fun submitApproval() {
         if (phase == SecuritySetupPhase.CHECKING || activationFinalizing || System.currentTimeMillis() < retryNotBeforeEpochMillis) return
         phase = SecuritySetupPhase.CHECKING
         coroutineScope.launch {
-            val hasLiveOrReceiptedActivation = pendingActivation() != null || hasSuccessfulFirstActivationReceipt(
-                operations = appOperationalStateCoordinator.operations.value.values,
-                accountIdHash = accountIdHash,
-                matrixDeviceIdHash = matrixDeviceIdHash,
-            )
-            if (hasLiveOrReceiptedActivation) {
-                synchronize()
-            } else {
-                // Only the user's explicit retry creates a replacement for an expired/failed LC-05.
-                // Concurrent taps are suppressed by the CHECKING phase above.
-                runCatching {
-                    appOperationalStateCoordinator.perform(
-                        firstActivationOperationRequest(accountIdHash, matrixDeviceIdHash)
-                    ) {
-                        managementControlService.synchronize()
-                    }
-                }.fold(
-                    onSuccess = { synchronize() },
-                    onFailure = { failure ->
-                        if (failure is CancellationException) throw failure
-                        phase = failure.toSecuritySetupPhase()
-                    },
-                )
-            }
-            if (phase == SecuritySetupPhase.LOCATION_REQUIRED) {
-                requestLocation()
-            }
+            // One read determines the next action. LC05 is admitted only by the
+            // completion effect after identity verification, never by Retry.
+            synchronize()
+            if (phase == SecuritySetupPhase.LOCATION_REQUIRED) requestLocation()
         }
     }
 
@@ -675,10 +706,8 @@ fun SecuritySetupRoute(
                     return@LaunchedEffect
                 }
             }
-            while (isActive && phase == SecuritySetupPhase.SERVICE_UNAVAILABLE) {
-                delay(maxOf(30_000L, retryNotBeforeEpochMillis - System.currentTimeMillis()))
-                synchronize()
-            }
+            // Bounded retries retain the operation and expose manual recovery.
+            // A permanent authority conflict must not become an endless spinner.
             return@LaunchedEffect
         }
         while (isActive && phase.isApprovalPending()) {
@@ -830,6 +859,8 @@ fun SecuritySetupRoute(
                 state = SecuritySetupState(
                     phase = phase,
                     errorCode = errorCode,
+                    identityVerified = sessionVerificationStatus is SessionVerifiedStatus.Verified,
+                    locationAccepted = locationAccepted,
                     identityConfirmationRequired = identityConfirmationRequired,
                     recoveryKey = recoveryKey,
                     displayRecoveryKey = displayRecoveryKey,
@@ -956,7 +987,7 @@ fun SecuritySetupView(
         IdentityConfirmationView(state = state, modifier = modifier)
         return
     }
-    val progress = state.phase.toSecurityProgress()
+    val progress = state.phase.toSecurityProgress(state.identityVerified, state.locationAccepted)
     val validationPending = state.phase.isApprovalPending()
     HeaderFooterPage(
         modifier = modifier.statusBarsPadding().fillMaxSize(),
@@ -998,6 +1029,7 @@ fun SecuritySetupView(
                         onClick = { state.eventSink(SecuritySetupEvent.CollectLocation) },
                     )
                     SecuritySetupPhase.ACTION_REQUIRED,
+                    SecuritySetupPhase.SECURITY_BLOCKED,
                     SecuritySetupPhase.SERVICE_UNAVAILABLE -> Button(
                         modifier = Modifier.fillMaxWidth(),
                         text = stringResource(
@@ -1061,6 +1093,13 @@ fun SecuritySetupView(
                 SecuritySetupPhase.RECOVERY_EXPIRED -> Text(stringResource(R.string.screen_security_setup_recovery_expired))
                 SecuritySetupPhase.SECURITY_BLOCKED -> Text(stringResource(R.string.screen_security_setup_security_blocked))
                 SecuritySetupPhase.LOCATION_REQUIRED -> Unit
+            }
+            state.errorCode?.takeIf { it.matches(Regex("[A-Z0-9_]{1,96}")) }?.let { code ->
+                var showDiagnostic by remember(code) { mutableStateOf(false) }
+                androidx.compose.material3.TextButton(onClick = { showDiagnostic = !showDiagnostic }) {
+                    Text(stringResource(R.string.screen_security_setup_diagnostic))
+                }
+                if (showDiagnostic) Text(code, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -1193,19 +1232,12 @@ internal enum class SecurityProgressState {
     ERROR,
 }
 
-internal fun SecuritySetupPhase.toSecurityProgress(): List<SecurityProgressState> {
-    val locationComplete = this in setOf(
-        SecuritySetupPhase.VALIDATION_PENDING,
-        SecuritySetupPhase.MANAGED_APPROVAL_PENDING,
-        SecuritySetupPhase.READY,
-        SecuritySetupPhase.ACTION_REQUIRED,
-        SecuritySetupPhase.SERVICE_UNAVAILABLE,
-        SecuritySetupPhase.RECOVERY_METHOD_REQUIRED,
-        SecuritySetupPhase.RECOVERY_EXPIRED,
-        SecuritySetupPhase.SECURITY_BLOCKED,
-    )
+internal fun SecuritySetupPhase.toSecurityProgress(
+    identityVerified: Boolean = false,
+    locationComplete: Boolean = false,
+): List<SecurityProgressState> {
     return listOf(
-        SecurityProgressState.COMPLETE,
+        if (identityVerified) SecurityProgressState.COMPLETE else SecurityProgressState.PENDING,
         when {
             locationComplete -> SecurityProgressState.COMPLETE
             this in setOf(
@@ -1243,6 +1275,22 @@ internal suspend fun runSecuritySetupSynchronization(
         throw failure
     } catch (failure: Exception) {
         onFailure(failure)
+    }
+}
+
+internal suspend fun synchronizeBeforeActivationResume(
+    accountIdHash: String,
+    hasPendingActivation: Boolean,
+    readDevice: suspend () -> ManagementSyncReport,
+    identityVerified: Boolean = true,
+    resumeActivation: suspend () -> ManagementSyncReport,
+): ManagementSyncReport {
+    val report = readDevice()
+    // This only exposes recovery controls. Signed admission and CORE_READY still protect content.
+    return if (!hasPendingActivation || !identityVerified || report.toSecuritySetupPhase(accountIdHash) != SecuritySetupPhase.READY) {
+        report
+    } else {
+        resumeActivation()
     }
 }
 

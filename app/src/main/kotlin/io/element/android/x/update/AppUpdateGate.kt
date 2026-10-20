@@ -184,11 +184,64 @@ fun AppUpdateGate(
 
     var checkRunning by remember { mutableStateOf(false) }
 
+    var handoverRunning by remember { mutableStateOf(false) }
+
     var networkDisconnected by remember { mutableStateOf(false) }
 
     var offlineGrantValidated by remember { mutableStateOf(false) }
 
     var retainedEntryPermitted by remember { mutableStateOf(false) }
+
+    var automaticCandidateAttempted by remember { mutableStateOf(false) }
+
+    fun admitCandidateInstallation() {
+                if (!handoverRunning && !checkRunning) {
+                    handoverRunning = true
+                    scope.launch {
+                        try {
+                            val subjects = checkNotNull(managementControlService.managedAuthorizationHandoverSubjects()) {
+                                "RECOVERY_MATRIX_SESSION_UNAVAILABLE"
+                            }
+                            val accountHash = checkNotNull(subjects.accountIdHash)
+                            val matrixHash = checkNotNull(subjects.matrixDeviceIdHash)
+                            appOperationalStateCoordinator.performResuming(
+                                lifecycleOperationRequest(
+                                    lifecycleId = FullAppLifecycleId.LC_06,
+                                    trigger = "reactivation",
+                                    accountIdHash = accountHash,
+                                    matrixDeviceIdHash = matrixHash,
+                                )
+                            ) {
+                                managementControlService.transferManagedDeviceAuthorization(accountHash, matrixHash)
+                            }
+                            // Validate the signed license and refresh the real restriction. Never open content from HTTP success.
+                            securityRefreshService.refreshSecurityAccess()
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            state = AppUpdateGateState.CheckFailed(
+                                startupGateAccessibilityContract(io.element.android.x.security.startupFailureReasonCode(failure))
+                            )
+                        } finally {
+                            handoverRunning = false
+                            checkAttempt++
+                        }
+                    }
+                }
+            
+    }
+
+    LaunchedEffect(state, checkRunning) {
+        val failed = state as? AppUpdateGateState.CheckFailed ?: return@LaunchedEffect
+        if (!automaticCandidateAttempted && !checkRunning &&
+            failed.accessibility.primaryAction == StartupGatePrimaryAction.TRANSFER_MANAGED_AUTHORIZATION
+        ) {
+            // The server only admits this candidate. It does not retire the old
+            // mobile or release account content; account cutover stays separate.
+            automaticCandidateAttempted = true
+            admitCandidateInstallation()
+        }
+    }
 
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
 
@@ -520,7 +573,11 @@ fun AppUpdateGate(
 
             modifier = modifier,
 
-            onRetry = { if (!checkRunning && System.currentTimeMillis() >= (retryNotBefore ?: 0L)) checkAttempt++ },
+            onRetry = { if (!handoverRunning && !checkRunning && System.currentTimeMillis() >= (retryNotBefore ?: 0L)) checkAttempt++ },
+
+            handoverRunning = handoverRunning,
+
+            onTransferAuthorization = ::admitCandidateInstallation,
 
             retryAtEpochMillis = retryNotBefore,
 
@@ -694,6 +751,10 @@ private fun AppUpdateCheckFailedView(
 
     retryAtEpochMillis: Long? = null,
 
+    handoverRunning: Boolean = false,
+
+    onTransferAuthorization: () -> Unit = {},
+
 ) {
 
     val copy = startupGateCopy(accessibility.reasonCode)
@@ -750,13 +811,24 @@ private fun AppUpdateCheckFailedView(
 
             Button(
 
-                text = stringResource(R.string.screen_force_update_retry),
+                text = stringResource(
+                    when {
+                        handoverRunning -> R.string.screen_entry_transfer_authorization_progress
+                        accessibility.primaryAction == StartupGatePrimaryAction.TRANSFER_MANAGED_AUTHORIZATION ->
+                            R.string.screen_entry_transfer_authorization
+                        else -> R.string.screen_force_update_retry
+                    }
+                ),
 
-                onClick = onRetry,
+                onClick = if (accessibility.primaryAction == StartupGatePrimaryAction.TRANSFER_MANAGED_AUTHORIZATION) {
+                    onTransferAuthorization
+                } else {
+                    onRetry
+                },
 
                 modifier = Modifier.fillMaxWidth(),
 
-                enabled = remainingSeconds == 0L,
+                enabled = remainingSeconds == 0L && !handoverRunning,
 
             )
 

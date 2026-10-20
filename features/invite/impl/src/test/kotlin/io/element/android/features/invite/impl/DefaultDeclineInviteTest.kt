@@ -109,7 +109,8 @@ class DefaultDeclineInviteTest {
         val room = FakeBaseRoom(
             roomId = roomId,
             leaveRoomLambda = failureLeaveRoomLambda,
-            reportRoomResult = successReportRoomLambda
+            reportRoomResult = successReportRoomLambda,
+            initialRoomInfo = aRoomInfo(inviter = inviter)
         )
         val client = FakeMatrixClient(ignoreUserResult = successIgnoreUserLambda).apply {
             givenGetRoomResult(roomId, room)
@@ -149,7 +150,8 @@ class DefaultDeclineInviteTest {
 
         assertThat(result.exceptionOrNull()).isEqualTo(DeclineInvite.Exception.BlockUserFailed)
 
-        assert(clearMembershipNotificationForRoomLambda).isCalledOnce()
+        assert(clearMembershipNotificationForRoomLambda).isNeverCalled()
+        assert(successLeaveRoomLambda).isNeverCalled()
         assertThat(seenInvitesStore.seenRoomIds().first()).containsExactly(roomId)
     }
 

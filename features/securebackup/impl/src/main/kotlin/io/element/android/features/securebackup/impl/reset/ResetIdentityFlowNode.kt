@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.window.DialogProperties
 import com.bumble.appyx.core.modality.BuildContext
 import com.bumble.appyx.core.node.Node
@@ -35,6 +36,8 @@ import io.element.android.libraries.architecture.BaseFlowNode
 import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.architecture.createNode
 import io.element.android.libraries.designsystem.components.ProgressDialog
+import io.element.android.libraries.designsystem.components.dialogs.ErrorDialog
+import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.libraries.di.SessionScope
 import io.element.android.libraries.di.annotations.SessionCoroutineScope
 import io.element.android.libraries.matrix.api.encryption.IdentityOAuthResetHandle
@@ -178,6 +181,12 @@ class ResetIdentityFlowNode(
             ProgressDialog(
                 properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true),
                 onDismissRequest = { sessionCoroutineScope.launch { cancelResetJob() } }
+            )
+        }
+        if (startResetState.isFailure()) {
+            ErrorDialog(
+                content = stringResource(CommonStrings.error_identity_reset_unconfirmed),
+                onSubmit = resetIdentityFlowManager::dismissError,
             )
         }
 

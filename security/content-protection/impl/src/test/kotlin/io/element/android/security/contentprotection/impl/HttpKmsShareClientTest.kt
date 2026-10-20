@@ -56,6 +56,28 @@ import java.util.Base64
 
 class HttpKmsShareClientTest {
     @Test
+    fun `new share rejects retired recipient even when sender cached its device`() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            for (request in listOf(storeRequest(), v3StoreRequest())) {
+                for (detail in listOf("account has no approved recipient devices", "an account has no approved recipient devices",
+                        "authorized device set changed; refresh recipients and retry")) {
+                    server.enqueue(MockResponse().setResponseCode(409).setBody("""{"detail":"$detail"}"""))
+                    val failure = runCatching { client(server, signingKey()).storeShare(request) }.exceptionOrNull()
+                    assertThat(failure).isInstanceOf(ContentProtectionException.RecipientDeviceUnavailable::class.java)
+                }
+            }
+            for (body in listOf("""{"detail":"unknown conflict"}""", "not-json", "x".repeat(4097))) {
+                server.enqueue(MockResponse().setResponseCode(409).setBody(body))
+                val failure = runCatching { client(server, signingKey()).storeShare(v3StoreRequest()) }.exceptionOrNull()
+                assertThat(failure).isNotInstanceOf(ContentProtectionException.RecipientDeviceUnavailable::class.java)
+                assertThat(failure).isNotNull()
+            }
+        } finally { server.shutdown() }
+    }
+
+    @Test
     fun `BUG043 unavailable epoch material never becomes content TTL expiry`() = runTest {
         val bodies = listOf(
             """{"detail":"ROOM_EPOCH_MATERIAL_UNAVAILABLE"}""",

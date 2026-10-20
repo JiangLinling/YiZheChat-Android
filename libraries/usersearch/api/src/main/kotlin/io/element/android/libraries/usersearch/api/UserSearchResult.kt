@@ -18,4 +18,5 @@ data class UserSearchResult(
 data class UserSearchResultState(
     val results: List<UserSearchResult>,
     val isSearching: Boolean,
+    val hasError: Boolean = false,
 )

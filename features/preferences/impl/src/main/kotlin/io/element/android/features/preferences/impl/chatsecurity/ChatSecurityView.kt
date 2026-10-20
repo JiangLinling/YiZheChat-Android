@@ -18,25 +18,34 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.tooling.preview.PreviewParameter
+import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.preferences.impl.R
+import io.element.android.features.preferences.impl.components.SettingsNavigationRow
 import io.element.android.libraries.androidutils.background.AutostartPermissionState
+import io.element.android.libraries.androidutils.background.BackgroundBindingState
+import io.element.android.libraries.androidutils.background.readBackgroundBindingState
 import io.element.android.libraries.androidutils.background.xiaomiApplicationDetailsSettingsIntent
 import io.element.android.libraries.androidutils.background.xiaomiAutostartPermissionState
 import io.element.android.libraries.designsystem.components.dialogs.AlertDialog
@@ -51,9 +60,12 @@ import io.element.android.libraries.designsystem.theme.components.ListItem
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.designsystem.utils.OnLifecycleEvent
 import io.element.android.libraries.ui.strings.CommonStrings
-import io.element.android.security.contentprotection.api.DeviceRecoveryStatus
 import io.element.android.security.contentprotection.api.DeviceRecoveryState
+import io.element.android.security.contentprotection.api.DeviceRecoveryStatus
 import io.element.android.security.contentprotection.api.PendingDeviceRecovery
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 internal enum class ChatCapability(
     @StringRes val titleRes: Int,
@@ -69,7 +81,9 @@ internal enum class ChatCapability(
     LOCK_SCREEN(R.string.screen_chat_security_lock_screen, R.string.screen_chat_security_lock_screen_description),
 }
 
-private enum class CapabilityState { ENABLED, ACTION_REQUIRED, CHECK_IN_SETTINGS }
+private enum class CapabilityState { ENABLED, ACTION_REQUIRED, CHECK_IN_SETTINGS, OPTIONAL }
+
+enum class ChatSecuritySection { MAIN, ACCESS, HISTORY, DEVICE, PERMISSIONS, PRIVACY }
 
 @Composable
 fun ChatSecurityView(
@@ -78,11 +92,25 @@ fun ChatSecurityView(
     onRestoreHistoryClick: () -> Unit,
     onEncryptionClick: () -> Unit = {},
     modifier: Modifier = Modifier,
+    initialSection: ChatSecuritySection = ChatSecuritySection.MAIN,
 ) {
     val context = LocalContext.current
     var refreshKey by remember { mutableIntStateOf(0) }
     var recoveryToConfirm by remember { mutableStateOf<PendingDeviceRecovery?>(null) }
     var showLocalHistoryCleanupConfirmation by remember { mutableStateOf(false) }
+    var section by rememberSaveable { mutableStateOf(initialSection) }
+    var bindingState by remember(context) { mutableStateOf(BackgroundBindingState.Unknown) }
+    LaunchedEffect(context, refreshKey, section) {
+        if (section == ChatSecuritySection.PERMISSIONS) {
+            for (waitMs in listOf(0L, 1_000L, 3_000L, 10_000L)) {
+                if (waitMs > 0) delay(waitMs)
+                bindingState = withContext(Dispatchers.IO) { context.readBackgroundBindingState() }
+                if (bindingState != BackgroundBindingState.Recovering) break
+            }
+        }
+    }
+    val back = { if (section == ChatSecuritySection.MAIN) onBackClick() else section = ChatSecuritySection.MAIN }
+    BackHandler(enabled = section != ChatSecuritySection.MAIN, onBack = back)
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         refreshKey++
     }
@@ -93,143 +121,254 @@ fun ChatSecurityView(
         }
     }
 
-    PreferencePage(
-        modifier = modifier,
-        onBackClick = onBackClick,
-        title = stringResource(R.string.screen_chat_security_title),
-    ) {
-        ListItem(
-            headlineContent = { Text(stringResource(CommonStrings.common_encryption)) },
-            leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Key())),
-            onClick = onEncryptionClick,
-        )
-        ListItem(
-            headlineContent = { Text(stringResource(R.string.screen_chat_security_access_verification)) },
-            supportingContent = { Text(state.deviceSecurityState.label()) },
-            trailingContent = ListItemContent.Text(
-                stringResource(
-                    if (state.isRefreshing) R.string.screen_chat_security_refreshing else R.string.screen_chat_security_refresh
-                )
-            ),
-            onClick = { state.eventSink(ChatSecurityEvent.Refresh) },
-        )
-        ListItem(
-            headlineContent = { Text(stringResource(R.string.screen_chat_security_history_recovery)) },
-            supportingContent = { Text(state.historyRecoveryState.label()) },
-            trailingContent = if (state.historyRecoveryState is PublicHistoryRecoveryState.AVAILABLE) {
-                ListItemContent.Text(stringResource(R.string.screen_chat_security_restore_action))
-            } else {
-                ListItemContent.Text(stringResource(R.string.screen_chat_security_recheck))
-            },
-            onClick = {
-                if (state.historyRecoveryState is PublicHistoryRecoveryState.AVAILABLE) {
-                    onRestoreHistoryClick()
-                } else {
-                    state.eventSink(ChatSecurityEvent.Refresh)
+    key(section) {
+        PreferencePage(
+            modifier = modifier,
+            onBackClick = back,
+            title = stringResource(
+                when (section) {
+                    ChatSecuritySection.MAIN -> R.string.screen_chat_security_title
+                    ChatSecuritySection.ACCESS -> R.string.screen_chat_security_access_verification
+                    ChatSecuritySection.HISTORY -> R.string.screen_chat_security_history_recovery
+                    ChatSecuritySection.DEVICE -> R.string.screen_settings_device_recovery
+                    ChatSecuritySection.PERMISSIONS -> R.string.screen_settings_phone_permissions
+                    ChatSecuritySection.PRIVACY -> R.string.screen_settings_privacy_information
                 }
-            },
-        )
-        if (state.historyRecoveryState.canClearUnavailableHistoryLocally()) {
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.screen_chat_security_clear_unavailable_history)) },
-                supportingContent = {
-                    Text(
-                        stringResource(
-                            R.string.screen_chat_security_clear_unavailable_history_description,
-                            state.unavailableHistoryCount,
-                        )
-                    )
-                },
-                trailingContent = ListItemContent.Text(
-                    stringResource(
-                        if (state.isLocalHistoryCleanupRunning) {
-                            R.string.screen_chat_security_recovery_processing
-                        } else {
-                            R.string.screen_chat_security_clear_action
-                        }
-                    )
-                ),
-                onClick = {
-                    if (!state.isLocalHistoryCleanupRunning) showLocalHistoryCleanupConfirmation = true
-                },
-            )
-        }
-        ListItem(
-            headlineContent = { Text(stringResource(R.string.screen_chat_security_device_code)) },
-            supportingContent = {
-                Text(
-                    state.currentDeviceCode?.let {
-                        stringResource(R.string.screen_chat_security_device_code_value, it)
-                    } ?: stringResource(R.string.screen_chat_security_device_code_unavailable)
-                )
-            },
-        )
-        ListItem(
-            headlineContent = { Text(stringResource(R.string.screen_chat_security_request_device_recovery)) },
-            supportingContent = {
-                Text(
-                    state.deviceRecoveryStatus?.recoveryLabel()
-                        ?: stringResource(R.string.screen_chat_security_request_device_recovery_description)
-                )
-            },
-            trailingContent = ListItemContent.Text(
-                stringResource(
-                    if (state.isRecoveryActionRunning) {
-                        R.string.screen_chat_security_recovery_processing
-                    } else {
-                        R.string.screen_chat_security_request_action
-                    }
-                )
             ),
-            onClick = {
-                if (!state.isRecoveryActionRunning) state.eventSink(ChatSecurityEvent.RequestDeviceRecovery)
-            },
-        )
-        state.pendingDeviceRecoveries.forEach { recovery ->
-            val deviceCode = recovery.newInstallationId.takeLast(8).uppercase()
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.screen_chat_security_confirm_new_device)) },
-                supportingContent = {
-                    Text(stringResource(R.string.screen_chat_security_confirm_new_device_description, deviceCode))
-                },
-                trailingContent = ListItemContent.Text(stringResource(R.string.screen_chat_security_confirm_action)),
-                onClick = { recoveryToConfirm = recovery },
-            )
-        }
-        HorizontalDivider()
-        ChatCapability.entries.forEach { capability ->
-            val capabilityState = remember(capability, refreshKey) { context.capabilityState(capability) }
-            ListItem(
-                headlineContent = { Text(stringResource(capability.titleRes)) },
-                supportingContent = { Text(stringResource(capability.descriptionRes)) },
-                trailingContent = ListItemContent.Text(capabilityState.label()),
-                onClick = {
-                    when (capability) {
-                        ChatCapability.MESSAGE_NOTIFICATIONS -> {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                !context.hasPermission(Manifest.permission.POST_NOTIFICATIONS)
-                            ) {
-                                permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
-                            } else {
-                                context.openNotificationSettings()
-                            }
+        ) {
+            if (section == ChatSecuritySection.MAIN) {
+                ListItem(
+                    headlineContent = { Text(stringResource(CommonStrings.common_encryption)) },
+                    leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Key())),
+                    onClick = onEncryptionClick,
+                )
+            }
+            if (section == ChatSecuritySection.MAIN || section == ChatSecuritySection.ACCESS) {
+                ListItem(
+                    leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Shield())),
+                    headlineContent = { Text(stringResource(R.string.screen_chat_security_access_verification)) },
+                    supportingContent = { Text(state.deviceSecurityState.label()) },
+                    trailingContent = if (section == ChatSecuritySection.MAIN) {
+                        ListItemContent.Icon(IconSource.Vector(CompoundIcons.ChevronRight()))
+                    } else {
+                        ListItemContent.Text(
+                            stringResource(
+                                if (state.isRefreshing) R.string.screen_chat_security_refreshing else R.string.screen_chat_security_refresh
+                            )
+                        )
+                    },
+                    onClick = {
+                        if (section == ChatSecuritySection.MAIN) section = ChatSecuritySection.ACCESS else state.eventSink(ChatSecurityEvent.Refresh)
+                    },
+                )
+            }
+            if (section == ChatSecuritySection.MAIN) {
+                HorizontalDivider()
+                SettingsNavigationRow(
+                    title = stringResource(R.string.screen_chat_security_history_recovery),
+                    icon = CompoundIcons.History(),
+                    summary = state.historyRecoveryState.label(),
+                    onClick = { section = ChatSecuritySection.HISTORY },
+                )
+                SettingsNavigationRow(
+                    title = stringResource(R.string.screen_settings_device_recovery),
+                    icon = CompoundIcons.Devices(),
+                    summary = when {
+                        state.pendingDeviceRecoveries.isNotEmpty() ->
+                            stringResource(R.string.screen_settings_recovery_pending, state.pendingDeviceRecoveries.size)
+                        else -> state.deviceRecoveryStatus?.recoveryLabel()
+                    },
+                    onClick = { section = ChatSecuritySection.DEVICE },
+                )
+                HorizontalDivider()
+                SettingsNavigationRow(
+                    title = stringResource(R.string.screen_settings_phone_permissions),
+                    icon = CompoundIcons.Mobile(),
+                    onClick = { section = ChatSecuritySection.PERMISSIONS },
+                )
+                SettingsNavigationRow(
+                    title = stringResource(R.string.screen_settings_privacy_information),
+                    icon = CompoundIcons.Info(),
+                    onClick = { section = ChatSecuritySection.PRIVACY },
+                )
+            }
+            if (section == ChatSecuritySection.HISTORY) {
+                ListItem(
+                    leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.History())),
+                    headlineContent = { Text(stringResource(R.string.screen_chat_security_history_recovery)) },
+                    supportingContent = { Text(state.historyRecoveryState.label()) },
+                    trailingContent = if (state.historyRecoveryState is PublicHistoryRecoveryState.AVAILABLE) {
+                        ListItemContent.Text(stringResource(R.string.screen_chat_security_restore_action))
+                    } else {
+                        ListItemContent.Text(stringResource(R.string.screen_chat_security_recheck))
+                    },
+                    onClick = {
+                        if (state.historyRecoveryState is PublicHistoryRecoveryState.AVAILABLE) {
+                            onRestoreHistoryClick()
+                        } else {
+                            state.eventSink(ChatSecurityEvent.Refresh)
                         }
-                        ChatCapability.MICROPHONE_CAMERA -> permissionLauncher.launch(mediaRuntimePermissions())
-                        ChatCapability.CALL_ALERTS -> context.openCallAlertSettings()
-                        ChatCapability.DO_NOT_DISTURB -> context.openDoNotDisturbSettings()
-                        ChatCapability.BACKGROUND_RUNTIME -> context.openBatteryOptimizationSettings()
-                        ChatCapability.AUTOSTART -> context.openAutostartSettings()
-                        ChatCapability.BACKGROUND_DATA -> context.openBackgroundDataSettings()
-                        ChatCapability.LOCK_SCREEN -> context.openNotificationSettings()
-                    }
-                },
-            )
+                    },
+                )
+                if (state.unavailableHistoryCount > 0 && state.historyRecoveryState.canClearUnavailableHistoryLocally()) {
+                    ListItem(
+                        leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Delete())),
+                        headlineContent = { Text(stringResource(R.string.screen_chat_security_clear_unavailable_history)) },
+                        supportingContent = {
+                            Text(
+                                stringResource(
+                                    R.string.screen_chat_security_clear_unavailable_history_description,
+                                    state.unavailableHistoryCount,
+                                )
+                            )
+                        },
+                        trailingContent = ListItemContent.Text(
+                            stringResource(
+                                if (state.isLocalHistoryCleanupRunning) {
+                                    R.string.screen_chat_security_recovery_processing
+                                } else {
+                                    R.string.screen_chat_security_clear_action
+                                }
+                            )
+                        ),
+                        onClick = {
+                            if (!state.isLocalHistoryCleanupRunning) showLocalHistoryCleanupConfirmation = true
+                        },
+                    )
+                }
+            }
+            if (section == ChatSecuritySection.DEVICE) {
+                ListItem(
+                    leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Devices())),
+                    headlineContent = { Text(stringResource(R.string.screen_chat_security_device_code)) },
+                    supportingContent = {
+                        Text(
+                            state.currentDeviceCode?.let {
+                                stringResource(R.string.screen_chat_security_device_code_value, it)
+                            } ?: stringResource(R.string.screen_chat_security_device_code_unavailable)
+                        )
+                    },
+                )
+                ListItem(
+                    leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Key())),
+                    headlineContent = { Text(stringResource(R.string.screen_chat_security_request_device_recovery)) },
+                    supportingContent = {
+                        Text(
+                            state.deviceRecoveryStatus?.recoveryLabel()
+                                ?: stringResource(R.string.screen_chat_security_request_device_recovery_description)
+                        )
+                    },
+                    trailingContent = ListItemContent.Text(
+                        stringResource(
+                            if (state.isRecoveryActionRunning) {
+                                R.string.screen_chat_security_recovery_processing
+                            } else {
+                                R.string.screen_chat_security_request_action
+                            }
+                        )
+                    ),
+                    onClick = {
+                        if (!state.isRecoveryActionRunning) state.eventSink(ChatSecurityEvent.RequestDeviceRecovery)
+                    },
+                )
+                state.pendingDeviceRecoveries.forEach { recovery ->
+                    val deviceCode = recovery.newInstallationId.takeLast(8).uppercase()
+                    ListItem(
+                        leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Shield())),
+                        headlineContent = { Text(stringResource(R.string.screen_chat_security_confirm_new_device)) },
+                        supportingContent = {
+                            Text(stringResource(R.string.screen_chat_security_confirm_new_device_description, deviceCode))
+                        },
+                        trailingContent = ListItemContent.Text(stringResource(R.string.screen_chat_security_confirm_action)),
+                        onClick = { recoveryToConfirm = recovery },
+                    )
+                }
+            }
+            if (section == ChatSecuritySection.PERMISSIONS) {
+                ChatCapability.entries.forEach { capability ->
+                    val capabilityState = remember(capability, refreshKey) { context.capabilityState(capability) }
+                    ListItem(
+                        leadingContent = ListItemContent.Icon(
+                            IconSource.Vector(
+                                when (capability) {
+                                    ChatCapability.MESSAGE_NOTIFICATIONS -> CompoundIcons.Notifications()
+                                    ChatCapability.MICROPHONE_CAMERA -> CompoundIcons.MicOn()
+                                    ChatCapability.CALL_ALERTS -> CompoundIcons.VoiceCall()
+                                    ChatCapability.DO_NOT_DISTURB -> CompoundIcons.NotificationsOff()
+                                    ChatCapability.BACKGROUND_RUNTIME -> CompoundIcons.Settings()
+                                    ChatCapability.AUTOSTART -> CompoundIcons.Mobile()
+                                    ChatCapability.BACKGROUND_DATA -> CompoundIcons.Cloud()
+                                    ChatCapability.LOCK_SCREEN -> CompoundIcons.Lock()
+                                }
+                            )
+                        ),
+                        headlineContent = { Text(stringResource(capability.titleRes)) },
+                        supportingContent = { Text(stringResource(capability.descriptionRes)) },
+                        trailingContent = ListItemContent.Text(capabilityState.label()),
+                        onClick = {
+                            when (capability) {
+                                ChatCapability.MESSAGE_NOTIFICATIONS -> {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                        !context.hasPermission(Manifest.permission.POST_NOTIFICATIONS)
+                                    ) {
+                                        permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                                    } else {
+                                        context.openNotificationSettings()
+                                    }
+                                }
+                                ChatCapability.MICROPHONE_CAMERA -> permissionLauncher.launch(mediaRuntimePermissions())
+                                ChatCapability.CALL_ALERTS -> context.openCallAlertSettings()
+                                ChatCapability.DO_NOT_DISTURB -> context.openDoNotDisturbSettings()
+                                ChatCapability.BACKGROUND_RUNTIME -> context.openBatteryOptimizationSettings()
+                                ChatCapability.AUTOSTART -> context.openAutostartSettings()
+                                ChatCapability.BACKGROUND_DATA -> context.openBackgroundDataSettings()
+                                ChatCapability.LOCK_SCREEN -> context.openNotificationSettings()
+                            }
+                        },
+                    )
+                }
+                if (bindingState != BackgroundBindingState.Unavailable) {
+                    ListItem(
+                        leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Settings())),
+                        headlineContent = { Text(stringResource(R.string.screen_chat_security_startup_binding)) },
+                        supportingContent = { Text(stringResource(R.string.screen_chat_security_startup_binding_description)) },
+                        trailingContent = ListItemContent.Text(
+                            stringResource(
+                                when (bindingState) {
+                                    BackgroundBindingState.Ready -> R.string.screen_chat_security_startup_binding_ready
+                                    BackgroundBindingState.Disabled -> R.string.screen_settings_permission_optional
+                                    BackgroundBindingState.Recovering -> R.string.screen_chat_security_startup_binding_waiting
+                                    else -> R.string.screen_chat_security_check_settings
+                                }
+                            )
+                        ),
+                        onClick = {
+                            // This own-app page explains the optional service and reads actual state.
+                            // It then opens the generic system setting; dismissing a home reminder
+                            // never removes this permanent entry.
+                            val explanation = Intent().setComponent(
+                                ComponentName(
+                                    context.packageName,
+                                    "io.element.android.x.backgroundtest.BackgroundBindingTestActivity",
+                                )
+                            )
+                            if (!context.startSafely(explanation)) {
+                                if (!context.startSafely(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))) {
+                                    context.openApplicationDetails()
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+            if (section == ChatSecuritySection.PRIVACY) {
+                ListItem(
+                    leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.LocationPin())),
+                    headlineContent = { Text(stringResource(R.string.screen_chat_security_location_title)) },
+                    supportingContent = { Text(stringResource(R.string.screen_chat_security_location_boundary)) },
+                )
+            }
         }
-        HorizontalDivider()
-        ListItem(
-            headlineContent = { Text(stringResource(R.string.screen_chat_security_location_title)) },
-            supportingContent = { Text(stringResource(R.string.screen_chat_security_location_boundary)) },
-        )
     }
     recoveryToConfirm?.let { recovery ->
         val deviceCode = recovery.newInstallationId.takeLast(8).uppercase()
@@ -308,6 +447,7 @@ private fun CapabilityState.label(): String = stringResource(
         CapabilityState.ENABLED -> R.string.screen_chat_security_enabled
         CapabilityState.ACTION_REQUIRED -> R.string.screen_chat_security_needs_action
         CapabilityState.CHECK_IN_SETTINGS -> R.string.screen_chat_security_check_settings
+        CapabilityState.OPTIONAL -> R.string.screen_settings_permission_optional
     }
 )
 
@@ -385,10 +525,13 @@ private fun Context.capabilityState(capability: ChatCapability): CapabilityState
     ChatCapability.CALL_ALERTS -> {
         val fullScreenGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
             NotificationManagerCompat.from(this).canUseFullScreenIntent()
-        if (fullScreenGranted && isXiaomiBackgroundStartAllowed()) {
-            CapabilityState.ENABLED
-        } else {
-            CapabilityState.ACTION_REQUIRED
+        when {
+            !fullScreenGranted -> CapabilityState.ACTION_REQUIRED
+            else -> when (isXiaomiBackgroundStartAllowed()) {
+                true -> CapabilityState.ENABLED
+                false -> CapabilityState.ACTION_REQUIRED
+                null -> CapabilityState.CHECK_IN_SETTINGS
+            }
         }
     }
     ChatCapability.DO_NOT_DISTURB -> if (
@@ -396,7 +539,7 @@ private fun Context.capabilityState(capability: ChatCapability): CapabilityState
     ) {
         CapabilityState.ENABLED
     } else {
-        CapabilityState.ACTION_REQUIRED
+        CapabilityState.OPTIONAL
     }
     ChatCapability.BACKGROUND_RUNTIME -> if (
         getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(packageName) == true
@@ -493,7 +636,7 @@ private fun Context.startSafely(intent: Intent): Boolean {
     }
 }
 
-private fun Context.isXiaomiBackgroundStartAllowed(): Boolean {
+private fun Context.isXiaomiBackgroundStartAllowed(): Boolean? {
     if (!isXiaomiDevice()) return true
     return runCatching {
         val manager = getSystemService(AppOpsManager::class.java)
@@ -503,8 +646,12 @@ private fun Context.isXiaomiBackgroundStartAllowed(): Boolean {
             Int::class.javaPrimitiveType,
             String::class.java,
         )
-        method.invoke(manager, MIUI_OP_BACKGROUND_START_ACTIVITY, applicationInfo.uid, packageName) == AppOpsManager.MODE_ALLOWED
-    }.getOrDefault(false)
+        when (method.invoke(manager, MIUI_OP_BACKGROUND_START_ACTIVITY, applicationInfo.uid, packageName)) {
+            AppOpsManager.MODE_ALLOWED -> true
+            AppOpsManager.MODE_IGNORED, AppOpsManager.MODE_ERRORED -> false
+            else -> null
+        }
+    }.getOrNull()
 }
 
 private fun isXiaomiDevice(): Boolean =
@@ -521,7 +668,9 @@ private const val MIUI_EXTRA_PACKAGE_NAME = "extra_pkgname"
 
 @PreviewsDayNight
 @Composable
-private fun ChatSecurityViewPassedPreview() = ElementPreview {
+private fun ChatSecurityViewPassedPreview(
+    @PreviewParameter(ChatSecuritySectionProvider::class) section: ChatSecuritySection,
+) = ElementPreview {
     ChatSecurityView(
         state = ChatSecurityState(
             PublicDeviceSecurityState.PASSED,
@@ -532,11 +681,17 @@ private fun ChatSecurityViewPassedPreview() = ElementPreview {
             isRefreshing = false,
             isRecoveryActionRunning = false,
             recoveryActionFailure = null,
+            unavailableHistoryCount = 18,
         ) {},
         onBackClick = {},
         onRestoreHistoryClick = {},
         onEncryptionClick = {},
+        initialSection = section,
     )
+}
+
+internal class ChatSecuritySectionProvider : PreviewParameterProvider<ChatSecuritySection> {
+    override val values = ChatSecuritySection.entries.asSequence()
 }
 
 @PreviewsDayNight

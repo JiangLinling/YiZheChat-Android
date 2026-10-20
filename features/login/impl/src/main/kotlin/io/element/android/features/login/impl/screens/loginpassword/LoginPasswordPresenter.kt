@@ -190,6 +190,9 @@ class LoginPasswordPresenter(
                 is LoginPasswordEvents.SetRegistrationPasswordConfirmation -> {
                     invitationFormState.value = invitationFormState.value.copy(passwordConfirmation = event.password.replace("\n", ""))
                 }
+                is LoginPasswordEvents.SetAgreementAccepted -> {
+                    invitationFormState.value = invitationFormState.value.copy(agreementAccepted = event.accepted)
+                }
                 LoginPasswordEvents.SubmitInvitationRegistration -> {
                     localCoroutineScope.submitInvitationRegistration(
                         formState = invitationFormState.value,
@@ -222,6 +225,10 @@ class LoginPasswordPresenter(
         loginAction: MutableState<AsyncData<SessionId>>,
         usernameSuggestion: MutableState<AsyncData<OnboardingUsernameSuggestion>>,
     ) {
+        if (!formState.agreementAccepted) {
+            loginAction.value = AsyncData.Failure(io.element.android.security.dataprotection.api.RegistrationAgreementRequired())
+            return
+        }
         if (
             invitation == null || suggestion == null ||
             !OnboardingPasswordPolicy.isSatisfiedBy(formState.password) ||
@@ -242,6 +249,10 @@ class LoginPasswordPresenter(
                         preferredStem = formState.preferredStem,
                         password = formState.password,
                         idempotencyKey = formState.idempotencyKey,
+                        consent = io.element.android.security.dataprotection.api.RegistrationConsent(
+                            io.element.android.security.dataprotection.api.RegistrationAgreement.VERSION,
+                            io.element.android.security.dataprotection.api.RegistrationAgreement.SHA256,
+                        ),
                     )
                     usernameSuggestion.value = AsyncData.Success(
                         OnboardingUsernameSuggestion(

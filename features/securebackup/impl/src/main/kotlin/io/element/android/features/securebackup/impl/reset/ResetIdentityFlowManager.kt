@@ -15,6 +15,9 @@ import io.element.android.libraries.matrix.api.encryption.EncryptionService
 import io.element.android.libraries.matrix.api.encryption.IdentityResetHandle
 import io.element.android.security.dataprotection.api.AccountIdentityResetLifecycleRecorder
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -36,14 +39,18 @@ class ResetIdentityFlowManager(
 ) {
     private val resetHandleFlow: MutableStateFlow<AsyncData<IdentityResetHandle?>> = MutableStateFlow(AsyncData.Uninitialized)
     val currentHandleFlow: StateFlow<AsyncData<IdentityResetHandle?>> = resetHandleFlow
+    private var handleJob: Job? = null
 
     /**
      * Complete through whichever trustworthy signal arrives first: the SDK reset call itself,
      * or an independently refreshed proof that the reset's security state is fully active.
      */
     suspend fun completeReset(reset: suspend () -> Result<Unit>): Result<Unit> = supervisorScope {
+        val previousHash = identityResetLifecycleRecorder.beginExplicitReset().getOrElse {
+            return@supervisorScope Result.failure(it)
+        }
         val resetJob = async { reset() }
-        val completionProofJob = async { awaitCompletionProof() }
+        val completionProofJob = async { awaitCompletionProof(previousHash) }
         val resetResult = try {
             select {
                 resetJob.onAwait { it }
@@ -64,7 +71,7 @@ class ResetIdentityFlowManager(
         }
     }
 
-    private suspend fun awaitCompletionProof(): Result<Unit> {
+    private suspend fun awaitCompletionProof(previousHash: String): Result<Unit> {
         return try {
             withTimeout(COMPLETION_TIMEOUT) {
                 var lastState: Any? = null
@@ -76,7 +83,7 @@ class ResetIdentityFlowManager(
                         Timber.d("Identity reset completion state: $state")
                         lastState = state
                     }
-                    if (state?.isComplete == true) {
+                    if (state?.isComplete == true && state.identityKeyHash != null && state.identityKeyHash != previousHash) {
                         Timber.i("Identity reset completion independently verified")
                         return@withTimeout
                     }
@@ -95,9 +102,30 @@ class ResetIdentityFlowManager(
         } else {
             resetHandleFlow.value = AsyncData.Loading()
 
-            sessionCoroutineScope.launch {
+            handleJob = sessionCoroutineScope.launch {
+                val resumed = identityResetLifecycleRecorder.resumeCompletedReset()
+                if (resumed.isFailure) {
+                    resetHandleFlow.value = AsyncData.Failure(checkNotNull(resumed.exceptionOrNull()))
+                    return@launch
+                }
+                if (resumed.getOrThrow()) {
+                    resetHandleFlow.value = AsyncData.Success(null)
+                    return@launch
+                }
+                val intent = identityResetLifecycleRecorder.beginExplicitReset()
+                if (intent.isFailure) {
+                    resetHandleFlow.value = AsyncData.Failure(checkNotNull(intent.exceptionOrNull()))
+                    return@launch
+                }
                 encryptionService.startIdentityReset()
                     .onSuccess { handle ->
+                        if (handle == null) {
+                            val recorded = identityResetLifecycleRecorder.recordExplicitReset()
+                            if (recorded.isFailure) {
+                                resetHandleFlow.value = AsyncData.Failure(checkNotNull(recorded.exceptionOrNull()))
+                                return@onSuccess
+                            }
+                        }
                         resetHandleFlow.value = AsyncData.Success(handle)
                     }
                     .onFailure {
@@ -110,8 +138,22 @@ class ResetIdentityFlowManager(
     }
 
     suspend fun cancel() {
-        currentHandleFlow.value.dataOrNull()?.cancel()
-        resetHandleFlow.value = AsyncData.Uninitialized
+        handleJob?.cancelAndJoin()
+        try {
+            currentHandleFlow.value.dataOrNull()?.cancel()
+            identityResetLifecycleRecorder.cancelExplicitReset().getOrThrow()
+            resetHandleFlow.value = AsyncData.Uninitialized
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            // Unknown remote outcomes retain the durable checkpoint for reconciliation.
+            // A navigation callback must not turn them into an uncaught session exception.
+            resetHandleFlow.value = AsyncData.Failure(error)
+        }
+    }
+
+    fun dismissError() {
+        if (resetHandleFlow.value.isFailure()) resetHandleFlow.value = AsyncData.Uninitialized
     }
 
     private companion object {

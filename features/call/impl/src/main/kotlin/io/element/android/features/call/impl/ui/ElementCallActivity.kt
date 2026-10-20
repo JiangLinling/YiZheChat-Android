@@ -176,11 +176,24 @@ class ElementCallActivity :
                 compoundDark = colors.dark,
                 buildMeta = buildMeta,
             ) {
+                // recreate() retains the Activity's saved-state registry. Scope all call state
+                // to the actual dial/answer attempt so a new call cannot restore a retired LC20
+                // operation or its WebView state. Rotation of the same attempt retains its key.
+                androidx.compose.runtime.key(webViewTarget.value?.sessionId, webViewTarget.value?.roomId, webViewTarget.value?.attemptId) {
                 val state = presenter.present()
                 eventSink = state.eventSink
                 mediaCallActive = state.isCallActive && !state.isTerminating
-                LaunchedEffect(state.isCallActive, state.isTerminating) {
+                LaunchedEffect(state.isCallActive, state.isTerminating, pipState.isInPictureInPicture) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) setPipParams()
+                    if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment &&
+                        state.isTerminating && pipState.isInPictureInPicture
+                    ) {
+                        // A retired PiP must release its task, not remain as a hidden owner of
+                        // future invitations. Presenter cleanup already runs in the app scope
+                        // under the original operation; a foreground ended screen stays readable.
+                        finish()
+                        return@LaunchedEffect
+                    }
                     if (state.isCallActive) {
                         setCallIsActive()
                     }
@@ -197,6 +210,7 @@ class ElementCallActivity :
                         requestPermissionsLauncher.launch(permissions)
                     }
                 )
+                }
             }
         }
     }

@@ -136,6 +136,17 @@ class DefaultSeenInvitesStore(
         retireOldReferences()
     }
 
+    override suspend fun updateNotificationKinds(kinds: Map<RoomId, InviteNotification.Kind>) = mutex.withLock {
+        store.edit { prefs ->
+            val old = readRecords(prefs)
+            val updated = old.map { record -> kinds[record.roomId]?.let {
+                record.copy(kind = InviteNotificationCodec.refinedKind(record.kind, it))
+            } ?: record }
+            if (updated != old) persist(prefs, updated)
+        }
+        retireOldReferences()
+    }
+
     override suspend fun recordOutcome(roomId: RoomId, outcome: InviteNotification.Outcome, seen: Boolean, expectedSequence: Long?) = mutex.withLock {
         store.edit { prefs ->
             val old = readRecords(prefs)

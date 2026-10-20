@@ -88,6 +88,8 @@ captures/
 
 # Google Services (e.g. APIs or Firebase)
 # google-services.json
+app/agconnect-services.json
+app/src/gplayRelease/agconnect-services.json
 
 # Freeline
 freeline.py
@@ -115,3 +117,19 @@ lint/tmp/
 .DS_Store
 
 checkouts/**
+
+# Local build caches, generated diagnostics and device evidence (not source).
+/.codex-gradle-home/
+/.codex-isolated-build/
+/.codex-build*/
+/.codex-project-cache*/
+/.codex-tmp/
+/.codex-qrtest-build/
+/.codex-shake-frames/
+/.codex-artifacts/
+/.tmp-hms/
+/.acceptance/
+/.office-viewer-build/
+/device-test-evidence/
+/artifacts/
+/gradle-thread-snapshot*.txt

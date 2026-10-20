@@ -12,13 +12,16 @@
 ## Overview
 
 Element Android uses [MapTiler](https://www.maptiler.com/) to provide map
-imagery where required. MapTiler requires an API key, which we bake in to
-the app at release time.
+imagery where required when an API key is configured. YiZheChat falls back to
+[OpenFreeMap](https://openfreemap.org/) for interactive maps when no MapTiler
+key is present, so location sharing remains available in local and F-Droid
+builds.
 
 ## Local development with MapTiler
 
-If you're developing the application and want maps to render properly you can
-sign up for the [MapTiler free tier](https://www.maptiler.com/cloud/pricing/).
+If you're developing the application, the built-in OpenFreeMap fallback works
+without extra configuration. To use MapTiler instead, sign up for the
+[MapTiler free tier](https://www.maptiler.com/cloud/pricing/).
 
 Place your API key in `local.properties` with the key
 `services.maptiler.apikey`, e.g.:

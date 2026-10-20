@@ -138,7 +138,9 @@ class DefaultDataDeletionCoordinator(
                 }
                 if (!featureResourcesCleared) return persistFailure(entry, ERROR_LOCAL_RESIDUAL_STATE_DELETION_FAILED)
             }
-            val residualStateCleared = runCatchingExceptions { accountLocalStateCleaner.clear(scope) }.getOrElse {
+            val residualStateCleared = runCatchingExceptions {
+                accountLocalStateCleaner.clear(scope, preserveAccountState = deletionSessionCleaner.hasReplacement(scope))
+            }.getOrElse {
                 return persistFailure(entry, ERROR_LOCAL_RESIDUAL_STATE_DELETION_FAILED)
             }
             if (!residualStateCleared) return persistFailure(entry, ERROR_LOCAL_RESIDUAL_STATE_DELETION_FAILED)
@@ -180,7 +182,9 @@ class DefaultDataDeletionCoordinator(
 
         if (DeletionStep.CANCELLED_NOTIFICATIONS !in entry.completedSteps) {
             val scope = entry.request.scope as DeletionScope.Account
-            if (!deletionNotificationCleaner.cancel(scope)) return persistFailure(entry, ERROR_NOTIFICATION_CANCELLATION_FAILED)
+            if (!deletionSessionCleaner.hasReplacement(scope) && !deletionNotificationCleaner.cancel(scope)) {
+                return persistFailure(entry, ERROR_NOTIFICATION_CANCELLATION_FAILED)
+            }
             entry = persistProgress(entry, setOf(DeletionStep.CANCELLED_NOTIFICATIONS)) ?: return entry.toReport(
                 retryRequired = true,
                 errorCode = ERROR_JOURNAL_PROGRESS_WRITE_FAILED,

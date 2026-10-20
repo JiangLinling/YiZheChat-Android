@@ -1,3 +1,14 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+# Byte-sensitive build inputs and fixtures retain the reviewed bytes.
+*.aar -text
+*.jar -text
+*.so -text
+**/src/**/assets/** -text
+**/src/**/resources/** -text
+**/src/**/res/raw/** -text
+libraries/rustsdk/source-patches/** -text
+
 screenshots/**/*.png filter=lfs diff=lfs merge=lfs -text
 libraries/compound/screenshots/** filter=lfs diff=lfs merge=lfs -text
 **/snapshots/**/*.png filter=lfs diff=lfs merge=lfs -text

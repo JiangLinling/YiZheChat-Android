@@ -111,6 +111,7 @@ class JoinedRustRoom(
     private val featureFlagService: FeatureFlagService,
     private val protectedContentAdapter: MatrixProtectedContentAdapter,
     private val fetchRtcEvent: (suspend (String) -> kotlinx.serialization.json.JsonObject)? = null,
+    private val redactRtcMembershipEvent: (suspend (String) -> Unit)? = null,
     private val updateRawUserPowerLevels: (suspend (Map<String, Long>) -> Unit)? = null,
     private val powerLevelMutationMutex: Mutex = Mutex(),
 ) : JoinedRoom, BaseRoom by baseRoom {
@@ -489,8 +490,9 @@ class JoinedRustRoom(
                 },
                 safeLifecycleDiagnosticsEnabled = io.element.android.appconfig.NextDeploymentConfig.isNextDeployment,
                 restoreStickyMetadata = { message -> stickyMetadata?.restore(message) ?: message },
+                redactMembershipEvent = redactRtcMembershipEvent,
                 prepareOutgoingMessage = { message ->
-                    if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment && !isDm()) {
+                    if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment) {
                         io.element.android.libraries.matrix.impl.widget.prepareGroupRingingMessage(message) {
                             getMembers(Int.MAX_VALUE).getOrThrow().filter {
                                 it.membership == io.element.android.libraries.matrix.api.room.RoomMembershipState.JOIN &&

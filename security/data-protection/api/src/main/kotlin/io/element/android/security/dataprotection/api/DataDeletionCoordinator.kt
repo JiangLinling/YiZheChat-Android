@@ -10,6 +10,12 @@ package io.element.android.security.dataprotection.api
 @JvmInline
 value class DeletionOperationId(val value: String)
 
+/** Stable cleanup identity retained when a signed-out login row is removed before remote commands arrive. */
+fun signedOutCleanupOperationId(accountIdHash: String, matrixDeviceIdHash: String): DeletionOperationId =
+    DeletionOperationId("signedout-" + java.security.MessageDigest.getInstance("SHA-256")
+        .digest("$accountIdHash:$matrixDeviceIdHash".encodeToByteArray())
+        .joinToString("") { "%02x".format(it.toInt() and 0xff) })
+
 enum class DeletionReason {
     RETENTION_EXPIRED,
     USER_REQUEST,

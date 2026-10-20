@@ -69,6 +69,7 @@ class RustClientSessionDelegate(
         Timber.tag(loggerTag.value).i("Saving new session info for user ${session.userId} after a token refresh")
         runCatchingExceptions {
             val existingData = runBlocking { sessionStore.getSession(session.userId) } ?: return
+            if (existingData.deviceId != session.deviceId || !existingData.isTokenValid) return
 
             if (existingData.accessToken == session.accessToken) {
                 Timber.tag(loggerTag.value).e("Access token is the same as the one already stored, this should not happen after a token refresh!")
@@ -118,10 +119,9 @@ class RustClientSessionDelegate(
                     "Removing session data with access token '$anonymizedAccessToken' " +
                         "and refresh token '$anonymizedRefreshToken'."
                 )
-                if (existingData != null) {
+                if (existingData != null && existingData.deviceId == currentClient.deviceId.value) {
                     // Set isTokenValid to false
-                    val newData = existingData.copy(isTokenValid = false)
-                    runBlocking { sessionStore.updateData(newData) }
+                    runBlocking { sessionStore.invalidateSessionIfDeviceMatches(existingData.userId, currentClient.deviceId.value) }
                     Timber.tag(loggerTag.value).d("Invalidated session data with access token: '$anonymizedAccessToken'.")
                 } else {
                     Timber.tag(loggerTag.value).d("No session data found.")

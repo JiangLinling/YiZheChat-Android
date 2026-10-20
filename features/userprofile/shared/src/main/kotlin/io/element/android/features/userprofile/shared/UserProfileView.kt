@@ -8,6 +8,8 @@
 
 package io.element.android.features.userprofile.shared
 
+import io.element.android.libraries.matrix.ui.components.contactFailureMessageResource
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -129,6 +131,7 @@ fun UserProfileView(
                 isCurrentUser = state.isCurrentUser,
                 hasDm = state.dmRoomId != null,
                 canCall = state.canCall,
+                isBlocked = state.isBlocked.dataOrNull() == true,
                 onShareUser = onShareUser,
                 onStartDM = { state.eventSink(UserProfileEvents.StartDM) },
                 onCall = { intent -> state.dmRoomId?.let { onStartCall(it, intent) } }
@@ -202,7 +205,7 @@ fun UserProfileView(
                     )
                 },
                 onSuccess = onOpenDm,
-                errorMessage = { stringResource(R.string.screen_start_chat_error_starting_chat) },
+                errorMessage = { stringResource(it.contactFailureMessageResource() ?: R.string.screen_start_chat_error_starting_chat) },
                 onRetry = { state.eventSink(UserProfileEvents.StartDM) },
                 onErrorDismiss = { state.eventSink(UserProfileEvents.ClearStartDMState) },
                 confirmationDialog = { data ->

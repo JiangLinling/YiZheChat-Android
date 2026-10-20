@@ -10,13 +10,32 @@ package io.element.android.features.preferences.impl.about
 
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import io.element.android.libraries.architecture.AsyncData
+import io.element.android.security.dataprotection.api.AppUpdateDownloadProgress
 import kotlinx.collections.immutable.toImmutableList
 
 open class AboutStateProvider : PreviewParameterProvider<AboutState> {
     override val values: Sequence<AboutState>
         get() = sequenceOf(
             anAboutState(),
+            anAboutState().copy(updateCheck = AsyncData.Loading()),
+            anAboutState().copy(
+                preparedUpdate = AsyncData.Loading(),
+                downloadProgress = AppUpdateDownloadProgress(0L, -1L),
+            ),
+            anAboutState().copy(
+                preparedUpdate = AsyncData.Loading(),
+                downloadProgress = AppUpdateDownloadProgress(68_000_000L, 100_000_000L),
+            ),
+            anAboutState().copy(
+                preparedUpdate = AsyncData.Loading(),
+                downloadProgress = AppUpdateDownloadProgress(100_000_000L, 100_000_000L),
+            ),
+            anAboutState().copy(preparedUpdate = AsyncData.Failure(IllegalStateException("Download unavailable"))),
         )
+}
+
+class LegalDocumentProvider : PreviewParameterProvider<ElementLegal> {
+    override val values = getAllLegals().asSequence()
 }
 
 fun anAboutState(

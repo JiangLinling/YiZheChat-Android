@@ -167,7 +167,14 @@ fun EditUserProfileView(
             },
             onSuccess = { onEditProfileSuccess() },
             errorTitle = { stringResource(R.string.screen_edit_profile_error_title) },
-            errorMessage = { stringResource(R.string.screen_edit_profile_error) },
+            errorMessage = { failure ->
+                stringResource(when ((failure as? ProfileSaveFailure)?.part) {
+                    ProfileSaveFailure.Part.Name -> R.string.error_profile_name_save
+                    ProfileSaveFailure.Part.Avatar -> R.string.error_profile_avatar_save
+                    ProfileSaveFailure.Part.Refresh -> R.string.error_profile_refresh
+                    else -> R.string.error_profile_both_save
+                })
+            },
             onErrorDismiss = { state.eventSink(EditUserProfileEvent.CloseDialog) },
         )
     }

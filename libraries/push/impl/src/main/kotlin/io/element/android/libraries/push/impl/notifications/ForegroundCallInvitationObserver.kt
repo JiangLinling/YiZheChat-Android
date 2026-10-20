@@ -28,15 +28,38 @@ class ForegroundCallInvitationObserver(
         if (!NextDeploymentConfig.isNextDeployment) return emptyFlow()
         return navigation.appNavigationState.map { state ->
             if (!state.isInForeground) null else when (val nav = state.navigationState) {
-                is NavigationState.Room -> nav
-                is NavigationState.Thread -> nav.parentRoom
+                is NavigationState.Session -> nav.sessionId to null
+                is NavigationState.Room -> nav.parentSession.sessionId to nav.roomId
+                is NavigationState.Thread -> nav.parentRoom.parentSession.sessionId to nav.parentRoom.roomId
                 else -> null
             }
-        }.distinctUntilChanged().flatMapLatest { nav ->
-            if (nav == null) return@flatMapLatest emptyFlow()
+        }.distinctUntilChanged().flatMapLatest { scope ->
+            Timber.d("Foreground RTC scope: session=%s room=%s", scope?.first, scope?.second)
+            if (scope == null) return@flatMapLatest emptyFlow()
+            flow {
+                val client = clients.getOrRestore(scope.first).getOrNull() ?: return@flow
+                emitAll(client.roomListService.allRooms.summaries.map { rooms ->
+                    // A room-list preview is only a hint to open its authenticated timeline.
+                    // It never supplies an event ID, lifetime, or ringing authorization.
+                    (listOfNotNull(scope.second) + rooms.filter {
+                        isFreshForegroundCallHint(it.latestEvent, scope.first, clock.epochMillis())
+                    }.map { it.roomId }).distinct().sortedBy { it.value }
+                }.distinctUntilChanged().flatMapLatest { roomIds ->
+                    Timber.d("Foreground RTC observed rooms=%s", roomIds)
+                    merge(*roomIds.map { roomId ->
+                        roomInvitations(NavigationState.Room("foreground-call", roomId,
+                            NavigationState.Session("foreground-call", scope.first)))
+                    }.toTypedArray())
+                })
+            }.catch { Timber.w(it, "Foreground RTC room discovery unavailable; push delivery remains active") }
+        }
+    }
+
+    private fun roomInvitations(nav: NavigationState.Room): Flow<NotifiableRingingCallEvent> =
             flow {
                 val client = clients.getOrRestore(nav.parentSession.sessionId).getOrNull() ?: return@flow
                 val room = client.getJoinedRoom(nav.roomId) ?: return@flow
+                Timber.d("Foreground RTC room subscription started: %s", nav.roomId)
                 try {
                     val seen = mutableSetOf<io.element.android.libraries.matrix.api.core.EventId>()
                     room.liveTimeline.timelineItems.collect { items ->
@@ -46,6 +69,8 @@ class ForegroundCallInvitationObserver(
                         for (event in candidates) {
                             val id = event.eventId ?: continue
                             val content = event.content as CallNotifyContent
+                            Timber.d("Foreground RTC candidate: id=%s age=%d state=%s seen=%s", id,
+                                clock.epochMillis() - event.timestamp, content.lifecycleState, id in seen)
                             if (id in seen || content.lifecycleState != null || client.sessionId in content.declinedBy ||
                                 event.timestamp > clock.epochMillis() || clock.epochMillis() - event.timestamp >= 90_000) continue
                             val notification = client.notificationService.getNotifications(mapOf(nav.roomId to listOf(id)))
@@ -81,8 +106,18 @@ class ForegroundCallInvitationObserver(
                     // This observer acquired its own room. Retire its timeline and owner scopes
                     // when navigation changes or observation is cancelled.
                     room.close()
+                    Timber.d("Foreground RTC room subscription stopped: %s", nav.roomId)
                 }
             }.catch { Timber.w(it, "Foreground RTC observer unavailable; push delivery remains active") }
-        }
-    }
+}
+
+internal fun isFreshForegroundCallHint(
+    latest: io.element.android.libraries.matrix.api.roomlist.LatestEventValue,
+    sessionId: io.element.android.libraries.matrix.api.core.SessionId,
+    now: Long,
+): Boolean {
+    val event = latest as? io.element.android.libraries.matrix.api.roomlist.LatestEventValue.Remote ?: return false
+    val content = event.content as? CallNotifyContent ?: return false
+    return !event.isOwn && event.senderId != sessionId && content.lifecycleState == null &&
+        sessionId !in content.declinedBy && event.timestamp <= now && now - event.timestamp < 90_000
 }

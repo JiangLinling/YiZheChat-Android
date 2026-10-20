@@ -29,6 +29,7 @@ import io.element.android.libraries.designsystem.theme.components.ListItem
 import io.element.android.libraries.designsystem.theme.components.ListItemStyle
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.ui.strings.CommonStrings
+import io.element.android.libraries.matrix.ui.components.contactFailureMessageResource
 
 @Composable
 fun BlockUserSection(
@@ -49,7 +50,7 @@ fun BlockUserSection(
     }
     if (isBlocked is AsyncData.Failure) {
         RetryDialog(
-            content = stringResource(CommonStrings.error_unknown),
+            content = stringResource(isBlocked.error.contactFailureMessageResource() ?: CommonStrings.error_network_or_server_issue),
             onDismiss = { state.eventSink(UserProfileEvents.ClearBlockUserError) },
             onRetry = {
                 val event = when (isBlocked.prevData) {

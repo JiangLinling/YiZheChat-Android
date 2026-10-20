@@ -54,7 +54,6 @@ import com.bumble.appyx.navmodel.backstack.operation.Push
 import com.bumble.appyx.navmodel.backstack.operation.pop
 import com.bumble.appyx.navmodel.backstack.operation.push
 import com.bumble.appyx.navmodel.backstack.operation.replace
-import com.bumble.appyx.navmodel.backstack.operation.singleTop
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedInject
 import io.element.android.annotations.ContributesNode
@@ -276,6 +275,10 @@ class LoggedInFlowNode(
         roomMembershipObserver = matrixClient.roomMembershipObserver,
     )
 
+    private val incomingVerificationNavigation = IncomingVerificationNavigation(backstack) {
+        it is NavTarget.IncomingVerificationRequest
+    }
+
     private val verificationListener = object : SessionVerificationServiceListener {
         override fun onIncomingSessionRequest(verificationRequest: VerificationRequest.Incoming) {
             // Without this launch the rendering and actual state of this Appyx node's children gets out of sync, resulting in a crash.
@@ -304,7 +307,11 @@ class LoggedInFlowNode(
                     }
                 }
 
-                backstack.singleTop(NavTarget.IncomingVerificationRequest(verificationRequest))
+                incomingVerificationNavigation.show(
+                    requestId = verificationRequest.details.flowId.value,
+                    target = NavTarget.IncomingVerificationRequest(verificationRequest),
+                    timeoutMillis = (2.minutes - elapsedTimeSinceReceived).inWholeMilliseconds.coerceAtLeast(1),
+                )
             }
         }
     }
@@ -421,14 +428,20 @@ class LoggedInFlowNode(
 
                 lifecycleScope.launch {
                     if (enterDeletionRecoveryIfPending()) return@launch
-                    accountReactivationCoordinator.hasPendingExplicitIdentityReset(matrixClient)
-                        .onSuccess { pending ->
-                            if (pending) beginIdentityResetConvergence()
-                        }
-                        .onFailure { failure ->
-                            Timber.w(failure, "Could not restore the pending identity-reset convergence state.")
-                            identityResetConvergenceState.value = IdentityResetConvergenceState.RETRY_REQUIRED
-                        }
+                    combine(
+                        matrixClient.sessionVerificationService.sessionVerifiedStatus,
+                        matrixClient.encryptionService.backupStateStateFlow,
+                    ) { verification, backup -> verification to backup }.collectLatest {
+                        // On process recovery the SDK may discover the completed remote reset
+                        // only after verification sync. Reconcile that evidence when it arrives.
+                        accountReactivationCoordinator.hasPendingExplicitIdentityReset(matrixClient)
+                            .onSuccess { pending ->
+                                if (pending) beginIdentityResetConvergence()
+                            }
+                            .onFailure { failure ->
+                                Timber.w(failure, "Could not restore the pending identity-reset convergence state.")
+                            }
+                    }
                 }
 
                 lifecycleScope.launch {
@@ -579,6 +592,7 @@ class LoggedInFlowNode(
                         recoveryRequired = recovery.requiresGate,
                     )
                 }
+                    .distinctStartupNavigation()
                     .onEach { startupState ->
                         val destination = startupState.destination()
                         when (destination) {
@@ -1139,10 +1153,10 @@ class LoggedInFlowNode(
                                 // Leave the destructive flow only once its local marker is durable.
                                 // The shared startup surface then covers RESET_CONFIRMED convergence;
                                 // failure offers retry of that same operation, never another reset.
-                                backstack.pop()
+                                backstack.removeLast(navTarget)
                                 beginIdentityResetConvergence()
                             } else {
-                                backstack.pop()
+                                backstack.removeLast(navTarget)
                                 if (recoveryTarget) securityRecoveryCompletionToken.value += 1L
                             }
                         }
@@ -1199,6 +1213,19 @@ class LoggedInFlowNode(
                     canRestoreOffline = { accountReactivationCoordinator.canRestoreOffline(matrixClient) },
                     hasCurrentCoreReceipt = { accountReactivationCoordinator.hasCurrentCoreReceipt(matrixClient) },
                     canRestoreRetainedList = { accountReactivationCoordinator.canRestoreLocalList(matrixClient) },
+                    completeAccountHandover = {
+                        appOperationalStateCoordinator.performResuming(loggedInOperationRequest(FullAppLifecycleId.LC_06, "reactivation")) {
+                            accountReactivationCoordinator.activate(matrixClient).getOrThrow()
+                        }
+                    },
+                    startRecoveryVerification = {
+                        appOperationalStateCoordinator.performResuming(loggedInOperationRequest(FullAppLifecycleId.LC_06, "post_login")) {
+                            check(matrixSessionCache.startSync(matrixClient.sessionId)) { "Recovery sync is unavailable." }
+                            matrixClient.sessionVerificationService.setListener(verificationListener)
+                            // This starts only verification transport. Sending, protected content,
+                            // ordinary session initialization and HOME keep their existing gates.
+                        }
+                    },
                     verifiedStartupReadiness = managementSecurityRefreshService::verifiedOnlineReadiness,
                     onOfflineReady = {
                         offlineCoreRestored.value = true
@@ -1325,8 +1352,13 @@ class LoggedInFlowNode(
                     buildContext = buildContext,
                     params = IncomingVerificationEntryPoint.Params(navTarget.data),
                     callback = object : IncomingVerificationEntryPoint.Callback {
+                        private var finished = false
+
                         override fun onDone() {
-                            backstack.pop()
+                            if (finished) return
+                            finished = true
+                            // A late completion belongs to this request, never to a newer screen.
+                            backstack.removeLast(navTarget)
                         }
                     },
                 )
@@ -1542,6 +1574,12 @@ internal enum class StartupDestination {
     DELETION_RECOVERY,
     ERROR,
 }
+
+/** Equivalent readiness updates must not dismiss an in-progress recovery child. */
+internal fun kotlinx.coroutines.flow.Flow<StartupSecurityState>.distinctStartupNavigation() =
+    distinctUntilChanged { previous, current ->
+        previous.destination() == current.destination() && previous.failureReasonCode == current.failureReasonCode
+    }
 
 internal fun StartupSecurityState.destination(): StartupDestination = when {
     deletionRecoveryRequired -> StartupDestination.DELETION_RECOVERY

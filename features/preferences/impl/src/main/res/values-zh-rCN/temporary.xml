@@ -1,1 +1,42 @@
-<resources><string name="screen_settings_friend_qr">我的加好友二维码</string></resources>
+<resources>
+    <string name="screen_chat_security_startup_binding">启动加速（可选）</string>
+    <string name="screen_chat_security_startup_binding_description">查看功能说明、实际状态和系统开关。系统仍可能停止服务，消息和来电功能独立运行。</string>
+    <string name="screen_chat_security_startup_binding_ready">已连接</string>
+    <string name="screen_chat_security_startup_binding_waiting">等待系统连接</string>
+    <string name="screen_settings_friend_qr">我的加好友二维码</string>    <string name="error_profile_name_save">昵称未保存。其他已成功的修改会保留，请检查网络后再次保存。</string>
+    <string name="error_profile_avatar_save">头像未保存。其他已成功的修改会保留，请检查网络后重试；若所选照片已不可用，请重新选择。</string>
+    <string name="error_profile_refresh">修改已保存，但最新资料暂未刷新。请检查网络后再次点击保存以刷新。</string>
+    <string name="error_profile_both_save">昵称和头像均未保存。编辑内容仍保留在本页，请检查网络后重试。</string>
+    <string name="screen_settings_accounts_devices">账号与设备</string>
+    <string name="screen_settings_media">图片与视频</string>
+    <string name="screen_settings_chat_privacy">聊天隐私</string>
+    <string name="screen_settings_device_recovery">设备恢复</string>
+    <string name="screen_settings_phone_permissions">手机权限</string>
+    <string name="screen_settings_privacy_information">隐私说明</string>
+    <string name="screen_settings_recovery_pending">%1$d 项设备请求待确认</string>
+    <string name="screen_settings_permission_optional">可选</string>
+    <string name="screen_settings_run_notification_checks">开始检查通知</string>
+    <string name="screen_yizhe_about_title">关于乙者</string>
+    <string name="screen_yizhe_name">乙者</string>
+    <string name="screen_yizhe_test_version">测试版本</string>
+    <string name="screen_yizhe_current_version">当前版本</string>
+    <string name="screen_yizhe_version_details">版本详情</string>
+    <string name="screen_yizhe_updates">版本更新</string>
+    <string name="screen_yizhe_notices">协议与声明</string>
+    <string name="screen_yizhe_no_update">暂无可用更新</string>
+    <string name="screen_yizhe_legal_date">内容版本：2026 年 10 月 20 日</string>
+    <string name="screen_yizhe_legal_scope">适用于当前测试版本 · 可离线阅读</string>
+    <string name="screen_yizhe_preparing_download">正在连接下载服务…</string>
+    <string name="screen_yizhe_download_bytes">已下载 %1$s / %2$s · %3$d%%</string>
+    <string name="screen_yizhe_download_unknown">已下载 %1$s</string>
+    <string name="screen_yizhe_downloading">正在下载新版本</string>
+    <string name="screen_yizhe_download_failed">下载或校验未完成，点此重试</string>
+    <string name="screen_yizhe_download_action">下载新版本</string>
+    <string name="screen_yizhe_install_verified">校验通过，可以安装</string>
+    <string name="screen_yizhe_copyright_title">版权声明</string>
+    <string name="screen_yizhe_copyright_body">乙者\n本声明适用于乙者应用及相关服务。乙者的名称、标识、自有界面设计、文案及原创功能成果，由相应权利人依法享有权利。未经授权，不得冒用乙者名义发布应用、提供服务或使他人误以为获得乙者认可。\n\n你的内容\n你在乙者中创建或发送的文字、图片、语音、视频、文件及其他内容，其权利仍归你或原权利人所有。发送、转发、收藏或分享内容前，请确认具备相应权限，并尊重他人的隐私、肖像及其他合法权益。使用乙者不意味着将这些内容的所有权转让给乙者。\n\n第三方作品\n乙者使用了 Element、Matrix 及其他第三方软件组件。相关组件、代码、字体、图标与作品的版权归各自权利人所有，分别适用其原有授权条款；本声明不替代或缩减这些授权，也不将第三方作品声明为乙者独有。\n\n权利反馈\n如你认为乙者中的内容或应用材料涉及侵权，请通过“我 → 问题反馈”说明涉及的内容、位置、权利依据及可联系的方式。请勿提交与处理问题无关的个人资料、账号密码或恢复密钥。</string>
+    <string name="screen_yizhe_usage_title">使用规范</string>
+    <string name="screen_yizhe_usage_body">适用范围\n本规范适用于乙者当前测试版本提供的账号、聊天、群组、音视频通话、文件与位置分享、收藏及相关服务。请结合功能页面提示使用服务；尚未开放的能力不属于当前可用功能。\n\n账号与设备\n请妥善保管账号凭据、恢复密钥与已登录设备，不向他人提供密码、验证码或恢复密钥。邀请、设备验证和恢复操作应由本人或获得授权的人完成。发现设备遗失、异常登录或账号被冒用时，请及时处理设备访问权限并反馈问题。\n\n交流与分享\n请在合法、正当且获得必要授权的范围内交流。不得利用乙者实施诈骗、骚扰、威胁、冒充、恶意营销、传播恶意程序，或者侵害他人的隐私、知识产权及其他合法权益。群组创建者和管理者应合理管理邀请与成员权限；分享他人的文件、位置和聊天内容前，应确认分享范围与权限。\n\n尊重安全机制\n不得窃取账号或密钥、伪造设备身份、绕过访问验证，或者以自动化滥用、恶意请求等方式破坏服务。发现漏洞时，可通过“我 → 问题反馈”提供必要的复现说明；请避免在反馈中附带他人的敏感数据。\n\n消息、备份与恢复\n发送、送达、已读、备份和恢复是不同状态，请以应用实际提示为准。撤回、过期或清理不能保证收回接收方已经另行保存或转发的内容。请妥善保管恢复材料；卸载、退出账号或更换设备不等于已完成备份，也不保证所有历史内容均可恢复。\n\n权限与更新\n相机、麦克风、位置、通知及系统特殊访问权限分别用于对应功能。可在系统设置中调整授权；拒绝非必需权限不应影响无关功能。更新安装包应通过乙者提供的可信渠道获取，并完成应用要求的安全校验。\n\n退出、删除与反馈\n退出账号与删除账号是两种不同操作。删除前请阅读当次确认页的范围和影响，并保留仍需要的资料。处理尚未完成时，应以实际状态为准。使用疑问、账号争议、侵权线索或安全问题可通过“我 → 问题反馈”提交；本规范不排除你依法享有的权利。</string>
+    <string name="screen_yizhe_privacy_title">隐私政策</string>
+    <string name="screen_yizhe_privacy_body">适用范围与联系\n本说明由乙者提供，适用于当前测试版本，说明使用相关功能时涉及的信息与控制方式。你可以通过“我 → 问题反馈”提出个人信息相关问题，并留下希望使用的联系方法。请勿在反馈中提交密码、验证码、私钥或恢复密钥。\n\n账号与安全访问\n注册、登录、设备验证与恢复会处理账号标识、你填写的资料、设备或安装标识、系统与应用版本、设备安全证明、访问状态及必要的网络信息，用于建立账号、确认设备、验证访问权限和排查异常。安全校验状态不等于某个系统权限的授权状态。\n\n聊天、通话与个人资料\n为完成消息同步、好友和群组管理、通话连接及内容展示，服务会处理账号与会话标识、成员关系、事件时间、消息状态、连接信息及你主动提供的内容。受支持的聊天内容通过加密机制保护；加密不意味着账号关系、时间、连接状态等服务必要信息全部不可见。头像、昵称及你主动发送的内容会在相应分享范围内展示。\n\n相机、麦克风、文件与位置\n相机用于扫码、拍摄或视频通话；麦克风用于语音消息和通话；图片、视频与文件访问用于你选择的发送、保存或反馈附件。位置用于你发起的位置分享、实时位置，或设备启用时经说明与授权的一次性安全判断。实时位置与一次性设备判断是不同功能，可分别结束分享或调整系统授权。使用地图选点、地点搜索及地址解析时，高德地图相关服务会处理对应的地图请求、地点关键词、坐标及必要网络信息；发送前请确认选中的位置。\n\n通知、后台与应用保护\n消息提醒会涉及设备推送注册信息、投递状态和必要的通知信息；当前选择的推送服务及手机系统会参与投递。后台运行、自启动、全屏来电、悬浮显示或勿扰访问会按系统设置影响提醒方式。应用锁可以使用系统提供的认证能力；系统生物识别验证结果用于判断是否允许进入，指纹或人脸模板由系统管理。\n\n备份、收藏与恢复\n启用相关功能时，会处理加密备份、恢复状态、收藏内容及其同步标识。恢复需要满足账号、设备和相应密钥条件；设置了备份不代表所有数据始终可恢复。请自行妥善保存恢复材料。收藏、备份与聊天记录的保存范围可能不同，以各功能实际说明与状态为准。\n\n问题反馈与诊断\n你提交反馈时，服务会接收描述、选中的附件，以及你选择附带的截图、日志和通知设置。日志可能包含版本、设备、账号或会话标识和错误信息，附件也可能含有个人内容；请在发送前检查。可在反馈页调整诊断选项，并选择是否允许联系。若当前版本提供使用分析选项，请按该选项的说明决定是否启用；反馈上传与使用分析是不同操作。\n\n保存、删除与安全措施\n账号资料用于账号与服务管理；消息和受保护内容依据适用的会话保留规则、到期状态及删除操作处理；反馈资料用于定位和处理所报告的问题。保存期限以实现相关目的所必要的范围及适用要求为限。删除可能涉及本机、服务端、备份和多个设备，不能将界面消失视为所有副本已同步清除。接收方另行保存的副本不一定受乙者控制。乙者使用加密、访问验证和设备保护等机制降低风险，但不存在绝对安全或任何情况下均可恢复的保证。\n\n你的控制方式\n可以在个人资料中修改可编辑的信息，在系统设置中调整权限，在聊天与安全中查看恢复与权限状态，在问题反馈中提出查阅、更正、复制、删除或撤回相关授权的请求。退出账号不会自动删除账号；删除账号应使用独立的删除入口并阅读确认提示。处理请求时可能需要核验身份，以防止他人冒用。\n\n其他服务与政策变更\n打开外部网页、地图服务或主动分享至其他应用时，相应服务会按其规则处理收到的信息，请阅读对应提示。涉及新增处理目的、权限或接收方的变化，应提供相应说明。本页面可离线阅读；内容随应用版本更新，重要变更应另行提示。</string>
+</resources>

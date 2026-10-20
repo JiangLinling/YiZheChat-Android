@@ -30,7 +30,14 @@ data class VerifiedManagementCommand(
     val notBeforeEpochMillis: Long,
     val expiresAtEpochMillis: Long,
     val supersedesCommandId: String? = null,
-)
+    val targetMatrixDeviceIdHash: String? = null,
+    val mobileGeneration: Long? = null,
+    val reasonCode: String? = null,
+) {
+    fun targetsAccountSession(accountHash: String, matrixDeviceHash: String): Boolean =
+        type == ManagementCommandType.CLEAR_ACCOUNT && accountIdHash == accountHash &&
+            (targetMatrixDeviceIdHash == null || targetMatrixDeviceIdHash == matrixDeviceHash)
+}
 
 enum class ManagementCommandState {
     RECEIVED,
@@ -323,6 +330,8 @@ data class AccountReactivationCheckpoint(
     val reactivationRequired: Boolean = false,
     /** Survives process death until a signed activation receipt consumes this reset assertion. */
     val pendingExplicitIdentityReset: Boolean = false,
+    /** Persisted before the destructive SDK call; completion requires a different identity. */
+    val identityResetPreviousKeyHash: String? = null,
 )
 
 data class HistoryRecoveryAttempt(
@@ -334,6 +343,15 @@ data class HistoryRecoveryAttempt(
 )
 
 interface AccountReactivationScopeStore {
+    /** Called only after the SDK cancels and the unchanged identity is independently read. */
+    suspend fun cancelIdentityReset(accountIdHash: String, installationId: String, matrixDeviceIdHash: String, previousKeyHash: String): Boolean =
+        error("Identity reset cancellation storage is unavailable")
+    suspend fun beginIdentityReset(
+        accountIdHash: String,
+        installationId: String,
+        matrixDeviceIdHash: String,
+        previousKeyHash: String,
+    ): Boolean = error("Identity reset intent storage is unavailable")
     /** Returns the latest authenticated checkpoint for this exact account/installation/device. */
     suspend fun current(
         accountIdHash: String,
@@ -419,6 +437,9 @@ interface AccountReactivationScopeStore {
     ): Boolean
 }
 
+/** The authority proved this prepare expired without committing; a new attempt is safe. */
+class AccountActivationExpired : Exception("ACCOUNT_ACTIVATION_EXPIRED")
+
 data class PreparedAccountReactivation(
     val activationId: String,
     val expiresAtEpochMillis: Long,
@@ -454,6 +475,9 @@ data class AccountActivationReceipt(
 
 /** Session-scoped bridge called only after Matrix proves an explicit identity reset completed. */
 interface AccountIdentityResetLifecycleRecorder {
+    suspend fun cancelExplicitReset(): Result<Unit> = Result.success(Unit)
+    suspend fun beginExplicitReset(): Result<String> = Result.failure(IllegalStateException("Reset intent recorder unavailable"))
+    suspend fun resumeCompletedReset(): Result<Boolean> = Result.success(false)
     suspend fun recordExplicitReset(): Result<Unit>
 }
 
@@ -500,6 +524,9 @@ data class AccountDeletionReceipt(
 )
 
 interface ManagementControlService {
+    /** Exact single local session eligible for an explicit startup handover intent; never an access grant. */
+    suspend fun managedAuthorizationHandoverSubjects(): LifecycleSubjectHashes? = null
+
     /** Explicit account-authenticated certificate transfer. Does not grant account or history access. */
     suspend fun transferManagedDeviceAuthorization(accountIdHash: String, matrixDeviceIdHash: String): Unit =
         throw UnsupportedOperationException("Managed authorization handover unavailable")
@@ -574,6 +601,18 @@ interface ManagementControlService {
     suspend fun managedDirectRoom(accountIdHash: String, matrixDeviceIdHash: String, peerUserId: String, create: Boolean): ManagedDirectRoomResult? =
         error("Managed direct room authority unavailable")
 
+    /** Changes the server restriction first. Matrix ignored-user data is a UI projection. */
+    suspend fun setContactBlocked(accountIdHash: String, matrixDeviceIdHash: String, peerUserId: String, blocked: Boolean): Unit =
+        error("Contact policy authority unavailable")
+
+    /** Fresh signed contact check for call preparation; final RTC admission still owns authorization. */
+    suspend fun requireContactRoomAllowed(accountIdHash: String, matrixDeviceIdHash: String, roomId: String): Unit =
+        error("Contact policy authority unavailable")
+
+    /** Signed terminal observation of the original call. This never grants a new admission. */
+    suspend fun contactCallTerminationReason(accountIdHash: String, matrixDeviceIdHash: String, roomId: String, operationId: String): String? =
+        error("Call status authority unavailable")
+
     suspend fun startLifecycleOperation(
         request: LifecycleOperationRequest,
     ): LifecycleOperation = throw UnsupportedOperationException("App lifecycle operations are not available.")
@@ -630,6 +669,9 @@ interface ManagementControlService {
 
     suspend fun pendingCommands(): List<VerifiedManagementCommand>
 
+    /** UI explanation only, derived from a verified command for this exact retired login. */
+    suspend fun isMobileSessionSuperseded(accountIdHash: String, matrixDeviceIdHash: String): Boolean = false
+
     suspend fun reportCommand(report: ManagementCommandExecutionReport): Boolean
 
     /** Returns only a server-signed, newer release that is valid for this installed package. */
@@ -677,6 +719,7 @@ interface ManagementControlService {
         preferredStem: String,
         password: String,
         idempotencyKey: String,
+        consent: RegistrationConsent? = null,
     ): OnboardingActivation = throw UnsupportedOperationException("Onboarding invitations are not available.")
 
     suspend fun revokeOnboardingInvitation(publicId: String, inviterUserId: String): OnboardingInvitation =

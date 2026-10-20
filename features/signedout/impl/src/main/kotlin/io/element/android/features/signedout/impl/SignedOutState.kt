@@ -14,4 +14,7 @@ data class SignedOutState(
     val appName: String,
     val signedOutSession: SessionData?,
     val eventSink: (SignedOutEvents) -> Unit,
+    val mobileSessionSuperseded: Boolean = false,
+    val cleanupError: Boolean = false,
+    val preparingSignIn: Boolean = false,
 )

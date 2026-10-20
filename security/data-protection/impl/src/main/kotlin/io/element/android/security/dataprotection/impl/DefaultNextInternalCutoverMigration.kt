@@ -25,7 +25,7 @@ import io.element.android.security.securestorage.api.deriveAccountVaultId
 import java.net.URI
 import java.security.MessageDigest
 
-/** One-time, journalled removal of old test identities before Next startup services can read them. */
+/** Journalled cleanup of the previous authority before startup can reuse its account state. */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
 class DefaultNextInternalCutoverMigration(
@@ -35,22 +35,34 @@ class DefaultNextInternalCutoverMigration(
     private val managementState: SignedManagementStateRepository,
 ) : NextInternalCutoverMigration {
     override suspend fun migrate(nextHomeserverUrl: String) {
-        val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+        val destination = URI(nextHomeserverUrl)
+        val formalTarget = destination.scheme == "https" && destination.host == "matrix.yizhesy.cn" &&
+            destination.port in setOf(-1, 443) && destination.path in setOf("", "/")
+        val preferencesName = if (formalTarget) FORMAL_PREFERENCES else PREFERENCES
+        val preferences = context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
         val sessions = sessionStore.getAllSessions()
         val nextServerName = checkNotNull(URI(nextHomeserverUrl).host) { "Next homeserver URL is invalid." }
+        val hasOldAuthorityState = managementState.hasSignedStateFromAuthority(OLD_CONTROL_KEY_ID)
         val oldSessions = sessions.filterNot { session ->
-            sameHomeserver(session.homeserverUrl, nextHomeserverUrl) ||
-                session.userId.substringAfterLast(':', "").equals(nextServerName, ignoreCase = true)
+            !hasOldAuthorityState && (sameHomeserver(session.homeserverUrl, nextHomeserverUrl) ||
+                session.userId.substringAfterLast(':', "").equals(nextServerName, ignoreCase = true))
         }
         val pending = preferences.getBoolean(PENDING, false)
-        val hasOldAuthorityState = managementState.hasSignedStateFromAuthority(OLD_CONTROL_KEY_ID)
         if (preferences.getBoolean(COMPLETE, false)) {
             check(!pending && oldSessions.isEmpty() && !hasOldAuthorityState) {
                 "Old internal authority state reappeared after cutover."
             }
             return
         }
-        if (oldSessions.isEmpty() && !pending && !hasOldAuthorityState) return
+        if (oldSessions.isEmpty() && !pending && !hasOldAuthorityState) {
+            if (!formalTarget) return
+            if (sessions.isNotEmpty()) {
+                check(preferences.edit().putBoolean(COMPLETE, true).commit())
+                return
+            }
+            // A logged-out installation can still retain the previous server's signed policy.
+            // The formal migration has its own marker even though the signing key was retained.
+        }
 
         // A mixed installation cannot prove which authority owns the persisted policy and tombstone cursor.
         // Keep both identities closed instead of resetting security state for a valid Next account.
@@ -68,7 +80,9 @@ class DefaultNextInternalCutoverMigration(
                 .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
             val report = deletionCoordinator.delete(
                 DeletionRequest(
-                    operationId = DeletionOperationId("next-internal-cutover-${identity.take(32)}"),
+                    operationId = DeletionOperationId(
+                        "${if (formalTarget) "formal-internal-cutover" else "next-internal-cutover"}-${identity.take(32)}"
+                    ),
                     scope = DeletionScope.Account(
                         accountIdHash = accountIdHash(session.userId),
                         vaultId = vaultId.value,
@@ -105,6 +119,7 @@ class DefaultNextInternalCutoverMigration(
 
     private companion object {
         const val PREFERENCES = "next_internal_cutover_migration_v1"
+        const val FORMAL_PREFERENCES = "formal_internal_cutover_migration_v1"
         const val PENDING = "pending"
         const val COMPLETE = "complete"
         // Public key ID read from the old internal-test control plane during the 2026-10-17 cutover.

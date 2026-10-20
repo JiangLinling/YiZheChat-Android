@@ -1,0 +1,22 @@
+{
+  "command": [
+    "C:/Users/70534/.cargo/bin/cargo.exe",
+    "test",
+    "--offline",
+    "--locked",
+    "-p",
+    "matrix-sdk",
+    "--features",
+    "experimental-widgets,testing,bundled-sqlite",
+    "--test",
+    "integration",
+    "encrypted_signal_http_producer_roundtrip",
+    "--",
+    "--test-threads=1"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 184.79,
+  "source": "w/formal-rust-sdk",
+  "target_cache": "D:/mr/ephemeral-media-ffi-target",
+  "log": "formal-rust-tests.log"
+}

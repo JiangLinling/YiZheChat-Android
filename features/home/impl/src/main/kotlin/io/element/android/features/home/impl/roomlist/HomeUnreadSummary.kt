@@ -7,6 +7,7 @@
 package io.element.android.features.home.impl.roomlist
 
 import androidx.compose.runtime.Immutable
+import io.element.android.features.home.impl.datasource.isDirectInvitation
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.room.CurrentUserMembership
 import io.element.android.libraries.matrix.api.room.directRoomRelationState
@@ -76,7 +77,7 @@ internal fun calculateHomeUnreadSummary(
                         pendingSpaces++
                         if (isUnseen) unseenSpaces++
                     }
-                    info.isDm -> {
+                    info.isDm || info.isDirectInvitation -> {
                         pendingFriends++
                         if (isUnseen) unseenFriends++
                     }

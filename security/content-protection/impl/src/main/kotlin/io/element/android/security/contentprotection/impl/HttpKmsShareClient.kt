@@ -1248,6 +1248,8 @@ class HttpKmsShareClient(
                 }
             }.getOrNull()
             val reason = when (detail) {
+                "CONTACT_BLOCKED_BY_YOU" -> throw ContentProtectionException.ContactRestricted(true)
+                "CONTACT_UNAVAILABLE" -> throw ContentProtectionException.ContactRestricted(false)
                 "content binding mismatch" -> "CONTENT_BINDING_MISMATCH"
                 "DEVICE_RECOVERY_REQUIRED" -> "DEVICE_RECOVERY_REQUIRED"
                 "device content key mismatch" -> "DEVICE_CONTENT_KEY_MISMATCH"
@@ -1349,13 +1351,23 @@ class HttpKmsShareClient(
     }
 
     private fun <T> requireStoreBody(response: Response<T>, canRefreshLifecycleContract: Boolean): T {
-        if (canRefreshLifecycleContract && response.code() == 409) {
-            val error = runCatching {
+        if (response.code() == 409) {
+            val payload = runCatching {
                 response.errorBody()?.use { body ->
-                    ERROR_JSON.decodeFromString<ControlPlaneErrorResponse>(body.string())
+                    val source = body.source()
+                    source.request(MAX_ROOM_EPOCH_ERROR_BODY_BYTES.toLong() + 1)
+                    if (source.buffer.size > MAX_ROOM_EPOCH_ERROR_BODY_BYTES) return@use null
+                    val bytes = source.readByteArray()
+                    ERROR_JSON.parseToJsonElement(bytes.decodeToString()).jsonObject
                 }
             }.getOrNull()
-            if (error?.detail?.code == ROOM_LIFECYCLE_CONTRACT_EXPIRED &&
+            val detail = runCatching { payload?.get("detail")?.jsonPrimitive?.content }.getOrNull()
+            if (detail in setOf("account has no approved recipient devices", "an account has no approved recipient devices",
+                    "authorized device set changed; refresh recipients and retry")) {
+                throw ContentProtectionException.RecipientDeviceUnavailable()
+            }
+            val error = payload?.let { runCatching { ERROR_JSON.decodeFromJsonElement(ControlPlaneErrorResponse.serializer(), it) }.getOrNull() }
+            if (canRefreshLifecycleContract && error?.detail?.code == ROOM_LIFECYCLE_CONTRACT_EXPIRED &&
                 error.detail.retryableAfterPolicyRefresh
             ) {
                 throw ContentProtectionException.LifecycleContractRefreshRequired()

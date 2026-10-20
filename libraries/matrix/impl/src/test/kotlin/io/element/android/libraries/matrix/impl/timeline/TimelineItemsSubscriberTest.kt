@@ -135,6 +135,37 @@ class TimelineItemsSubscriberTest {
     }
 
     @Test
+    fun `ignore list Clear followed by Append resumes the existing subscriber without restart`() = runTest {
+        val timelineItems: MutableSharedFlow<List<MatrixTimelineItem>> =
+            MutableSharedFlow(replay = 1, extraBufferCapacity = Int.MAX_VALUE)
+        val timeline = FakeFfiTimeline()
+        val diffProcessor = createMatrixTimelineDiffProcessor(timelineItems = timelineItems)
+        val timelineItemsSubscriber = createTimelineItemsSubscriber(
+            timeline = timeline,
+            timelineDiffProcessor = diffProcessor,
+        )
+        timelineItems.test {
+            timelineItemsSubscriber.subscribeIfNeeded()
+            runCurrent()
+            timeline.emitDiff(listOf(TimelineDiff.Reset(listOf(FakeFfiTimelineItem(), FakeFfiTimelineItem()))))
+            assertThat(awaitItem()).hasSize(2)
+
+            timeline.emitDiff(listOf(TimelineDiff.Clear))
+            advanceTimeBy(100L)
+            runCurrent()
+
+            expectNoEvents()
+            assertThat(timelineItems.replayCache.single()).isNotEmpty()
+
+            timeline.emitDiff(listOf(TimelineDiff.Append(listOf(FakeFfiTimelineItem()))))
+            assertThat(awaitItem()).hasSize(1)
+            timeline.emitDiff(listOf(TimelineDiff.PushBack(FakeFfiTimelineItem())))
+            assertThat(awaitItem()).hasSize(2)
+            timelineItemsSubscriber.unsubscribeIfNeeded()
+        }
+    }
+
+    @Test
     fun `a newer Clear supersedes an uncommitted replacement without publishing an empty timeline`() = runTest {
         val timelineItems: MutableSharedFlow<List<MatrixTimelineItem>> =
             MutableSharedFlow(replay = 1, extraBufferCapacity = Int.MAX_VALUE)

@@ -5,7 +5,7 @@ package io.element.android.libraries.matrix.impl.widget
 
 import kotlinx.serialization.json.*
 
-/** Room-wide mentions require moderator power. A group call invites its joined recipients individually. */
+/** Room-wide mentions require moderator power, including in DMs. Invite joined recipients individually. */
 internal suspend fun prepareGroupRingingMessage(message: String, joinedRecipients: suspend () -> List<String>): String {
     val root = runCatching { Json.parseToJsonElement(message) as? JsonObject }.getOrNull() ?: return message
     val data = root["data"] as? JsonObject ?: return message

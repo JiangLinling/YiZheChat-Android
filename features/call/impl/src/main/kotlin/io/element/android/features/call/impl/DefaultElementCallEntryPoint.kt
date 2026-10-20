@@ -21,25 +21,47 @@ import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.security.dataprotection.api.DataProtectionPolicyProvider
 import io.element.android.security.dataprotection.api.NotificationExposure
+import io.element.android.libraries.di.annotations.AppCoroutineScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 
 @ContributesBinding(AppScope::class)
 class DefaultElementCallEntryPoint(
     @ApplicationContext private val context: Context,
     private val activeCallManager: ActiveCallManager,
     private val dataProtectionPolicyProvider: DataProtectionPolicyProvider,
+    @AppCoroutineScope private val coroutineScope: CoroutineScope,
 ) : ElementCallEntryPoint {
     companion object {
         const val EXTRA_CALL_TYPE = "EXTRA_CALL_TYPE"
         const val REQUEST_CODE = 2255
     }
 
+    private val roomEntry = Mutex()
+
     override fun startCall(callData: CallData) {
         // The room Join button must accept the same invitation as the full-screen
         // answer button. A fresh attempt here replaces the ringing generation.
-        val target = if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment) {
-            IntentProvider.forRoomEntry(callData, activeCallManager.activeCall.value?.callData)
-        } else callData
-        context.startActivity(IntentProvider.createIntent(context, target))
+        if (!io.element.android.appconfig.NextDeploymentConfig.isNextDeployment) {
+            context.startActivity(IntentProvider.createIntent(context, callData))
+            return
+        }
+        if (!roomEntry.tryLock()) return
+        coroutineScope.launch {
+            try {
+                val target = activeCallManager.resolveRoomEntry(callData)
+                context.startActivity(IntentProvider.createIntent(context, target))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                timber.log.Timber.w(failure, "Unable to resolve room call entry")
+                android.widget.Toast.makeText(context, R.string.call_connection_failed, android.widget.Toast.LENGTH_LONG).show()
+            } finally {
+                roomEntry.unlock()
+            }
+        }
     }
 
     override suspend fun handleIncomingCall(

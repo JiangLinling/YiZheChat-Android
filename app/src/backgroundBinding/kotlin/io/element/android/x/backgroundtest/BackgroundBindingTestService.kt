@@ -25,9 +25,10 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import io.element.android.x.R
+import io.element.android.x.BuildConfig
 import timber.log.Timber
 
-/** Next Debug only. No screen retrieval, gesture, synchronization, key or account access. */
+/** Shared by explicitly opted-in Next variants. No screen retrieval, gesture, key or account access. */
 class BackgroundBindingTestService : AccessibilityService(), Application.ActivityLifecycleCallbacks {
     var foreground = false
         private set
@@ -67,7 +68,7 @@ class BackgroundBindingTestService : AccessibilityService(), Application.Activit
         if (instance !== this) return
         // Diagnostic A/B only: public metadata classification, never a permission or OEM API.
         // Keep generic as default; a production declaration must match actual accessibility feedback.
-        val feedback = if (getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(ALL_FEEDBACK, false)) {
+        val feedback = if (BuildConfig.DEBUG && getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(ALL_FEEDBACK, false)) {
             AccessibilityServiceInfo.FEEDBACK_ALL_MASK
         } else AccessibilityServiceInfo.FEEDBACK_GENERIC
         // getServiceInfo is a Binder query and may return null while the system disconnects.
@@ -92,7 +93,7 @@ class BackgroundBindingTestService : AccessibilityService(), Application.Activit
         else if (scheduleRecovery) foregroundRecovery.start()
     }
 
-    private fun wantsForeground(): Boolean = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(FOREGROUND, true)
+    private fun wantsForeground(): Boolean = !BuildConfig.DEBUG || getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(FOREGROUND, true)
 
     private fun hasSystemAuthorization(): Boolean = try {
         val ownComponent = ComponentName(this, javaClass)
@@ -127,11 +128,16 @@ class BackgroundBindingTestService : AccessibilityService(), Application.Activit
         lastForegroundAttempt = now
         try {
             val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(NotificationChannel(CHANNEL, getString(R.string.background_binding_test_label),
-                NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false); enableVibration(false); setSound(null, null) })
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                manager.createNotificationChannel(NotificationChannel(CHANNEL, getString(R.string.background_binding_test_label),
+                    NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false); enableVibration(false); setSound(null, null) })
+            }
             val pending = PendingIntent.getActivity(this, NOTIFICATION_ID,
                 Intent(this, BackgroundBindingTestActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            val notification = Notification.Builder(this, CHANNEL)
+            @Suppress("DEPRECATION")
+            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, CHANNEL)
+                else Notification.Builder(this).setPriority(Notification.PRIORITY_LOW)
+            val notification = builder
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle(getString(R.string.background_binding_test_notification))
                 .setContentText(getString(R.string.background_binding_test_notification_body))
@@ -149,7 +155,7 @@ class BackgroundBindingTestService : AccessibilityService(), Application.Activit
     }
 
     private fun applyOverlay() {
-        if (!getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(OVERLAY, false)) {
+        if (!BuildConfig.DEBUG || !getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(OVERLAY, false)) {
             removeOverlay()
             return
         }

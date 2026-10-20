@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 YiZheChat. SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial. */
 package io.element.android.x.backgroundtest
 
-/** Main-thread, finite recovery of an already connected service. Never grants permission or starts a service. */
+/** Shared finite recovery of an already connected service. Never grants permission or starts a service. */
 internal class ConnectedForegroundRetry(
     private val postDelayed: (Runnable, Long) -> Unit,
     private val remove: (Runnable) -> Unit,

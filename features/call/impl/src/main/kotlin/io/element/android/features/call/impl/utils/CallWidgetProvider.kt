@@ -15,6 +15,10 @@ import io.element.android.libraries.matrix.api.widget.MatrixWidgetDriver
 import io.element.android.libraries.matrix.api.room.JoinedRoom
 
 interface CallWidgetProvider {
+    /** Projects explicit authority revocation; transient transport failure is not a block fact. */
+    fun observeContactRevocation(sessionId: SessionId, roomId: RoomId, operationId: String): kotlinx.coroutines.flow.Flow<Throwable> =
+        kotlinx.coroutines.flow.emptyFlow()
+
     suspend fun getWidget(
         sessionId: SessionId,
         roomId: RoomId,

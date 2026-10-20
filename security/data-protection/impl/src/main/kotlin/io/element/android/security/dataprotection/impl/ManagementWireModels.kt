@@ -424,6 +424,9 @@ internal data class CommandWire(
     @SerialName("not_before_epoch_millis") val notBeforeEpochMillis: Long,
     @SerialName("expires_at_epoch_millis") val expiresAtEpochMillis: Long,
     @SerialName("schema_version") val schemaVersion: Int,
+    @SerialName("target_matrix_device_id_hash") val targetMatrixDeviceIdHash: String? = null,
+    @SerialName("mobile_generation") val mobileGeneration: Long? = null,
+    @SerialName("reason_code") val reasonCode: String? = null,
 )
 
 @Serializable
@@ -484,6 +487,9 @@ internal data class OnboardingUsernameSuggestionWire(
 
 @Serializable
 internal data class ActivateOnboardingInvitationWire(
+    @SerialName("agreement_accepted") val agreementAccepted: Boolean,
+    @SerialName("agreement_version") val agreementVersion: String,
+    @SerialName("agreement_sha256") val agreementSha256: String,
     @SerialName("activation_session") val activationSession: String,
     @SerialName("display_name") val displayName: String,
     @SerialName("preferred_stem") val preferredStem: String,

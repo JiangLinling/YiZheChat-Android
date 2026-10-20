@@ -18,6 +18,7 @@ sealed interface LoginPasswordEvents {
     data class SetDisplayName(val displayName: String) : LoginPasswordEvents
     data class SetRegistrationPassword(val password: String) : LoginPasswordEvents
     data class SetRegistrationPasswordConfirmation(val password: String) : LoginPasswordEvents
+    data class SetAgreementAccepted(val accepted: Boolean) : LoginPasswordEvents
     data object SubmitInvitationRegistration : LoginPasswordEvents
     data object ClearError : LoginPasswordEvents
 }

@@ -80,7 +80,10 @@
         <meta-data
             android:name="io.element.android.yizhe.officepreview.CERTIFICATE_PIN"
             android:value="${yizheOfficePreviewCertificatePin}" />
-        <!-- Next-only deployment identity consumed by the update, Matrix, and RTC owners. -->
+        <!-- Explicit deployment identity preserves unified authority across public naming changes. -->
+        <meta-data
+            android:name="io.element.android.yizhe.control.DEPLOYMENT_ID"
+            android:value="${yizheDeploymentId}" />
         <meta-data
             android:name="io.element.android.yizhe.update.CHANNEL"
             android:value="${yizheUpdateChannel}" />

@@ -15,6 +15,15 @@ import org.junit.Test
 
 class HomeUnreadSummaryTest {
     @Test
+    fun `direct invitation marker counts as friend before joined DM projection`() {
+        val result = calculateHomeUnreadSummary(listOf(aRoomSummary(info = aRoomInfo(
+            isDirect = true, isDm = false, currentUserMembership = CurrentUserMembership.INVITED,
+        ))), emptySet())
+        assertThat(result.pendingFriendRequestCount).isEqualTo(1)
+        assertThat(result.pendingGroupInviteCount).isEqualTo(0)
+    }
+
+    @Test
     fun `counts joined unread once using the strongest Matrix counter`() {
         val result = calculateHomeUnreadSummary(
             roomSummaries = listOf(

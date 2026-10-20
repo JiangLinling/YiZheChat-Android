@@ -26,6 +26,40 @@ import org.junit.Test
 
 class ResetIdentityFlowManagerTest {
     @Test
+    fun `existing verified identity cannot satisfy a new reset`() = runTest {
+        val encryption = FakeEncryptionService().apply {
+            givenIdentityResetCompletionStateResult(Result.success(IdentityResetCompletionState(
+                BackupState.ENABLED, RecoveryState.ENABLED, true, true, "a".repeat(64),
+            )))
+        }
+        assertThat(createFlowManager(encryption).completeReset { awaitCancellation() }.isFailure).isTrue()
+    }
+
+    @Test
+    fun `null handle records completion before reporting success`() = runTest {
+        val calls = mutableListOf<String>()
+        val encryption = FakeEncryptionService(startIdentityResetLambda = {
+            calls += "sdk"
+            Result.success(null)
+        })
+        val manager = createFlowManager(encryption, object : AccountIdentityResetLifecycleRecorder {
+            override suspend fun beginExplicitReset(): Result<String> {
+                calls += "intent"
+                return Result.success("a".repeat(64))
+            }
+            override suspend fun recordExplicitReset(): Result<Unit> {
+                calls += "complete"
+                return Result.success(Unit)
+            }
+        })
+        manager.getResetHandle().test {
+            assertThat(awaitItem().isLoading()).isTrue()
+            assertThat(awaitItem().isSuccess()).isTrue()
+        }
+        assertThat(calls).containsExactly("intent", "sdk", "complete").inOrder()
+    }
+
+    @Test
     fun `getResetHandle - emits a reset handle`() = runTest {
         val startResetLambda = lambdaRecorder<Result<IdentityResetHandle?>> { Result.success(FakeIdentityPasswordResetHandle()) }
         val encryptionService = FakeEncryptionService(startIdentityResetLambda = startResetLambda)
@@ -114,6 +148,62 @@ class ResetIdentityFlowManagerTest {
     }
 
     @Test
+    fun `cancel - unknown authority outcome is visible and retry reconciles without repeating reset`() = runTest {
+        var pending = true
+        var starts = 0
+        val unknown = IllegalStateException("Reset outcome is still unknown.")
+        val manager = createFlowManager(
+            encryptionService = FakeEncryptionService(startIdentityResetLambda = {
+                starts++
+                Result.success(FakeIdentityPasswordResetHandle(cancelLambda = {}))
+            }),
+            lifecycleRecorder = object : AccountIdentityResetLifecycleRecorder {
+                override suspend fun beginExplicitReset() = Result.success("a".repeat(64))
+                override suspend fun recordExplicitReset(): Result<Unit> = error("Must reconcile before completion")
+                override suspend fun resumeCompletedReset() = Result.success(!pending)
+                override suspend fun cancelExplicitReset(): Result<Unit> = Result.failure(unknown)
+            },
+        )
+        manager.getResetHandle().test {
+            assertThat(awaitItem().isLoading()).isTrue()
+            assertThat(awaitItem().isSuccess()).isTrue()
+            manager.cancel()
+            assertThat((awaitItem() as AsyncData.Failure).error).isSameInstanceAs(unknown)
+            manager.dismissError()
+            assertThat(awaitItem().isUninitialized()).isTrue()
+        }
+        pending = false
+        manager.getResetHandle().test {
+            assertThat(awaitItem().isLoading()).isTrue()
+            val recovered = awaitItem()
+            assertThat(recovered.isSuccess()).isTrue()
+            assertThat(recovered.dataOrNull()).isNull()
+        }
+        assertThat(starts).isEqualTo(1)
+    }
+
+    @Test
+    fun `cancel - SDK cleanup failure does not discard durable intent`() = runTest {
+        val failed = IllegalStateException("SDK unavailable")
+        val manager = createFlowManager(
+            encryptionService = FakeEncryptionService(startIdentityResetLambda = {
+                Result.success(FakeIdentityPasswordResetHandle(cancelLambda = { throw failed }))
+            }),
+            lifecycleRecorder = object : AccountIdentityResetLifecycleRecorder {
+                override suspend fun beginExplicitReset() = Result.success("a".repeat(64))
+                override suspend fun recordExplicitReset(): Result<Unit> = error("Not complete")
+                override suspend fun cancelExplicitReset(): Result<Unit> = error("SDK cleanup did not finish")
+            },
+        )
+        manager.getResetHandle().test {
+            assertThat(awaitItem().isLoading()).isTrue()
+            assertThat(awaitItem().isSuccess()).isTrue()
+            manager.cancel()
+            assertThat((awaitItem() as AsyncData.Failure).error).isSameInstanceAs(failed)
+        }
+    }
+
+    @Test
     fun `completeReset - consumes the successful handle so a later reset starts a new attempt`() = runTest {
         val startResetLambda = lambdaRecorder<Result<IdentityResetHandle?>> {
             Result.success(FakeIdentityPasswordResetHandle())
@@ -142,6 +232,7 @@ class ResetIdentityFlowManagerTest {
         val flowManager = createFlowManager(
             encryptionService = encryptionService,
             lifecycleRecorder = object : AccountIdentityResetLifecycleRecorder {
+                override suspend fun beginExplicitReset(): Result<String> = Result.success("a".repeat(64))
                 override suspend fun recordExplicitReset(): Result<Unit> =
                     Result.failure(IllegalStateException("checkpoint unavailable"))
             },
@@ -162,6 +253,7 @@ class ResetIdentityFlowManagerTest {
                         recoveryState = RecoveryState.ENABLED,
                         isCurrentSessionVerified = true,
                         backupExistsOnServer = true,
+                        identityKeyHash = "b".repeat(64),
                     )
                 )
             )
@@ -197,6 +289,7 @@ class ResetIdentityFlowManagerTest {
     private fun TestScope.createFlowManager(
         encryptionService: FakeEncryptionService = FakeEncryptionService(),
         lifecycleRecorder: AccountIdentityResetLifecycleRecorder = object : AccountIdentityResetLifecycleRecorder {
+            override suspend fun beginExplicitReset(): Result<String> = Result.success("a".repeat(64))
             override suspend fun recordExplicitReset(): Result<Unit> = Result.success(Unit)
         },
     ) = ResetIdentityFlowManager(

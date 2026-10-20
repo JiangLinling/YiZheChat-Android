@@ -25,6 +25,39 @@ class EncryptedAccountReactivationScopeStoreTest {
     val temporaryFolder = TemporaryFolder()
 
     @Test
+    fun `confirmed reset cancellation permits fresh activation without asserting reset completion`() = runTest {
+        val store = EncryptedAccountReactivationScopeStore(roots(), FakeDeviceRootKeyService(INSTALLATION_ID))
+        store.beginIdentityReset(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH, "a".repeat(64))
+        assertThat(runCatching {
+            store.cancelIdentityReset(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH, "b".repeat(64))
+        }.isFailure).isTrue()
+        store.cancelIdentityReset(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH, "a".repeat(64))
+        store.nextAttempt(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH)
+        val checkpoint = checkNotNull(store.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH))
+        assertThat(checkpoint.reactivationRequired).isTrue()
+        assertThat(checkpoint.pendingExplicitIdentityReset).isFalse()
+        assertThat(checkpoint.identityResetPreviousKeyHash).isNull()
+    }
+
+    @Test
+    fun `reset intent survives restart and cannot become activation before Matrix completion`() = runTest {
+        val roots = roots()
+        val key = FakeDeviceRootKeyService(INSTALLATION_ID)
+        val first = EncryptedAccountReactivationScopeStore(roots, key)
+        first.beginIdentityReset(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH, "a".repeat(64))
+        val resumed = EncryptedAccountReactivationScopeStore(roots, key)
+        val before = checkNotNull(resumed.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH))
+        assertThat(before.identityResetPreviousKeyHash).isEqualTo("a".repeat(64))
+        assertThat(before.pendingExplicitIdentityReset).isFalse()
+        assertThat(runCatching { resumed.nextAttempt(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH) }.isFailure).isTrue()
+        resumed.markExplicitIdentityReset(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH)
+        val completed = checkNotNull(resumed.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH))
+        assertThat(completed.attempt).isEqualTo(before.attempt)
+        assertThat(completed.identityResetPreviousKeyHash).isNull()
+        assertThat(completed.pendingExplicitIdentityReset).isTrue()
+    }
+
+    @Test
     fun `generation is durably incremented across process recreation`() = runTest {
         val roots = roots()
         val rootKey = FakeDeviceRootKeyService(INSTALLATION_ID)

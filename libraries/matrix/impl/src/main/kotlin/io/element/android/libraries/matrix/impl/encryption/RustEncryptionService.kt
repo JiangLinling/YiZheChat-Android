@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import java.security.MessageDigest
 import org.matrix.rustcomponents.sdk.BackupSteadyStateListener
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.EnableRecoveryProgressListener
@@ -161,6 +162,11 @@ class RustEncryptionService(
 
     override suspend fun getIdentityResetCompletionState(): Result<IdentityResetCompletionState> = withContext(dispatchers.io) {
         runCatchingExceptions {
+            val identity = service.userIdentity(sessionId.value, fallbackToServer = true)
+            val publicKey = identity?.use { checkNotNull(it.masterKey()) { "Cross-signing public key is unavailable." } }
+                ?: "NO_CROSS_SIGNING_IDENTITY"
+            val identityHash = MessageDigest.getInstance("SHA-256").digest(publicKey.encodeToByteArray())
+                .joinToString("") { "%02x".format(it.toInt() and 0xff) }
             val backupState = backupStateMapper.map(service.backupState())
             val recoveryState = recoveryStateMapper.map(service.recoveryState())
             val isCurrentSessionVerified = service.verificationState() == VerificationState.VERIFIED
@@ -174,6 +180,7 @@ class RustEncryptionService(
                 recoveryState = recoveryState,
                 isCurrentSessionVerified = isCurrentSessionVerified,
                 backupExistsOnServer = backupExistsOnServer,
+                identityKeyHash = identityHash,
             )
         }
     }

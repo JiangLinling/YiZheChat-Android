@@ -96,13 +96,16 @@ class HttpDeviceRecipientRegistryTest {
         server.start()
         try {
             val registry = registry(server, key)
-            server.enqueue(MockResponse().setResponseCode(409))
+            server.enqueue(MockResponse().setResponseCode(409).setBody("""{"detail":"an account has no approved recipient devices"}"""))
             assertThat(runCatching { registry.approvedRecipients(setOf(FIRST_ACCOUNT_HASH, SECOND_ACCOUNT_HASH)) }.exceptionOrNull())
                 .isInstanceOf(ContentProtectionException.RecipientDeviceUnavailable::class.java)
             server.enqueue(MockResponse().setResponseCode(503))
             assertThat(runCatching { registry.approvedRecipients(setOf(FIRST_ACCOUNT_HASH)) }.exceptionOrNull())
                 .isInstanceOf(ContentProtectionException.KmsUnavailable::class.java)
-            assertThat(server.requestCount).isEqualTo(2)
+            server.enqueue(MockResponse().setResponseCode(409).setBody("""{"detail":"authority projection pending"}"""))
+            assertThat(runCatching { registry.approvedRecipients(setOf(FIRST_ACCOUNT_HASH)) }.exceptionOrNull())
+                .isInstanceOf(ContentProtectionException.KmsUnavailable::class.java)
+            assertThat(server.requestCount).isEqualTo(3)
         } finally {
             server.shutdown()
         }

@@ -221,6 +221,7 @@ dependencies {
     implementation(projects.libraries.designsystem)
     implementation(projects.libraries.featureflag.api)
     implementation(projects.libraries.matrix.api)
+    implementation(projects.libraries.matrixui)
     implementation(projects.libraries.matrixmedia.api)
     implementation(projects.libraries.network)
     implementation(projects.features.networkmonitor.api)

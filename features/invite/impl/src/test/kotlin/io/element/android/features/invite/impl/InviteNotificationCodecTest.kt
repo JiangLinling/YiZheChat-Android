@@ -12,6 +12,21 @@ import org.junit.Test
 class InviteNotificationCodecTest {
     private val request = InviteNotification(RoomId("!request:example.test"), InviteNotification.Kind.FRIEND, "@peer:example.test", 100, sequence = 1)
 
+    @Test fun `late direct classification corrects metadata without resetting declined history`() {
+        val previous = request.copy(kind = InviteNotification.Kind.GROUP, senderId = null,
+            outcome = InviteNotification.Outcome.DECLINED, handledAt = 200, seen = true)
+        val actual = InviteNotificationCodec.merge(listOf(previous), listOf(request)).single()
+        assertThat(actual).isEqualTo(previous.copy(kind = InviteNotification.Kind.FRIEND, senderId = request.senderId))
+    }
+
+    @Test fun `joining snapshot cannot downgrade known friend invitation to group`() {
+        val transient = request.copy(kind = InviteNotification.Kind.GROUP)
+        assertThat(InviteNotificationCodec.merge(listOf(request), listOf(transient)).single().kind)
+            .isEqualTo(InviteNotification.Kind.FRIEND)
+        assertThat(InviteNotificationCodec.refinedKind(InviteNotification.Kind.FRIEND, InviteNotification.Kind.GROUP))
+            .isEqualTo(InviteNotification.Kind.FRIEND)
+    }
+
     @Test fun `metadata survives round trip`() {
         val record = request.copy(outgoing = true, outcome = InviteNotification.Outcome.ACCEPTED, handledAt = 200, seen = true)
         assertThat(InviteNotificationCodec.decode(InviteNotificationCodec.encode(record))).isEqualTo(record)

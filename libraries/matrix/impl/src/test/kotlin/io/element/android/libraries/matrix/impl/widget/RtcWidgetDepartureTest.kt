@@ -17,6 +17,21 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RtcWidgetDepartureTest {
+    @Test fun `redaction targets only correlated acknowledged live membership events`() {
+        val departure = RtcWidgetDeparture("w")
+        val join = request.replace("\"delay\":20000,", "")
+            .replace("\"content\":{", "\"content\":{\"member\":{\"id\":\"own\"},")
+        val accepted = registered.replace("\"delay_id\":\"own-delay\"", "\"event_id\":\"${'$'}own\"")
+        departure.received(accepted)
+        assertThat(departure.membershipEvents()).isEmpty()
+        departure.sent(join.replace("\"widgetId\":\"w\"", "\"widgetId\":\"foreign\""))
+        departure.received(accepted)
+        assertThat(departure.membershipEvents()).isEmpty()
+        departure.sent(join); departure.received(accepted)
+        assertThat(departure.membershipEvents()).containsExactly("${'$'}own")
+        departure.received(accepted.replace("${'$'}own", "${'$'}injected"))
+        assertThat(departure.membershipEvents()).containsExactly("${'$'}own")
+    }
     private val request = """{"api":"fromWidget","widgetId":"w","requestId":"r","action":"send_event","data":{
         "type":"org.matrix.msc4143.rtc.member","delay":20000,"sticky_duration_ms":3600000,
         "content":{"slot_id":"m.call#ROOM","msc4354_sticky_key":"member"}}}"""

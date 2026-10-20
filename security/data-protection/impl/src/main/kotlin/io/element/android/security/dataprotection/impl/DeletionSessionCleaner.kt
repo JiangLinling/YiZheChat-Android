@@ -24,6 +24,7 @@ data class LocalSessionDeletionReport(
 
 interface DeletionSessionCleaner {
     suspend fun delete(scope: DeletionScope.Account): LocalSessionDeletionReport
+    suspend fun hasReplacement(scope: DeletionScope.Account): Boolean = false
 }
 
 /** Removes the credential row and both random per-session directories using pre-validated, direct-child paths. */
@@ -34,6 +35,10 @@ class DefaultDeletionSessionCleaner(
     @BaseDirectory private val sessionsBaseDirectory: File,
     @CacheDirectory private val cacheBaseDirectory: File,
 ) : DeletionSessionCleaner {
+    override suspend fun hasReplacement(scope: DeletionScope.Account): Boolean = sessionStore.getSession(scope.localSessionId)?.let {
+        it.sessionPath != scope.sessionFilePath || it.cachePath != scope.sessionCachePath
+    } == true
+
     override suspend fun delete(scope: DeletionScope.Account): LocalSessionDeletionReport {
         val sessionFiles = runCatchingExceptions {
             validatedDirectChild(scope.sessionFilePath, sessionsBaseDirectory) to
@@ -42,7 +47,9 @@ class DefaultDeletionSessionCleaner(
             return LocalSessionDeletionReport(sessionRecordRemoved = false, sessionFilesDeleted = false)
         }
 
-        val recordRemoved = runCatchingExceptions { sessionStore.removeSession(scope.localSessionId) }.isSuccess
+        val recordRemoved = runCatchingExceptions {
+            sessionStore.removeSessionIfPathsMatch(scope.localSessionId, scope.sessionFilePath, scope.sessionCachePath)
+        }.isSuccess
         val filesDeleted = recordRemoved && deleteIfPresent(sessionFiles.first) && deleteIfPresent(sessionFiles.second)
         return LocalSessionDeletionReport(
             sessionRecordRemoved = recordRemoved,

@@ -59,6 +59,23 @@ class AccountLocalStateCleanerTest {
         assertThat(officePreviewPreferences.contains("other-account-document")).isTrue()
     }
 
+    @Test
+    fun `old vault cleanup preserves preferences belonging to a replacement login`() {
+        val context = RuntimeEnvironment.getApplication()
+        val scope = aScope()
+        val preferences = sessionPreferencesFile(context, scope.localSessionId).apply {
+            parentFile?.mkdirs()
+            writeText("replacement-session-preferences")
+        }
+        val plaintext = RecordingPlaintextCleaner()
+        val leases = RecordingLeaseManager()
+        assertThat(DefaultAccountLocalStateCleaner(context, plaintext, leases, AtomicRecoveryIntentJournal(context))
+            .clear(scope, preserveAccountState = true)).isTrue()
+        assertThat(leases.revokedVault).isEqualTo(AccountVaultId(scope.vaultId))
+        assertThat(plaintext.targets).isEmpty()
+        assertThat(preferences.readText()).isEqualTo("replacement-session-preferences")
+    }
+
     private fun aScope() = DeletionScope.Account(
         accountIdHash = "a".repeat(64),
         vaultId = "account-local-cleaner-vault",

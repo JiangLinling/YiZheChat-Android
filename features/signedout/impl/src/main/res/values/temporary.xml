@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_signed_out_current_phone_title">Signed out on this phone</string>
+    <string name="screen_signed_out_mobile_handover">Your account is now signed in on another phone. This login has ended. To switch back, sign in again and complete verification. Your account has not been deleted.</string>
+    <string name="screen_signed_out_login_expired">This login is no longer valid. Sign in again and complete identity verification to continue on this phone.</string>
+    <string name="screen_signed_out_cleanup_retry">This login has ended, but local cleanup could not be prepared. Tap Sign in again to retry. Your account has not been deleted.</string>
+</resources>

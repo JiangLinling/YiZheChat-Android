@@ -313,6 +313,16 @@ jobs:
         # This is equivalent to `./gradlew checkDocs`, but we avoid having to install java and gradle
         run: python3 ./tools/docs/generate_toc.py --verify ./*.md docs/**/*.md
 
+  security_baseline:
+    name: Security baseline checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Check security baseline
+        run: python3 ./tools/security/check_security_baseline.py
+
   # Note: to auto fix issues you can use the following command:
   # shellcheck -f diff <files> | git apply
   shellcheck:
@@ -341,7 +351,7 @@ jobs:
   upload_reports:
     name: Project Check Suite
     runs-on: ubuntu-latest
-    needs: [konsist, lint, ktlint, detekt]
+    needs: [konsist, lint, ktlint, detekt, security_baseline]
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'element-hq/element-x-android' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

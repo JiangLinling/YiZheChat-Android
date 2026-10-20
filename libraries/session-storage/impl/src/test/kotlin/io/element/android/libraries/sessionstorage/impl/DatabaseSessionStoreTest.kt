@@ -27,6 +27,32 @@ class DatabaseSessionStoreTest {
 
     private val aSessionData = aDbSessionData()
 
+    @Test
+    fun `late SDK refresh cannot overwrite replacement or revive revoked login`() = runTest {
+        val replacement = aSessionData.copy(deviceId = "NEW", sessionPath = "new-files", cachePath = "new-cache")
+        databaseSessionStore.addSession(replacement.toApiModel())
+        databaseSessionStore.updateData(aSessionData.toApiModel())
+        assertThat(databaseSessionStore.getSession(aSessionData.userId)).isEqualTo(replacement.toApiModel())
+        databaseSessionStore.invalidateSessionIfDeviceMatches(replacement.userId, replacement.deviceId)
+        databaseSessionStore.updateData(replacement.toApiModel())
+        assertThat(databaseSessionStore.getSession(aSessionData.userId)?.isTokenValid).isFalse()
+    }
+
+    @Test
+    fun `handover invalidates only the old Matrix session and emits signed out state`() = runTest {
+        databaseSessionStore.addSession(aSessionData.toApiModel())
+        databaseSessionStore.loggedInStateFlow().test {
+            assertThat(awaitItem()).isEqualTo(LoggedInState.LoggedIn(aSessionData.userId, true))
+            databaseSessionStore.invalidateSessionIfDeviceMatches(aSessionData.userId, aSessionData.deviceId)
+            assertThat(awaitItem()).isEqualTo(LoggedInState.LoggedIn(aSessionData.userId, false))
+        }
+        val replacement = aSessionData.copy(deviceId = "NEW", sessionPath = "new-files", cachePath = "new-cache")
+        databaseSessionStore.removeSession(aSessionData.userId)
+        databaseSessionStore.addSession(replacement.toApiModel())
+        databaseSessionStore.invalidateSessionIfDeviceMatches(aSessionData.userId, aSessionData.deviceId)
+        assertThat(databaseSessionStore.getSession(aSessionData.userId)).isEqualTo(replacement.toApiModel())
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Before
     fun setup() {
@@ -54,6 +80,16 @@ class DatabaseSessionStoreTest {
         assertThat(database.sessionDataQueries.selectLatest().executeAsOneOrNull()).isEqualTo(aSessionData)
         assertThat(database.sessionDataQueries.selectAll().executeAsList().size).isEqualTo(1)
         assertThat(database.sessionDataQueries.count().executeAsOneOrNull()).isEqualTo(1)
+    }
+
+    @Test
+    fun `old session cleanup cannot remove replacement login`() = runTest {
+        val replacement = aSessionData.copy(deviceId = "NEW", sessionPath = "new-files", cachePath = "new-cache")
+        databaseSessionStore.addSession(replacement.toApiModel())
+        databaseSessionStore.removeSessionIfPathsMatch(aSessionData.userId, aSessionData.sessionPath, aSessionData.cachePath)
+        assertThat(databaseSessionStore.getSession(aSessionData.userId)).isEqualTo(replacement.toApiModel())
+        databaseSessionStore.removeSessionIfPathsMatch(replacement.userId, replacement.sessionPath, replacement.cachePath)
+        assertThat(databaseSessionStore.getSession(replacement.userId)).isNull()
     }
 
     @Test
@@ -213,7 +249,7 @@ class DatabaseSessionStoreTest {
     }
 
     @Test
-    fun `update session update all fields except info used by the application`() = runTest {
+    fun `update same Matrix session preserves info used by the application`() = runTest {
         val firstSessionData = SessionData(
             userId = "userId",
             deviceId = "deviceId",
@@ -234,7 +270,7 @@ class DatabaseSessionStoreTest {
         )
         val secondSessionData = SessionData(
             userId = "userId",
-            deviceId = "deviceIdAltered",
+            deviceId = "deviceId",
             accessToken = "accessTokenAltered",
             refreshToken = "refreshTokenAltered",
             homeserverUrl = "homeserverUrlAltered",

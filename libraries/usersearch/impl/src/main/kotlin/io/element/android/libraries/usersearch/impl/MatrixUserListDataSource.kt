@@ -13,6 +13,8 @@ import io.element.android.libraries.di.SessionScope
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.user.MatrixUser
+import io.element.android.libraries.matrix.api.exception.ClientException
+import io.element.android.libraries.matrix.api.exception.ErrorKind
 import io.element.android.libraries.usersearch.api.UserListDataSource
 
 @ContributesBinding(SessionScope::class)
@@ -21,10 +23,12 @@ class MatrixUserListDataSource(
 ) : UserListDataSource {
     override suspend fun search(query: String, count: Long): List<MatrixUser> {
         val res = client.searchUsers(query, count)
-        return res.getOrNull()?.results.orEmpty()
+        return res.getOrThrow().results
     }
 
     override suspend fun getProfile(userId: UserId): MatrixUser? {
-        return client.getProfile(userId).getOrNull()
+        return client.getProfile(userId).getOrElse {
+            if (it is ClientException.MatrixApi && it.kind == ErrorKind.NotFound) null else throw it
+        }
     }
 }

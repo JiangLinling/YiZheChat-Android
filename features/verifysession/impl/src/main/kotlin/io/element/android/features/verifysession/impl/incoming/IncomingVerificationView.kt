@@ -115,7 +115,10 @@ private fun IncomingVerificationHeader(step: Step, request: VerificationRequest.
         Step.Failure -> R.string.screen_session_verification_request_failure_title
     }
     val subtitleTextId = when (step) {
-        Step.Canceled -> R.string.screen_session_verification_request_failure_subtitle
+        Step.Canceled -> when (request) {
+            is VerificationRequest.Incoming.OtherSession -> R.string.screen_phone_verification_incomplete
+            is VerificationRequest.Incoming.User -> R.string.screen_session_verification_request_failure_subtitle
+        }
         is Step.Initial -> when (request) {
             is VerificationRequest.Incoming.OtherSession -> R.string.screen_session_verification_request_subtitle
             is VerificationRequest.Incoming.User -> R.string.screen_session_verification_user_responder_subtitle
@@ -128,10 +131,13 @@ private fun IncomingVerificationHeader(step: Step, request: VerificationRequest.
             }
         }
         Step.Completed -> when (request) {
-            is VerificationRequest.Incoming.OtherSession -> R.string.screen_session_verification_complete_subtitle
+            is VerificationRequest.Incoming.OtherSession -> R.string.screen_other_phone_identity_confirmed
             is VerificationRequest.Incoming.User -> R.string.screen_session_verification_complete_user_subtitle
         }
-        Step.Failure -> R.string.screen_session_verification_request_failure_subtitle
+        Step.Failure -> when (request) {
+            is VerificationRequest.Incoming.OtherSession -> R.string.screen_phone_verification_incomplete
+            is VerificationRequest.Incoming.User -> R.string.screen_session_verification_request_failure_subtitle
+        }
     }
     val timeLimitMessage = if (step.isTimeLimited) {
         stringResource(CommonStrings.a11y_session_verification_time_limited_action_required)

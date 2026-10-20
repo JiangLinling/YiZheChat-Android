@@ -52,6 +52,7 @@ fun UserListView(
             selectedUsers = state.selectedUsers,
             active = state.isSearchActive,
             showLoader = state.showSearchLoader,
+            hasError = state.searchHasError,
             isMultiSelectionEnable = state.isMultiSelectionEnabled,
             showBackButton = showBackButton,
             placeHolderTitle = searchPlaceholder,

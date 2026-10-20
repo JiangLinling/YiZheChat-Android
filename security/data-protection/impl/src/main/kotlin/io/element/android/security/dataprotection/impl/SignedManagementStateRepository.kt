@@ -733,6 +733,15 @@ class SignedManagementStateRepository(
         pendingCommands(readVerifiedState(), nowEpochMillis)
     }
 
+    internal fun isMobileSessionSuperseded(accountIdHash: String, matrixDeviceIdHash: String): Boolean = lock.withLock {
+        readVerifiedState().commands.any { persisted ->
+            verifier.verify(persisted.envelope) && decodeCommand(persisted.envelope).let { command ->
+                command.reasonCode == "ACCOUNT_MOBILE_SUPERSEDED" && command.accountIdHash == accountIdHash &&
+                    command.targetMatrixDeviceIdHash == matrixDeviceIdHash
+            }
+        }
+    }
+
     private fun pendingCommands(state: PersistedManagementState, nowEpochMillis: Long): List<VerifiedManagementCommand> {
         val trustedNow = maxOf(nowEpochMillis, state.trustedTimeEpochMillis)
         return state.commands.asSequence()
@@ -749,7 +758,9 @@ class SignedManagementStateRepository(
         val current = readVerifiedState()
         val updated = current.commands.mapNotNull { persisted ->
             if (decodeCommand(persisted.envelope).commandId != report.commandId) return@mapNotNull persisted
-            if (removeWhenComplete && report.state == ManagementCommandState.COMPLETE) return@mapNotNull null
+            if (removeWhenComplete && report.state == ManagementCommandState.COMPLETE &&
+                decodeCommand(persisted.envelope).reasonCode != "ACCOUNT_MOBILE_SUPERSEDED"
+            ) return@mapNotNull null
             persisted.copy(state = report.state.name, progress = report.progress, errorCode = report.errorCode)
         }
         writeState(current.copy(commands = updated))
@@ -1142,10 +1153,18 @@ class SignedManagementStateRepository(
         // Management commands are currently issued as schema 1 by the control plane.
         // Keep this check scoped to commands; app-release schema support is handled
         // independently in decodeRelease below.
-        check(wire.schemaVersion == 1)
+        check(wire.schemaVersion in 1..2)
         check(wire.version > 0 && wire.commandId.isNotBlank() && wire.installationId.isNotBlank())
         check(wire.expiresAtEpochMillis > wire.notBeforeEpochMillis)
         val type = ManagementCommandType.valueOf(wire.commandType)
+        if (wire.schemaVersion == 2) {
+            check(type == ManagementCommandType.CLEAR_ACCOUNT)
+            check(wire.targetMatrixDeviceIdHash?.matches(ACCOUNT_HASH_PATTERN) == true)
+            check((wire.mobileGeneration ?: 0) > 0)
+            check(wire.reasonCode == "ACCOUNT_MOBILE_SUPERSEDED")
+        } else {
+            check(wire.targetMatrixDeviceIdHash == null && wire.mobileGeneration == null && wire.reasonCode == null)
+        }
         check(type != ManagementCommandType.CLEAR_ACCOUNT || wire.accountIdHash?.matches(ACCOUNT_HASH_PATTERN) == true)
         check(type == ManagementCommandType.CLEAR_ACCOUNT || wire.accountIdHash == null)
         check(type != ManagementCommandType.CLEAR_CONTENT || wire.contentId?.matches(CONTENT_ID_PATTERN) == true)
@@ -1161,6 +1180,9 @@ class SignedManagementStateRepository(
             issuedAtEpochMillis = wire.issuedAtEpochMillis,
             notBeforeEpochMillis = wire.notBeforeEpochMillis,
             expiresAtEpochMillis = wire.expiresAtEpochMillis,
+            targetMatrixDeviceIdHash = wire.targetMatrixDeviceIdHash,
+            mobileGeneration = wire.mobileGeneration,
+            reasonCode = wire.reasonCode,
         )
     }
 

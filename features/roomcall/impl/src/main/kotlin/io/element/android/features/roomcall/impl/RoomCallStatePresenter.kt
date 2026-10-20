@@ -40,7 +40,6 @@ class RoomCallStatePresenter(
         }
         val roomInfo by room.roomInfoFlow.collectAsState()
         val canJoinCall by room.permissionsAsState(false) { perms -> perms.canCall() }
-        val canInteract = roomInfo.directRoomRelationState().canInteract
         val isUserInTheCall by remember {
             derivedStateOf {
                 room.sessionId in roomInfo.activeRoomCallParticipants
@@ -54,6 +53,7 @@ class RoomCallStatePresenter(
         }
         val callState by remember {
             derivedStateOf {
+                val canInteract = roomInfo.directRoomRelationState().canInteract
                 when {
                     isAvailable.not() -> RoomCallState.Unavailable
                     roomInfo.hasRoomCall -> RoomCallState.OnGoing(

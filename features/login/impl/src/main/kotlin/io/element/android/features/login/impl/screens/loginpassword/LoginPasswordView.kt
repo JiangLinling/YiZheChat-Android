@@ -528,6 +528,11 @@ private fun InvitationRegistrationForm(
             keyboardActions = KeyboardActions(onDone = { onSubmit() }),
             singleLine = true,
         )
+        RegistrationAgreementSection(
+            accepted = form.agreementAccepted,
+            enabled = !isLoading,
+            onAcceptedChange = { eventSink(LoginPasswordEvents.SetAgreementAccepted(it)) },
+        )
         Text(
             text = stringResource(R.string.screen_login_return),
             style = ElementTheme.typography.fontBodySmMedium,
@@ -585,7 +590,11 @@ private fun String.sanitize(): String {
 
 @Composable
 private fun LoginErrorDialog(error: Throwable, onDismiss: () -> Unit) {
-    val content = if (error is LoginSecuritySynchronizationException) {
+    val content = if (error is io.element.android.security.dataprotection.api.RegistrationAgreementRequired) {
+        stringResource(R.string.screen_registration_agreement_required)
+    } else if (error is io.element.android.security.dataprotection.api.RegistrationAgreementChanged) {
+        stringResource(R.string.screen_registration_agreement_changed)
+    } else if (error is LoginSecuritySynchronizationException) {
         stringResource(R.string.screen_login_error_security_sync, error.errorCode)
     } else {
         stringResource(loginError(error))

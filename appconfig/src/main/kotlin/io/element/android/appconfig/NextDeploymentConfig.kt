@@ -32,7 +32,7 @@ internal fun resolveClientReachablePushGatewayUrl(
     val uri = runCatching { URI(configuredUrl) }.getOrNull() ?: return configuredUrl
     if (
         uri.scheme != "http" ||
-        uri.host != NEXT_INTERNAL_REGISTRAR_HOST ||
+        uri.host !in INTERNAL_REGISTRAR_HOSTS ||
         uri.port != NEXT_INTERNAL_REGISTRAR_PORT ||
         uri.rawPath != MATRIX_PUSH_PATH ||
         uri.rawUserInfo != null ||
@@ -45,7 +45,7 @@ internal fun resolveClientReachablePushGatewayUrl(
     return "${pushRegistrarBaseUrl.trimEnd('/')}$MATRIX_PUSH_PATH$query"
 }
 
-private const val NEXT_INTERNAL_REGISTRAR_HOST = "next-push-registrar"
+private val INTERNAL_REGISTRAR_HOSTS = setOf("next-push-registrar", "push-registrar")
 private const val NEXT_INTERNAL_REGISTRAR_PORT = 8080
 private const val MATRIX_PUSH_PATH = "/_matrix/push/v1/notify"
 private const val COORDINATOR_QUERY = "provider=coordinator"

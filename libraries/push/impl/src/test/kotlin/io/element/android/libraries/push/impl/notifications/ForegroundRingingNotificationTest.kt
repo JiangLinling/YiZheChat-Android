@@ -15,6 +15,22 @@ import io.element.android.libraries.matrix.test.timeline.anEventTimelineItem
 import org.junit.Test
 
 class ForegroundRingingNotificationTest {
+    @Test fun `room list discovers fresh remote call hints without reviving old or terminal calls`() {
+        val call = CallNotifyContent(CallIntent.AUDIO, emptyList())
+        val hint = io.element.android.libraries.matrix.api.roomlist.LatestEventValue.Remote(
+            timestamp = 99_000, content = call, senderId = A_USER_ID_2,
+            senderProfile = io.element.android.libraries.matrix.api.timeline.item.event.ProfileDetails.Unavailable,
+            isOwn = false,
+        )
+        assertThat(isFreshForegroundCallHint(hint, A_SESSION_ID, 100_000)).isTrue()
+        for (invalid in listOf(hint.copy(isOwn = true), hint.copy(senderId = A_SESSION_ID),
+            hint.copy(timestamp = 100_001), hint.copy(timestamp = 10_000),
+            hint.copy(content = call.copy(declinedBy = listOf(A_SESSION_ID))),
+            hint.copy(content = call.copy(lifecycleState = CallLifecycleState.ENDED)))) {
+            assertThat(isFreshForegroundCallHint(invalid, A_SESSION_ID, 100_000)).isFalse()
+        }
+        assertThat(isFreshForegroundCallHint(io.element.android.libraries.matrix.api.roomlist.LatestEventValue.None, A_SESSION_ID, 100_000)).isFalse()
+    }
     private val info = aRoomInfo(isDirect = true, isDm = true, isEncrypted = true, joinedMembersCount = 2)
     private fun event() = anEventTimelineItem(
         isRemote = true, sender = A_USER_ID_2, timestamp = 99_000,

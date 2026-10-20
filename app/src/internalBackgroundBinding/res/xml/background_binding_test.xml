@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/background_binding_test_disclosure"
+    android:settingsActivity="io.element.android.x.backgroundtest.BackgroundBindingTestActivity"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="1000"
+    android:canRetrieveWindowContent="false"
+    android:canPerformGestures="false"
+    android:isAccessibilityTool="false" />

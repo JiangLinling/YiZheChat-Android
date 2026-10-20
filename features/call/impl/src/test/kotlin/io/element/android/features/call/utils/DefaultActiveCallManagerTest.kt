@@ -132,6 +132,90 @@ class DefaultActiveCallManagerTest {
     private val notificationId = NotificationIdProvider.getForegroundServiceNotificationId(ForegroundServiceType.INCOMING_CALL)
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `Next room Join binds original invitation before late push while a different invite remains busy`() = runTest {
+        setupShadowPowerManager()
+        val first = invitation()
+        val items = MutableStateFlow<List<MatrixTimelineItem>>(listOf(first))
+        val room = roomEntryFixture(items)
+        val client = FakeMatrixClient().apply { givenGetRoomResult(A_ROOM_ID, room) }
+        val holder = mockk<io.element.android.services.appnavstate.api.ActiveRoomsHolder> {
+            every { getActiveRoomMatching(A_SESSION_ID, A_ROOM_ID) } returns room
+        }
+        val ringtone = mockk<IncomingCallRingtonePlayer>(relaxed = true)
+        val foreground = FakeAppForegroundStateService()
+        val service = mockk<IncomingCallForegroundServiceController>(relaxed = true)
+        val manager = createActiveCallManager(matrixClientProvider = FakeMatrixClientProvider { Result.success(client) },
+            systemClock = FakeSystemClock().apply { epochMillisResult = 100 }, nextCalls = true,
+            activeRoomsHolder = holder, incomingCallRingtonePlayer = ringtone,
+            appForegroundStateService = foreground, incomingCallForegroundServiceController = service)
+        val target = manager.resolveRoomEntry(CallData(A_SESSION_ID, A_ROOM_ID, true))
+        assertThat(target.notificationEventId).isEqualTo(AN_EVENT_ID.value)
+        assertThat(target.attemptId).isEqualTo(AN_EVENT_ID.value)
+        assertThat(target.isAudioCall).isFalse() // The original invitation owns the mode.
+        runCurrent()
+        foreground.givenIsInForeground(false)
+        runCurrent()
+        verify(exactly = 0) { service.start(any()) }
+        manager.validateIncomingCall(target, room)
+        manager.joinedCall(target)
+        manager.registerIncomingCall(aCallNotificationData(timestamp = 10, expirationTimestamp = 30_000))
+        runCurrent()
+        assertThat(manager.activeCall.value?.callData).isEqualTo(target)
+        assertThat(manager.activeCall.value?.callState).isEqualTo(CallState.InCall)
+        coVerify(exactly = 0) { room.declineCall(AN_EVENT_ID) }
+        verify(exactly = 0) { ringtone.start(any()) }
+
+        items.value = listOf(first, invitation(AN_EVENT_ID_2, 20))
+        manager.registerIncomingCall(aCallNotificationData(eventId = AN_EVENT_ID_2, timestamp = 20, expirationTimestamp = 30_000))
+        runCurrent()
+        coVerify(exactly = 1) { room.declineCall(AN_EVENT_ID_2) }
+        coVerify(exactly = 0) { room.declineCall(AN_EVENT_ID) }
+    }
+
+    @Test fun `Next room Join never revives older invite after latest is finished or authority is mismatched`() = runTest {
+        val first = invitation()
+        val finished = invitation(AN_EVENT_ID_2, 20, CallLifecycleState.CANCELLED)
+        for (events in listOf(listOf(first, finished), listOf(first))) {
+            val room = roomEntryFixture(MutableStateFlow(events))
+            io.mockk.coEvery { room.loadRtcNotification(AN_EVENT_ID) } returns Result.success(
+                io.element.android.libraries.matrix.api.notification.RtcNotificationAuthority(AN_EVENT_ID_2, 10,
+                    io.element.android.libraries.matrix.api.notification.NotificationContent.MessageLike.RtcNotification(
+                        A_USER_ID_2, io.element.android.libraries.matrix.api.notification.RtcNotificationType.RING, CallIntent.VIDEO, 30_000)))
+            val client = FakeMatrixClient().apply { givenGetRoomResult(A_ROOM_ID, room) }
+            val holder = mockk<io.element.android.services.appnavstate.api.ActiveRoomsHolder> {
+                every { getActiveRoomMatching(A_SESSION_ID, A_ROOM_ID) } returns room
+            }
+            val manager = createActiveCallManager(matrixClientProvider = FakeMatrixClientProvider { Result.success(client) },
+                systemClock = FakeSystemClock().apply { epochMillisResult = 100 }, nextCalls = true, activeRoomsHolder = holder)
+            assertThat(runCatching { manager.resolveRoomEntry(CallData(A_SESSION_ID, A_ROOM_ID, true)) }.exceptionOrNull())
+                .isInstanceOf(io.element.android.features.call.impl.utils.IncomingCallUnavailableException::class.java)
+            assertThat(manager.activeCall.value).isNull()
+        }
+    }
+
+    @Test fun `Next room start without ongoing call keeps a new outgoing attempt`() = runTest {
+        val holder = mockk<io.element.android.services.appnavstate.api.ActiveRoomsHolder> {
+            every { getActiveRoomMatching(A_SESSION_ID, A_ROOM_ID) } returns null
+        }
+        val manager = createActiveCallManager(nextCalls = true, activeRoomsHolder = holder)
+        val request = CallData(A_SESSION_ID, A_ROOM_ID, true)
+        assertThat(manager.resolveRoomEntry(request)).isEqualTo(request)
+        assertThat(manager.activeCall.value).isNull()
+    }
+
+    private fun roomEntryFixture(items: MutableStateFlow<out List<MatrixTimelineItem>>): JoinedRoom {
+        val room = io.mockk.spyk(FakeJoinedRoom(
+            baseRoom = FakeBaseRoom(getUpdatedMemberResult = { Result.success(io.element.android.libraries.matrix.test.room.aRoomMember(it)) }),
+            liveTimeline = FakeTimeline(timelineItems = items),
+        ).apply { givenRoomInfo(aRoomInfo(isDm = true, hasRoomCall = true, joinedMembersCount = 2)) })
+        io.mockk.coEvery { room.loadRtcNotification(AN_EVENT_ID) } returns Result.success(
+            io.element.android.libraries.matrix.api.notification.RtcNotificationAuthority(AN_EVENT_ID, 10,
+                io.element.android.libraries.matrix.api.notification.NotificationContent.MessageLike.RtcNotification(
+                    A_USER_ID_2, io.element.android.libraries.matrix.api.notification.RtcNotificationType.RING, CallIntent.VIDEO, 30_000)))
+        return room
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `registerIncomingCall - sets the incoming call as active`() = runTest {
         setupShadowPowerManager()
@@ -763,6 +847,8 @@ class DefaultActiveCallManagerTest {
         declinedBy: List<io.element.android.libraries.matrix.api.core.UserId> = emptyList(),
         intent: CallIntent = CallIntent.VIDEO): MatrixTimelineItem.Event = mockk {
         every { event } returns mockk(relaxed = true) {
+            every { isOwn } returns false
+            every { isRemote } returns true
             every { eventId } returns id
             every { timestamp } returns time
             every { sender } returns A_USER_ID_2
@@ -1234,6 +1320,7 @@ class DefaultActiveCallManagerTest {
         appForegroundStateService: FakeAppForegroundStateService = FakeAppForegroundStateService(),
         notificationBitmapLoader: io.element.android.libraries.push.api.notifications.NotificationBitmapLoader = FakeNotificationBitmapLoader(),
         nextCalls: Boolean = false,
+        activeRoomsHolder: io.element.android.services.appnavstate.api.ActiveRoomsHolder = mockk(relaxed = true),
         coordinator: io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator =
             io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator(),
     ) = DefaultActiveCallManager(
@@ -1258,6 +1345,7 @@ class DefaultActiveCallManagerTest {
         dataProtectionPolicyProvider = io.element.android.security.dataprotection.test.FakeDataProtectionPolicyProvider(),
         appOperationalStateCoordinator = coordinator,
         nextCalls = nextCalls,
+        activeRoomsHolder = activeRoomsHolder,
         finalizationRecovery = mockk(relaxed = true),
     )
 }

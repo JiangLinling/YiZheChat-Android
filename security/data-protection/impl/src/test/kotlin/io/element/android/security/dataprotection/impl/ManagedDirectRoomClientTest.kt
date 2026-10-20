@@ -30,6 +30,7 @@ class ManagedDirectRoomClientTest {
         }
         val payload = buildJsonObject {
             put("schema_version", 1)
+            put("generation", "e".repeat(64))
             put("purpose", if (damage == "purpose") "FRIENDSHIP_REMOVAL_BEGIN" else "MANAGED_DIRECT_ROOM_${query.getValue("action").jsonPrimitive.content.uppercase()}")
             put("installation_id", if (damage == "installation") "other" else "test-installation")
             put("query", if (damage == "nonce") JsonObject(query + ("request_nonce" to JsonPrimitive("f".repeat(64)))) else query)
@@ -60,5 +61,15 @@ class ManagedDirectRoomClientTest {
     @Test fun `tampered invitation is rejected cryptographically`() = runTest {
         val client = ManagedDirectRoomClient(verifier, { "test-installation" }) { JsonObject(signed(it) + ("result" to JsonNull)) }
         assertThat(runCatching { client.execute("a".repeat(64), "b".repeat(64), "@peer:test", false) }.isFailure).isTrue()
+    }
+    @Test fun `new explicit invitation binds the signed empty preview generation`() = runTest {
+        val requests = mutableListOf<JsonObject>()
+        val client = ManagedDirectRoomClient(verifier, { "test-installation" }) {
+            requests.add(it)
+            signed(it, if (it.getValue("action").jsonPrimitive.content == "resolve") "null" else null)
+        }
+        assertThat(client.execute("a".repeat(64), "b".repeat(64), "@peer:test", true)?.status).isEqualTo("INVITED")
+        assertThat(requests.map { it.getValue("action").jsonPrimitive.content }).containsExactly("resolve", "invite").inOrder()
+        assertThat(requests.last().getValue("expected_generation").jsonPrimitive.content).isEqualTo("e".repeat(64))
     }
 }

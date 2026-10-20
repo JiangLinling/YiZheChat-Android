@@ -1,0 +1,45 @@
+--- a/crates/matrix-sdk/tests/integration/widget.rs
++++ b/crates/matrix-sdk/tests/integration/widget.rs
+@@ -111,19 +111,19 @@
+ async fn run_test_driver_e2e(
+     init_on_content_load: bool,
+ ) -> (Client, Client, MatrixMockServer, WidgetDriverHandle) {
+-    run_test_driver_e2e_scoped(init_on_content_load, false).await
++    run_test_driver_e2e_scoped(init_on_content_load, None).await
+ }
+ 
+ async fn run_test_driver_e2e_scoped(
+     init_on_content_load: bool,
+-    next: bool,
++    protected_host: Option<&str>,
+ ) -> (Client, Client, MatrixMockServer, WidgetDriverHandle) {
+     let mock_server = MatrixMockServer::new().await;
+     mock_server.mock_crypto_endpoints_preset().await;
+-    let (alice, bob) = if next {
++    let (alice, bob) = if let Some(host) = protected_host {
+         let http = reqwest::Client::builder().no_proxy()
+-            .resolve("matrix-next.yizhesy.cn", *mock_server.address()).build().unwrap();
+-        let url = format!("http://matrix-next.yizhesy.cn:{}", mock_server.address().port());
++            .resolve(host, *mock_server.address()).build().unwrap();
++        let url = format!("http://{host}:{}", mock_server.address().port());
+         let alice = mock_server.client_builder_for_crypto_end_to_end(user_id!("@alice:example.org"), device_id!("4L1C3"))
+             .on_builder(|b| b.homeserver_url(url).http_client(http)).build().await;
+         let bob = mock_server.client_builder_for_crypto_end_to_end(user_id!("@bob:example.org"), device_id!("B0B0B0B0B"))
+@@ -2407,7 +2407,16 @@
+ }
+ #[async_test]
+ async fn test_next_encrypted_signal_http_producer_roundtrip() {
+-    let (alice, bob, mock_server, handle) = run_test_driver_e2e_scoped(false, true).await;
++    encrypted_signal_http_producer_roundtrip("matrix-next.yizhesy.cn").await;
++}
++
++#[async_test]
++async fn test_formal_encrypted_signal_http_producer_roundtrip() {
++    encrypted_signal_http_producer_roundtrip("matrix.yizhesy.cn").await;
++}
++
++async fn encrypted_signal_http_producer_roundtrip(host: &str) {
++    let (alice, bob, mock_server, handle) = run_test_driver_e2e_scoped(false, Some(host)).await;
+     let bob_room = mock_server.sync_joined_room(&bob, &ROOM_ID).await;
+     let members = EventFactory::new().room(&ROOM_ID).sender(alice.user_id().unwrap());
+     mock_server.mock_sync().ok_and_run(&alice, |sync| {

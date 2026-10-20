@@ -18,6 +18,12 @@ internal class RtcWidgetDeparture(private val widgetId: String) {
     private val registrations = mutableSetOf<String>()
     private val delays = mutableSetOf<String>()
     private val completions = mutableMapOf<String, CompletableDeferred<Boolean>>()
+    private val joins = mutableSetOf<String>()
+    private val joinedEvents = mutableSetOf<String>()
+
+    /** Exact server echoes of this widget's own membership writes; never accepts IDs from a peer. */
+    @Synchronized
+    fun membershipEvents(): List<String> = joinedEvents.toList()
 
     @Synchronized
     fun sent(message: String) {
@@ -25,6 +31,13 @@ internal class RtcWidgetDeparture(private val widgetId: String) {
         if (!isOwn(envelope) || "response" in envelope || envelope.text("action") != "send_event") return
         val data = envelope["data"] as? JsonObject ?: return
         val content = data["content"] as? JsonObject ?: return
+        if (data.text("type") == NEXT_RTC_MEMBER_EVENT_TYPE && "state_key" !in data && "delay" !in data &&
+            content["member"] is JsonObject && content.text("slot_id") == "m.call#ROOM" &&
+            !content.text("msc4354_sticky_key").isNullOrBlank()
+        ) {
+            envelope.text("requestId")?.let(joins::add)
+            return
+        }
         if (data.text("type") != NEXT_RTC_MEMBER_EVENT_TYPE || "state_key" in data ||
             (data["delay"] as? JsonPrimitive)?.longOrNull?.let { it > 0 } != true ||
             (data["sticky_duration_ms"] as? JsonPrimitive)?.longOrNull?.let { it > 0 } != true ||
@@ -41,6 +54,9 @@ internal class RtcWidgetDeparture(private val widgetId: String) {
         if (!isOwn(envelope)) return false
         val response = envelope["response"] as? JsonObject ?: return false
         val requestId = envelope.text("requestId") ?: return false
+        if (envelope.text("action") == "send_event" && joins.remove(requestId) && "error" !in response) {
+            response.text("event_id")?.takeIf { it.startsWith('$') }?.let(joinedEvents::add)
+        }
         if (envelope.text("action") == UPDATE && completions.containsKey(requestId)) {
             completions.remove(requestId)?.complete("error" !in response)
             return true

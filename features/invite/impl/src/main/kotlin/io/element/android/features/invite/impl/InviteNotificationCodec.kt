@@ -10,6 +10,9 @@ import java.util.Base64
 
 internal object InviteNotificationCodec {
     const val MAX_RECORDS = 200
+    // Joining can briefly clear the SDK DM flags. Preserve an already observed invitation type.
+    fun refinedKind(previous: InviteNotification.Kind, observed: InviteNotification.Kind): InviteNotification.Kind =
+        if (previous == InviteNotification.Kind.GROUP) observed else previous
     // This payload is encrypted by the account SensitiveFileStore, never written to preferences.
     fun encode(value: InviteNotification): String = listOf(
         value.roomId.value, value.kind.name, value.senderId.orEmpty(), value.timestamp.toString(),
@@ -70,6 +73,8 @@ internal object InviteNotificationCodec {
                 result[next.roomId] = next.copy(sequence = ++sequence, receivedAt = receivedAt)
             } else {
                 result[next.roomId] = previous.copy(
+                    kind = refinedKind(previous.kind, next.kind),
+                    senderId = next.senderId ?: previous.senderId,
                     displayName = next.displayName ?: previous.displayName,
                     avatarUrl = next.avatarUrl ?: previous.avatarUrl,
                 )

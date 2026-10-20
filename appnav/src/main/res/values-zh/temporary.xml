@@ -39,7 +39,7 @@
     <string name="screen_security_setup_use_recovery_key">使用恢复密钥验证</string>
     <string name="screen_security_setup_reset_identity">重置加密身份</string>
     <string name="screen_security_setup_recovery_expired">本次设备恢复请求已过期，请重新发起经过验证的恢复。</string>
-    <string name="screen_security_setup_security_blocked">服务器拒绝了当前设备身份；该结果不允许进入恢复流程。请联系服务支持。</string>
+    <string name="screen_security_setup_security_blocked">本次登录尚未通过服务器安全校验，暂时无法进入聊天。请点击“重新检查安全状态”；如果仍然失败，请联系管理员核对设备授权和账号绑定。</string>
     <string name="screen_device_setup_title">完成安全初始化</string>
     <string name="screen_device_setup_subtitle">逐项完成必要的系统配置，避免消息延迟、来电不响或音视频不可用。</string>
     <string name="screen_device_setup_complete_title">安全初始化已完成</string>
@@ -118,4 +118,5 @@
     <string name="screen_entry_push_not_ready">通知暂未就绪，聊天可正常使用</string>
     <string name="screen_security_recovery_waiting">数字身份已验证，设备恢复仍在等待可信旧设备确认。</string>
     <string name="screen_security_recovery_refresh">刷新</string>
+    <string name="screen_security_setup_diagnostic">查看诊断代码</string>
 </resources>

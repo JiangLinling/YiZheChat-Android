@@ -30,6 +30,20 @@ import org.junit.Test
 
 class RoomCallStatePresenterTest {
     @Test
+    fun `pending accepted and removed relationship updates call action without reopening`() = runTest {
+        val pending = aRoomInfo(isDm = true, activeMembersCount = 2, joinedMembersCount = 1, invitedMembersCount = 1)
+        val base = FakeBaseRoom(initialRoomInfo = pending, roomPermissions = roomPermissions(true))
+        createRoomCallStatePresenter(joinedRoom = FakeJoinedRoom(baseRoom = base)).test {
+            skipItems(1)
+            assertThat((awaitItem() as RoomCallState.StandBy).canStartCall).isFalse()
+            base.givenRoomInfo(pending.copy(joinedMembersCount = 2, invitedMembersCount = 0))
+            assertThat((awaitItem() as RoomCallState.StandBy).canStartCall).isTrue()
+            base.givenRoomInfo(pending.copy(activeMembersCount = 1, invitedMembersCount = 0))
+            assertThat((awaitItem() as RoomCallState.StandBy).canStartCall).isFalse()
+        }
+    }
+
+    @Test
     fun `present - initial state`() = runTest {
         val room = FakeJoinedRoom(
             baseRoom = FakeBaseRoom(

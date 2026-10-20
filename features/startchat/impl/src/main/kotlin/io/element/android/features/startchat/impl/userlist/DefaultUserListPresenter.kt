@@ -76,16 +76,20 @@ class DefaultUserListPresenter(
             mutableStateOf(SearchBarResultState.Initial())
         }
         var showSearchLoader by remember { mutableStateOf(false) }
+        var searchHasError by remember { mutableStateOf(false) }
 
         val searchQuery = queryState.text.toString()
         LaunchedEffect(searchQuery, deletedIdentityRevision) {
             searchResults = SearchBarResultState.Initial()
             showSearchLoader = false
+            searchHasError = false
             userRepository.search(searchQuery).onEach { state ->
                 showSearchLoader = state.isSearching
+                searchHasError = state.hasError
                 val visibleResults = state.results
                     .filterNot { deletedIdentityProjection.isDeletedMatrixUserId(it.matrixUser.userId.value) }
                 searchResults = when {
+                    visibleResults.isEmpty() && state.hasError -> SearchBarResultState.Initial()
                     visibleResults.isEmpty() && state.isSearching -> SearchBarResultState.Initial()
                     visibleResults.isEmpty() && !state.isSearching -> SearchBarResultState.NoResultsFound()
                     else -> SearchBarResultState.Results(visibleResults.toImmutableList())
@@ -107,6 +111,7 @@ class DefaultUserListPresenter(
             selectedUsers = selectedUsers.toImmutableList(),
             isSearchActive = isSearchActive,
             showSearchLoader = showSearchLoader,
+            searchHasError = searchHasError,
             selectionMode = args.selectionMode,
             recentDirectRooms = recentDirectRooms.toImmutableList(),
             eventSink = ::handleEvent,

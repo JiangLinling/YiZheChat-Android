@@ -39,10 +39,11 @@ class RoomListRoomSummaryFactory(
         val roomInfo = roomSummary.info
         val avatarData = roomInfo.getAvatarData(size = AvatarSize.RoomListItem)
         val latestEventAuthorized = roomSummary.latestEvent.isAuthorizedForRoomSummary()
+        val displayName = roomInfo.invitationDisplayName()
         return RoomListRoomSummary(
             id = roomSummary.roomId.value,
             roomId = roomSummary.roomId,
-            name = roomInfo.name,
+            name = displayName,
             numberOfUnreadMessages = roomInfo.numUnreadMessages,
             numberOfUnreadMentions = roomInfo.numUnreadMentions,
             numberOfUnreadNotifications = roomInfo.numUnreadNotifications,
@@ -69,7 +70,7 @@ class RoomListRoomSummaryFactory(
             isDirect = roomInfo.isDirect,
             isFavorite = roomInfo.isFavorite,
             inviteSender = roomInfo.inviter?.toInviteSender(),
-            isDm = roomInfo.isDm,
+            isDm = roomInfo.isDm || roomInfo.isDirectInvitation,
             activeMembersCount = roomInfo.activeMembersCount,
             invitedMembersCount = roomInfo.invitedMembersCount,
             joinedMembersCount = roomInfo.joinedMembersCount,

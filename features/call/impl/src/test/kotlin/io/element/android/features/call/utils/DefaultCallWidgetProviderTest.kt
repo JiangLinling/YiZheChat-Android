@@ -30,11 +30,35 @@ import io.element.android.libraries.preferences.test.InMemoryAppPreferencesStore
 import io.element.android.services.appnavstate.api.ActiveRoomsHolder
 import io.element.android.services.appnavstate.impl.DefaultActiveRoomsHolder
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.launch
 import org.junit.Test
 
 private const val A_OPERATION_ID = "00000000-0000-4000-8000-000000000000"
 
 class DefaultCallWidgetProviderTest {
+    @Test
+    fun `contact monitor retries transport errors but emits explicit revocation once`() = runTest {
+        check(NextDeploymentConfig.isNextDeployment)
+        val control = io.mockk.mockk<io.element.android.security.dataprotection.api.ManagementControlService>()
+        var reads = 0
+        io.mockk.coEvery { control.contactCallTerminationReason(any(), any(), A_ROOM_ID.value, A_OPERATION_ID) } coAnswers {
+            reads++
+            if (reads == 1) throw java.io.IOException("network unavailable")
+            "RTC_CALL_ENDED"
+        }
+        val provider = createProvider(managementControlService = control)
+        val events = mutableListOf<Throwable>()
+        val job = backgroundScope.launch { provider.observeContactRevocation(A_SESSION_ID, A_ROOM_ID, A_OPERATION_ID).collect { events += it } }
+        runCurrent()
+        advanceTimeBy(5_001); runCurrent()
+        assertThat(events).isEmpty()
+        advanceTimeBy(5_001); runCurrent()
+        assertThat(events.map { it.message }).containsExactly("RTC_CALL_ENDED")
+        assertThat(job.isCompleted).isTrue()
+    }
+
     @Test
     fun `joining from a live group banner uses its projection while retaining a fresh driver room`() = runTest {
         if (!NextDeploymentConfig.isNextDeployment) return@runTest
@@ -354,11 +378,25 @@ class DefaultCallWidgetProviderTest {
         callWidgetSettingsProvider: CallWidgetSettingsProvider = FakeCallWidgetSettingsProvider(),
         activeRoomsHolder: ActiveRoomsHolder = DefaultActiveRoomsHolder(),
         callProtectionService: FakeCallProtectionService = FakeCallProtectionService(),
+        managementControlService: io.element.android.security.dataprotection.api.ManagementControlService = io.mockk.mockk(relaxed = true),
     ) = DefaultCallWidgetProvider(
         matrixClientsProvider = matrixClientProvider,
         appPreferencesStore = appPreferencesStore,
         callWidgetSettingsProvider = callWidgetSettingsProvider,
         activeRoomsHolder = activeRoomsHolder,
         callProtectionService = callProtectionService,
+        managementControlService = managementControlService,
     )
+
+    @Test
+    fun `blocked contact never prepares widget or room`() = runTest {
+        check(NextDeploymentConfig.isNextDeployment)
+        val client = FakeMatrixClient()
+        val control = io.mockk.mockk<io.element.android.security.dataprotection.api.ManagementControlService>()
+        io.mockk.coEvery { control.requireContactRoomAllowed(any(), any(), A_ROOM_ID.value) } throws IllegalStateException("CONTACT_UNAVAILABLE")
+        val provider = createProvider(matrixClientProvider = FakeMatrixClientProvider { Result.success(client) }, managementControlService = control)
+        val result = provider.getWidget(A_SESSION_ID, A_ROOM_ID, false, "clientId", "zh", "dark", A_OPERATION_ID)
+        assertThat(result.exceptionOrNull()?.message).isEqualTo("CONTACT_UNAVAILABLE")
+        assertThat(client.getJoinedRoomCalledCount).isEqualTo(0)
+    }
 }

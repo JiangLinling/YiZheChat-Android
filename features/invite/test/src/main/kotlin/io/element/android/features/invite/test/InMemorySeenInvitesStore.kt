@@ -39,6 +39,11 @@ class InMemorySeenInvitesStore(
         records.value = records.value.map { if (it.roomId == roomId) it.copy(outcome = outcome, seen = seen) else it }
         if (seen) roomIds.value += roomId else roomIds.value -= roomId
     }
+    override suspend fun updateNotificationKinds(kinds: Map<RoomId, InviteNotification.Kind>) {
+        records.value = records.value.map { record ->
+            if (record.kind == InviteNotification.Kind.GROUP) kinds[record.roomId]?.let { record.copy(kind = it) } ?: record else record
+        }
+    }
     override suspend fun markNotificationSeen(roomId: RoomId) {
         records.value = records.value.map { if (it.roomId == roomId) it.copy(seen = true) else it }
         markAsSeen(roomId)

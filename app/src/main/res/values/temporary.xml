@@ -84,7 +84,7 @@
     <string name="screen_force_update_downloading">Downloading %1$d%% · %2$s / %3$s</string>
     <string name="screen_force_update_downloading_unknown">Downloading · %1$s</string>
     <string name="screen_entry_offline_expired_title">Connect to continue</string>
-    <string name="screen_entry_offline_expired_description">The offline period allowed by your administrator has ended. Your account and chats are retained.</string>
+    <string name="screen_entry_offline_expired_description">This device needs an online check to continue. Your account and chats are retained. Access will resume automatically after verification.</string>
     <string name="screen_entry_service_retry_title">Reconnecting to the security service</string>
     <string name="screen_entry_service_retry_description">The service is temporarily unavailable. Preparation will continue automatically when it recovers.</string>
     <string name="screen_entry_rate_limit_title">Please wait before retrying</string>
@@ -105,4 +105,8 @@
     <string name="a11y_notification_window_close">Close chat window</string>
     <string name="a11y_notification_window_restore">Restore chat window</string>
     <string name="notification_chat_window">Chat window</string>
+    <string name="screen_entry_transfer_authorization">Continue on this device</string>
+    <string name="screen_entry_transfer_authorization_progress">Transferring authorization…</string>
+    <string name="screen_dm_details_block_alert_description">Blocking prevents new direct messages, calls and friend requests in either direction, and ends an active direct call. Existing chat history is retained. You can unblock this person later.</string>
+    <string name="screen_dm_details_unblock_alert_description">You can contact this person again unless they still block you. This does not restore a removed friendship or send messages that were rejected while blocked.</string>
 </resources>

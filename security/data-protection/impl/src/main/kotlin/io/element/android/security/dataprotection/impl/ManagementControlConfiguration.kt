@@ -38,7 +38,10 @@ class ManagementControlConfiguration(
     val updateCdnBaseUrl: String = metadata?.getString(METADATA_UPDATE_CDN_BASE_URL).orEmpty().trimEnd('/')
     val updateFallbackBaseUrl: String = metadata?.getString(METADATA_UPDATE_FALLBACK_BASE_URL).orEmpty().trimEnd('/')
 
-    val isNextDeployment: Boolean = updateChannel.startsWith("next-")
+    val deploymentId: String = metadata?.getString(METADATA_DEPLOYMENT_ID)
+        ?: if (updateChannel.startsWith("next-")) "next" else "legacy"
+    // The protocol remains the same when its public channel changes from Next to internal.
+    val isNextDeployment: Boolean = deploymentId in setOf("next", "internal")
 
     val isConfigured: Boolean = baseUrl.startsWith("https://") &&
         signingPublicKeyDerBase64.isNotBlank() &&
@@ -46,6 +49,7 @@ class ManagementControlConfiguration(
         certificatePin.startsWith("sha256/")
 
     companion object {
+        const val METADATA_DEPLOYMENT_ID = "io.element.android.yizhe.control.DEPLOYMENT_ID"
         const val METADATA_BASE_URL = "io.element.android.yizhe.control.BASE_URL"
         const val METADATA_SIGNING_KEY = "io.element.android.yizhe.control.SIGNING_KEY_DER_B64"
         const val METADATA_SIGNING_KEY_ID = "io.element.android.yizhe.control.SIGNING_KEY_ID"

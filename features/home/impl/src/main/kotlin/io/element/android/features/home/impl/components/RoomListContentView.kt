@@ -102,12 +102,17 @@ fun RoomListContentView(
             is RoomListContentState.Empty -> contentState.securityBannerState == SecurityBannerState.None
             is RoomListContentState.Rooms -> contentState.securityBannerState == SecurityBannerState.None
         }
-        val reachabilityGuideShown = if (canShowReachabilityGuide) ReachabilityGuideBanner() else false
+        val callPermissions = when (contentState) {
+            is RoomListContentState.Skeleton -> null
+            is RoomListContentState.Empty -> contentState.fullScreenIntentPermissionsState
+            is RoomListContentState.Rooms -> contentState.fullScreenIntentPermissionsState
+        }
+        val reachabilityGuideShown = if (canShowReachabilityGuide && callPermissions != null) ReachabilityGuideBanner(callPermissions) else false
         if (contentState is RoomListContentState.Empty &&
             contentState.securityBannerState == SecurityBannerState.None && !reachabilityGuideShown
         ) {
             when {
-                contentState.fullScreenIntentPermissionsState.shouldDisplayBanner -> {
+                contentState.fullScreenIntentPermissionsState.shouldDisplayHomeBanner -> {
                     FullScreenIntentPermissionBanner(state = contentState.fullScreenIntentPermissionsState)
                 }
                 contentState.batteryOptimizationState.shouldDisplayBanner -> {
@@ -397,7 +402,7 @@ private fun RoomsViewList(
             }
             // Show system call and battery reminders after the reachability guide's current step.
             SecurityBannerState.None -> when {
-                !reachabilityGuideShown && state.fullScreenIntentPermissionsState.shouldDisplayBanner -> {
+                !reachabilityGuideShown && state.fullScreenIntentPermissionsState.shouldDisplayHomeBanner -> {
                     item {
                         FullScreenIntentPermissionBanner(state = state.fullScreenIntentPermissionsState)
                     }

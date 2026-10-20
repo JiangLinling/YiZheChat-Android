@@ -82,7 +82,7 @@
     <string name="screen_force_update_downloading">正在下载 %1$d%% · %2$s / %3$s</string>
     <string name="screen_force_update_downloading_unknown">正在下载 · %1$s</string>
     <string name="screen_entry_offline_expired_title">请联网验证后继续</string>
-    <string name="screen_entry_offline_expired_description">已超过管理端允许的离线时长。账号和聊天数据已保留，联网验证后自动恢复。</string>
+    <string name="screen_entry_offline_expired_description">当前设备需要联网校验后才能继续。账号和聊天数据已保留，联网验证后自动恢复。</string>
     <string name="screen_entry_service_retry_title">正在重新连接安全服务</string>
     <string name="screen_entry_service_retry_description">服务暂时无法连接，正在重试；恢复后会自动继续。</string>
     <string name="screen_entry_rate_limit_title">请稍候再试</string>
@@ -103,4 +103,8 @@
     <string name="a11y_notification_window_close">关闭聊天小窗</string>
     <string name="a11y_notification_window_restore">恢复聊天小窗</string>
     <string name="notification_chat_window">聊天小窗</string>
+    <string name="screen_entry_transfer_authorization">继续在本机使用</string>
+    <string name="screen_entry_transfer_authorization_progress">正在交接授权…</string>
+    <string name="screen_dm_details_block_alert_description">拉黑后，双方将无法通过私聊发送新消息、发起通话或好友申请，正在进行的私聊通话也会结束。原有聊天记录仍保留，你可以随时解除拉黑。</string>
+    <string name="screen_dm_details_unblock_alert_description">解除后可重新联系；如果对方仍将你拉黑，联系限制仍然有效。已解除的好友关系不会自动恢复，拉黑期间被拒绝的消息不会自动补发。</string>
 </resources>

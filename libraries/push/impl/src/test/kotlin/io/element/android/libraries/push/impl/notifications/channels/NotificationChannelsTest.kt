@@ -46,12 +46,24 @@ class NotificationChannelsTest {
             every { createNotificationChannel(capture(createdCompatChannels)) } returns Unit
         }
 
-        createNotificationChannels(notificationManager = notificationManager)
+        val channels = createNotificationChannels(
+            notificationManager = notificationManager,
+            enterpriseService = FakeEnterpriseService(getNoisyNotificationChannelIdResult = { null }),
+        )
+        assertThat(channels.messageNotificationChannelId()).isEqualTo(channels.getChannelIdForMessage(A_SESSION_ID, noisy = true))
+        assertThat(channels.ringingNotificationChannelId()).isEqualTo(channels.getChannelForIncomingCall(ring = true))
 
         verify { notificationManager.createNotificationChannel(any<NotificationChannelCompat>()) }
         verify { notificationManager.deleteNotificationChannel(any<String>()) }
         assertThat(createdCompatChannels.first { it.id == NOISY_NOTIFICATION_CHANNEL_ID_BASE }.importance)
             .isEqualTo(NotificationManagerCompat.IMPORTANCE_HIGH)
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
+    fun `session specific enterprise channel is unknown to app wide guidance`() {
+        val channels = createNotificationChannels(enterpriseService = FakeEnterpriseService(isEnterpriseBuild = true))
+        assertThat(channels.messageNotificationChannelId()).isNull()
     }
 
     @Test

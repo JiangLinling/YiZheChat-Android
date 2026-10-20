@@ -22,6 +22,48 @@ import org.junit.Test
 
 class SecuritySetupProgressTest {
     @Test
+    fun `candidate identity and device evidence must be ready before activation resume`() = kotlinx.coroutines.test.runTest {
+        for (status in ManagementSyncStatus.entries) {
+            val report = ManagementSyncReport(status = status, deviceSecurityState = ManagedDeviceSecurityState.READY)
+            synchronizeBeforeActivationResume("a".repeat(64), true, { report }, identityVerified = false) {
+                error("Unverified identity must remain in bootstrap")
+            }
+        }
+        for (state in ManagedDeviceSecurityState.entries.filterNot { it == ManagedDeviceSecurityState.READY }) {
+            val report = ManagementSyncReport(status = ManagementSyncStatus.SYNCHRONIZED, deviceSecurityState = state)
+            assertThat(synchronizeBeforeActivationResume("a".repeat(64), true, { report }) {
+                error("Device evidence must complete before activation")
+            }).isEqualTo(report)
+        }
+    }
+
+    @Test
+    fun `availability errors do not fabricate completed identity or location evidence`() {
+        val progress = SecuritySetupPhase.SERVICE_UNAVAILABLE.toSecurityProgress()
+        assertThat(progress.take(2)).containsExactly(SecurityProgressState.PENDING, SecurityProgressState.CURRENT).inOrder()
+    }
+    @Test
+    fun `signed handover reaches recovery without resuming a rejected pending activation`() = kotlinx.coroutines.test.runTest {
+        val report = ManagementSyncReport(
+            status = ManagementSyncStatus.SYNCHRONIZED,
+            deviceSecurityState = ManagedDeviceSecurityState.READY,
+            accountHandoverRequiredAccountHashes = setOf("a".repeat(64)),
+        )
+        val result = synchronizeBeforeActivationResume("a".repeat(64), true, { report }) {
+            error("Must not resume activation before identity recovery")
+        }
+        assertThat(result.toSecuritySetupPhase("a".repeat(64))).isEqualTo(SecuritySetupPhase.RECOVERY_METHOD_REQUIRED)
+    }
+
+    @Test
+    fun `normal pending activation still resumes its original operation`() = kotlinx.coroutines.test.runTest {
+        val report = ManagementSyncReport(status = ManagementSyncStatus.SYNCHRONIZED, deviceSecurityState = ManagedDeviceSecurityState.READY)
+        var resumed = false
+        synchronizeBeforeActivationResume("a".repeat(64), true, { report }) { resumed = true; report }
+        assertThat(resumed).isTrue()
+    }
+
+    @Test
     fun `managed handover is explicit only for a signed binding conflict and remains closed while running`() {
         val state = SecuritySetupState(SecuritySetupPhase.ACTION_REQUIRED,
             errorCode = "COMPATIBILITY_BINDING_CONFLICT", eventSink = {})
@@ -243,7 +285,7 @@ class SecuritySetupProgressTest {
 
     @Test
     fun `location required highlights device information collection`() {
-        assertThat(SecuritySetupPhase.LOCATION_REQUIRED.toSecurityProgress()).containsExactly(
+        assertThat(SecuritySetupPhase.LOCATION_REQUIRED.toSecurityProgress(identityVerified = true)).containsExactly(
             SecurityProgressState.COMPLETE,
             SecurityProgressState.CURRENT,
             SecurityProgressState.PENDING,
@@ -252,7 +294,7 @@ class SecuritySetupProgressTest {
 
     @Test
     fun `validation pending highlights system security validation`() {
-        assertThat(SecuritySetupPhase.VALIDATION_PENDING.toSecurityProgress()).containsExactly(
+        assertThat(SecuritySetupPhase.VALIDATION_PENDING.toSecurityProgress(true, true)).containsExactly(
             SecurityProgressState.COMPLETE,
             SecurityProgressState.COMPLETE,
             SecurityProgressState.CURRENT,
@@ -261,7 +303,7 @@ class SecuritySetupProgressTest {
 
     @Test
     fun `managed approval pending remains at system security validation`() {
-        assertThat(SecuritySetupPhase.MANAGED_APPROVAL_PENDING.toSecurityProgress()).containsExactly(
+        assertThat(SecuritySetupPhase.MANAGED_APPROVAL_PENDING.toSecurityProgress(true, true)).containsExactly(
             SecurityProgressState.COMPLETE,
             SecurityProgressState.COMPLETE,
             SecurityProgressState.CURRENT,
@@ -270,7 +312,7 @@ class SecuritySetupProgressTest {
 
     @Test
     fun `ready advances to secure initialization`() {
-        assertThat(SecuritySetupPhase.READY.toSecurityProgress()).containsExactly(
+        assertThat(SecuritySetupPhase.READY.toSecurityProgress(true, true)).containsExactly(
             SecurityProgressState.COMPLETE,
             SecurityProgressState.COMPLETE,
             SecurityProgressState.COMPLETE,
@@ -279,7 +321,7 @@ class SecuritySetupProgressTest {
 
     @Test
     fun `not passed marks validation as error without exposing internal approval state`() {
-        assertThat(SecuritySetupPhase.ACTION_REQUIRED.toSecurityProgress()).containsExactly(
+        assertThat(SecuritySetupPhase.ACTION_REQUIRED.toSecurityProgress(true, true)).containsExactly(
             SecurityProgressState.COMPLETE,
             SecurityProgressState.COMPLETE,
             SecurityProgressState.ERROR,

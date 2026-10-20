@@ -1,0 +1,11 @@
+--- a/crates/matrix-sdk/src/widget/matrix.rs
++++ b/crates/matrix-sdk/src/widget/matrix.rs
+@@ -244,7 +244,7 @@
+             #[cfg(not(feature = "e2e-encryption"))]
+             return Err(Error::InsufficientData);
+             #[cfg(feature = "e2e-encryption")]
+-            if self.room.client().homeserver().host_str() == Some("matrix-next.yizhesy.cn") {
++            if matches!(self.room.client().homeserver().host_str(), Some("matrix-next.yizhesy.cn" | "matrix.yizhesy.cn")) {
+                 return self.send_next_rtc_sticky_encrypted(&type_str, content, delayed_event_parameters, duration).await;
+             }
+             #[cfg(feature = "e2e-encryption")]

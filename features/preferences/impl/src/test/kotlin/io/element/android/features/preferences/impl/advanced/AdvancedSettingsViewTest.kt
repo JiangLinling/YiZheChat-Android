@@ -40,7 +40,18 @@ import org.robolectric.annotation.Config
 @RunWith(AndroidJUnit4::class)
 class AdvancedSettingsViewTest {
     @Test
-    fun `clicking on back invokes the expected callback`() = runAndroidComposeUiTest {
+    fun `privacy settings are nested and back returns to advanced settings`() = runAndroidComposeUiTest<ComponentActivity> {
+        setAdvancedSettingsView(aAdvancedSettingsState())
+        assertNoNodeWithText(R.string.screen_advanced_settings_share_presence)
+        clickOn(R.string.screen_settings_chat_privacy)
+        onNodeWithText(activity!!.getString(R.string.screen_advanced_settings_share_presence)).assertExists()
+        pressBack()
+        assertNoNodeWithText(R.string.screen_advanced_settings_share_presence)
+        onNodeWithText(activity!!.getString(R.string.screen_settings_media)).assertExists()
+    }
+
+    @Test
+    fun `clicking on back invokes the expected callback`() = runAndroidComposeUiTest<ComponentActivity> {
         val eventsRecorder = EventsRecorder<AdvancedSettingsEvents>(expectEvents = false)
         ensureCalledOnce {
             setAdvancedSettingsView(
@@ -54,7 +65,7 @@ class AdvancedSettingsViewTest {
     }
 
     @Test
-    fun `clicking on other theme emits the expected event`() = runAndroidComposeUiTest {
+    fun `clicking on other theme emits the expected event`() = runAndroidComposeUiTest<ComponentActivity> {
         val eventsRecorder = EventsRecorder<AdvancedSettingsEvents>()
         setAdvancedSettingsView(
             state = aAdvancedSettingsState(
@@ -67,7 +78,7 @@ class AdvancedSettingsViewTest {
     }
 
     @Test
-    fun `black theme is shown when available`() = runAndroidComposeUiTest {
+    fun `black theme is shown when available`() = runAndroidComposeUiTest<ComponentActivity> {
         setAdvancedSettingsView(
             state = aAdvancedSettingsState(
                 availableThemeOptions = ThemeOption.entries.toImmutableList(),
@@ -81,7 +92,7 @@ class AdvancedSettingsViewTest {
     }
 
     @Test
-    fun `black theme is hidden when unavailable`() = runAndroidComposeUiTest {
+    fun `black theme is hidden when unavailable`() = runAndroidComposeUiTest<ComponentActivity> {
         setAdvancedSettingsView(
             state = aAdvancedSettingsState(
                 availableThemeOptions = ThemeOption.entries.filterNot { it == ThemeOption.Black }.toImmutableList(),
@@ -92,31 +103,33 @@ class AdvancedSettingsViewTest {
     }
 
     @Test
-    fun `clicking on View source emits the expected event`() = runAndroidComposeUiTest {
+    fun `clicking on View source emits the expected event`() = runAndroidComposeUiTest<ComponentActivity> {
         val eventsRecorder = EventsRecorder<AdvancedSettingsEvents>()
         setAdvancedSettingsView(
             state = aAdvancedSettingsState(
                 eventSink = eventsRecorder,
             ),
         )
+        clickOn(CommonStrings.common_developer_options)
         clickOn(CommonStrings.action_view_source)
         eventsRecorder.assertSingle(AdvancedSettingsEvents.SetDeveloperModeEnabled(true))
     }
 
     @Test
-    fun `clicking on Share presence emits the expected event`() = runAndroidComposeUiTest {
+    fun `clicking on Share presence emits the expected event`() = runAndroidComposeUiTest<ComponentActivity> {
         val eventsRecorder = EventsRecorder<AdvancedSettingsEvents>()
         setAdvancedSettingsView(
             state = aAdvancedSettingsState(
                 eventSink = eventsRecorder,
             ),
         )
+        clickOn(R.string.screen_settings_chat_privacy)
         clickOn(R.string.screen_advanced_settings_share_presence)
         eventsRecorder.assertSingle(AdvancedSettingsEvents.SetSharePresenceEnabled(true))
     }
 
     @Test
-    fun `clicking on media to enable compression emits the expected event`() = runAndroidComposeUiTest {
+    fun `clicking on media to enable compression emits the expected event`() = runAndroidComposeUiTest<ComponentActivity> {
         val eventsRecorder = EventsRecorder<AdvancedSettingsEvents>()
         val analyticsService = FakeAnalyticsService()
         setAdvancedSettingsView(
@@ -125,6 +138,7 @@ class AdvancedSettingsViewTest {
             ),
             analyticsService = analyticsService
         )
+        clickOn(R.string.screen_settings_media)
         clickOn(R.string.screen_advanced_settings_media_compression_description)
         eventsRecorder.assertSingle(AdvancedSettingsEvents.SetCompressMedia(true))
         assertThat(analyticsService.capturedEvents).isEqualTo(
@@ -137,7 +151,7 @@ class AdvancedSettingsViewTest {
     }
 
     @Test
-    fun `clicking on media to disable compression emits the expected event`() = runAndroidComposeUiTest {
+    fun `clicking on media to disable compression emits the expected event`() = runAndroidComposeUiTest<ComponentActivity> {
         val eventsRecorder = EventsRecorder<AdvancedSettingsEvents>()
         val analyticsService = FakeAnalyticsService()
         setAdvancedSettingsView(
@@ -147,6 +161,7 @@ class AdvancedSettingsViewTest {
             ),
             analyticsService = analyticsService
         )
+        clickOn(R.string.screen_settings_media)
         clickOn(R.string.screen_advanced_settings_media_compression_description)
         eventsRecorder.assertSingle(AdvancedSettingsEvents.SetCompressMedia(false))
         assertThat(analyticsService.capturedEvents).isEqualTo(
@@ -160,7 +175,7 @@ class AdvancedSettingsViewTest {
 
     @Test
     @Config(qualifiers = "h1080dp")
-    fun `clicking on hide invite avatars emits the expected event`() = runAndroidComposeUiTest {
+    fun `clicking on hide invite avatars emits the expected event`() = runAndroidComposeUiTest<ComponentActivity> {
         val eventsRecorder = EventsRecorder<AdvancedSettingsEvents>()
         setAdvancedSettingsView(
             state = aAdvancedSettingsState(
@@ -168,13 +183,14 @@ class AdvancedSettingsViewTest {
                 hideInviteAvatars = false
             ),
         )
+        clickOn(R.string.screen_settings_chat_privacy)
         clickOn(R.string.screen_advanced_settings_hide_invite_avatars_toggle_title)
         eventsRecorder.assertSingle(AdvancedSettingsEvents.SetHideInviteAvatars(true))
     }
 
     @Test
     @Config(qualifiers = "h1080dp")
-    fun `clicking on timeline media preview always hide emits the expected event`() = runAndroidComposeUiTest {
+    fun `clicking on timeline media preview always hide emits the expected event`() = runAndroidComposeUiTest<ComponentActivity> {
         val eventsRecorder = EventsRecorder<AdvancedSettingsEvents>()
         setAdvancedSettingsView(
             state = aAdvancedSettingsState(
@@ -182,13 +198,14 @@ class AdvancedSettingsViewTest {
                 timelineMediaPreviewValue = MediaPreviewValue.On
             ),
         )
+        clickOn(R.string.screen_settings_chat_privacy)
         clickOn(R.string.screen_advanced_settings_show_media_timeline_always_hide)
         eventsRecorder.assertSingle(AdvancedSettingsEvents.SetTimelineMediaPreviewValue(MediaPreviewValue.Off))
     }
 
     @Test
     @Config(qualifiers = "h1080dp")
-    fun `clicking on timeline media preview private rooms emits the expected event`() = runAndroidComposeUiTest {
+    fun `clicking on timeline media preview private rooms emits the expected event`() = runAndroidComposeUiTest<ComponentActivity> {
         val eventsRecorder = EventsRecorder<AdvancedSettingsEvents>()
         setAdvancedSettingsView(
             state = aAdvancedSettingsState(
@@ -196,13 +213,14 @@ class AdvancedSettingsViewTest {
                 timelineMediaPreviewValue = MediaPreviewValue.On
             ),
         )
+        clickOn(R.string.screen_settings_chat_privacy)
         clickOn(R.string.screen_advanced_settings_show_media_timeline_private_rooms)
         eventsRecorder.assertSingle(AdvancedSettingsEvents.SetTimelineMediaPreviewValue(MediaPreviewValue.Private))
     }
 
     @Test
     @Config(qualifiers = "h1080dp")
-    fun `clicking on timeline media preview always show emits the expected event`() = runAndroidComposeUiTest {
+    fun `clicking on timeline media preview always show emits the expected event`() = runAndroidComposeUiTest<ComponentActivity> {
         val eventsRecorder = EventsRecorder<AdvancedSettingsEvents>()
         setAdvancedSettingsView(
             state = aAdvancedSettingsState(
@@ -210,13 +228,14 @@ class AdvancedSettingsViewTest {
                 timelineMediaPreviewValue = MediaPreviewValue.Off
             ),
         )
+        clickOn(R.string.screen_settings_chat_privacy)
         clickOn(R.string.screen_advanced_settings_show_media_timeline_always_show)
         eventsRecorder.assertSingle(AdvancedSettingsEvents.SetTimelineMediaPreviewValue(MediaPreviewValue.On))
     }
 
     @Test
     @Config(qualifiers = "h1080dp")
-    fun `hide invite avatars toggle is disabled when action is loading`() = runAndroidComposeUiTest {
+    fun `hide invite avatars toggle is disabled when action is loading`() = runAndroidComposeUiTest<ComponentActivity> {
         val eventsRecorder = EventsRecorder<AdvancedSettingsEvents>(expectEvents = false)
         setAdvancedSettingsView(
             state = aAdvancedSettingsState(
@@ -226,12 +245,13 @@ class AdvancedSettingsViewTest {
             ),
         )
         // The toggle should be disabled, so clicking should not emit any events
+        clickOn(R.string.screen_settings_chat_privacy)
         clickOn(R.string.screen_advanced_settings_hide_invite_avatars_toggle_title)
     }
 
     @Test
     @Config(qualifiers = "h1080dp")
-    fun `timeline media preview options are disabled when action is loading`() = runAndroidComposeUiTest {
+    fun `timeline media preview options are disabled when action is loading`() = runAndroidComposeUiTest<ComponentActivity> {
         val eventsRecorder = EventsRecorder<AdvancedSettingsEvents>(expectEvents = false)
         setAdvancedSettingsView(
             state = aAdvancedSettingsState(
@@ -241,6 +261,7 @@ class AdvancedSettingsViewTest {
             ),
         )
         // The options should be disabled, so clicking should not emit any events
+        clickOn(R.string.screen_settings_chat_privacy)
         clickOn(R.string.screen_advanced_settings_show_media_timeline_always_hide)
         clickOn(R.string.screen_advanced_settings_show_media_timeline_private_rooms)
     }

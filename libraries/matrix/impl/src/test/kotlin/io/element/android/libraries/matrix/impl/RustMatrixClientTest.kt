@@ -18,6 +18,8 @@ import io.element.android.libraries.matrix.impl.fixtures.fakes.FakeFfiClient
 import io.element.android.libraries.matrix.impl.fixtures.fakes.FakeFfiSyncService
 import io.element.android.libraries.matrix.impl.room.FakeTimelineEventFilterFactory
 import io.element.android.libraries.matrix.api.exception.AccountDeactivationException
+import io.element.android.libraries.matrix.api.exception.ClientException
+import io.element.android.libraries.matrix.api.exception.ErrorKind
 import io.element.android.libraries.matrix.test.AN_AVATAR_URL
 import io.element.android.libraries.matrix.test.A_DEVICE_ID
 import io.element.android.libraries.matrix.test.A_ROOM_ID
@@ -81,6 +83,33 @@ import java.io.File
 private const val TEST_INSTALLATION_ID = "matrix-client-installation-test"
 
 class RustMatrixClientTest {
+    @Test
+    fun `profile not found preserves Matrix error kind across SDK boundary`() = runTest {
+        val sdkError = RustClientException.MatrixApi(
+            kind = org.matrix.rustcomponents.sdk.ErrorKind.NotFound,
+            code = "M_NOT_FOUND",
+            msg = "Profile not found",
+            details = null,
+        )
+        val client = createRustMatrixClient(client = FakeFfiClient(getProfileResult = { throw sdkError }))
+        val failure = client.getProfile(A_USER_ID).exceptionOrNull()
+        assertThat(failure).isInstanceOf(ClientException.MatrixApi::class.java)
+        assertThat((failure as ClientException.MatrixApi).kind).isEqualTo(ErrorKind.NotFound)
+        assertThat(failure.code).isEqualTo("M_NOT_FOUND")
+        assertThat(failure.cause).isSameInstanceAs(sdkError)
+        client.destroy()
+    }
+
+    @Test
+    fun `profile transport failure remains an error`() = runTest {
+        val sdkError = RustClientException.Generic(msg = "error sending request for url", details = null)
+        val client = createRustMatrixClient(client = FakeFfiClient(getProfileResult = { throw sdkError }))
+        val failure = client.getProfile(A_USER_ID).exceptionOrNull()
+        assertThat(failure).isInstanceOf(ClientException.Generic::class.java)
+        assertThat(failure?.cause).isSameInstanceAs(sdkError)
+        client.destroy()
+    }
+
     @Test
     fun `session construction does not wait for the maintenance database query`() = runTest {
         var checks = 0

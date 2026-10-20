@@ -42,6 +42,7 @@ fun SearchMultipleUsersResultItem(
         )
     }
     CheckableUserRow(
+        enabled = !searchResult.isUnresolved,
         checked = isUserSelected,
         modifier = modifier,
         data = data,

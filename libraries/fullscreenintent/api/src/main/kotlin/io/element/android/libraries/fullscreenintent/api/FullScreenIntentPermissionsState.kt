@@ -20,4 +20,6 @@ data class FullScreenIntentPermissionsState(
     val missingPermission: MissingCallPermission?,
     val shouldDisplayBanner: Boolean,
     val eventSink: (FullScreenIntentPermissionsEvents) -> Unit,
+    val messageNotificationChannelId: String? = null,
+    val ringingNotificationChannelId: String? = null,
 )

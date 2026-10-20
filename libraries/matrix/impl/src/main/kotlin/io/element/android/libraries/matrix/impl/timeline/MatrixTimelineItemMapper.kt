@@ -29,6 +29,13 @@ class MatrixTimelineItemMapper(
         val uniqueId = UniqueId(timelineItem.uniqueId().id)
         val asEvent = it.asEvent()
         if (asEvent != null) {
+            val redacted = (asEvent.content as? org.matrix.rustcomponents.sdk.TimelineItemContent.MsgLike)?.content?.kind is
+                org.matrix.rustcomponents.sdk.MsgLikeKind.Redacted
+            if (redacted && io.element.android.libraries.matrix.impl.widget.isRtcMembershipCleanup(
+                    asEvent.lazyProvider.debugInfo().originalJson,
+                    (asEvent.eventOrTransactionId as? org.matrix.rustcomponents.sdk.EventOrTransactionId.EventId)?.eventId,
+                    asEvent.sender,
+                )) return MatrixTimelineItem.Other
             val eventTimelineItem = eventTimelineItemMapper.map(asEvent)
             if (eventTimelineItem.hasNotLoadedInReplyTo() && eventTimelineItem.eventId != null) {
                 fetchEventDetails(eventTimelineItem.eventId!!)

@@ -41,7 +41,7 @@ internal fun contactsRoomSummaries(
             RoomListRoomSummary(
                 id = summary.roomId.value,
                 roomId = summary.roomId,
-                name = info.name,
+                name = info.invitationDisplayName(),
                 canonicalAlias = info.canonicalAlias,
                 displayType = displayType,
                 numberOfUnreadMessages = info.numUnreadMessages,
@@ -60,7 +60,7 @@ internal fun contactsRoomSummaries(
                     CallIntentConsensus.None -> null
                 },
                 isDirect = info.isDirect,
-                isDm = info.isDm,
+                isDm = info.isDm || info.isDirectInvitation,
                 activeMembersCount = info.activeMembersCount,
                 invitedMembersCount = info.invitedMembersCount,
                 joinedMembersCount = info.joinedMembersCount,

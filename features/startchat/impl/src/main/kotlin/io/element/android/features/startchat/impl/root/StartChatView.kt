@@ -8,6 +8,8 @@
 
 package io.element.android.features.startchat.impl.root
 
+import io.element.android.libraries.matrix.ui.components.contactFailureMessageResource
+
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -128,7 +130,7 @@ fun StartChatView(
             )
         },
         onSuccess = { onOpenDM(it) },
-        errorMessage = { stringResource(R.string.screen_start_chat_error_starting_chat) },
+        errorMessage = { stringResource(it.contactFailureMessageResource() ?: R.string.screen_start_chat_error_starting_chat) },
         onRetry = {
             state.userListState.selectedUsers.firstOrNull()
                 ?.let { state.eventSink(StartChatEvents.StartDM(it)) }

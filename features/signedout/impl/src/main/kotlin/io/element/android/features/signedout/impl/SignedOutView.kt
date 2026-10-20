@@ -9,31 +9,25 @@
 package io.element.android.features.signedout.impl
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
-import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.libraries.designsystem.atomic.molecules.ButtonColumnMolecule
 import io.element.android.libraries.designsystem.atomic.molecules.IconTitleSubtitleMolecule
-import io.element.android.libraries.designsystem.atomic.organisms.InfoListItem
-import io.element.android.libraries.designsystem.atomic.organisms.InfoListOrganism
 import io.element.android.libraries.designsystem.atomic.pages.HeaderFooterPage
 import io.element.android.libraries.designsystem.components.BigIcon
 import io.element.android.libraries.designsystem.preview.ElementPreview
 import io.element.android.libraries.designsystem.preview.PreviewsDayNight
 import io.element.android.libraries.designsystem.theme.components.Button
 import io.element.android.libraries.ui.strings.CommonStrings
-import kotlinx.collections.immutable.persistentListOf
 
 @Composable
 fun SignedOutView(
@@ -47,10 +41,11 @@ fun SignedOutView(
             .systemBarsPadding()
             .imePadding(),
         header = { SignedOutHeader(state) },
-        content = { SignedOutContent() },
+        content = {},
         footer = {
             SignedOutFooter(
                 onSignInAgain = { state.eventSink(SignedOutEvents.SignInAgain) },
+                enabled = !state.preparingSignIn,
             )
         }
     )
@@ -60,50 +55,28 @@ fun SignedOutView(
 private fun SignedOutHeader(state: SignedOutState) {
     IconTitleSubtitleMolecule(
         modifier = Modifier.padding(top = 60.dp, bottom = 12.dp),
-        title = stringResource(id = R.string.screen_signed_out_title),
-        subTitle = stringResource(id = R.string.screen_signed_out_subtitle, state.appName),
+        title = stringResource(id = R.string.screen_signed_out_current_phone_title),
+        subTitle = if (state.cleanupError) {
+            stringResource(R.string.screen_signed_out_cleanup_retry)
+        } else if (state.mobileSessionSuperseded) {
+            stringResource(R.string.screen_signed_out_mobile_handover)
+        } else {
+            stringResource(R.string.screen_signed_out_login_expired)
+        },
         iconStyle = BigIcon.Style.Default(CompoundIcons.UserProfileSolid()),
     )
 }
 
 @Composable
-private fun SignedOutContent() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = BiasAlignment(
-            horizontalBias = 0f,
-            verticalBias = -0.4f
-        )
-    ) {
-        InfoListOrganism(
-            items = persistentListOf(
-                InfoListItem(
-                    message = stringResource(id = R.string.screen_signed_out_reason_1),
-                    iconVector = CompoundIcons.Lock(),
-                ),
-                InfoListItem(
-                    message = stringResource(id = R.string.screen_signed_out_reason_2),
-                    iconVector = CompoundIcons.Devices(),
-                ),
-                InfoListItem(
-                    message = stringResource(id = R.string.screen_signed_out_reason_3),
-                    iconVector = CompoundIcons.Block(),
-                ),
-            ),
-            textStyle = ElementTheme.typography.fontBodyMdMedium,
-            iconTint = ElementTheme.colors.iconSecondary,
-        )
-    }
-}
-
-@Composable
 private fun SignedOutFooter(
     onSignInAgain: () -> Unit,
+    enabled: Boolean,
 ) {
     ButtonColumnMolecule {
         Button(
             text = stringResource(id = CommonStrings.action_sign_in_again),
             onClick = onSignInAgain,
+            enabled = enabled,
             modifier = Modifier.fillMaxWidth(),
         )
     }

@@ -46,6 +46,16 @@ class DefaultDeclineInvite(
     ): Result<RoomId> {
         val room = client.getRoom(roomId) ?: return Result.failure(DeclineInvite.Exception.RoomNotFound)
         room.use {
+            // Leaving removes the invite snapshot. Capture its verified inviter first.
+            val userIdToBlock = if (blockUser) {
+                room.info().inviter?.userId ?: return Result.failure(DeclineInvite.Exception.BlockUserFailed)
+            } else {
+                null
+            }
+            if (userIdToBlock != null) {
+                client.ignoreUser(userIdToBlock)
+                    .onFailure { return Result.failure(DeclineInvite.Exception.BlockUserFailed) }
+            }
             room.leave()
                 .onFailure { return Result.failure(DeclineInvite.Exception.DeclineInviteFailed) }
                 .onSuccess {
@@ -56,14 +66,6 @@ class DefaultDeclineInvite(
                     seenInvitesStore.recordOutcome(roomId, InviteNotification.Outcome.DECLINED)
                 }
 
-            if (blockUser) {
-                val userIdToBlock = room.info().inviter?.userId
-                if (userIdToBlock != null) {
-                    client
-                        .ignoreUser(userIdToBlock)
-                        .onFailure { return Result.failure(DeclineInvite.Exception.BlockUserFailed) }
-                }
-            }
             if (reportRoom) {
                 room
                     .reportRoom(reportReason)

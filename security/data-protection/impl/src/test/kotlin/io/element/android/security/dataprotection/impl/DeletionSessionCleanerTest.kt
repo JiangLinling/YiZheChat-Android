@@ -58,6 +58,28 @@ class DeletionSessionCleanerTest {
         assertThat(outside.exists()).isTrue()
     }
 
+    @Test
+    fun `delayed cleanup deletes old files but preserves a new login for the same account`() = runTest {
+        val sessionsRoot = temporaryFolder.newFolder("sessions")
+        val cacheRoot = temporaryFolder.newFolder("cache")
+        val oldFiles = sessionsRoot.resolve("old").apply { mkdirs() }
+        val oldCache = cacheRoot.resolve("old").apply { mkdirs() }
+        val newFiles = sessionsRoot.resolve("new").apply { mkdirs() }
+        val newCache = cacheRoot.resolve("new").apply { mkdirs() }
+        val newSession = aSessionData(newFiles.path, newCache.path).copy(deviceId = "NEW-DEVICE")
+        val store = InMemorySessionStore(initialList = listOf(newSession))
+        val cleaner = DefaultDeletionSessionCleaner(store, sessionsRoot, cacheRoot)
+        assertThat(cleaner.hasReplacement(aScope(oldFiles.path, oldCache.path))).isTrue()
+        repeat(2) {
+            val report = cleaner.delete(aScope(oldFiles.path, oldCache.path))
+            assertThat(report.sessionRecordRemoved).isTrue()
+            assertThat(report.sessionFilesDeleted).isTrue()
+            assertThat(store.getSession(SESSION_ID)).isEqualTo(newSession)
+            assertThat(newFiles.exists()).isTrue()
+            assertThat(newCache.exists()).isTrue()
+        }
+    }
+
     private fun aScope(filePath: String, cachePath: String) = DeletionScope.Account(
         accountIdHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         vaultId = "account-vault",

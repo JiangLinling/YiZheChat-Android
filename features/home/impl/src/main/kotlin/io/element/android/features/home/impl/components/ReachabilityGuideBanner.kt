@@ -6,7 +6,11 @@
 
 package io.element.android.features.home.impl.components
 
-import android.app.AppOpsManager
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
@@ -25,6 +29,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import io.element.android.features.home.impl.R
+import io.element.android.libraries.fullscreenintent.api.FullScreenIntentPermissionsState
+import io.element.android.libraries.fullscreenintent.api.FullScreenIntentPermissionsEvents
 import io.element.android.libraries.androidutils.background.AutostartPermissionState
 import io.element.android.libraries.androidutils.background.xiaomiAutostartPermissionState
 import io.element.android.libraries.designsystem.components.Announcement
@@ -35,79 +41,75 @@ import io.element.android.libraries.designsystem.utils.OnLifecycleEvent
 
 /** One reminder at a time, on the same room-list surface as the recovery-key reminder. */
 @Composable
-internal fun ReachabilityGuideBanner(): Boolean {
+internal fun ReachabilityGuideBanner(callPermissions: FullScreenIntentPermissionsState): Boolean {
     val context = LocalContext.current
     val family = remember { deviceFamily(Build.MANUFACTURER, Build.BRAND) }
     val preferences = remember(context) { context.getSharedPreferences("reachability_guide", Context.MODE_PRIVATE) }
     var refresh by remember { mutableIntStateOf(0) }
     var resumed by remember { mutableStateOf(true) }
-    var deferred by remember { mutableStateOf(emptySet<String>()) }
+    var deferred by remember { mutableStateOf(preferences.getStringSet("deferred_v2", emptySet()).orEmpty().toSet()) }
     var openedStep by remember { mutableStateOf<String?>(null) }
-    var confirmed by remember { mutableStateOf(preferences.getStringSet("confirmed_v1", emptySet()).orEmpty().toSet()) }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        // Requery the OS, including a denial; the callback is not a fabricated grant.
+        refresh++
+    }
     OnLifecycleEvent { _, event ->
         if (event == Lifecycle.Event.ON_RESUME) {
             resumed = true
+            deferred = preferences.getStringSet("deferred_v2", emptySet()).orEmpty().toSet()
             refresh++
+            callPermissions.eventSink(FullScreenIntentPermissionsEvents.Refresh)
         } else if (event == Lifecycle.Event.ON_PAUSE) resumed = false
     }
     val acceleration = rememberStartupAccelerationState(context, refresh, resumed)
-
-    val next = remember(context, refresh, deferred, confirmed, family, acceleration) {
+    val next = remember(context, refresh, deferred, family, acceleration, callPermissions) {
         ReachabilityStep.entries.firstOrNull { step ->
-            step.appliesTo(family) && step.name !in deferred &&
-                !context.isReachabilityStepDone(step, family, confirmed, acceleration)
+            val essentialNotification = step in setOf(ReachabilityStep.NOTIFICATIONS, ReachabilityStep.FLOATING_NOTIFICATION,
+                ReachabilityStep.CALL_NOTIFICATION)
+            (!callPermissions.shouldDisplayHomeBanner || essentialNotification) &&
+                shouldGuide(context.readiness(step, family, acceleration, callPermissions), step.name in deferred)
         }
     } ?: return false
-    val accelerationRecovering = next == ReachabilityStep.STARTUP_ACCELERATION && acceleration == StartupAccelerationState.Recovering
-    // A vendor can accept startActivity and then silently redirect/finish. Let the
-    // user explicitly use the plain accessibility home on their next attempt.
     val accelerationOverview = next == ReachabilityStep.STARTUP_ACCELERATION && openedStep == next.name
-    val returnedFromSettings = openedStep == next.name && context.requiresManualConfirmation(next, family)
-
-    fun confirmStep() {
-        confirmed = confirmed + next.confirmationKey(family)
-        preferences.edit().putStringSet("confirmed_v1", confirmed).apply()
-        openedStep = null
-        refresh++
+    val serviceLabel = remember(context) {
+        runCatching {
+            context.packageManager.getServiceInfo(context.startupAccelerationComponent(), 0)
+                .loadLabel(context.packageManager).toString()
+        }.getOrDefault(context.getString(R.string.screen_reachability_startup))
     }
-
+    val settingsHelp = if (next == ReachabilityStep.STARTUP_ACCELERATION) {
+        stringResource(R.string.screen_reachability_startup_path, serviceLabel)
+    } else {
+        stringResource(family.pathFor(next))
+    }
     ReachabilityAnnouncement(
-        title = stringResource(if (accelerationRecovering) {
-            R.string.screen_reachability_startup_pending
-        } else if (next == ReachabilityStep.AUTOSTART && family.usesBackgroundActivitySetting()) {
-            R.string.screen_reachability_background_activity
-        } else next.title),
-        description = stringResource(if (accelerationRecovering) {
-            R.string.screen_reachability_startup_pending_detail
-        } else if (next == ReachabilityStep.AUTOSTART && family.usesBackgroundActivitySetting()) {
-            R.string.screen_reachability_background_activity_detail
-        } else next.description) + if (accelerationRecovering) "" else "\n" + stringResource(family.pathFor(next)),
+        title = stringResource(next.title),
+        description = stringResource(next.description) + "\n" + settingsHelp,
         actionText = stringResource(when {
-            accelerationRecovering -> R.string.screen_reachability_startup_recheck
             accelerationOverview -> R.string.screen_reachability_startup_open_overview
             next == ReachabilityStep.STARTUP_ACCELERATION -> R.string.screen_reachability_startup_open
-            next == ReachabilityStep.RECENTS_LOCK -> R.string.screen_reachability_recents_lock_confirm
-            !returnedFromSettings -> R.string.screen_reachability_open
-            next.canBeMissingOn(family) -> R.string.screen_reachability_reviewed
-            else -> R.string.screen_reachability_confirm
+            else -> R.string.screen_reachability_open
         }),
         onDismissClick = {
             deferred = deferred + next.name
+            preferences.edit().putStringSet("deferred_v2", deferred).apply()
             openedStep = null
         },
         onActionClick = {
-            if (accelerationRecovering) {
-                refresh++
-            } else if (returnedFromSettings || next == ReachabilityStep.RECENTS_LOCK) {
-                confirmStep()
+            if (next == ReachabilityStep.NOTIFICATIONS && Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+                !preferences.getBoolean("notifications_requested_v2", false)
+            ) {
+                preferences.edit().putBoolean("notifications_requested_v2", true).apply()
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             } else {
-                if (context.openReachabilitySettings(next, family, accelerationOverview)) {
-                    openedStep = next.name
-                } else if (next == ReachabilityStep.STARTUP_ACCELERATION) {
-                    // Even when all routes failed, the next attempt offers only the
-                    // plain home; never leave the user retrying a broken OEM route.
-                    openedStep = next.name
+                val channelId = when (next) {
+                    ReachabilityStep.FLOATING_NOTIFICATION -> callPermissions.messageNotificationChannelId
+                    ReachabilityStep.CALL_NOTIFICATION -> callPermissions.ringingNotificationChannelId
+                    else -> null
                 }
+                context.openReachabilitySettings(next, family, accelerationOverview, channelId)
+                openedStep = next.name
             }
         },
     )
@@ -151,7 +153,7 @@ internal enum class DeviceFamily { XIAOMI, VIVO, OPPO, REALME, SAMSUNG, MOTOROLA
 internal fun deviceFamily(manufacturer: String, brand: String): DeviceFamily {
     val values = listOf(manufacturer, brand).map { it.lowercase() }
     return when {
-        values.any { it in setOf("xiaomi", "redmi") } -> DeviceFamily.XIAOMI
+        values.any { it in setOf("xiaomi", "redmi", "poco") } -> DeviceFamily.XIAOMI
         values.any { it in setOf("vivo", "iqoo") } -> DeviceFamily.VIVO
         values.any { it == "realme" } -> DeviceFamily.REALME
         values.any { it in setOf("oppo", "oneplus") } -> DeviceFamily.OPPO
@@ -164,77 +166,49 @@ internal fun deviceFamily(manufacturer: String, brand: String): DeviceFamily {
 }
 
 private enum class ReachabilityStep(val title: Int, val description: Int) {
-    STARTUP_ACCELERATION(R.string.screen_reachability_startup, R.string.screen_reachability_startup_detail),
     NOTIFICATIONS(R.string.screen_reachability_notifications, R.string.screen_reachability_notifications_detail),
     FLOATING_NOTIFICATION(R.string.screen_reachability_floating, R.string.screen_reachability_floating_detail),
     LOCK_SCREEN_NOTIFICATION(R.string.screen_reachability_lock_screen, R.string.screen_reachability_lock_screen_detail),
     SCREEN_OFF_WAKE(R.string.screen_reachability_screen_off, R.string.screen_reachability_screen_off_detail),
     CALL_NOTIFICATION(R.string.screen_reachability_call, R.string.screen_reachability_call_detail),
+    STARTUP_ACCELERATION(R.string.screen_reachability_startup, R.string.screen_reachability_startup_detail),
     BACKGROUND_POPUP(R.string.screen_reachability_background_popup, R.string.screen_reachability_background_popup_detail),
     OVERLAY(R.string.screen_reachability_overlay, R.string.screen_reachability_overlay_detail),
     AUTOSTART(R.string.screen_reachability_autostart, R.string.screen_reachability_autostart_detail),
     RECENTS_LOCK(R.string.screen_reachability_recents_lock, R.string.screen_reachability_recents_lock_detail),
 }
 
-private fun ReachabilityStep.appliesTo(family: DeviceFamily): Boolean =
-    this != ReachabilityStep.RECENTS_LOCK || family == DeviceFamily.XIAOMI
-
-private fun DeviceFamily.usesBackgroundActivitySetting(): Boolean = this == DeviceFamily.SAMSUNG || this == DeviceFamily.MOTOROLA
-
-private fun ReachabilityStep.confirmationKey(family: DeviceFamily): String =
-    if (this == ReachabilityStep.AUTOSTART && family in setOf(DeviceFamily.REALME, DeviceFamily.SAMSUNG, DeviceFamily.MOTOROLA)) {
-        "$name:${family.name}"
-    } else name
-
-private fun ReachabilityStep.canBeMissingOn(family: DeviceFamily): Boolean = when (this) {
-    ReachabilityStep.SCREEN_OFF_WAKE -> family !in setOf(DeviceFamily.VIVO, DeviceFamily.HUAWEI_ANDROID)
-    ReachabilityStep.BACKGROUND_POPUP -> family != DeviceFamily.XIAOMI
-    ReachabilityStep.AUTOSTART -> family == DeviceFamily.GENERIC
-    else -> false
-}
-
-private fun Context.requiresManualConfirmation(step: ReachabilityStep, family: DeviceFamily): Boolean = when (step) {
-    ReachabilityStep.NOTIFICATIONS, ReachabilityStep.OVERLAY, ReachabilityStep.STARTUP_ACCELERATION -> false
-    ReachabilityStep.AUTOSTART -> family != DeviceFamily.XIAOMI ||
-        xiaomiAutostartPermissionState() == AutostartPermissionState.UNKNOWN
-    ReachabilityStep.BACKGROUND_POPUP -> family != DeviceFamily.XIAOMI || xiaomiBackgroundPopupAllowed() == null
-    else -> true
-}
-
-private fun Context.isReachabilityStepDone(
+private fun Context.readiness(
     step: ReachabilityStep,
     family: DeviceFamily,
-    confirmed: Set<String>,
     acceleration: StartupAccelerationState,
-): Boolean = when (step) {
-    // Unknown/unavailable is not a completed permission grant; it cannot produce an actionable reminder.
-    ReachabilityStep.STARTUP_ACCELERATION -> !acceleration.needsReminder
-    ReachabilityStep.NOTIFICATIONS -> NotificationManagerCompat.from(this).areNotificationsEnabled()
-    ReachabilityStep.OVERLAY -> Settings.canDrawOverlays(this)
+    callPermissions: FullScreenIntentPermissionsState,
+): ReachabilityReadiness = when (step) {
+    ReachabilityStep.NOTIFICATIONS -> runCatching {
+        if (NotificationManagerCompat.from(this).areNotificationsEnabled()) ReachabilityReadiness.Ready else ReachabilityReadiness.NeedsUser
+    }.getOrDefault(ReachabilityReadiness.Unknown)
+    ReachabilityStep.FLOATING_NOTIFICATION -> channelReadiness(callPermissions.messageNotificationChannelId)
+    ReachabilityStep.CALL_NOTIFICATION -> channelReadiness(callPermissions.ringingNotificationChannelId)
+    ReachabilityStep.STARTUP_ACCELERATION -> when (acceleration) {
+        StartupAccelerationState.Disabled -> ReachabilityReadiness.NeedsUser
+        StartupAccelerationState.Ready -> ReachabilityReadiness.Ready
+        StartupAccelerationState.Unavailable -> ReachabilityReadiness.Unsupported
+        // Authorization is already enabled while the existing service retries; do not request it again.
+        StartupAccelerationState.Recovering, StartupAccelerationState.Unknown -> ReachabilityReadiness.Unknown
+    }
     ReachabilityStep.AUTOSTART -> if (family == DeviceFamily.XIAOMI) {
         when (xiaomiAutostartPermissionState()) {
-            AutostartPermissionState.ALLOWED -> true
-            AutostartPermissionState.UNKNOWN -> step.confirmationKey(family) in confirmed
-            AutostartPermissionState.BLOCKED -> false
+            AutostartPermissionState.ALLOWED -> ReachabilityReadiness.Ready
+            AutostartPermissionState.BLOCKED -> ReachabilityReadiness.NeedsUser
+            AutostartPermissionState.UNKNOWN -> ReachabilityReadiness.Unknown
         }
-    } else step.confirmationKey(family) in confirmed
-    ReachabilityStep.BACKGROUND_POPUP -> if (family == DeviceFamily.XIAOMI) {
-        xiaomiBackgroundPopupAllowed() ?: (step.name in confirmed)
-    } else step.name in confirmed
-    else -> step.name in confirmed
+    } else ReachabilityReadiness.Unknown
+    // FullScreenIntentPermissionsPresenter owns incoming-call permission guidance; do not duplicate it here.
+    ReachabilityStep.BACKGROUND_POPUP -> ReachabilityReadiness.Unknown
+    // Optional enhancements and unreadable OEM switches stay in settings, not a compulsory onboarding queue.
+    ReachabilityStep.OVERLAY, ReachabilityStep.SCREEN_OFF_WAKE,
+    ReachabilityStep.RECENTS_LOCK, ReachabilityStep.LOCK_SCREEN_NOTIFICATION -> ReachabilityReadiness.Unknown
 }
-
-private fun Context.xiaomiBackgroundPopupAllowed(): Boolean? = runCatching {
-    val manager = getSystemService(AppOpsManager::class.java) ?: return@runCatching null
-    val checkOp = AppOpsManager::class.java.getMethod(
-        "checkOpNoThrow", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, String::class.java,
-    )
-    when (checkOp.invoke(manager, 10021, applicationInfo.uid, packageName)) {
-        AppOpsManager.MODE_ALLOWED -> true
-        AppOpsManager.MODE_IGNORED, AppOpsManager.MODE_ERRORED -> false
-        else -> null
-    }
-}.getOrNull()
 
 private fun DeviceFamily.pathFor(step: ReachabilityStep): Int = when (step) {
     ReachabilityStep.STARTUP_ACCELERATION -> R.string.screen_reachability_startup_path
@@ -282,7 +256,7 @@ private fun DeviceFamily.notificationPath(): Int = when (this) {
         DeviceFamily.GENERIC -> R.string.screen_reachability_path_generic_notification
 }
 
-private fun Context.openReachabilitySettings(step: ReachabilityStep, family: DeviceFamily, accelerationOverview: Boolean = false): Boolean {
+private fun Context.openReachabilitySettings(step: ReachabilityStep, family: DeviceFamily, accelerationOverview: Boolean = false, channelId: String? = null): Boolean {
     if (step == ReachabilityStep.STARTUP_ACCELERATION) {
         return launchStartupAccelerationSettings(
             startupAccelerationSettingsRoutes(
@@ -292,8 +266,9 @@ private fun Context.openReachabilitySettings(step: ReachabilityStep, family: Dev
         ) != null
     }
     val appDetails = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$packageName".toUri())
-    val notificationSettings = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+    val notificationSettings = Intent(if (channelId == null) Settings.ACTION_APP_NOTIFICATION_SETTINGS else Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
         .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        .apply { if (channelId != null) putExtra(Settings.EXTRA_CHANNEL_ID, channelId) }
     val candidate = when (step) {
         ReachabilityStep.STARTUP_ACCELERATION -> return false // Handled above, with an accessibility-specific fallback.
         ReachabilityStep.NOTIFICATIONS, ReachabilityStep.FLOATING_NOTIFICATION,

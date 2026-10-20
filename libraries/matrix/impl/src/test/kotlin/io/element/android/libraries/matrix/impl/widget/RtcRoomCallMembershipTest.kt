@@ -6,6 +6,26 @@ import kotlinx.serialization.json.*
 import org.junit.Test
 
 class RtcRoomCallMembershipTest {
+    @Test fun `only authority redaction of the exact live event clears membership and replay cannot revive it`() {
+        val state = RtcRoomCallMembership(room)
+        state.observe(event())
+        val id = "${'$'}one1000"
+        fun redacted(target: String) = JsonObject(event() + ("unsigned" to buildJsonObject {
+            putJsonObject("redacted_because") {
+                put("type", "m.room.redaction"); put("event_id", "${'$'}redaction")
+                putJsonObject("content") { put("redacts", target) }
+            }
+        }))
+        state.observeRedaction(id, redacted("${'$'}other"))
+        assertThat(state.snapshot(2000).participants).hasSize(1)
+        state.observeRedaction(id, redacted(id))
+        assertThat(state.snapshot(2000).participants).isEmpty()
+        state.observe(event())
+        assertThat(state.snapshot(2000).participants).isEmpty()
+        state.observe(event(at = 3000))
+        state.observeRedaction(id, redacted(id))
+        assertThat(state.snapshot(3000).participants).hasSize(1)
+    }
     private val room = "!room:test"
     private fun event(user: String = "@one:test", key: String = "one", at: Long = 1000, leave: Boolean = false) = buildJsonObject {
         put("room_id", room); put("type", NEXT_RTC_MEMBER_EVENT_TYPE); put("sender", user)

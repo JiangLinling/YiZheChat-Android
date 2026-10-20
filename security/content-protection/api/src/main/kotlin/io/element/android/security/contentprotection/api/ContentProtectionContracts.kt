@@ -469,6 +469,9 @@ class KmsRequestAuthorization private constructor(private val headerValue: Strin
 }
 
 sealed class ContentProtectionException(message: String, cause: Throwable? = null) : SecurityException(message, cause) {
+    class ContactRestricted(val blockedBySelf: Boolean) : ContentProtectionException(
+        if (blockedBySelf) "CONTACT_BLOCKED_BY_YOU" else "CONTACT_UNAVAILABLE",
+    )
     class InvalidEnvelope(cause: Throwable? = null) : ContentProtectionException("Invalid protected content envelope.", cause)
 
     class DeviceKeyUnavailable(cause: Throwable? = null) : ContentProtectionException("Device content key is unavailable.", cause)

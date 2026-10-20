@@ -1,7 +1,7 @@
 import groovy.json.JsonSlurper
 import java.security.MessageDigest
 
-// A Next APK must retain the reviewed cumulative source baseline. This is a
+// Every cumulative APK, including both internal variants, must retain its reviewed source baseline. This is a
 // local integration gate, independent of server authority/signature validation.
 def manifestFile = rootProject.file('unified-source-manifest.json')
 def verifyUnifiedSourceBaseline = tasks.register('verifyUnifiedSourceBaseline') {
@@ -17,9 +17,30 @@ def verifyUnifiedSourceBaseline = tasks.register('verifyUnifiedSourceBaseline') 
             throw new GradleException('UNIFIED_SOURCE_MANIFEST_INCOMPLETE')
         }
         def problems = []
+        // A new service or source-set file must also be reviewed and frozen.
+        // Checking only old entries would allow unfrozen additions into one variant.
+        if (manifest.source_selection) {
+            def selection = manifest.source_selection
+            def selected = rootProject.fileTree(rootProject.projectDir) {
+                include '*'
+                selection.roots.each { include it + '/**' }
+                exclude '**/build/**', '**/node_modules/**', '**/out/**', '**/__pycache__/**', '**/.*/**'
+            }.files.findAll { source ->
+                def relative = rootProject.relativePath(source).replace('\\', '/')
+                def name = source.name
+                def dot = name.lastIndexOf('.')
+                def extension = dot < 0 ? '' : name.substring(dot)
+                !(relative in ['local.properties', 'gradle.properties', 'unified-source-manifest.json']) &&
+                    (extension in selection.extensions || relative.contains('/src/') ||
+                        relative.startsWith('tools/') || name == 'gradlew' || extension == '.pro')
+            }.collect { rootProject.relativePath(it).replace('\\', '/') }.toSet()
+            (selected - manifest.sources.keySet()).sort().each { problems.add(it + ': UNREVIEWED_SOURCE') }
+        }
         manifest.sources.each { relative, expected ->
-            def source = rootProject.file(relative)
-            if (!source.isFile()) {
+            def source = rootProject.file(relative).canonicalFile
+            if (!source.toPath().startsWith(rootProject.projectDir.canonicalFile.toPath())) {
+                problems.add(relative + ': OUTSIDE_SOURCE_ROOT')
+            } else if (!source.isFile()) {
                 problems.add(relative + ': MISSING')
             } else {
                 def digest = MessageDigest.getInstance('SHA-256')
@@ -37,6 +58,8 @@ def verifyUnifiedSourceBaseline = tasks.register('verifyUnifiedSourceBaseline') 
 }
 allprojects {
     tasks.configureEach {
-        if (name == 'preNextDebugBuild' || name == 'preNextReleaseBuild') dependsOn(verifyUnifiedSourceBaseline)
+        if (name in ['preNextDebugBuild', 'preNextReleaseBuild', 'preNextInternalDebugBuild', 'preNextInternalReleaseBuild']) {
+            dependsOn(verifyUnifiedSourceBaseline)
+        }
     }
 }

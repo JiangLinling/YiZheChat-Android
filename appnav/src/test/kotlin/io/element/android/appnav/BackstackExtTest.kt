@@ -15,6 +15,28 @@ import org.junit.Test
 
 class BackstackExtTest {
     @Test
+    fun `late recovery completion cannot pop a root already restored by verification`() {
+        val backstack = BackStack(initialElement = "security-setup", savedStateMap = null)
+        backstack.push("identity-reset")
+        backstack.safeRoot("security-setup")
+
+        backstack.removeLast("identity-reset")
+
+        assertThat(backstack.activeElement).isEqualTo("security-setup")
+    }
+
+    @Test
+    fun `recovery completion removes only its child before or after Home is ready`() {
+        val backstack = BackStack(initialElement = "security-setup", savedStateMap = null)
+        backstack.push("identity-reset")
+        backstack.removeLast("identity-reset")
+        assertThat(backstack.activeElement).isEqualTo("security-setup")
+        backstack.safeRoot("home")
+        backstack.removeLast("identity-reset")
+        assertThat(backstack.activeElement).isEqualTo("home")
+    }
+
+    @Test
     fun `safeRoot restores a target that exists underneath the active child`() {
         val backstack = BackStack(initialElement = "security-setup", savedStateMap = null)
         backstack.push("analytics-opt-in")

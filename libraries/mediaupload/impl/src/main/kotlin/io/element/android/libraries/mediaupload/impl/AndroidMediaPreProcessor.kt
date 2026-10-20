@@ -92,6 +92,7 @@ class AndroidMediaPreProcessor(
         mimeType: String,
         deleteOriginal: Boolean,
         mediaOptimizationConfig: MediaOptimizationConfig,
+        retainTemporarySource: Boolean,
         onProgress: (Float) -> Unit,
     ): Result<MediaUploadInfo> {
         val outputFiles = MediaUploadFileOwnership(emptyList())
@@ -132,7 +133,7 @@ class AndroidMediaPreProcessor(
                     if (deleteOriginal) {
                         Timber.w("Deleting original uri $uri")
                         contentResolver.delete(uri, null, null)
-                    } else {
+                    } else if (!retainTemporarySource) {
                         temporaryUriDeleter.delete(uri)
                     }
                 }

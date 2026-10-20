@@ -9,22 +9,18 @@
 package io.element.android.features.preferences.impl.about
 
 import androidx.annotation.StringRes
-import io.element.android.features.preferences.impl.BuildConfig
-import io.element.android.libraries.ui.strings.CommonStrings
+import io.element.android.features.preferences.impl.R
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
-private const val COPYRIGHT_URL = BuildConfig.URL_COPYRIGHT
-private const val USE_POLICY_URL = BuildConfig.URL_ACCEPTABLE_USE
-private const val PRIVACY_URL = BuildConfig.URL_PRIVACY
-
 sealed class ElementLegal(
     @StringRes val titleRes: Int,
-    val url: String,
+    @StringRes val bodyRes: Int,
+    val documentId: String,
 ) {
-    data object Copyright : ElementLegal(CommonStrings.common_copyright, COPYRIGHT_URL)
-    data object AcceptableUsePolicy : ElementLegal(CommonStrings.common_acceptable_use_policy, USE_POLICY_URL)
-    data object PrivacyPolicy : ElementLegal(CommonStrings.common_privacy_policy, PRIVACY_URL)
+    data object Copyright : ElementLegal(R.string.screen_yizhe_copyright_title, R.string.screen_yizhe_copyright_body, "copyright")
+    data object AcceptableUsePolicy : ElementLegal(R.string.screen_yizhe_usage_title, R.string.screen_yizhe_usage_body, "usage")
+    data object PrivacyPolicy : ElementLegal(R.string.screen_yizhe_privacy_title, R.string.screen_yizhe_privacy_body, "privacy")
 }
 
 fun getAllLegals(): ImmutableList<ElementLegal> {

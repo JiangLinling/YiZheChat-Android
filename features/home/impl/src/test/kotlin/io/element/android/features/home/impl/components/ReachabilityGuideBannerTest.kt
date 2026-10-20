@@ -14,6 +14,7 @@ class ReachabilityGuideBannerTest {
     fun `requested domestic brands use the matching guide`() {
         assertThat(deviceFamily("Xiaomi", "Xiaomi")).isEqualTo(DeviceFamily.XIAOMI)
         assertThat(deviceFamily("Xiaomi", "REDMI")).isEqualTo(DeviceFamily.XIAOMI)
+        assertThat(deviceFamily("POCO", "POCO")).isEqualTo(DeviceFamily.XIAOMI)
         assertThat(deviceFamily("vivo", "vivo")).isEqualTo(DeviceFamily.VIVO)
         assertThat(deviceFamily("vivo", "iQOO")).isEqualTo(DeviceFamily.VIVO)
         assertThat(deviceFamily("OPPO", "OPPO")).isEqualTo(DeviceFamily.OPPO)
@@ -29,6 +30,12 @@ class ReachabilityGuideBannerTest {
     @Test
     fun `other Android brands use the common guide`() {
         assertThat(deviceFamily("Google", "Pixel")).isEqualTo(DeviceFamily.GENERIC)
+        assertThat(deviceFamily("Sony", "Sony")).isEqualTo(DeviceFamily.GENERIC)
+        assertThat(deviceFamily("Nothing", "Nothing")).isEqualTo(DeviceFamily.GENERIC)
+        assertThat(deviceFamily("ASUS", "ASUS")).isEqualTo(DeviceFamily.GENERIC)
+        assertThat(deviceFamily("meizu", "meizu")).isEqualTo(DeviceFamily.GENERIC)
+        assertThat(deviceFamily("TECNO", "TECNO")).isEqualTo(DeviceFamily.GENERIC)
+        assertThat(deviceFamily("Infinix", "Infinix")).isEqualTo(DeviceFamily.GENERIC)
         assertThat(deviceFamily("ZTE", "nubia")).isEqualTo(DeviceFamily.GENERIC)
     }
 }

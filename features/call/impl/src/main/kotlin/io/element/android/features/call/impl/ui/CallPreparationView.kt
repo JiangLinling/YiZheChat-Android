@@ -22,11 +22,13 @@ import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.features.call.impl.security.CallProtectionDeniedException
 import io.element.android.features.call.impl.security.CallProtectionDenialReason
 import io.element.android.features.call.impl.utils.IncomingCallUnavailableException
+import io.element.android.libraries.matrix.ui.components.contactFailureMessageResource
 
 @Composable
 internal fun CallPreparationView(state: CallScreenState) {
     val failure = (state.urlState as? AsyncData.Failure)?.error
-    val text = when (failure) {
+    val endedByContact = state.isTerminating && failure?.message in setOf("CONTACT_BLOCKED_BY_YOU", "CONTACT_UNAVAILABLE")
+    val text = if (endedByContact) R.string.call_contact_ended else failure?.contactFailureMessageResource() ?: if (failure?.message == "RTC_CALL_ENDED") R.string.call_previous_authorization_ended else when (failure) {
         is IncomingCallUnavailableException -> if (failure.ended) R.string.call_invitation_ended else R.string.call_connection_failed
         is CallProtectionDeniedException -> when (failure.reason) {
             CallProtectionDenialReason.VAULT_LOCKED -> R.string.call_vault_locked
@@ -55,6 +57,10 @@ internal fun CallPreparationView(state: CallScreenState) {
             Text(stringResource(if (state.isAudioCall) R.string.call_voice_type else R.string.call_video_type), color = Color(0xFFCDD5CF))
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (state.isTerminating && failure != null) {
+                Text(stringResource(R.string.call_authority_ended), color = Color.White)
+                Spacer(Modifier.height(12.dp))
+            }
             if (failure == null) CircularProgressIndicator(color = Color(0xFFCDD5CF))
             Spacer(Modifier.height(16.dp))
             Text(stringResource(text), color = Color.White)

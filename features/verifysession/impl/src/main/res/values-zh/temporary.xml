@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_identity_confirmed_continue_setup">你的身份已确认。请继续完成设备授权和登录。如果正在换机，换机完成后原手机才会退出。</string>
+    <string name="screen_other_phone_identity_confirmed">已确认另一台手机的身份。请在那台手机继续完成登录；换机完成后，本机才会退出。</string>
+    <string name="screen_phone_verification_incomplete">本次验证未完成。请重新发起，并在两台手机上核对验证内容。换机尚未完成。</string>
+</resources>

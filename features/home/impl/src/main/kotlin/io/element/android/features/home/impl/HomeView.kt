@@ -619,12 +619,7 @@ private fun ContactsView(
 }
 
 private fun HomeState.friendDisplayName(room: RoomListRoomSummary): String {
-    if (!room.isDm) return room.name ?: room.roomId.value
-    val hero = room.heroes.firstOrNull()
-    val userId = hero?.id?.let(::UserId)
-    return userId?.let { friendProfiles.privateDirectDisplayName(it, hero.name) }
-        ?: hero?.name?.trim()?.takeIf { it.isNotEmpty() }
-        ?: room.roomId.value
+    return contactDisplayName(room, friendProfiles)
 }
 
 private val contactNameTransliterator by lazy {

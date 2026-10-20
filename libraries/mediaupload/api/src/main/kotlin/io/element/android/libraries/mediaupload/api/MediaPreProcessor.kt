@@ -21,6 +21,8 @@ interface MediaPreProcessor {
         mimeType: String,
         deleteOriginal: Boolean,
         mediaOptimizationConfig: MediaOptimizationConfig,
+        // The caller owns deletion after upload success or explicit discard; allows a failed avatar upload to retry.
+        retainTemporarySource: Boolean = false,
         onProgress: (Float) -> Unit = {},
     ): Result<MediaUploadInfo>
 

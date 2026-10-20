@@ -37,6 +37,7 @@ class RustWidgetDriver(
     private val safeLifecycleDiagnosticsEnabled: Boolean = false,
     private val restoreStickyMetadata: suspend (String) -> String = { it },
     private val prepareOutgoingMessage: suspend (String) -> String = { it },
+    private val redactMembershipEvent: (suspend (String) -> Unit)? = null,
 ) : MatrixWidgetDriver {
     // It's important to have extra capacity here to make sure we don't drop any messages
     override val incomingMessages = MutableSharedFlow<String>(extraBufferCapacity = 10)
@@ -116,8 +117,21 @@ class RustWidgetDriver(
 
     override suspend fun stopCallMembership() {
         if (!safeLifecycleDiagnosticsEnabled || !stopping.compareAndSet(false, true)) return
-        val acknowledged = departure.depart { driverAndHandle.handle.send(it) }
+        // Normal departure uses the registered LEAVE. A block forbids encrypted messages,
+        // so only a failed or unacknowledged LEAVE falls back to exact own-event redaction.
+        val acknowledged = kotlinx.coroutines.withTimeoutOrNull(1_500) {
+            departure.depart { driverAndHandle.handle.send(it) }
+        } == true
         Timber.d("Next RTC native departure acknowledged=%s.", acknowledged)
+        if (acknowledged) return
+        val redact = redactMembershipEvent
+        if (redact != null) {
+            for (eventId in departure.membershipEvents()) {
+                try { redact(eventId) } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) { Timber.w("RTC membership redaction remains unconfirmed.") }
+            }
+        }
     }
 
     override fun close() {

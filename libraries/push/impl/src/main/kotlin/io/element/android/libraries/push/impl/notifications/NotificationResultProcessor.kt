@@ -80,6 +80,7 @@ class DefaultNotificationResultProcessor(
         foregroundCallJob = foregroundCallInvitations.invitations()
             .onEach(::handleRingingCallEvent)
             .launchIn(coroutineScope)
+            .also { job -> job.invokeOnCompletion { cause -> Timber.d("Foreground RTC processing completed: %s", cause?.javaClass?.simpleName) } }
         processJob = resultFlow
             .onEach(::processResults)
             .launchIn(coroutineScope)

@@ -16,7 +16,9 @@ open class SignedOutStateProvider : PreviewParameterProvider<SignedOutState> {
     override val values: Sequence<SignedOutState>
         get() = sequenceOf(
             aSignedOutState(),
-            // Add other states here
+            aSignedOutState().copy(mobileSessionSuperseded = true),
+            aSignedOutState().copy(cleanupError = true),
+            aSignedOutState().copy(preparingSignIn = true),
         )
 }
 

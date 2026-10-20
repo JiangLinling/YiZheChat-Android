@@ -30,16 +30,15 @@ internal fun startupAccelerationSettingsRoutes(
     overviewOnly: Boolean = false,
 ): List<StartupSettingsRoute> = buildList {
     if (!overviewOnly) {
+        // Prefer the system's public resolver on every brand. Retain the existing
+        // vendor fallback only for systems that reject the generic details route.
+        add(StartupSettingsRoute(StartupSettingsDestination.ServiceDetails, startupAccelerationSettingsIntent(component)))
         if (family == DeviceFamily.XIAOMI) {
             add(StartupSettingsRoute(
                 StartupSettingsDestination.ServiceDetails,
                 startupAccelerationXiaomiSettingsIntent(component, title),
             ))
         }
-        // Includes OPPO/OnePlus/realme, vivo/iQOO, Huawei Android/Honor, Samsung,
-        // Motorola and unknown brands. Try the ROM's own details resolver; many ROMs
-        // restrict it to system callers, in which case the launcher falls through.
-        add(StartupSettingsRoute(StartupSettingsDestination.ServiceDetails, startupAccelerationSettingsIntent(component)))
         if (family == DeviceFamily.SAMSUNG) {
             // One UI's installed-services list is closer to the switch than its
             // accessibility home. This is a list, NOT a verified direct switch page.

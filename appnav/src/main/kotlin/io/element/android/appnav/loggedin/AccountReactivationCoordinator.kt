@@ -16,6 +16,7 @@ import io.element.android.security.contentprotection.api.KmsAuthorizationProvide
 import io.element.android.security.contentprotection.api.MatrixContentProtectionBinding
 import io.element.android.security.contentprotection.api.MatrixContentProtectionStatus
 import io.element.android.security.dataprotection.api.AccountActivationReceipt
+import io.element.android.security.dataprotection.api.AccountActivationExpired
 import io.element.android.security.dataprotection.api.AccountReactivationCheckpointState
 import io.element.android.security.dataprotection.api.AccountReactivationRequest
 import io.element.android.security.dataprotection.api.AccountReactivationScopeStore
@@ -33,6 +34,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
+
+/** Stable, non-sensitive prerequisite codes for entry diagnostics. */
+internal class AccountEntryPrerequisiteFailure(val reasonCode: String) : IllegalStateException(reasonCode)
+
+private fun requireEntryPrerequisite(satisfied: Boolean, reasonCode: String) {
+    if (!satisfied) throw AccountEntryPrerequisiteFailure(reasonCode)
+}
 
 /**
  * Produces one server-signed CORE_READY receipt after every existing fail-closed
@@ -69,11 +77,19 @@ class AccountReactivationCoordinator(
     /** Restores the post-reset convergence job after process recreation without repeating reset. */
     suspend fun hasPendingExplicitIdentityReset(matrixClient: MatrixClient): Result<Boolean> = runCatching {
         val trust = deviceTrustService.current()
-        accountReactivationScopeStore.current(
+        val checkpoint = accountReactivationScopeStore.current(
             accountIdHash = accountIdHash(matrixClient.sessionId.value),
             installationId = trust.installationId,
             matrixDeviceIdHash = sha256Hex(matrixClient.deviceId.value),
-        )?.pendingExplicitIdentityReset == true
+        ) ?: return@runCatching false
+        if (checkpoint.pendingExplicitIdentityReset) return@runCatching true
+        val before = checkpoint.identityResetPreviousKeyHash ?: return@runCatching false
+        val state = matrixClient.encryptionService.getIdentityResetCompletionState().getOrThrow()
+        if (!state.isComplete || state.identityKeyHash == null || state.identityKeyHash == before) return@runCatching false
+        check(accountReactivationScopeStore.markExplicitIdentityReset(
+            accountIdHash(matrixClient.sessionId.value), trust.installationId, sha256Hex(matrixClient.deviceId.value),
+        ))
+        true
     }
 
     suspend fun canRestoreOffline(matrixClient: MatrixClient): Boolean {
@@ -186,19 +202,18 @@ class AccountReactivationCoordinator(
         val sync = io.element.android.libraries.androidutils.startup.StartupTrace.measureSuspend("Startup.core.sync") {
             managementControlService.synchronize()
         }
-        check(sync.status == ManagementSyncStatus.SYNCHRONIZED) { "Management synchronization is not ready." }
+        requireEntryPrerequisite(sync.status == ManagementSyncStatus.SYNCHRONIZED, "ACTIVATION_DEVICE_SYNC")
         val policy = dataProtectionPolicyProvider.current()
-        check(policy.source == DataProtectionPolicySource.VERIFIED_REMOTE) { "Verified remote policy is unavailable." }
-        check(sync.acceptedPolicyVersion == null || sync.acceptedPolicyVersion == policy.policy.version) {
-            "Management policy revision has not converged."
-        }
+        requireEntryPrerequisite(policy.source == DataProtectionPolicySource.VERIFIED_REMOTE, "ACTIVATION_POLICY_UNAVAILABLE")
+        requireEntryPrerequisite(sync.acceptedPolicyVersion == null || sync.acceptedPolicyVersion == policy.policy.version,
+            "ACTIVATION_POLICY_REVISION")
 
         val trust = deviceTrustService.current()
-        check(trust.allowsLocalVaultAccess) { "The current device cannot unlock protected state." }
+        requireEntryPrerequisite(trust.allowsLocalVaultAccess, "ACTIVATION_DEVICE_TRUST")
         val vaultId = deriveAccountVaultId(matrixClient.sessionId.value, matrixClient.deviceId.value)
-        check(vaultKeyService.isUnlocked(vaultId)) { "The account vault is not unlocked." }
+        requireEntryPrerequisite(vaultKeyService.isUnlocked(vaultId), "ACTIVATION_VAULT_LOCKED")
         val shareKey = deviceShareKeyService.descriptor()
-        check(shareKey.installationId == trust.installationId) { "The device share key belongs to another installation." }
+        requireEntryPrerequisite(shareKey.installationId == trust.installationId, "ACTIVATION_RECIPIENT_INSTALLATION")
 
         val accountHash = accountIdHash(matrixClient.sessionId.value)
         val matrixDeviceIdHash = sha256Hex(matrixClient.deviceId.value)
@@ -208,26 +223,29 @@ class AccountReactivationCoordinator(
             matrixDeviceIdHash = matrixDeviceIdHash,
         )
         val explicitIdentityResetPending = existing?.pendingExplicitIdentityReset == true
+        requireEntryPrerequisite(existing?.identityResetPreviousKeyHash == null, "ACTIVATION_IDENTITY_RESET_PENDING")
 
         // Normal reactivation proves the existing KMS/Matrix boundary before CORE_READY. An
         // explicit identity reset is the one legal exception to that ordering: the old boundary
         // is intentionally unavailable, so RESET_CONFIRMED must be committed first. The caller
         // then creates the new KMS profile boundary before HOME is released.
-        if (!explicitIdentityResetPending) {
-            check(kmsAuthorizationProvider.isAvailable()) { "KMS authorization is unavailable." }
-            check(matrixContentProtectionBinding.status() == MatrixContentProtectionStatus.READY) {
-                "The Matrix protected-content mapping is not ready."
-            }
+        // A signed candidate projection cannot appear in the account's active recipient list
+        // until ownership commits. The server independently verifies Matrix identity, policy,
+        // device admission and the registered recipient key at PREPARE and COMMIT.
+        val candidateHandover = accountHash in sync.accountHandoverRequiredAccountHashes
+        if (!explicitIdentityResetPending && !candidateHandover) {
+            requireEntryPrerequisite(kmsAuthorizationProvider.isAvailable(), "ACTIVATION_KMS_UNAVAILABLE")
+            requireEntryPrerequisite(matrixContentProtectionBinding.status() == MatrixContentProtectionStatus.READY,
+                "ACTIVATION_CONTENT_MAPPING")
             val recipients = io.element.android.libraries.androidutils.startup.StartupTrace.measureSuspend("Startup.core.recipients") {
                 deviceRecipientRegistry.approvedRecipients(accountHash)
             }
             val ownRecipient = recipients.recipients.singleOrNull { recipient ->
                 recipient.installationId == trust.installationId && recipient.keyId == shareKey.keyId
             }
-            check(ownRecipient != null) { "The current device is absent from the signed recipient registry." }
-            check(matrixContentProtectionBinding.recipientsApproved(setOf(accountHash), recipients.recipients)) {
-                "The Matrix recipient projection is not approved."
-            }
+            requireEntryPrerequisite(ownRecipient != null, "ACTIVATION_RECIPIENT_MISSING")
+            requireEntryPrerequisite(matrixContentProtectionBinding.recipientsApproved(setOf(accountHash), recipients.recipients),
+                "ACTIVATION_RECIPIENT_PROJECTION")
         }
 
         existing?.receipt?.takeIf { receipt ->
@@ -246,17 +264,18 @@ class AccountReactivationCoordinator(
         val resumable = existing?.takeIf { checkpoint ->
             when (checkpoint.state) {
                 AccountReactivationCheckpointState.ALLOCATED -> true
-                AccountReactivationCheckpointState.PREPARED ->
-                    checkNotNull(checkpoint.prepared).expiresAtEpochMillis > System.currentTimeMillis()
+                // An expired local prepare may already have committed remotely. Only the
+                // authority can distinguish a lost response from an uncommitted expiration.
+                AccountReactivationCheckpointState.PREPARED -> true
                 AccountReactivationCheckpointState.COMMITTED -> false
             }
         }
-        val attempt = resumable?.attempt ?: accountReactivationScopeStore.nextAttempt(
+        var attempt = resumable?.attempt ?: accountReactivationScopeStore.nextAttempt(
             accountIdHash = accountHash,
             installationId = trust.installationId,
             matrixDeviceIdHash = matrixDeviceIdHash,
         )
-        val request = AccountReactivationRequest(
+        fun requestForAttempt() = AccountReactivationRequest(
             accountIdHash = accountHash,
             matrixDeviceIdHash = matrixDeviceIdHash,
             clientScopeId = attempt.clientScopeId,
@@ -265,15 +284,25 @@ class AccountReactivationCoordinator(
             idempotencyKey = attempt.idempotencyKey,
             explicitIdentityResetConfirmed = explicitIdentityResetPending,
         )
-        val prepared = resumable
-            ?.takeIf { checkpoint -> checkpoint.state == AccountReactivationCheckpointState.PREPARED }
-            ?.prepared
-            ?.takeIf { prepared -> prepared.expiresAtEpochMillis > System.currentTimeMillis() }
-            ?: managementControlService.prepareAccountReactivation(request).also { prepared ->
-                accountReactivationScopeStore.markPrepared(attempt, prepared)
+        suspend fun commitAttempt(reusePrepared: Boolean): AccountActivationReceipt {
+            val request = requestForAttempt()
+            val prepared = resumable
+                ?.takeIf { reusePrepared && it.state == AccountReactivationCheckpointState.PREPARED }
+                ?.prepared
+                ?: managementControlService.prepareAccountReactivation(request).also { prepared ->
+                    accountReactivationScopeStore.markPrepared(attempt, prepared)
+                }
+            return io.element.android.libraries.androidutils.startup.StartupTrace.measureSuspend("Startup.core.commit") {
+                managementControlService.commitAccountReactivation(request, prepared)
             }
-        val receipt = io.element.android.libraries.androidutils.startup.StartupTrace.measureSuspend("Startup.core.commit") {
-            managementControlService.commitAccountReactivation(request, prepared)
+        }
+        val receipt = try {
+            commitAttempt(reusePrepared = true)
+        } catch (_: AccountActivationExpired) {
+            // A definitive uncommitted expiration permits one new durable attempt. Network
+            // failures and unknown outcomes retain the original identity for the next retry.
+            attempt = accountReactivationScopeStore.nextAttempt(accountHash, trust.installationId, matrixDeviceIdHash)
+            commitAttempt(reusePrepared = false)
         }
         // A valid server commit and its local checkpoint form one UI-visible transaction. Finish
         // the small encrypted local write even if navigation refreshes immediately after recovery.

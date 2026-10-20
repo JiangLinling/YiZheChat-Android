@@ -39,7 +39,7 @@
     <string name="screen_security_setup_use_recovery_key">Verify with recovery key</string>
     <string name="screen_security_setup_reset_identity">Reset encrypted identity</string>
     <string name="screen_security_setup_recovery_expired">The device recovery request expired. Start a new verified recovery attempt.</string>
-    <string name="screen_security_setup_security_blocked">The server rejected this device identity. Recovery is not allowed for this response. Contact service support.</string>
+    <string name="screen_security_setup_security_blocked">This login has not passed the server security checks. Check the security status again. If it still fails, ask your administrator to check device authorization and the account binding.</string>
     <string name="screen_device_setup_title">Complete secure initialization</string>
     <string name="screen_device_setup_subtitle">Complete each system setting to prevent delayed messages, missed calls, or unavailable audio and video.</string>
     <string name="screen_device_setup_complete_title">Security initialization complete</string>
@@ -122,4 +122,5 @@
     <string name="screen_group_invite_confirm">Open this group invitation? Invitation permissions and expiry will be checked.</string>
     <string name="screen_group_invite_open">Open invitation</string>
     <string name="screen_group_invite_error">Invitation unavailable or expired. Check your connection or ask for a new invitation.</string>
+    <string name="screen_security_setup_diagnostic">View diagnostic code</string>
 </resources>

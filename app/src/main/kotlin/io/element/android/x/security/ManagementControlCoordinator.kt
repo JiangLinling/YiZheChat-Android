@@ -576,6 +576,12 @@ class ManagementControlCoordinator(
             }
         }
         val pendingAfterExecution = managementControlService.pendingCommands()
+        val remainingSessions = sessionStore.getAllSessions()
+        val blockingCommands = pendingAfterExecution.filterNot { command ->
+            command.isScopedMobileHandover() && remainingSessions.none { session ->
+                session.isTokenValid && command.targetsAccountSession(accountIdHash(session.userId), stableCommandSubjectHash(session.deviceId))
+            }
+        }
         Log.i(
             STARTUP_DIAGNOSTIC_TAG,
             "YZMGMT_PENDING_AFTER_EXECUTION count=${pendingAfterExecution.size} " +
@@ -595,7 +601,7 @@ class ManagementControlCoordinator(
                 syncReport.copy(status = ManagementSyncStatus.RETRY_REQUIRED, errorCode = "POLICY_APPLICATION_EVIDENCE_PENDING")
             commandReportPending ->
                 syncReport.copy(status = ManagementSyncStatus.RETRY_REQUIRED, errorCode = "COMMAND_REPORT_PENDING")
-            pendingAfterExecution.isNotEmpty() ->
+            blockingCommands.isNotEmpty() ->
                 syncReport.copy(status = ManagementSyncStatus.RETRY_REQUIRED, errorCode = "COMMAND_EXECUTION_PENDING")
             else -> syncReport
         }
@@ -700,20 +706,37 @@ class ManagementControlCoordinator(
     }
 
     private suspend fun executeAccountClear(command: VerifiedManagementCommand): ManagementCommandResult {
-        val targetHash = checkNotNull(command.accountIdHash)
-        val sessions = sessionStore.getAllSessions().filter { accountIdHash(it.userId) == targetHash }
+        checkNotNull(command.accountIdHash)
+        val sessions = sessionStore.getAllSessions().filter {
+            command.targetsAccountSession(accountIdHash(it.userId), stableCommandSubjectHash(it.deviceId))
+        }
         if (sessions.isEmpty()) {
+            // Removing the old SessionStore row is not evidence that its files were cleaned.
+            val recovery = dataDeletionCoordinator.resumePending()
+            check(recovery.unreadableJournalEntries == 0) { "Account cleanup journal is unreadable." }
+            val operationId = "managed-${command.commandId}-${checkNotNull(command.accountIdHash).take(12)}"
+            val signedOutOperationId = command.targetMatrixDeviceIdHash?.let { matrixHash ->
+                io.element.android.security.dataprotection.api.signedOutCleanupOperationId(checkNotNull(command.accountIdHash), matrixHash).value
+            }
+            if (recovery.operationReports.any { it.operationId.value in setOf(operationId, signedOutOperationId) && !it.isComplete }) {
+                return ManagementCommandResult(ManagementCommandState.WAITING_RESTART, 70)
+            }
             return ManagementCommandResult(ManagementCommandState.COMPLETE, 100)
         }
         // LC-22 revokes one account identity, not the installation itself. Changing the shared
         // device-trust state here would lock every unrelated account stored on the same phone.
         // Device-wide trust transitions remain owned by LOCK/REVOKE (LC-09/LC-07).
         sessions.forEach { session ->
-            vaultKeyService.destroy(
+            prepareDeletion(command, session, DeletionReason.ADMINISTRATIVE_REVOCATION)
+            check(vaultKeyService.destroy(
                 deriveAccountVaultId(session.userId, session.deviceId),
                 VaultDestroyReason.ADMINISTRATIVE_REVOCATION,
-            )
-            prepareDeletion(command, session, DeletionReason.ADMINISTRATIVE_REVOCATION)
+            )) { "Account key retirement failed." }
+            if (command.isScopedMobileHandover()) {
+                // Keep the durable file cleanup pending until the SDK is closed. Navigation can
+                // already show SignedOut because this exact login no longer has keys or authority.
+                sessionStore.invalidateSessionIfDeviceMatches(session.userId, session.deviceId)
+            }
         }
         return ManagementCommandResult(ManagementCommandState.WAITING_RESTART, 70)
     }
@@ -763,7 +786,7 @@ class ManagementControlCoordinator(
         reason: DeletionReason,
     ) {
         val vaultId = deriveAccountVaultId(session.userId, session.deviceId)
-        dataDeletionCoordinator.prepare(
+        val report = dataDeletionCoordinator.prepare(
             DeletionRequest(
                 operationId = DeletionOperationId("managed-${command.commandId}-${accountIdHash(session.userId).take(12)}"),
                 scope = DeletionScope.Account(
@@ -778,6 +801,7 @@ class ManagementControlCoordinator(
                 requestedAtEpochMillis = command.issuedAtEpochMillis,
             )
         )
+        check(report.errorCode == null) { "Account cleanup preparation failed." }
     }
 
     private suspend fun report(
@@ -878,6 +902,10 @@ internal suspend fun <T> runOrderedStartupDependencyChain(
     ensureEnrollment()
     return runLc02(afterLc02)
 }
+
+internal fun VerifiedManagementCommand.isScopedMobileHandover(): Boolean =
+    type == ManagementCommandType.CLEAR_ACCOUNT && reasonCode == "ACCOUNT_MOBILE_SUPERSEDED" &&
+        accountIdHash != null && targetMatrixDeviceIdHash != null && (mobileGeneration ?: 0) > 0
 
 internal fun shouldRejectLocalAccess(
     allowsLocalVaultAccess: Boolean,

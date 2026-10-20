@@ -40,6 +40,9 @@ interface SeenInvitesStore {
     /** Refresh encrypted history snapshots from currently visible Matrix profiles. */
     suspend fun updateNotificationProfiles(profiles: Map<RoomId, Pair<String?, String?>>) = Unit
 
+    /** Refresh presentation metadata only; retain the original outcome, arrival order and read state. */
+    suspend fun updateNotificationKinds(kinds: Map<RoomId, InviteNotification.Kind>) = Unit
+
     /** Only call after the existing Matrix/lifecycle action confirms the outcome. */
     suspend fun recordOutcome(roomId: RoomId, outcome: InviteNotification.Outcome, seen: Boolean = true, expectedSequence: Long? = null)
 

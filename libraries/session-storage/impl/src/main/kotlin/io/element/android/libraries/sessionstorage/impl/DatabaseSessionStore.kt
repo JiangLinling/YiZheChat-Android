@@ -72,13 +72,14 @@ class DatabaseSessionStore(
                 .executeAsOneOrNull()
                 ?.toApiModel()
 
-            if (result == null) {
-                Timber.e("User ${sessionData.userId} not found in session database")
+            if (result == null || result.deviceId != sessionData.deviceId) {
+                Timber.w("Ignoring update for a removed or replaced Matrix session")
                 return
             }
             // Copy new data from SDK, but keep application data
             database.sessionDataQueries.updateSession(
                 sessionData.copy(
+                    isTokenValid = sessionData.isTokenValid && result.isTokenValid,
                     loginTimestamp = result.loginTimestamp,
                     position = result.position,
                     lastUsageIndex = result.lastUsageIndex,
@@ -181,6 +182,18 @@ class DatabaseSessionStore(
     override suspend fun removeSession(sessionId: String) {
         sessionDataMutex.withLock {
             database.sessionDataQueries.removeSession(sessionId)
+        }
+    }
+
+    override suspend fun removeSessionIfPathsMatch(sessionId: String, sessionPath: String, cachePath: String) {
+        sessionDataMutex.withLock {
+            database.sessionDataQueries.removeSessionIfPathsMatch(sessionId, sessionPath, cachePath)
+        }
+    }
+
+    override suspend fun invalidateSessionIfDeviceMatches(sessionId: String, deviceId: String) {
+        sessionDataMutex.withLock {
+            database.sessionDataQueries.invalidateSessionIfDeviceMatches(sessionId, deviceId)
         }
     }
 }

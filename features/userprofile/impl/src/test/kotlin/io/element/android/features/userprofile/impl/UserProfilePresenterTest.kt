@@ -62,6 +62,23 @@ class UserProfilePresenterTest {
     val warmUpRule = WarmUpRule()
 
     @Test
+    fun `profile resolves new direct room when peer membership changes while open`() = runTest {
+        val rooms = io.element.android.libraries.matrix.test.roomlist.FakeDynamicRoomList()
+        val client = FakeMatrixClient(roomListService = io.element.android.libraries.matrix.test.roomlist.FakeRoomListService(allRooms = rooms))
+        client.givenFindDmResult(Result.success(null))
+        createUserProfilePresenter(client = client, userId = A_USER_ID, isElementCallAvailable = false).test {
+            while (awaitItem().isBlocked !is AsyncData.Success) Unit
+            client.givenFindDmResult(Result.success(A_ROOM_ID))
+            rooms.summaries.value = listOf(io.element.android.libraries.matrix.test.room.aRoomSummary(
+                info = io.element.android.libraries.matrix.test.room.aRoomInfo(id = A_ROOM_ID, isDm = true,
+                    heroes = listOf(MatrixUser(A_USER_ID)), joinedMembersCount = 2, invitedMembersCount = 0)))
+            var state = awaitItem()
+            while (state.dmRoomId != A_ROOM_ID) state = awaitItem()
+            assertThat(state.dmRoomId).isEqualTo(A_ROOM_ID)
+        }
+    }
+
+    @Test
     fun `present - returns the user profile data`() = runTest {
         val matrixUser = aMatrixUser(A_USER_ID.value, "Alice", "anAvatarUrl")
         val client = createFakeMatrixClient().apply {

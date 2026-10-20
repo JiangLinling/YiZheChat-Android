@@ -8,6 +8,8 @@
 
 package io.element.android.features.invite.impl.acceptdecline
 
+import io.element.android.libraries.matrix.ui.components.contactFailureMessageResource
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -47,7 +49,9 @@ fun AcceptDeclineInviteView(
                 stringResource(CommonStrings.common_something_went_wrong)
             },
             errorMessage = { error ->
-                if (error is AcceptInvite.Failures.InvalidInvite) {
+                if (error.contactFailureMessageResource() != null) {
+                    stringResource(checkNotNull(error.contactFailureMessageResource()))
+                } else if (error is AcceptInvite.Failures.InvalidInvite) {
                     stringResource(CommonStrings.error_invalid_invite)
                 } else {
                     stringResource(CommonStrings.error_network_or_server_issue)

@@ -29,6 +29,8 @@ internal data class TimelineDiffTransaction(
  *
  * A bare Clear never leaves this coordinator. A later Clear supersedes every uncommitted
  * replacement before it, and only the tail following the last Clear is eligible to commit.
+ * The SDK also repopulates an ignored-user-list clear with ordinary Append/Push/Insert diffs;
+ * a Reset is not guaranteed. Preserve that ordered stream against the new empty base.
  */
 internal class TimelineStructuralTransactionCoordinator(
     private val scope: TimelineCommitScope,
@@ -47,14 +49,13 @@ internal class TimelineStructuralTransactionCoordinator(
                 structuralEpoch += diffs.count { it == TimelineDiff.Clear }
                 awaitingStructuralReplacement = true
                 val replacement = diffs.drop(lastClearIndex + 1)
-                if (replacement.none { it is TimelineDiff.Reset }) return null
+                if (replacement.isEmpty()) return null
                 awaitingStructuralReplacement = false
                 listOf(TimelineDiff.Clear) + replacement
             }
             awaitingStructuralReplacement -> {
-                if (lastResetIndex < 0) return null
                 awaitingStructuralReplacement = false
-                listOf(TimelineDiff.Clear) + diffs.drop(lastResetIndex)
+                listOf(TimelineDiff.Clear) + if (lastResetIndex >= 0) diffs.drop(lastResetIndex) else diffs
             }
             lastResetIndex >= 0 -> {
                 structuralEpoch += diffs.count { it is TimelineDiff.Reset }

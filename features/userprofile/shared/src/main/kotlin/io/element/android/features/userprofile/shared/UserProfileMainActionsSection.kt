@@ -48,6 +48,7 @@ fun UserProfileMainActionsSection(
     onStartDM: () -> Unit,
     onCall: (CallIntent) -> Unit,
     modifier: Modifier = Modifier,
+    isBlocked: Boolean = false,
 ) {
     var choosingCall by remember { mutableStateOf(false) }
     if (isCurrentUser) {
@@ -58,6 +59,8 @@ fun UserProfileMainActionsSection(
                 onClick = onShareUser,
             )
         }
+    } else if (isBlocked) {
+        Text(text = stringResource(CommonStrings.contact_blocked_by_you), modifier = Modifier.padding(16.dp))
     } else {
         Column(modifier.fillMaxWidth()) {
             ProfileActionRow(
@@ -75,7 +78,7 @@ fun UserProfileMainActionsSection(
             }
         }
     }
-    if (choosingCall && canCall && hasDm) {
+    if (choosingCall && canCall && hasDm && !isBlocked) {
         ModalBottomSheet(
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             onDismissRequest = { choosingCall = false },

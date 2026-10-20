@@ -110,6 +110,10 @@ class DefaultNotificationChannels(
     @Volatile private var currentNoisyChannelId: String = NOISY_NOTIFICATION_CHANNEL_ID_BASE
     @Volatile private var currentRingingCallChannelId: String = RINGING_CALL_NOTIFICATION_CHANNEL_ID_BASE
 
+    // Enterprise sessions can use separate channels; without a session do not guess their state.
+    override fun messageNotificationChannelId(): String? = currentNoisyChannelId.takeUnless { enterpriseService.isEnterpriseBuild }
+    override fun ringingNotificationChannelId(): String = currentRingingCallChannelId
+
     // Serializes concurrent recreate* calls; readers stay lock-free via @Volatile on the id fields.
     private val recreateLock = Any()
 

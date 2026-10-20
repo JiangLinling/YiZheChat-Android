@@ -13,12 +13,12 @@ import io.element.android.libraries.di.SessionScope
 import io.element.android.libraries.matrix.api.MatrixClient
 import io.element.android.libraries.matrix.api.core.MatrixPatterns
 import io.element.android.libraries.matrix.api.core.UserId
-import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.usersearch.api.UserListDataSource
 import io.element.android.libraries.usersearch.api.UserRepository
 import io.element.android.libraries.usersearch.api.UserSearchResult
 import io.element.android.libraries.usersearch.api.UserSearchResultState
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -28,43 +28,45 @@ class MatrixUserRepository(
     private val dataSource: UserListDataSource
 ) : UserRepository {
     override fun search(query: String): Flow<UserSearchResultState> = flow {
-        val shouldQueryProfile = MatrixPatterns.isUserId(query) && !client.isMe(UserId(query))
-        val shouldFetchSearchResults = query.length >= MINIMUM_SEARCH_LENGTH
-        // If the search term is a MXID that's not ours, we'll show a 'fake' result for that user, then update it when we get search results.
-        val fakeSearchResult = if (shouldQueryProfile) {
-            UserSearchResult(MatrixUser(UserId(query)))
-        } else {
-            null
-        }
-        if (shouldQueryProfile || shouldFetchSearchResults) {
-            emit(UserSearchResultState(isSearching = shouldFetchSearchResults, results = listOfNotNull(fakeSearchResult)))
-        }
-        if (shouldFetchSearchResults) {
-            val results = fetchSearchResults(query, shouldQueryProfile)
-            emit(results)
-        }
+        val text = query.trim()
+        if (text.length < MINIMUM_SEARCH_LENGTH) return@flow
+        emit(UserSearchResultState(isSearching = true, results = emptyList()))
+        emit(fetchSearchResults(text))
     }
 
-    private suspend fun fetchSearchResults(query: String, shouldQueryProfile: Boolean): UserSearchResultState {
+    private suspend fun fetchSearchResults(query: String): UserSearchResultState {
         // Debounce
         delay(DEBOUNCE_TIME_MILLIS)
-        val results = dataSource
-            .search(query, MAXIMUM_SEARCH_RESULTS)
+        var failed = false
+        val directory = try {
+            dataSource.search(query, MAXIMUM_SEARCH_RESULTS)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            failed = true
+            emptyList()
+        }
+        val results = directory
             .filter { !client.isMe(it.userId) }
             .map { UserSearchResult(it) }
             .toMutableList()
 
-        // If the query is another user's MXID and the result doesn't contain that user ID, query the profile information explicitly
-        if (shouldQueryProfile && results.none { it.matrixUser.userId.value == query }) {
-            results.add(
-                0,
-                dataSource.getProfile(UserId(query))
-                    ?.let { UserSearchResult(it) }
-                    ?: UserSearchResult(MatrixUser(UserId(query)), isUnresolved = true)
-            )
+        val exactId = when {
+            MatrixPatterns.isUserId(query) -> UserId(query)
+            query.removePrefix("@").matches(Regex("[a-z0-9._=/-]{3,255}")) ->
+                UserId("@${query.removePrefix("@")}:${client.sessionId.value.substringAfter(':')}")
+            else -> null
         }
-
-        return UserSearchResultState(results = results, isSearching = false)
+        if (exactId != null && !client.isMe(exactId) && results.none { it.matrixUser.userId == exactId }) {
+            try {
+                dataSource.getProfile(exactId)?.takeIf { it.userId == exactId }?.let { results.add(0, UserSearchResult(it)) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                failed = true
+            }
+        }
+        return UserSearchResultState(results = results.distinctBy { it.matrixUser.userId }, isSearching = false, hasError = failed)
     }
 
     companion object {

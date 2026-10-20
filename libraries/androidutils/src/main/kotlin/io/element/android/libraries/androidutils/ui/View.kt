@@ -28,7 +28,7 @@ fun View.hideKeyboard() {
 }
 
 suspend fun View.hideKeyboardAndAwaitAnimation() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !rootWindowInsets.isVisible(WindowInsets.Type.ime())) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == false) {
         // Keyboard is already hidden, no need to do anything
         return
     }
@@ -36,30 +36,43 @@ suspend fun View.hideKeyboardAndAwaitAnimation() {
     val imm = context?.getSystemService<InputMethodManager>() ?: return
     val future = CompletableDeferred<Unit>()
 
-    val requested = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        setOnApplyWindowInsetsListener { view, insets ->
-            if (!insets.isVisible(WindowInsets.Type.ime())) {
+    // LocalView is often AndroidComposeView. Replacing its insets listener breaks
+    // Compose's WindowInsetsHolder and leaves the last IME height on later screens.
+    // Observe layout without taking ownership of that listener (or animation callback).
+    val observer = viewTreeObserver
+    val layoutListener = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        ViewTreeObserver.OnGlobalLayoutListener {
+            if (rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == false) {
                 future.complete(Unit)
-                // Remove the listener now, it's a single use operation
-                setOnApplyWindowInsetsListener(null)
             }
-            insets
-        }
-        imm.hideSoftInputFromWindow(windowToken, 0)
+        }.also(observer::addOnGlobalLayoutListener)
     } else {
-        @Suppress("DEPRECATION")
-        imm.hideSoftInputFromWindow(windowToken, 0, object : ResultReceiver(null) {
-            override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
-                if (resultCode == InputMethodManager.RESULT_UNCHANGED_HIDDEN || resultCode == InputMethodManager.RESULT_HIDDEN) {
-                    future.complete(Unit)
-                }
-            }
-        })
+        null
     }
-
-    if (requested) {
-        // Await the future to ensure the keyboard hide animation has completed before proceeding
-        withTimeoutOrNull(1.seconds) { future.await() }
+    try {
+        val requested = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            imm.hideSoftInputFromWindow(windowToken, 0).also { requestApplyInsets() }
+        } else {
+            @Suppress("DEPRECATION")
+            imm.hideSoftInputFromWindow(windowToken, 0, object : ResultReceiver(null) {
+                override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                    if (resultCode == InputMethodManager.RESULT_UNCHANGED_HIDDEN || resultCode == InputMethodManager.RESULT_HIDDEN) {
+                        future.complete(Unit)
+                    }
+                }
+            })
+        }
+        if (requested) {
+            withTimeoutOrNull(1.seconds) { future.await() }
+        }
+    } finally {
+        if (layoutListener != null) {
+            if (observer.isAlive) {
+                observer.removeOnGlobalLayoutListener(layoutListener)
+            } else {
+                viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
+            }
+        }
     }
 }
 

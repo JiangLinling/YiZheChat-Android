@@ -41,11 +41,11 @@ data class LoginPasswordState(
                 formState.login.isNotEmpty() &&
                 formState.password.isNotEmpty()
             LoginPasswordMode.INVITATION_REGISTER -> loginAction !is AsyncData.Failure &&
-                invitationAction is AsyncData.Success &&
+                (!invitationFormState.agreementAccepted || (invitationAction is AsyncData.Success &&
                 usernameSuggestion is AsyncData.Success &&
                 invitationFormState.displayName.isNotBlank() &&
                 OnboardingPasswordPolicy.isSatisfiedBy(invitationFormState.password) &&
-                invitationFormState.password == invitationFormState.passwordConfirmation
+                invitationFormState.password == invitationFormState.passwordConfirmation))
         }
 }
 
@@ -77,11 +77,12 @@ data class InvitationRegistrationFormState(
     val password: String,
     val passwordConfirmation: String,
     val idempotencyKey: String,
+    val agreementAccepted: Boolean = false,
 ) : Parcelable {
     companion object {
         val savedStateSaver = androidx.compose.runtime.saveable.Saver<InvitationRegistrationFormState, InvitationRegistrationFormState>(
             save = { it.copy(password = "", passwordConfirmation = "") },
-            restore = { it.copy(password = "", passwordConfirmation = "") },
+            restore = { it.copy(password = "", passwordConfirmation = "", agreementAccepted = false) },
         )
         val Default = InvitationRegistrationFormState(
             inviteCode = "",

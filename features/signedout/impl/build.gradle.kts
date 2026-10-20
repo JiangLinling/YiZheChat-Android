@@ -29,8 +29,11 @@ dependencies {
     implementation(projects.libraries.designsystem)
     implementation(projects.libraries.sessionStorage.api)
     implementation(projects.libraries.uiStrings)
+    implementation(projects.security.dataProtection.api)
+    implementation(projects.security.secureStorage.api)
 
     testCommonDependencies(libs)
     testImplementation(projects.libraries.matrix.test)
     testImplementation(projects.libraries.sessionStorage.test)
+    testImplementation(projects.security.dataProtection.test)
 }

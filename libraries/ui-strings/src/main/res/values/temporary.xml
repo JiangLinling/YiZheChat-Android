@@ -1,12 +1,22 @@
 <resources>
-    <string name="error_share_recipient_device_unavailable">A recipient has no verified device available. Ask them to finish device verification, then try again.</string>
-    <string name="error_share_security_access_denied">Your account or device has not completed security verification. This share could not be sent.</string>
-    <string name="error_share_security_service_unavailable">The security service is temporarily unavailable. Please try again later.</string>
-    <string name="error_share_send_failed">This share could not be sent. Please try again.</string>
+    <string name="error_share_recipient_device_unavailable">Not sent: a recipient’s device authorization has expired or changed. They may have signed out, switched devices, or not finished verification. Ask them to sign in and verify their device, then retry shortly. In a group, this may concern one member.</string>
+    <string name="error_share_security_access_denied">Sending was not authorized. Check your account and device verification status, then retry. Contact your administrator if access remains blocked.</string>
+    <string name="error_share_security_service_unavailable">The security service could not be reached. Check your connection and try again later; this does not establish whether the recipient is offline.</string>
+    <string name="error_share_send_failed">The send result could not be confirmed. Check your connection and the message status before retrying.</string>
     <string name="screen_voice_recording_stopped_title">Recording stopped</string>
     <string name="screen_voice_recording_permission_lost">Microphone access is off. Your recording has stopped and was not sent. Enable microphone access to record again.</string>
     <string name="common_relay_ended_preview">Relay ended</string>
     <string name="screen_room_media_cancellation_pending">Cancellation pending confirmation</string>
     <string name="screen_room_media_submission_pending">Send result awaiting confirmation</string>
     <string name="screen_media_viewer_external_read_choose_app">Open with</string>
+    <string name="error_send_confirmation_pending">The message was submitted and confirmation is pending. Check its status before sending again to avoid duplicates.</string>
+    <string name="contact_search_failed">Search could not be completed. Check your connection and try again.</string>
+    <string name="contact_search_hint">Enter at least 3 characters. A full ID or exact account finds a specific person; nickname results are limited by directory visibility.</string>
+    <string name="contact_blocked_by_you">You have blocked this person. Unblock them in their profile before sending messages, calling, or sending a friend request.</string>
+    <string name="contact_unavailable">You cannot contact this person right now. The message, call, or request was not sent.</string>
+    <string name="contact_request_changed">This friend request has changed or ended. Return to the profile, check its current state, and send a new request if needed.</string>
+    <string name="contact_request_pending">Your friend request is being processed. Please check it again shortly; do not send another request.</string>
+    <string name="contact_policy_unavailable">Contact permissions could not be checked. Nothing was sent. Check your connection and try again.</string>
+    <string name="contact_projection_pending">Contact permissions have changed, but the displayed status has not synced yet. Reopen this profile shortly to check the result.</string>
+    <string name="error_identity_reset_unconfirmed">The identity reset result could not be confirmed. Your recovery record has been kept. Check your connection and return to this page to retry; the app will check the previous attempt before continuing. Your account has not been deleted.</string>
 </resources>

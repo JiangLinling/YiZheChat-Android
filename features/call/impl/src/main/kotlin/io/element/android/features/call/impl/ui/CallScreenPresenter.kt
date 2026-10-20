@@ -123,6 +123,7 @@ class CallScreenPresenter(
         var ignoreWebViewError by rememberSaveable { mutableStateOf(false) }
         var webViewError by remember { mutableStateOf<String?>(null) }
         var terminationInitiated by remember { mutableStateOf(false) }
+        var contactEndedNotice by remember { mutableStateOf(false) }
         LaunchedEffect(startupContentLoaded, urlState.value, terminationInitiated) {
             if (startupContentLoaded && urlState.value is AsyncData.Success && !terminationInitiated && !isWidgetLoaded) {
                 isWidgetLoaded = true
@@ -233,6 +234,25 @@ class CallScreenPresenter(
         }
 
         callWidgetDriver.value?.let { driver ->
+            LaunchedEffect(driver) {
+                callWidgetProvider.observeContactRevocation(callData.sessionId, callData.roomId, callOperationId).collect { failure ->
+                    if (!terminationInitiated) {
+                        terminationInitiated = true
+                        contactEndedNotice = true
+                        joinAttempt.cancel()
+                        mediaReadyJob.value?.cancel()
+                        messageInterceptor.value?.takeIf { isWidgetLoaded }?.let { sendHangupMessage(driver.id, it) }
+                        isWidgetLoaded = false
+                        preparationUrl.value = null
+                        urlState.value = AsyncData.Failure(failure)
+                        // Remove the WebView/media immediately, but keep an actionable native
+                        // explanation. The original LC20 operation owns departure/finalization.
+                        appCoroutineScope.launch(start = cleanupStart) {
+                            releaseLocalCallAndFinalize(callWidgetDriver, callOperationId, protectionSession, preparationJob.value)
+                        }
+                    }
+                }
+            }
             LaunchedEffect(Unit) {
                 driver.incomingMessages
                     .onEach {
@@ -381,7 +401,13 @@ class CallScreenPresenter(
         fun handleEvent(event: CallScreenEvent) {
             when (event) {
                 is CallScreenEvent.Hangup -> {
-                    if (terminationInitiated) return
+                    if (terminationInitiated) {
+                        if (contactEndedNotice) {
+                            contactEndedNotice = false
+                            navigator.close()
+                        }
+                        return
+                    }
                     terminationInitiated = true
                     joinAttempt.cancel()
                     mediaReadyJob.value?.cancel()
@@ -576,7 +602,7 @@ class CallScreenPresenter(
         kotlinx.coroutines.withContext(dispatchers.io) {
             try {
                 if (NextDeploymentConfig.isNextDeployment) {
-                    kotlinx.coroutines.withTimeoutOrNull(900.milliseconds) { widgetDriver?.stopCallMembership() }
+                    kotlinx.coroutines.withTimeoutOrNull(5_000.milliseconds) { widgetDriver?.stopCallMembership() }
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled

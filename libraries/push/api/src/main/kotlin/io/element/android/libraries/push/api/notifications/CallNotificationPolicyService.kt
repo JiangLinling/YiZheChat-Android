@@ -11,6 +11,10 @@ package io.element.android.libraries.push.api.notifications
  * Keeps the incoming-call notification channel aligned with the current system interruption policy.
  */
 interface CallNotificationPolicyService {
+    /** Exact channels currently used for delivery; null means unavailable, never denied. */
+    fun messageNotificationChannelId(): String? = null
+    fun ringingNotificationChannelId(): String? = null
+
     /** Whether the user granted access to bypass Do Not Disturb for urgent calls. */
     fun isDoNotDisturbAccessGranted(): Boolean
 

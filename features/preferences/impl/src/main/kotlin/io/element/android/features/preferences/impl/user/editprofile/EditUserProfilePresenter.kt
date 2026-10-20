@@ -27,7 +27,6 @@ import dev.zacsweers.metro.AssistedInject
 import io.element.android.libraries.androidutils.file.TemporaryUriDeleter
 import io.element.android.libraries.architecture.AsyncAction
 import io.element.android.libraries.architecture.Presenter
-import io.element.android.libraries.architecture.runCatchingUpdatingState
 import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.matrix.api.MatrixClient
@@ -35,6 +34,7 @@ import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.ui.media.AvatarAction
 import io.element.android.libraries.mediapickers.api.PickerProvider
 import io.element.android.libraries.mediaupload.api.MediaOptimizationConfigProvider
+import io.element.android.libraries.mediaupload.api.allFiles
 import io.element.android.libraries.mediaupload.api.MediaPreProcessor
 import io.element.android.libraries.permissions.api.PermissionsEvent
 import io.element.android.libraries.permissions.api.PermissionsPresenter
@@ -70,6 +70,10 @@ class EditUserProfilePresenter(
         val cameraPermissionState = cameraPermissionPresenter.present()
         var userAvatarUri by rememberSaveable { mutableStateOf(matrixUser.avatarUrl) }
         var userDisplayName by rememberSaveable { mutableStateOf(matrixUser.displayName) }
+        // Acknowledge each successful server mutation separately; retry only the part that failed.
+        var savedName by rememberSaveable { mutableStateOf(matrixUser.displayName) }
+        var savedAvatarSelection by rememberSaveable { mutableStateOf(matrixUser.avatarUrl) }
+        var refreshPending by rememberSaveable { mutableStateOf(false) }
         val cameraPhotoPicker = mediaPickerProvider.registerCameraPhotoPicker(
             onResult = { uri ->
                 if (uri != null) {
@@ -115,19 +119,27 @@ class EditUserProfilePresenter(
         val saveAction: MutableState<AsyncAction<Unit>> = remember { mutableStateOf(AsyncAction.Uninitialized) }
         val localCoroutineScope = rememberCoroutineScope()
 
-        val canSave = remember(userDisplayName, userAvatarUri) {
-            val hasProfileChanged = hasDisplayNameChanged(userDisplayName, matrixUser) ||
-                hasAvatarUrlChanged(userAvatarUri, matrixUser)
-            !userDisplayName.isNullOrBlank() && hasProfileChanged
+        val baseline = matrixUser.copy(displayName = savedName, avatarUrl = savedAvatarSelection)
+        val nameChanged = hasDisplayNameChanged(userDisplayName, baseline)
+        val canSave = (!nameChanged || !userDisplayName.isNullOrBlank()) &&
+            (nameChanged || hasAvatarUrlChanged(userAvatarUri, baseline) || refreshPending)
+
+        fun discardLocalAvatar() {
+            if (userAvatarUri != matrixUser.avatarUrl) temporaryUriDeleter.delete(userAvatarUri?.toUri())
         }
 
         fun handleEvent(event: EditUserProfileEvent) {
+            if (saveAction.value is AsyncAction.Loading) return
             when (event) {
                 is EditUserProfileEvent.Save -> localCoroutineScope.saveChanges(
                     name = userDisplayName,
                     avatarUri = userAvatarUri?.toUri(),
-                    currentUser = matrixUser,
+                    currentUser = baseline,
                     action = saveAction,
+                    onNameSaved = { savedName = userDisplayName?.trim(); refreshPending = true },
+                    onAvatarSaved = { savedAvatarSelection = userAvatarUri; refreshPending = true },
+                    onRefreshed = { refreshPending = false },
+                    onCompleted = ::discardLocalAvatar,
                 )
                 is EditUserProfileEvent.HandleAvatarAction -> {
                     when (event.action) {
@@ -150,6 +162,7 @@ class EditUserProfilePresenter(
                         is AsyncAction.Confirming -> {
                             // Close the dialog right now
                             saveAction.value = AsyncAction.Uninitialized
+                            discardLocalAvatar()
                             navigator.close()
                         }
                         AsyncAction.Loading -> Unit
@@ -161,6 +174,7 @@ class EditUserProfilePresenter(
                             if (canSave) {
                                 saveAction.value = AsyncAction.ConfirmingCancellation
                             } else {
+                                discardLocalAvatar()
                                 navigator.close()
                             }
                         }
@@ -178,8 +192,8 @@ class EditUserProfilePresenter(
             saveButtonEnabled = canSave && saveAction.value !is AsyncAction.Loading,
             saveAction = saveAction.value,
             cameraPermissionState = cameraPermissionState,
-            canChangeDisplayName = canChangeDisplayName.value,
-            canChangeAvatarUrl = canChangeAvatar.value,
+            canChangeDisplayName = canChangeDisplayName.value && saveAction.value !is AsyncAction.Loading,
+            canChangeAvatarUrl = canChangeAvatar.value && saveAction.value !is AsyncAction.Loading,
             eventSink = ::handleEvent,
         )
     }
@@ -195,36 +209,65 @@ class EditUserProfilePresenter(
         avatarUri: Uri?,
         currentUser: MatrixUser,
         action: MutableState<AsyncAction<Unit>>,
-    ) = launch {
-        val results = mutableListOf<Result<Unit>>()
-        suspend {
-            if (!name.isNullOrEmpty() && name.trim() != currentUser.displayName.orEmpty().trim()) {
-                results.add(matrixClient.setDisplayName(name).onFailure {
-                    Timber.e(it, "Failed to set user's display name")
-                })
+        onNameSaved: () -> Unit,
+        onAvatarSaved: () -> Unit,
+        onRefreshed: () -> Unit,
+        onCompleted: () -> Unit,
+    ) {
+        if (action.value is AsyncAction.Loading) return
+        if (hasDisplayNameChanged(name, currentUser) && name.isNullOrBlank()) return
+        action.value = AsyncAction.Loading
+        launch {
+            val nameChanged = hasDisplayNameChanged(name, currentUser)
+            val avatarChanged = hasAvatarUrlChanged(avatarUri?.toString(), currentUser)
+            val nameResult = if (nameChanged) matrixClient.setDisplayName(name.orEmpty().trim()).onSuccess { onNameSaved() }
+                else Result.success(Unit)
+            val avatarResult = if (avatarChanged) updateAvatar(avatarUri).onSuccess { onAvatarSaved() }
+                else Result.success(Unit)
+            // Refresh the authoritative profile even after partial success, so other screens do not keep stale data.
+            val refreshed = matrixClient.getUserProfile()
+            if (refreshed.isSuccess) onRefreshed()
+            val failure = when {
+                nameResult.isFailure && avatarResult.isFailure -> ProfileSaveFailure(ProfileSaveFailure.Part.Both)
+                nameResult.isFailure -> ProfileSaveFailure(ProfileSaveFailure.Part.Name)
+                avatarResult.isFailure -> ProfileSaveFailure(ProfileSaveFailure.Part.Avatar)
+                refreshed.isFailure -> ProfileSaveFailure(ProfileSaveFailure.Part.Refresh)
+                else -> null
             }
-            if (avatarUri?.toString()?.trim() != currentUser.avatarUrl?.trim()) {
-                results.add(updateAvatar(avatarUri).onFailure {
-                    Timber.e(it, "Failed to update user's avatar")
-                })
+            if (failure == null) {
+                onCompleted()
+                action.value = AsyncAction.Success(Unit)
+            } else {
+                action.value = AsyncAction.Failure(failure)
             }
-            if (results.all { it.isSuccess }) Unit else results.first { it.isFailure }.getOrThrow()
-        }.runCatchingUpdatingState(action)
+        }
     }
 
-    private suspend fun updateAvatar(avatarUri: Uri?): Result<Unit> {
-        return runCatchingExceptions {
-            if (avatarUri != null) {
-                val preprocessed = mediaPreProcessor.process(
-                    uri = avatarUri,
-                    mimeType = MimeTypes.Jpeg,
-                    deleteOriginal = false,
-                    mediaOptimizationConfig = mediaOptimizationConfigProvider.get(),
-                ).getOrThrow()
-                matrixClient.uploadAvatar(MimeTypes.Jpeg, preprocessed.file.readBytes()).getOrThrow()
-            } else {
-                matrixClient.removeAvatar().getOrThrow()
+    private suspend fun updateAvatar(avatarUri: Uri?): Result<Unit> = runCatchingExceptions {
+        if (avatarUri == null) {
+            matrixClient.removeAvatar().getOrThrow()
+        } else {
+            val preprocessed = mediaPreProcessor.process(
+                uri = avatarUri,
+                mimeType = MimeTypes.Jpeg,
+                deleteOriginal = false,
+                retainTemporarySource = true,
+                mediaOptimizationConfig = mediaOptimizationConfigProvider.get(),
+            ).getOrThrow()
+            var bytes: ByteArray? = null
+            try {
+                bytes = preprocessed.file.readBytes()
+                matrixClient.uploadAvatar(MimeTypes.Jpeg, bytes).getOrThrow()
+            } finally {
+                bytes?.fill(0)
+                preprocessed.allFiles().distinct().forEach { file ->
+                    if (file.exists() && !file.delete()) Timber.w("Avatar temporary output cleanup pending")
+                }
             }
-        }.onFailure { Timber.e(it, "Unable to update avatar") }
+        }
     }
+}
+
+internal class ProfileSaveFailure(val part: Part) : Exception("Profile update incomplete") {
+    enum class Part { Name, Avatar, Both, Refresh }
 }

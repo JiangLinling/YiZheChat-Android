@@ -17,6 +17,17 @@ import org.junit.Test
 
 class AppUpdateGatePolicyTest {
     @Test
+    fun `binding conflict exposes explicit handover while other security failures remain blocked`() {
+        val conflict = startupGateAccessibilityContract("COMPATIBILITY_BINDING_CONFLICT")
+        assertThat(conflict.primaryAction).isEqualTo(StartupGatePrimaryAction.TRANSFER_MANAGED_AUTHORIZATION)
+        assertThat(conflict.userState).isEqualTo(StartupGateUserState.BLOCKED)
+        assertThat(shouldAutomaticallyRetryStartup(conflict.reasonCode)).isFalse()
+        listOf("COMPATIBILITY_EVIDENCE_REJECTED", "DEVICE_TRUST_NOT_READY", "CONTROL_TLS_REJECTED").forEach {
+            assertThat(startupGateAccessibilityContract(it).primaryAction).isEqualTo(StartupGatePrimaryAction.RETRY_SECURITY_CHECK)
+        }
+    }
+
+    @Test
     fun `retained startup preparation preserves mandatory release and production manifest gates`() {
         assertThat(canPrepareRetainedAppContent(true, false, null)).isTrue()
         assertThat(canPrepareRetainedAppContent(true, true, release(mandatory = true))).isFalse()

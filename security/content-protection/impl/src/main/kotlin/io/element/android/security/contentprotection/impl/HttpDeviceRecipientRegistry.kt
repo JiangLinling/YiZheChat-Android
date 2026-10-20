@@ -21,6 +21,8 @@ import io.element.android.services.toolbox.api.systemclock.SystemClock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.CertificatePinner
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -177,7 +179,16 @@ class HttpDeviceRecipientRegistry(
 
     private fun <T> requireBody(response: Response<T>): T {
         if (response.code() == 401 || response.code() == 403) throw ContentProtectionException.AccessDenied()
-        if (response.code() == 409) throw ContentProtectionException.RecipientDeviceUnavailable()
+        if (response.code() == 409) {
+            // Other conflicts (for example a pending authority projection) are not proof of recipient logout.
+            val detail = runCatching {
+                Json.parseToJsonElement(response.errorBody()?.string().orEmpty()).jsonObject["detail"]?.jsonPrimitive?.content
+            }.getOrNull()
+            if (detail in setOf("account has no approved recipient devices", "an account has no approved recipient devices")) {
+                throw ContentProtectionException.RecipientDeviceUnavailable()
+            }
+            throw ContentProtectionException.KmsUnavailable()
+        }
         if (!response.isSuccessful) throw ContentProtectionException.KmsUnavailable()
         return response.body() ?: throw ContentProtectionException.KmsUnavailable()
     }

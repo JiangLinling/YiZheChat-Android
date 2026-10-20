@@ -43,7 +43,7 @@ private const val REACTIVATION_PREFIX = "scope-"
 private const val REACTIVATION_PARTIAL_PREFIX = ".partial-"
 private const val REACTIVATION_SUFFIX = ".yzra"
 private const val REACTIVATION_MIN_FILE_FORMAT_VERSION = 1
-private const val REACTIVATION_FILE_FORMAT_VERSION = 6
+private const val REACTIVATION_FILE_FORMAT_VERSION = 7
 private const val REACTIVATION_REVISION_WIDTH = 8
 private const val REACTIVATION_RETAINED_REVISIONS = 2
 private const val REACTIVATION_MAX_REVISION = 99_999_999
@@ -141,6 +141,40 @@ class EncryptedAccountReactivationScopeStore(
         accountIdHash: String,
         installationId: String,
         matrixDeviceIdHash: String,
+    ): Boolean = recordIdentityReset(accountIdHash, installationId, matrixDeviceIdHash, null)
+
+    override suspend fun cancelIdentityReset(
+        accountIdHash: String,
+        installationId: String,
+        matrixDeviceIdHash: String,
+        previousKeyHash: String,
+    ): Boolean = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val id = recordId(accountIdHash, installationId)
+            val previous = latest(id) ?: return@withLock false
+            check(previous.attempt.matrixDeviceIdHash == matrixDeviceIdHash)
+            check(previous.identityResetPreviousKeyHash == previousKeyHash && !previous.pendingExplicitIdentityReset)
+            // Keep reactivationRequired: cancelling a reset must not manufacture CORE_READY.
+            writeNextRevision(id, encode(previous.copy(identityResetPreviousKeyHash = null)))
+            true
+        }
+    }
+
+    override suspend fun beginIdentityReset(
+        accountIdHash: String,
+        installationId: String,
+        matrixDeviceIdHash: String,
+        previousKeyHash: String,
+    ): Boolean {
+        require(REACTIVATION_HASH_PATTERN.matches(previousKeyHash))
+        return recordIdentityReset(accountIdHash, installationId, matrixDeviceIdHash, previousKeyHash)
+    }
+
+    private suspend fun recordIdentityReset(
+        accountIdHash: String,
+        installationId: String,
+        matrixDeviceIdHash: String,
+        previousKeyHash: String?,
     ): Boolean = withContext(Dispatchers.IO) {
         mutex.withLock {
             require(REACTIVATION_HASH_PATTERN.matches(accountIdHash))
@@ -151,6 +185,12 @@ class EncryptedAccountReactivationScopeStore(
             if (previous?.pendingExplicitIdentityReset == true &&
                 previous.attempt.matrixDeviceIdHash == matrixDeviceIdHash
             ) {
+                return@withLock true
+            }
+            if (previous?.identityResetPreviousKeyHash != null && previous.attempt.matrixDeviceIdHash == matrixDeviceIdHash) {
+                if (previousKeyHash == null) {
+                    writeNextRevision(recordId, encode(previous.copy(identityResetPreviousKeyHash = null, pendingExplicitIdentityReset = true)))
+                }
                 return@withLock true
             }
             previous?.let { checkpoint ->
@@ -179,7 +219,8 @@ class EncryptedAccountReactivationScopeStore(
                 historyRecoveryGeneration = previous?.historyRecoveryGeneration ?: 0L,
                 pendingHistoryRoomScopeHashes = emptySet(),
                 reactivationRequired = true,
-                pendingExplicitIdentityReset = true,
+                pendingExplicitIdentityReset = previousKeyHash == null,
+                identityResetPreviousKeyHash = previousKeyHash,
             )
             validate(resetCheckpoint)
             writeNextRevision(recordId, encode(resetCheckpoint))
@@ -199,6 +240,7 @@ class EncryptedAccountReactivationScopeStore(
             val recordId = recordId(accountIdHash, installationId)
             val existingFiles = revisionFiles(recordId).sortedByDescending(::revisionOf)
             val previousCheckpoint = if (existingFiles.isEmpty()) null else latest(recordId)
+            check(previousCheckpoint?.identityResetPreviousKeyHash == null) { "Identity reset completion is not yet proven." }
             val previous = previousCheckpoint?.attempt
             previous?.let {
                 check(it.accountIdHash == accountIdHash && it.installationId == installationId)
@@ -410,6 +452,8 @@ class EncryptedAccountReactivationScopeStore(
                 checkpoint.pendingHistoryRoomScopeHashes.sorted().forEach(output::writeUTF)
                 output.writeBoolean(checkpoint.reactivationRequired)
                 output.writeBoolean(checkpoint.pendingExplicitIdentityReset)
+                output.writeBoolean(checkpoint.identityResetPreviousKeyHash != null)
+                checkpoint.identityResetPreviousKeyHash?.let(output::writeUTF)
             }
             bytes.toByteArray()
         }
@@ -512,6 +556,7 @@ class EncryptedAccountReactivationScopeStore(
                         pendingHistoryRoomScopeHashes = pendingHistoryRoomScopeHashes,
                         reactivationRequired = if (fileFormatVersion >= 4) decoded.readBoolean() else false,
                         pendingExplicitIdentityReset = if (fileFormatVersion >= 5) decoded.readBoolean() else false,
+                        identityResetPreviousKeyHash = if (fileFormatVersion >= 7 && decoded.readBoolean()) decoded.readUTF() else null,
                     )
                 }
                 check(decoded.available() == 0)
@@ -584,6 +629,11 @@ class EncryptedAccountReactivationScopeStore(
         require(checkpoint.pendingHistoryRoomScopeHashes.size <= REACTIVATION_MAX_HISTORY_ROOM_SCOPES)
         require(checkpoint.pendingHistoryRoomScopeHashes.all(REACTIVATION_HASH_PATTERN::matches))
         check(!checkpoint.pendingExplicitIdentityReset || checkpoint.reactivationRequired)
+        checkpoint.identityResetPreviousKeyHash?.let {
+            require(REACTIVATION_HASH_PATTERN.matches(it))
+            check(checkpoint.reactivationRequired && !checkpoint.pendingExplicitIdentityReset)
+            check(checkpoint.state == AccountReactivationCheckpointState.ALLOCATED)
+        }
         when (checkpoint.state) {
             AccountReactivationCheckpointState.ALLOCATED -> {
                 check(checkpoint.prepared == null && checkpoint.receipt == null)

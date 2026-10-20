@@ -56,6 +56,28 @@ import java.security.MessageDigest
 
 class AccountReactivationCoordinatorTest {
     @Test
+    fun `signed handover candidate can commit before appearing in the active recipient registry`() = runTest {
+        val attempt = attempt()
+        val prepared = PreparedAccountReactivation(ACTIVATION_ID, 1L)
+        val store = mockk<AccountReactivationScopeStore>()
+        coEvery { store.current(any(), any(), any()) } returns
+            AccountReactivationCheckpoint(attempt, AccountReactivationCheckpointState.PREPARED, prepared)
+        coEvery { store.markCommitted(attempt, any()) } returns
+            AccountReactivationCheckpoint(attempt, AccountReactivationCheckpointState.COMMITTED, prepared, receipt())
+        val management = mockk<ManagementControlService>()
+        coEvery { management.synchronize() } returns ManagementSyncReport(
+            ManagementSyncStatus.SYNCHRONIZED,
+            acceptedPolicyVersion = POLICY_VERSION,
+            accountHandoverRequiredAccountHashes = setOf(ACCOUNT_HASH),
+        )
+        coEvery { management.commitAccountReactivation(any(), prepared) } returns receipt()
+        val fixture = fixture(management, store, kmsAvailable = false, recipientRegistryAvailable = false)
+        assertThat(fixture.coordinator.activate(fixture.matrixClient).getOrThrow()).isEqualTo(receipt())
+        coVerify(exactly = 0) { fixture.recipientRegistry.approvedRecipients(any<String>()) }
+        coVerify(exactly = 0) { store.nextAttempt(any(), any(), any()) }
+    }
+
+    @Test
     fun `retained checks and descriptor run off caller then return to caller in original order`() = runTest {
         val caller = Thread.currentThread()
         val calls = mutableListOf<String>()
@@ -313,7 +335,7 @@ class AccountReactivationCoordinatorTest {
     @Test
     fun `prepared transaction is resumed after process recreation without allocating another generation`() = runTest {
         val attempt = attempt()
-        val prepared = PreparedAccountReactivation(ACTIVATION_ID, Long.MAX_VALUE)
+        val prepared = PreparedAccountReactivation(ACTIVATION_ID, 1L)
         val scopeStore = mockk<AccountReactivationScopeStore>()
         coEvery { scopeStore.current(ACCOUNT_HASH, INSTALLATION_ID, MATRIX_DEVICE_HASH) } returns
             AccountReactivationCheckpoint(attempt, AccountReactivationCheckpointState.PREPARED, prepared)
@@ -397,6 +419,7 @@ class AccountReactivationCoordinatorTest {
     @Test
     fun `failed security prerequisite cannot allocate or publish a generation`() = runTest {
         val scopeStore = mockk<AccountReactivationScopeStore>(relaxed = true)
+        coEvery { scopeStore.current(any(), any(), any()) } returns null
         val management = mockk<ManagementControlService>()
         coEvery { management.synchronize() } returns ManagementSyncReport(
             status = ManagementSyncStatus.SYNCHRONIZED,
@@ -414,6 +437,7 @@ class AccountReactivationCoordinatorTest {
     @Test
     fun `ordinary reactivation remains fail closed when the recipient registry is unavailable`() = runTest {
         val scopeStore = mockk<AccountReactivationScopeStore>(relaxed = true)
+        coEvery { scopeStore.current(any(), any(), any()) } returns null
         val management = mockk<ManagementControlService>()
         coEvery { management.synchronize() } returns ManagementSyncReport(
             status = ManagementSyncStatus.SYNCHRONIZED,

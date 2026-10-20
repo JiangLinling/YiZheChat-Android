@@ -75,6 +75,8 @@ import kotlin.math.min
  * Manages the active call state.
  */
 interface ActiveCallManager {
+    /** Resolve the original invitation before the room's Join action creates a local attempt. */
+    suspend fun resolveRoomEntry(callData: CallData): CallData = IntentProvider.forRoomEntry(callData, activeCall.value?.callData)
     suspend fun checkpointCall(callData: CallData, operationId: String) = Unit
     suspend fun finalizeReleasedCall(callData: CallData, cleanupSucceeded: Boolean, noInvitationConfirmed: Boolean = false): Boolean = false
     /**
@@ -143,6 +145,7 @@ class DefaultActiveCallManager(
     private val dataProtectionPolicyProvider: io.element.android.security.dataprotection.api.DataProtectionPolicyProvider,
     private val appOperationalStateCoordinator: io.element.android.security.dataprotection.api.AppOperationalStateCoordinator,
     private val finalizationRecovery: io.element.android.features.call.impl.security.CallFinalizationRecovery,
+    private val activeRoomsHolder: io.element.android.services.appnavstate.api.ActiveRoomsHolder,
     private val nextCalls: Boolean = NextDeploymentConfig.isNextDeployment,
 ) : ActiveCallManager, io.element.android.features.call.api.CallRecoveryService {
     private val tag = "ActiveCallManager"
@@ -202,7 +205,7 @@ class DefaultActiveCallManager(
             .drop(1)
             .filter { !it }
             .onEach {
-                val data = (activeCall.value?.callState as? CallState.Ringing)?.notificationData ?: return@onEach
+                val data = (activeCall.value?.callState as? CallState.Ringing)?.takeUnless { it.isAnswering }?.notificationData ?: return@onEach
                 showIncomingCallNotification(data)
             }
             .launchIn(coroutineScope)
@@ -218,7 +221,70 @@ class DefaultActiveCallManager(
         registerResolvedIncomingCall(resolved.copy(isGroupCall = info?.isDm == false))
     }
 
-    private suspend fun registerResolvedIncomingCall(notificationData: CallNotificationData) {
+    override suspend fun resolveRoomEntry(callData: CallData): CallData {
+        if (!nextCalls || callData.notificationEventId != null || callData.attemptId != null) return callData
+        activeCall.value?.let { current ->
+            val target = IntentProvider.forRoomEntry(callData, current.callData)
+            if (target == callData || current.remoteEnded) throw IncomingCallUnavailableException(true)
+            return target
+        }
+        val visibleRoom = activeRoomsHolder.getActiveRoomMatching(callData.sessionId, callData.roomId)
+        // This is only a Join hint. The exact decrypted invitation below owns admission.
+        if (visibleRoom?.info()?.hasRoomCall != true) return callData
+        if (!visibleRoom.info().isDm) return callData
+        val client = matrixClientProvider.getOrRestore(callData.sessionId).getOrThrow()
+        val room = client.getJoinedRoom(callData.roomId) ?: throw IncomingCallUnavailableException(false)
+        try {
+            val info = room.info()
+            if (!info.isDm || info.joinedMembersCount != 2L ||
+                info.currentUserMembership != io.element.android.libraries.matrix.api.room.CurrentUserMembership.JOINED
+            ) throw IncomingCallUnavailableException(false)
+            val notification = withTimeoutOrNull(5_000) {
+                room.liveTimeline.timelineItems.map { items ->
+                    // Select the latest invitation before checking validity: a finished newer
+                    // call must never cause an older ringing generation to be revived.
+                    val event = items.filterIsInstance<MatrixTimelineItem.Event>().map { it.event }
+                        .filter { !it.isOwn && it.isRemote && it.sender != callData.sessionId && it.content is CallNotifyContent }
+                        .maxByOrNull { it.timestamp } ?: return@map null
+                    val id = event.eventId ?: return@map null
+                    val content = event.content as CallNotifyContent
+                    val now = systemClock.epochMillis()
+                    if (content.isFinishedInvitation(callData.sessionId) || event.timestamp > now || now - event.timestamp >= 90_000) {
+                        throw IncomingCallUnavailableException(true)
+                    }
+                    val authority = room.loadRtcNotification(id).getOrNull() ?: throw IncomingCallUnavailableException(false)
+                    val protocol = authority.content
+                    if (authority.eventId != id || authority.timestamp != event.timestamp || protocol.senderId != event.sender ||
+                        protocol.type != io.element.android.libraries.matrix.api.notification.RtcNotificationType.RING ||
+                        protocol.callIntent != content.callIntent || protocol.expirationTimestampMillis <= now ||
+                        protocol.expirationTimestampMillis - event.timestamp !in 1..90_000
+                    ) throw IncomingCallUnavailableException(true)
+                    val member = room.getUpdatedMember(event.sender).getOrNull() ?: throw IncomingCallUnavailableException(false)
+                    if (member.membership != io.element.android.libraries.matrix.api.room.RoomMembershipState.JOIN || member.isIgnored) {
+                        throw IncomingCallUnavailableException(true)
+                    }
+                    CallNotificationData(
+                        sessionId = callData.sessionId, roomId = callData.roomId, eventId = id, senderId = event.sender,
+                        roomName = info.name, senderName = member.displayName, avatarUrl = member.avatarUrl,
+                        notificationChannelId = "", timestamp = event.timestamp, textContent = null,
+                        expirationTimestamp = protocol.expirationTimestampMillis, audioOnly = protocol.callIntent == CallIntent.AUDIO,
+                    )
+                }.filterNotNull().first()
+            } ?: throw IncomingCallUnavailableException(false)
+            // Explicit Join does not ring the user's own phone. It still uses the normal
+            // invitation validation, expiry, generation, cancellation and cleanup machinery.
+            registerResolvedIncomingCall(notification, userInitiated = true)
+            val current = activeCall.value ?: throw IncomingCallUnavailableException(true)
+            if (current.remoteEnded || current.callData.sessionId != callData.sessionId || current.callData.roomId != callData.roomId ||
+                current.callData.notificationEventId != notification.eventId.value
+            ) throw IncomingCallUnavailableException(true)
+            return current.callData
+        } finally {
+            room.close()
+        }
+    }
+
+    private suspend fun registerResolvedIncomingCall(notificationData: CallNotificationData, userInitiated: Boolean = false) {
         if (nextCalls) {
             // Push is a wakeup, not permission to resurrect a finished invitation.
             val content = invitationContent(notificationData.sessionId, notificationData.roomId, notificationData.eventId)
@@ -277,7 +343,7 @@ class DefaultActiveCallManager(
                     notificationEventId = notificationData.eventId.value.takeIf { nextCalls },
                     attemptId = notificationData.eventId.value.takeIf { nextCalls },
                 ),
-                callState = CallState.Ringing(notificationData),
+                callState = CallState.Ringing(notificationData, isAnswering = userInitiated),
             )
             callTracking = CallTracking(
                 callData = activeCall.value!!.callData,
@@ -286,14 +352,16 @@ class DefaultActiveCallManager(
                 joinedAtMillis = null,
                 connectedAtMillis = null,
             )
-            incomingCallRingtonePlayer.start(notificationData.notificationChannelId)
+            if (!userInitiated) incomingCallRingtonePlayer.start(notificationData.notificationChannelId)
 
             timedOutCallJob = coroutineScope.launch {
                 // Avatar initialization must not delay native answer controls.
-                showForegroundIncomingCall(notificationData)
-                setUpCoil(notificationData.sessionId)
+                if (!userInitiated) {
+                    showForegroundIncomingCall(notificationData)
+                    setUpCoil(notificationData.sessionId)
+                }
                 if ((activeCall.value?.callState as? CallState.Ringing)?.notificationData?.eventId != notificationData.eventId) return@launch
-                showIncomingCallNotification(notificationData)
+                if (!userInitiated) showIncomingCallNotification(notificationData)
 
                 // Wait for the ringing call to time out
                 delay(timeMillis = ringDuration)
@@ -1048,7 +1116,7 @@ sealed interface CallState {
      * The call is in a ringing state.
      * @param notificationData The data for the incoming call notification.
      */
-    data class Ringing(val notificationData: CallNotificationData) : CallState
+    data class Ringing(val notificationData: CallNotificationData, val isAnswering: Boolean = false) : CallState
 
     /**
      * The call is in an in-call state.

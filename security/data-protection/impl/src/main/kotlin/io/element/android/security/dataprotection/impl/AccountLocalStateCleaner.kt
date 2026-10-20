@@ -23,7 +23,7 @@ import java.util.Locale
 
 interface AccountLocalStateCleaner {
     /** Clears non-session-directory state only after the caller has stopped sync/UI and closed account databases. */
-    fun clear(scope: DeletionScope.Account): Boolean
+    fun clear(scope: DeletionScope.Account, preserveAccountState: Boolean = false): Boolean
 }
 
 @SingleIn(AppScope::class)
@@ -34,12 +34,14 @@ class DefaultAccountLocalStateCleaner(
     private val secureMediaLeaseManager: SecureMediaLeaseManager,
     private val recoveryIntentJournal: io.element.android.security.dataprotection.api.RecoveryIntentJournal,
 ) : AccountLocalStateCleaner {
-    override fun clear(scope: DeletionScope.Account): Boolean {
+    override fun clear(scope: DeletionScope.Account, preserveAccountState: Boolean): Boolean {
         secureMediaLeaseManager.revokeVault(AccountVaultId(scope.vaultId))
-        if (LegacyPlaintextTarget.entries.any { !plaintextCleaner.clean(it).completed }) return false
-        if (!recoveryIntentJournal.clearAccount(scope.accountIdHash)) return false
-        if (!deleteSessionPreferences(scope.localSessionId)) return false
-        if (!clearAccountPreferenceReferences(scope)) return false
+        if (!preserveAccountState) {
+            if (LegacyPlaintextTarget.entries.any { !plaintextCleaner.clean(it).completed }) return false
+            if (!recoveryIntentJournal.clearAccount(scope.accountIdHash)) return false
+            if (!deleteSessionPreferences(scope.localSessionId)) return false
+        }
+        if (!clearAccountPreferenceReferences(scope, preserveAccountState)) return false
         if (!clearAttachmentSources(scope.vaultId)) return false
         return clearAccountOfficePreviewCache(scope.vaultId)
     }
@@ -79,14 +81,14 @@ class DefaultAccountLocalStateCleaner(
         return deleteIfPresent(storeFile) && deleteIfPresent(File(storeFile.path + BACKUP_SUFFIX))
     }
 
-    private fun clearAccountPreferenceReferences(scope: DeletionScope.Account): Boolean {
+    private fun clearAccountPreferenceReferences(scope: DeletionScope.Account, preserveAccountState: Boolean): Boolean {
         val vaultHash = MessageDigest.getInstance(SHA_256)
             .digest(scope.vaultId.encodeToByteArray())
             .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
         return context.getSharedPreferences("${context.packageName}_preferences", Context.MODE_PRIVATE)
             .edit()
             .remove("friend_profiles_ref_$vaultHash")
-            .remove("friend_profiles_sync_pending_${scope.accountIdHash}")
+            .apply { if (!preserveAccountState) remove("friend_profiles_sync_pending_${scope.accountIdHash}") }
             .commit()
     }
 

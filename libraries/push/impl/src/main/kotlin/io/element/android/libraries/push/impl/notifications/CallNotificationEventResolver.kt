@@ -63,6 +63,23 @@ class DefaultCallNotificationEventResolver(
         val content = notificationData.content as? NotificationContent.MessageLike.RtcNotification
             ?: throw NotificationResolverException.UnknownError("content is not a call notify")
 
+        // Intentional user mentions make modern RTC invitations eligible for push. They must
+        // still obey the user's call switch and room mute policy (the legacy call rule only
+        // matches m.call.invite). Check outside the projection fallback so a policy denial
+        // can never turn into optimistic ringing.
+        if (content.type == RtcNotificationType.RING) {
+            val client = clientProvider.getOrRestore(sessionId).getOrNull()
+                ?: throw NotificationResolverException.EventFilteredOut
+            val settings = client.notificationSettingsService
+            val mode = settings.getRoomNotificationSettings(
+                notificationData.roomId, notificationData.isEncrypted, notificationData.isDm,
+            ).getOrNull()?.mode
+            if (settings.isCallEnabled().getOrNull() != true || mode == null ||
+                mode == io.element.android.libraries.matrix.api.room.RoomNotificationMode.MUTE ||
+                content.senderId in client.ignoredUsersFlow.value
+            ) throw NotificationResolverException.EventFilteredOut
+        }
+
         val isProjectionLagProneManufacturer = sequenceOf(Build.MANUFACTURER, Build.BRAND).any { value ->
             val normalizedValue = value.orEmpty().trim()
             normalizedValue.equals("huawei", ignoreCase = true) ||

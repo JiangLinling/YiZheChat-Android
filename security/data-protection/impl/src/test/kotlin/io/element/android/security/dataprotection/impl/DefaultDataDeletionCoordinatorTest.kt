@@ -245,7 +245,7 @@ private class FakeAccountLocalStateCleaner(
 ) : AccountLocalStateCleaner {
     var calls = 0
 
-    override fun clear(scope: DeletionScope.Account): Boolean {
+    override fun clear(scope: DeletionScope.Account, preserveAccountState: Boolean): Boolean {
         calls += 1
         return completed
     }

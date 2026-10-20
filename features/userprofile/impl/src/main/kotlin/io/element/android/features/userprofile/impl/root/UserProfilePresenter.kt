@@ -67,8 +67,16 @@ class UserProfilePresenter(
 
     @Composable
     private fun getDmRoomId(): State<RoomId?> {
-        return produceState(initialValue = null) {
-            value = client.findDM(userId).getOrNull()
+        return produceState<RoomId?>(initialValue = null, userId) {
+            client.roomListService.allRooms.summaries
+                .map { rooms -> rooms.map { it.info }.filter { info ->
+                    info.inviter?.userId == userId || info.heroes.any { it.userId == userId } || info.id == value
+                }.map { info ->
+                    listOf(info.id, info.currentUserMembership, info.isDm, info.isDirect,
+                        info.joinedMembersCount, info.invitedMembersCount, info.activeMembersCount)
+                }.toSet() }
+                .distinctUntilChanged()
+                .collect { value = client.findDM(userId).getOrNull() }
         }
     }
 
@@ -109,7 +117,7 @@ class UserProfilePresenter(
         }
         val relation = dmInfo?.directRoomRelationState()
         var friendship by remember(userId) { mutableStateOf<io.element.android.security.dataprotection.api.FriendshipRemovalSnapshot?>(null) }
-        LaunchedEffect(userId) {
+        LaunchedEffect(userId, dmRoomId, relation) {
             friendship = runCatchingExceptions { friendshipRemoval.preview(userId) }.getOrNull()
         }
         val removed = friendship?.status == io.element.android.security.dataprotection.api.FriendshipRemovalStatus.REMOVED
@@ -242,6 +250,7 @@ class UserProfilePresenter(
     ) = launch {
         isBlockedState.value = AsyncData.Loading(false)
         client.ignoreUser(userId)
+            .onSuccess { isBlockedState.value = AsyncData.Success(true) }
             .onFailure {
                 isBlockedState.value = AsyncData.Failure(it, false)
             }
@@ -253,6 +262,7 @@ class UserProfilePresenter(
     ) = launch {
         isBlockedState.value = AsyncData.Loading(true)
         client.unignoreUser(userId)
+            .onSuccess { isBlockedState.value = AsyncData.Success(false) }
             .onFailure {
                 isBlockedState.value = AsyncData.Failure(it, true)
             }

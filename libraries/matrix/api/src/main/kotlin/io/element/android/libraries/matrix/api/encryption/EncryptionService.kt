@@ -100,6 +100,8 @@ data class IdentityResetCompletionState(
     val recoveryState: RecoveryState,
     val isCurrentSessionVerified: Boolean,
     val backupExistsOnServer: Boolean,
+    /** Fingerprint of the actual cross-signing public key; never key material. */
+    val identityKeyHash: String? = null,
 ) {
     val isComplete: Boolean
         get() = backupState == BackupState.ENABLED &&

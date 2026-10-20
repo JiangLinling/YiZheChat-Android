@@ -13,12 +13,22 @@ internal class ManagedDirectRoomClient(
     private val send: suspend (JsonObject) -> JsonObject,
 ) {
     suspend fun execute(account: String, device: String, peer: String, create: Boolean): ManagedDirectRoomResult? {
+        val (existing, generation) = request(account, device, peer, expectedGeneration = null)
+        if (!create || existing != null) return existing
+        // Bind this explicit action to the reviewed generation. Transport retries retain
+        // this exact request; a delayed old invite cannot open a new rejected generation.
+        return request(account, device, peer, expectedGeneration = generation).first
+    }
+
+    private suspend fun request(account: String, device: String, peer: String, expectedGeneration: String?): Pair<ManagedDirectRoomResult?, String> {
+        val create = expectedGeneration != null
         val query = buildJsonObject {
             require(account.matches(Regex("[a-f0-9]{64}")) && device.matches(Regex("[a-f0-9]{64}")))
             require(peer.matches(Regex("@[^\\s:]+:[^\\s]+")))
             put("action", if (create) "invite" else "resolve")
             put("account_id_hash", account); put("matrix_device_id_hash", device); put("peer_user_id", peer)
             put("request_nonce", UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", ""))
+            expectedGeneration?.let { put("expected_generation", it) }
         }
         val payload = send(query)
         check(verifier.verifyDetached(JsonObject(payload.filterKeys { it != "signature_b64" }),
@@ -29,10 +39,13 @@ internal class ManagedDirectRoomClient(
         val expires = payload.text("expires_at_ms").toLong()
         val now = System.currentTimeMillis()
         check(issued > 0 && issued <= now + 5000 && expires > now && expires > issued && expires - issued <= 15000)
+        val generation = payload.text("generation")
+        check(generation.matches(Regex("[a-f0-9]{64}")))
+        if (expectedGeneration != null) check(generation == expectedGeneration) { "Invitation generation changed" }
         val result = payload.getValue("result").takeUnless { it is JsonNull }?.jsonObject
         if (result == null) {
             check(!create) { "Managed invitation returned no authoritative room" }
-            return null
+            return null to generation
         }
         val room = result.text("room_id")
         check(room.matches(Regex("![^\\s:]+:[^\\s]+")) && room.length <= 320)
@@ -46,7 +59,7 @@ internal class ManagedDirectRoomClient(
             check(parent.matches(Regex("direct-[a-f0-9]{64}")) && child == "dmroom-${parent.removePrefix("direct-")}")
             check(operations.all { it == parent || it == child })
         } else check(operations.isEmpty() && status == "ACCEPTED")
-        return ManagedDirectRoomResult(room, status, operations)
+        return ManagedDirectRoomResult(room, status, operations) to generation
     }
 
     private fun JsonObject.text(key: String) = getValue(key).jsonPrimitive.content

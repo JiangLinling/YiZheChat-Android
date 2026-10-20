@@ -14,6 +14,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -32,6 +33,7 @@ import io.element.android.libraries.designsystem.components.async.AsyncLoading
 import io.element.android.libraries.designsystem.theme.components.HorizontalDivider
 import io.element.android.libraries.designsystem.theme.components.SearchBar
 import io.element.android.libraries.designsystem.theme.components.SearchBarResultState
+import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.ui.components.SelectedUsersRowList
 import io.element.android.libraries.ui.strings.CommonStrings
@@ -53,6 +55,7 @@ fun SearchUserBar(
     modifier: Modifier = Modifier,
     showBackButton: Boolean = true,
     placeHolderTitle: String = stringResource(CommonStrings.common_search_for_someone),
+    hasError: Boolean = false,
 ) {
     val columnState = rememberLazyListState()
 
@@ -95,6 +98,11 @@ fun SearchUserBar(
         contentSuffix = {
             if (showLoader) {
                 AsyncLoading()
+            } else {
+                Text(
+                    text = stringResource(if (hasError) CommonStrings.contact_search_failed else CommonStrings.contact_search_hint),
+                    modifier = Modifier.padding(16.dp),
+                )
             }
         },
         resultState = resultState,

@@ -119,3 +119,14 @@ We wrap the `matrix-rust-sdk` to isolate the UI from the underlying SDK.
 - Naming: SDK `Room` → `JoinedRoom` or `RoomInfo`.
 - Type Mapping: Map Rust SDK types to Kotlin data classes in the `api` module to avoid leaking `MatrixRustSDK` into the UI.
 - Always follow Kotlin naming conventions (e.g., `userId` instead of `userID`).
+
+---
+
+## YiZheChat Project Context
+
+For YiZheChat architecture, lifecycle, security, storage, release, or acceptance work, first
+resolve the YiZheChat repository root, then read `.specify/memory/constitution.md`,
+`docs/PROJECT_REFERENCE_INDEX.md`, and the task-relevant contracts, design, source, and evidence.
+The Android checkout may be the `android/` submodule or a temporary integration worktree;
+do not assume its immediate parent is the repository root. Routine copy or local edits do not
+require a whole-project scan. This section adds to, and does not replace, the rules above.

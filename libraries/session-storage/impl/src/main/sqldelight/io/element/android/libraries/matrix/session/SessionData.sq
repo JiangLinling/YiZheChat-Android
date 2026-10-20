@@ -58,5 +58,11 @@ INSERT INTO SessionData VALUES ?;
 removeSession:
 DELETE FROM SessionData WHERE userId = ?;
 
+removeSessionIfPathsMatch:
+DELETE FROM SessionData WHERE userId = ? AND sessionPath = ? AND cachePath = ?;
+
 updateSession:
 REPLACE INTO SessionData VALUES ?;
+
+invalidateSessionIfDeviceMatches:
+UPDATE SessionData SET isTokenValid = 0 WHERE userId = ? AND deviceId = ?;

@@ -23,8 +23,53 @@ import io.element.android.tests.testutils.WarmUpRule
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
+import io.mockk.mockk
+import io.mockk.coEvery
+import io.element.android.security.dataprotection.api.DataDeletionCoordinator
+import io.element.android.security.dataprotection.api.DeletionReport
+import io.element.android.security.dataprotection.test.FakeDataDeletionCoordinator
+import io.element.android.security.securestorage.api.VaultKeyService
 
 class SignedOutPresenterTest {
+    @Test
+    fun `sign in again durably preserves exact old cleanup before removing row`() = runTest {
+        val old = aSessionData()
+        val store = InMemorySessionStore(initialList = listOf(old))
+        val deletion = FakeDataDeletionCoordinator()
+        val vault = mockk<VaultKeyService>()
+        coEvery { vault.destroy(any(), any()) } coAnswers {
+            assertThat(deletion.preparedRequests).hasSize(1)
+            assertThat(store.getSession(old.userId)).isEqualTo(old)
+            true
+        }
+        createSignedOutPresenter(sessionStore = store, deletion = deletion, vault = vault).prepareSignInAgain(old)
+        assertThat(store.getAllSessions()).isEmpty()
+        assertThat(deletion.preparedRequests.single().confirmedPreconditions).isEmpty()
+        assertThat(deletion.requests).isEmpty() // No fabricated SDK-closed or file-deleted receipt.
+    }
+
+    @Test
+    fun `failed cleanup preparation retains old row for retry`() = runTest {
+        val old = aSessionData()
+        val store = InMemorySessionStore(initialList = listOf(old))
+        val deletion = mockk<DataDeletionCoordinator>()
+        coEvery { deletion.prepare(any()) } answers {
+            DeletionReport(firstArg<io.element.android.security.dataprotection.api.DeletionRequest>().operationId,
+                emptySet(), true, "DELETION_JOURNAL_WRITE_FAILED")
+        }
+        val result = runCatching { createSignedOutPresenter(sessionStore = store, deletion = deletion).prepareSignInAgain(old) }
+        assertThat(result.isFailure).isTrue()
+        assertThat(store.getSession(old.userId)).isEqualTo(old)
+    }
+
+    @Test
+    fun `late sign in action cannot remove replacement session`() = runTest {
+        val old = aSessionData()
+        val replacement = old.copy(deviceId = "NEW", sessionPath = "new-files", cachePath = "new-cache", isTokenValid = true)
+        val store = InMemorySessionStore(initialList = listOf(replacement))
+        createSignedOutPresenter(sessionStore = store).prepareSignInAgain(old)
+        assertThat(store.getSession(old.userId)).isEqualTo(replacement)
+    }
     @get:Rule
     val warmUpRule = WarmUpRule()
 
@@ -61,9 +106,11 @@ class SignedOutPresenterTest {
             assertThat(sessionStore.getAllSessions()).isNotEmpty()
             assertThat(sessionStore.numberOfSessions()).isEqualTo(1)
             initialState.eventSink(SignedOutEvents.SignInAgain)
-            assertThat(awaitItem().signedOutSession).isNull()
+            var updated = awaitItem()
+            while (updated.signedOutSession != null) updated = awaitItem()
             assertThat(sessionStore.getAllSessions()).isEmpty()
             assertThat(sessionStore.numberOfSessions()).isEqualTo(0)
+            cancelAndIgnoreRemainingEvents()
         }
     }
 }
@@ -71,10 +118,15 @@ class SignedOutPresenterTest {
 internal fun createSignedOutPresenter(
     sessionId: SessionId = A_SESSION_ID,
     sessionStore: SessionStore = InMemorySessionStore(),
+    deletion: DataDeletionCoordinator = FakeDataDeletionCoordinator(),
+    vault: VaultKeyService = mockk { coEvery { destroy(any(), any()) } returns true },
 ): SignedOutPresenter {
     return SignedOutPresenter(
         sessionId = sessionId,
         sessionStore = sessionStore,
         buildMeta = aBuildMeta(applicationName = AN_APPLICATION_NAME),
+        managementControlService = mockk(relaxed = true),
+        dataDeletionCoordinator = deletion,
+        vaultKeyService = vault,
     )
 }

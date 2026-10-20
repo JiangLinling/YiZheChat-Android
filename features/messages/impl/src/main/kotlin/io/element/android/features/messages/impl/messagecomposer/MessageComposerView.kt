@@ -248,7 +248,7 @@ internal fun MessageComposerView(
             } else if (error is ContentProtectionException.RoomEpochConflict) {
                 stringResource(R.string.error_room_epoch_conflict)
             } else {
-                error.message ?: error.toString()
+                stringResource(io.element.android.features.messages.impl.attachments.preview.error.protectedSendErrorResource(error))
             }
         },
     )

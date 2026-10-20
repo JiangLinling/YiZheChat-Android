@@ -44,6 +44,8 @@ import kotlinx.serialization.json.JsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MediaType.Companion.toMediaType
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.DateDividerMode
 import org.matrix.rustcomponents.sdk.Membership
@@ -215,6 +217,23 @@ class RustRoomFactory(
                                         check(source.buffer.size < 65_536) { "RTC event authority response too large" }
                                         val bytes = source.buffer.readByteArray()
                                         Json.parseToJsonElement(bytes.decodeToString()) as JsonObject
+                                    }
+                                }
+                            } else null,
+                            redactRtcMembershipEvent = if (NextDeploymentConfig.isNextDeployment) { eventId ->
+                                withContext(dispatchers.io) {
+                                    check(eventId.startsWith('$')) { "RTC cleanup event identity invalid" }
+                                    val session = innerClient.session()
+                                    val url = session.homeserverUrl.toHttpUrl().newBuilder()
+                                        .addPathSegments("_matrix/client/v3/rooms").addPathSegment(sdkRoom.id())
+                                        .addPathSegment("redact").addPathSegment(eventId)
+                                        .addPathSegment("rtc-departure-$eventId").build()
+                                    check(url.isHttps) { "RTC cleanup requires HTTPS" }
+                                    val request = Request.Builder().url(url).header("Authorization", "Bearer ${session.accessToken}")
+                                        .put(io.element.android.libraries.matrix.impl.widget.rtcMembershipRedactionContent(eventId)
+                                            .toRequestBody("application/json".toMediaType())).build()
+                                    rtcEventHttpClient.newCall(request).execute().use { response ->
+                                        check(response.isSuccessful) { "RTC cleanup not accepted" }
                                     }
                                 }
                             } else null,

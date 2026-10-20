@@ -80,6 +80,32 @@ import kotlin.time.Duration.Companion.seconds
 @OptIn(ExperimentalCoroutinesApi::class)
 class CallScreenPresenterTest {
     @Test
+    fun `contact revocation stops media and retains a dismissible explanation`() = runTest {
+        val driver = FakeMatrixWidgetDriver()
+        val widget = FakeCallWidgetProvider(driver)
+        var closes = 0
+        val navigator = object : CallScreenNavigator { override fun close() { closes++ } }
+        val presenter = createCallScreenPresenter(CallData(A_SESSION_ID, A_ROOM_ID, true),
+            widgetProvider = widget, navigator = navigator, screenTracker = FakeScreenTracker {})
+        presenter.test {
+            advanceTimeBy(1.seconds); runCurrent()
+            widget.contactRevocations.emit(IllegalStateException("CONTACT_UNAVAILABLE"))
+            runCurrent()
+            val ended = expectMostRecentItem()
+            assertThat(ended.isTerminating).isTrue()
+            assertThat(ended.isCallActive).isFalse()
+            assertThat(ended.renderCallUrl(true)).isNull()
+            assertThat((ended.urlState as AsyncData.Failure).error.message).isEqualTo("CONTACT_UNAVAILABLE")
+            assertThat(closes).isEqualTo(0)
+            ended.eventSink(CallScreenEvent.Hangup)
+            ended.eventSink(CallScreenEvent.Hangup)
+            runCurrent()
+            assertThat(closes).isEqualTo(1)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `Next native signaling runs independently of the UI dispatcher`() = runTest {
         assumeTrue(NextDeploymentConfig.isNextDeployment)
         val io = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler, name = "rtc-native-io")
@@ -144,7 +170,7 @@ class CallScreenPresenterTest {
     }
 
     @Test
-    fun `Next unresponsive departure closes its native driver within 900 ms`() = runTest(UnconfinedTestDispatcher()) {
+    fun `Next unresponsive departure closes its native driver within the five second cleanup budget`() = runTest(UnconfinedTestDispatcher()) {
         assumeTrue(NextDeploymentConfig.isNextDeployment)
         val gate = CompletableDeferred<Unit>()
         val driver = FakeMatrixWidgetDriver(departure = { gate.await() })
@@ -158,7 +184,7 @@ class CallScreenPresenterTest {
         }
         runCurrent()
         assertThat(driver.closeCalledCount).isEqualTo(0)
-        advanceTimeBy(900)
+        advanceTimeBy(5_000)
         runCurrent()
         assertThat(driver.closeCalledCount).isEqualTo(1)
     }

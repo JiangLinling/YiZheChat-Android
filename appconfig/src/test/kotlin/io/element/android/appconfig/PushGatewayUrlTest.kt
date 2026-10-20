@@ -5,6 +5,15 @@ import org.junit.Test
 
 class PushGatewayUrlTest {
     @Test
+    fun `formal private registrar maps to the normal public authority`() {
+        assertThat(resolveClientReachablePushGatewayUrl(
+            "http://push-registrar:8080/_matrix/push/v1/notify?provider=coordinator",
+            true,
+            "https://security.yizhesy.cn/push/registrar",
+        )).isEqualTo("https://security.yizhesy.cn/push/registrar/_matrix/push/v1/notify?provider=coordinator")
+    }
+
+    @Test
     fun `Next maps only its exact server-internal coordinator endpoint`() {
         val result = resolveClientReachablePushGatewayUrl(
             configuredUrl = "http://next-push-registrar:8080/_matrix/push/v1/notify?provider=coordinator",

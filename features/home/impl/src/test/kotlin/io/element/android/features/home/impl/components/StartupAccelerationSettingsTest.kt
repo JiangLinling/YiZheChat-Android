@@ -27,12 +27,13 @@ class StartupAccelerationSettingsTest {
     }
 
     @Test
-    fun `xiaomi keeps its proven first route and never sends its fragment to other brands`() {
+    fun `generic details comes first and xiaomi fallback never leaks to other brands`() {
         for (family in DeviceFamily.entries) {
             val routes = startupAccelerationSettingsRoutes(family, service, "Startup acceleration")
+            assertThat(routes.first().intent.action).isEqualTo("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
             val fragments = routes.filter { it.intent.hasExtra(":settings:show_fragment") }
             assertThat(fragments.size).isEqualTo(if (family == DeviceFamily.XIAOMI) 1 else 0)
-            if (family == DeviceFamily.XIAOMI) assertThat(routes.first()).isEqualTo(fragments.single())
+            if (family == DeviceFamily.XIAOMI) assertThat(routes[1]).isEqualTo(fragments.single())
         }
     }
 

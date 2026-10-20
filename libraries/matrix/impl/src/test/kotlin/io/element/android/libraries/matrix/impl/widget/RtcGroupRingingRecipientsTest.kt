@@ -25,4 +25,16 @@ class RtcGroupRingingRecipientsTest {
             assertThat(prepareGroupRingingMessage(message) { error("must not fetch") }).isEqualTo(message)
         }
     }
+
+    @Test fun `direct call targets its peer without requiring room mention power`() = runTest {
+        val before = Json.parseToJsonElement(request()).jsonObject
+        val after = Json.parseToJsonElement(prepareGroupRingingMessage(request()) { listOf("@peer:test") }).jsonObject
+        val data = after["data"]!!.jsonObject
+        val content = data["content"]!!.jsonObject
+        assertThat(content["m.mentions"]).isEqualTo(buildJsonObject {
+            putJsonArray("user_ids") { add("@peer:test") }
+        })
+        assertThat(JsonObject(content - "m.mentions")).isEqualTo(JsonObject(before["data"]!!.jsonObject["content"]!!.jsonObject - "m.mentions"))
+        assertThat(JsonObject(after - "data")).isEqualTo(JsonObject(before - "data"))
+    }
 }

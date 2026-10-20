@@ -146,6 +146,8 @@ class FullScreenIntentPermissionsPresenter(
                 null -> false
             },
             eventSink = ::handleEvent,
+            messageNotificationChannelId = callNotificationPolicyService.messageNotificationChannelId(),
+            ringingNotificationChannelId = callNotificationPolicyService.ringingNotificationChannelId(),
         )
     }
 

@@ -12,6 +12,9 @@ import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.core.UserId
+import io.element.android.libraries.matrix.api.exception.ClientException
+import io.element.android.libraries.matrix.api.exception.ErrorKind
+import io.element.android.libraries.matrix.api.user.MatrixSearchUserResults
 import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.test.A_USER_ID
 import io.element.android.libraries.matrix.test.A_USER_NAME
@@ -20,11 +23,32 @@ import io.element.android.libraries.matrix.ui.components.aMatrixUserList
 import io.element.android.libraries.usersearch.api.UserSearchResult
 import io.element.android.libraries.usersearch.test.FakeUserListDataSource
 import kotlinx.coroutines.test.runTest
+import kotlinx.collections.immutable.persistentListOf
 import org.junit.Test
 
 private val SESSION_ID = SessionId("@current-user:example.com")
 
 internal class MatrixUserRepositoryTest {
+    @Test
+    fun `exact absent account finishes with no results and no network error`() = runTest {
+        val client = FakeMatrixClient(SESSION_ID)
+        val query = "absent-account"
+        val absentId = UserId("@absent-account:example.com")
+        client.givenSearchUsersResult(query, Result.success(MatrixSearchUserResults(persistentListOf(), false)))
+        client.givenGetProfileResult(absentId, Result.failure(
+            ClientException.MatrixApi(ErrorKind.NotFound, "M_NOT_FOUND", "Profile not found", null)
+        ))
+        MatrixUserRepository(client, MatrixUserListDataSource(client)).search(query).test {
+            assertThat(awaitItem().isSearching).isTrue()
+            awaitItem().also {
+                assertThat(it.isSearching).isFalse()
+                assertThat(it.results).isEmpty()
+                assertThat(it.hasError).isFalse()
+            }
+            awaitComplete()
+        }
+    }
+
     @Test
     fun `search - emits nothing if the search query is too short`() = runTest {
         val dataSource = FakeUserListDataSource()
@@ -79,7 +103,7 @@ internal class MatrixUserRepositoryTest {
     }
 
     @Test
-    fun `search - immediately returns placeholder if search is mxid`() = runTest {
+    fun `search - does not expose an unverified mxid as a result`() = runTest {
         val dataSource = FakeUserListDataSource()
         val repository = MatrixUserRepository(FakeMatrixClient(SESSION_ID), dataSource)
 
@@ -88,7 +112,7 @@ internal class MatrixUserRepositoryTest {
         result.test {
             awaitItem().also {
                 assertThat(it.isSearching).isTrue()
-                assertThat(it.results).isEqualTo(listOf(placeholderResult()))
+                assertThat(it.results).isEmpty()
             }
             cancelAndConsumeRemainingEvents()
         }
@@ -181,7 +205,7 @@ internal class MatrixUserRepositoryTest {
     }
 
     @Test
-    fun `search - returns unresolved user if profile can't be loaded`() = runTest {
+    fun `search - does not add a nonexistent account`() = runTest {
         val searchResults = aMatrixUserListWithoutUserId(A_USER_ID)
 
         val dataSource = FakeUserListDataSource()
@@ -193,7 +217,7 @@ internal class MatrixUserRepositoryTest {
 
         result.test {
             skipItems(1)
-            assertThat(awaitItem().results).isEqualTo(listOf(placeholderResult(isUnresolved = true)) + searchResults.toUserSearchResults())
+            assertThat(awaitItem().results).isEqualTo(searchResults.toUserSearchResults())
             awaitComplete()
         }
     }

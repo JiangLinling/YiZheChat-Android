@@ -44,6 +44,18 @@ import javax.net.ssl.SSLHandshakeException
 
 class ManagementControlCoordinatorTest {
     @Test
+    fun `only a signed session scoped handover can yield the global cleanup gate`() {
+        val handover = command(ManagementCommandType.CLEAR_ACCOUNT).copy(
+            reasonCode = "ACCOUNT_MOBILE_SUPERSEDED", targetMatrixDeviceIdHash = "b".repeat(64), mobileGeneration = 2,
+        )
+        assertThat(handover.isScopedMobileHandover()).isTrue()
+        assertThat(handover.copy(reasonCode = "ADMIN_REVOKE").isScopedMobileHandover()).isFalse()
+        assertThat(handover.copy(targetMatrixDeviceIdHash = null).isScopedMobileHandover()).isFalse()
+        assertThat(handover.copy(mobileGeneration = null).isScopedMobileHandover()).isFalse()
+        assertThat(handover.copy(type = ManagementCommandType.REVOKE).isScopedMobileHandover()).isFalse()
+    }
+
+    @Test
     fun `remote commands bind to their own complete lifecycle`() {
         val expected = mapOf(
             ManagementCommandType.LOCK to FullAppLifecycleId.LC_09,

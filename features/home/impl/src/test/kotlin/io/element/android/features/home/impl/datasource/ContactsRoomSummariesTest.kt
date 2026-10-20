@@ -25,6 +25,20 @@ import org.junit.Test
 
 class ContactsRoomSummariesTest {
     @Test
+    fun `direct invite uses inviter identity before joined DM metadata arrives`() {
+        val info = aRoomInfo(id = RoomId("!pending:test"), name = "!pending:test", isDm = false, isDirect = true,
+            currentUserMembership = CurrentUserMembership.INVITED,
+            heroes = listOf(MatrixUser(UserId("@peer:test"), "Peer", null)))
+        val room = contactsRoomSummaries(listOf(aRoomSummary(info = info)), RoomList.LoadingState.Loaded(1)).dataOrNull()!!.single()
+        assertThat(room.isDm).isTrue()
+        assertThat(room.name).isEqualTo("Peer")
+        val group = info.copy(isDirect = false)
+        assertThat(group.isDirectInvitation).isFalse()
+        assertThat(group.invitationDisplayName()).isEqualTo("!pending:test")
+        assertThat(info.copy(isSpace = true).isDirectInvitation).isFalse()
+    }
+
+    @Test
     fun `not loaded and missing nonempty snapshot do not report an empty directory`() {
         assertThat(contactsRoomSummaries(emptyList(), RoomList.LoadingState.NotLoaded)).isInstanceOf(AsyncData.Loading::class.java)
         assertThat(contactsRoomSummaries(null, RoomList.LoadingState.Loaded(1))).isInstanceOf(AsyncData.Loading::class.java)

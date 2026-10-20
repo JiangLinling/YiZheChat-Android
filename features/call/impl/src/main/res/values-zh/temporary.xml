@@ -43,4 +43,7 @@
     <string name="call_group_video_incoming">邀请你加入群视频通话</string>
     <string name="call_security_notice_title">端到端加密即时通话</string>
     <string name="call_security_notice_description">结束后清除本次通话密钥，不保存音视频内容</string>
+    <string name="call_authority_ended">通话已结束</string>
+    <string name="call_previous_authorization_ended">本次通话已结束。如需再次通话，请返回聊天重新拨打。</string>
+    <string name="call_contact_ended">本次通话已结束，当前无法继续与对方通话。请返回聊天；解除联系限制后可以重新拨打。</string>
 </resources>

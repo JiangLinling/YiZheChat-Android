@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_identity_confirmed_continue_setup">Your identity is confirmed. Continue to finish device authorization and sign-in. When switching phones, the previous phone will be signed out after the switch completes.</string>
+    <string name="screen_other_phone_identity_confirmed">The other phone\'s identity is confirmed. Continue setup on that phone. This phone will be signed out only when the switch completes.</string>
+    <string name="screen_phone_verification_incomplete">Verification did not finish. Try again and compare the verification details on both phones. The phone switch has not completed.</string>
+</resources>

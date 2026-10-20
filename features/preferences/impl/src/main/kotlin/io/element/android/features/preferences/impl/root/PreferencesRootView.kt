@@ -8,6 +8,7 @@
 
 package io.element.android.features.preferences.impl.root
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -19,7 +20,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -32,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.compound.tokens.generated.CompoundIcons
 import io.element.android.features.preferences.impl.R
+import io.element.android.features.preferences.impl.components.SettingsNavigationRow
 import io.element.android.features.preferences.impl.user.UserPreferences
 import io.element.android.libraries.architecture.coverage.ExcludeFromCoverage
 import io.element.android.libraries.designsystem.components.avatar.AvatarSize
@@ -81,6 +86,28 @@ fun PreferencesRootView(
     onMyQrCodeClick: () -> Unit = {},
 ) {
     val snackbarHostState = rememberSnackbarHostState(snackbarMessage = state.snackbarMessage)
+    var showAccountSettings by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = showAccountSettings) { showAccountSettings = false }
+    if (showAccountSettings) {
+        PreferencePage(
+            modifier = modifier,
+            onBackClick = { showAccountSettings = false },
+            applySystemBarsPadding = applySystemBarsPadding,
+            title = stringResource(R.string.screen_settings_accounts_devices),
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+        ) {
+            if (state.isMultiAccountEnabled) {
+                MultiAccountSection(state = state, onAddAccountClick = onAddAccountClick)
+            }
+            ManageAccountSection(
+                state = state,
+                onManageAccountClick = onManageAccountClick,
+                onLinkNewDeviceClick = onLinkNewDeviceClick,
+                onOpenBlockedUsers = onOpenBlockedUsers,
+            )
+        }
+        return
+    }
 
     // Include pref from other modules
     PreferencePage(
@@ -99,26 +126,21 @@ fun PreferencesRootView(
             matrixUser = state.myUser,
             onMyQrCodeClick = onMyQrCodeClick,
         )
-        if (state.isMultiAccountEnabled) {
-            MultiAccountSection(
-                state = state,
-                onAddAccountClick = onAddAccountClick,
-            )
-        } else {
-            HorizontalDivider()
-        }
-        ManageAccountSection(
-            state = state,
-            onManageAccountClick = onManageAccountClick,
-            onLinkNewDeviceClick = onLinkNewDeviceClick,
-            onOpenBlockedUsers = onOpenBlockedUsers
-        )
+        HorizontalDivider()
         ListItem(
             headlineContent = { Text(stringResource(id = R.string.screen_message_favourites_title)) },
-            supportingContent = { Text(stringResource(id = R.string.screen_message_favourites_summary)) },
             leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.FavouriteSolid())),
+            trailingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ChevronRight())),
             onClick = onOpenMessageFavourites,
         )
+        HorizontalDivider()
+        if (state.isMultiAccountEnabled || state.accountManagementUrl != null || state.showLinkNewDevice || state.showBlockedUsersItem) {
+            SettingsNavigationRow(
+                title = stringResource(R.string.screen_settings_accounts_devices),
+                icon = CompoundIcons.Devices(),
+                onClick = { showAccountSettings = true },
+            )
+        }
         SecuritySection(
             onOpenChatSecurity = onOpenChatSecurity,
         )
@@ -128,6 +150,7 @@ fun PreferencesRootView(
             canReportBug = state.canReportBug,
             onOpenRageShake = onOpenRageShake,
         )
+        HorizontalDivider()
         AboutSection(
             state = state,
             onSignOutClick = onSignOutClick,
@@ -182,8 +205,8 @@ private fun ColumnScope.SecuritySection(
 ) {
     ListItem(
         headlineContent = { Text(stringResource(id = R.string.screen_chat_security_title)) },
-        supportingContent = { Text(stringResource(id = R.string.screen_chat_security_summary)) },
         leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Shield())),
+        trailingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ChevronRight())),
         onClick = onOpenChatSecurity,
     )
 }
@@ -229,20 +252,22 @@ private fun ColumnScope.GeneralSection(
 ) {
     ListItem(
         headlineContent = { Text(stringResource(id = R.string.screen_notification_settings_title)) },
-        supportingContent = { Text(stringResource(id = R.string.troubleshoot_notifications_entry_point_title)) },
         leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Notifications())),
+        trailingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ChevronRight())),
         onClick = onOpenNotificationSettings,
     )
     ListItem(
         headlineContent = { Text(stringResource(id = CommonStrings.common_advanced_settings)) },
         leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.Settings())),
+        trailingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ChevronRight())),
         onClick = onOpenAdvancedSettings,
     )
     if (canReportBug) {
+        HorizontalDivider()
         ListItem(
             headlineContent = { Text(stringResource(R.string.screen_preferences_problem_feedback)) },
-            supportingContent = { Text(stringResource(R.string.screen_preferences_problem_feedback_summary)) },
             leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ChatProblem())),
+            trailingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ChevronRight())),
             onClick = onOpenRageShake,
         )
     }

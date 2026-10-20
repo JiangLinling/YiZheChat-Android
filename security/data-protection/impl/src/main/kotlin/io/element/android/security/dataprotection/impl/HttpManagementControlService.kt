@@ -267,6 +267,14 @@ class HttpManagementControlService(
         }
     }
 
+    override suspend fun managedAuthorizationHandoverSubjects(): LifecycleSubjectHashes? {
+        val session = sessionStore.getAllSessions().singleOrNull()?.takeIf { it.isTokenValid } ?: return null
+        return LifecycleSubjectHashes(
+            accountIdHash = accountIdHash(session.userId),
+            matrixDeviceIdHash = sha256Hex(session.deviceId.encodeToByteArray()),
+        )
+    }
+
     override suspend fun transferManagedDeviceAuthorization(accountIdHash: String, matrixDeviceIdHash: String) {
         withContext(Dispatchers.IO) {
             val token = recoveryMatrixToken(accountIdHash, matrixDeviceIdHash)
@@ -586,6 +594,39 @@ class HttpManagementControlService(
                 json.parseToJsonElement(executeSignedPost("/v1/lifecycle/direct-room", body.toString().encodeToByteArray(),
                     bindLifecycle = false).decodeToString()).jsonObject
             }.execute(accountIdHash, matrixDeviceIdHash, peerUserId, create)
+        }
+
+    override suspend fun setContactBlocked(accountIdHash: String, matrixDeviceIdHash: String, peerUserId: String, blocked: Boolean) =
+        withContext(Dispatchers.IO) {
+            check(configuration.isNextDeployment) { "Contact policy protocol is unavailable" }
+            ManagedContactPolicyClient(signatureVerifier, { deviceTrustService.current().installationId }) { query ->
+                val token = recoveryMatrixToken(accountIdHash, matrixDeviceIdHash)
+                val body = JsonObject(query + ("matrix_access_token" to kotlinx.serialization.json.JsonPrimitive(token)))
+                json.parseToJsonElement(executeSignedPost("/v1/lifecycle/contact-policy", body.toString().encodeToByteArray(),
+                    bindLifecycle = false).decodeToString()).jsonObject
+            }.setBlocked(accountIdHash, matrixDeviceIdHash, peerUserId, blocked)
+        }
+
+    override suspend fun requireContactRoomAllowed(accountIdHash: String, matrixDeviceIdHash: String, roomId: String) =
+        withContext(Dispatchers.IO) {
+            check(configuration.isNextDeployment) { "Contact policy protocol is unavailable" }
+            ManagedContactPolicyClient(signatureVerifier, { deviceTrustService.current().installationId }) { query ->
+                val token = recoveryMatrixToken(accountIdHash, matrixDeviceIdHash)
+                val body = JsonObject(query + ("matrix_access_token" to kotlinx.serialization.json.JsonPrimitive(token)))
+                json.parseToJsonElement(executeSignedPost("/v1/lifecycle/contact-policy", body.toString().encodeToByteArray(),
+                    bindLifecycle = false).decodeToString()).jsonObject
+            }.requireRoomAllowed(accountIdHash, matrixDeviceIdHash, roomId)
+        }
+
+    override suspend fun contactCallTerminationReason(accountIdHash: String, matrixDeviceIdHash: String, roomId: String, operationId: String) =
+        withContext(Dispatchers.IO) {
+            check(configuration.isNextDeployment) { "Contact policy protocol is unavailable" }
+            ManagedContactPolicyClient(signatureVerifier, { deviceTrustService.current().installationId }) { query ->
+                val token = recoveryMatrixToken(accountIdHash, matrixDeviceIdHash)
+                val body = JsonObject(query + ("matrix_access_token" to kotlinx.serialization.json.JsonPrimitive(token)))
+                json.parseToJsonElement(executeSignedPost("/v1/lifecycle/contact-policy", body.toString().encodeToByteArray(),
+                    bindLifecycle = false).decodeToString()).jsonObject
+            }.callTerminationReason(accountIdHash, matrixDeviceIdHash, roomId, operationId)
         }
 
     override suspend fun createManagedRoom(request: ManagedRoomCreationRequest): String? = withContext(Dispatchers.IO) {
@@ -971,9 +1012,9 @@ class HttpManagementControlService(
             AccountReactivationResponseWire.serializer(),
             executeSignedPost(ACCOUNT_REACTIVATION_PREPARE_PATH, body).decodeToString(),
         )
-        check(response.state == "PREPARED")
+        check(response.state in setOf("PREPARED", "COMMITTED"))
         check(response.activationId.matches(ACTIVATION_ID_PATTERN))
-        check(response.expiresAtEpochMillis > System.currentTimeMillis())
+        check(response.expiresAtEpochMillis > 0)
         PreparedAccountReactivation(response.activationId, response.expiresAtEpochMillis)
     }
 
@@ -983,7 +1024,8 @@ class HttpManagementControlService(
     ): AccountActivationReceipt = withContext(Dispatchers.IO) {
         validateAccountReactivationRequest(request)
         check(prepared.activationId.matches(ACTIVATION_ID_PATTERN))
-        check(prepared.expiresAtEpochMillis > System.currentTimeMillis())
+        // A lost COMMIT response may be recovered after PREPARE's deadline.
+        // Only the authority can distinguish COMMITTED from an expired attempt.
         val body = json.encodeToString(
             AccountReactivationCommitWire(
                 activationId = prepared.activationId,
@@ -992,7 +1034,14 @@ class HttpManagementControlService(
         ).encodeToByteArray()
         val response = json.decodeFromString(
             AccountReactivationResponseWire.serializer(),
-            executeSignedPost(ACCOUNT_REACTIVATION_COMMIT_PATH, body).decodeToString(),
+            try {
+                executeSignedPost(ACCOUNT_REACTIVATION_COMMIT_PATH, body).decodeToString()
+            } catch (failure: HttpStatusException) {
+                if (failure.statusCode == 410 && failure.safeDetail == "reactivation transaction expired") {
+                    throw io.element.android.security.dataprotection.api.AccountActivationExpired()
+                }
+                throw failure
+            },
         )
         check(response.state == "COMMITTED" && response.activationId == prepared.activationId)
         val envelope = SignedJsonEnvelopeWire(
@@ -1355,6 +1404,10 @@ class HttpManagementControlService(
         repository.pendingCommands()
     }
 
+    override suspend fun isMobileSessionSuperseded(accountIdHash: String, matrixDeviceIdHash: String): Boolean = withContext(Dispatchers.IO) {
+        repository.isMobileSessionSuperseded(accountIdHash, matrixDeviceIdHash)
+    }
+
     override suspend fun isOfflineDeadlineExceeded(): Boolean = withContext(Dispatchers.IO) {
         repository.isOfflineDeadlineExceeded()
     }
@@ -1555,13 +1608,18 @@ class HttpManagementControlService(
         preferredStem: String,
         password: String,
         idempotencyKey: String,
+        consent: io.element.android.security.dataprotection.api.RegistrationConsent?,
     ): OnboardingActivation = withContext(Dispatchers.IO) {
         check(configuration.isConfigured) { "Management service is not configured." }
         require(OnboardingPasswordPolicy.isSatisfiedBy(password))
         require(idempotencyKey.matches(IDEMPOTENCY_KEY_PATTERN))
+        if (consent == null) throw io.element.android.security.dataprotection.api.RegistrationAgreementRequired()
         val installationId = deviceTrustService.initialize().installationId
         val body = json.encodeToString(
             ActivateOnboardingInvitationWire(
+                agreementAccepted = true,
+                agreementVersion = consent.version,
+                agreementSha256 = consent.sha256,
                 activationSession = activationSession,
                 displayName = displayName,
                 preferredStem = preferredStem,
@@ -1798,6 +1856,12 @@ class HttpManagementControlService(
 
     private fun releaseBaseUrl(nextBaseUrl: String, stableHost: String, label: String): String {
         if (!configuration.isNextDeployment) return "https://$stableHost"
+        if (configuration.updateChannel == "internal") {
+            check(nextBaseUrl == "https://security.yizhesy.cn") {
+                "Internal update $label endpoint does not match the formal authority."
+            }
+            return nextBaseUrl
+        }
         val uri = runCatching { URI(nextBaseUrl) }.getOrNull()
         val host = uri?.host?.lowercase().orEmpty()
         val path = uri?.path
@@ -1974,7 +2038,7 @@ class HttpManagementControlService(
     private suspend fun performSync(): SyncResponseWire {
         val trust = deviceTrustService.current()
         if (trust.attestationVersion <= 0) throw EnrollmentRequiredException()
-        val sessions = sessionStore.getAllSessions()
+        val sessions = sessionStore.getAllSessions().filter { it.isTokenValid }
         val heartbeat = HeartbeatWire(
             appVersionCode = buildMeta.versionCode,
             attestationVersion = trust.attestationVersion,
@@ -2220,6 +2284,12 @@ class HttpManagementControlService(
         return httpClient.newCall(request).execute().use { response ->
             val bytes = response.body.bytes()
             if (!response.isSuccessful) {
+                if (request.url.encodedPath == ONBOARDING_ACTIVATE_PATH) {
+                    when (safeServerDetail(bytes)) {
+                        "REGISTRATION_AGREEMENT_REQUIRED" -> throw io.element.android.security.dataprotection.api.RegistrationAgreementRequired()
+                        "REGISTRATION_AGREEMENT_CHANGED" -> throw io.element.android.security.dataprotection.api.RegistrationAgreementChanged()
+                    }
+                }
                 if (request.url.encodedPath.endsWith(ACCOUNT_DELETION_PREPARE_PATH) &&
                     isPermanentDeletionSubmissionBlocked(response.code, bytes)
                 ) {
@@ -2488,7 +2558,7 @@ class HttpManagementControlService(
             "MANAGED" -> {
                 check(decision.managedLicenseState == "ACTIVE")
                 val contentShareKey = deviceShareKeyService.descriptor()
-                val sessions = sessionStore.getAllSessions()
+                val sessions = sessionStore.getAllSessions().filter { it.isTokenValid }
                 val currentAccountHashes = sessions.map { accountIdHash(it.userId) }.toSet()
                 val license = if (decision.schemaVersion == 3) {
                     val expectedBindings = sessions.map { session ->

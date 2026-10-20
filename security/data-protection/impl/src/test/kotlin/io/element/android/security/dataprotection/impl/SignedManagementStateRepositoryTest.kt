@@ -36,6 +36,29 @@ import java.util.Base64
 @RunWith(RobolectricTestRunner::class)
 class SignedManagementStateRepositoryTest {
     @Test
+    fun `mobile retirement notice is signed and bound to the exact old login after completion`() {
+        val fixture = Fixture(temporaryFolder.root)
+        val now = System.currentTimeMillis()
+        val command = fixture.repository.acceptCommand(fixture.mobileClear(now), now)
+        assertThat(command.targetMatrixDeviceIdHash).isEqualTo("b".repeat(64))
+        assertThat(command.targetsAccountSession("a".repeat(64), "b".repeat(64))).isTrue()
+        assertThat(command.targetsAccountSession("a".repeat(64), "c".repeat(64))).isFalse()
+        assertThat(command.targetsAccountSession("c".repeat(64), "b".repeat(64))).isFalse()
+        assertThat(fixture.repository.isMobileSessionSuperseded("a".repeat(64), "b".repeat(64))).isTrue()
+        assertThat(fixture.repository.isMobileSessionSuperseded("a".repeat(64), "c".repeat(64))).isFalse()
+        fixture.repository.recordCommandReport(
+            io.element.android.security.dataprotection.api.ManagementCommandExecutionReport(
+                command.commandId, command.type, io.element.android.security.dataprotection.api.ManagementCommandState.COMPLETE, 100,
+            ), removeWhenComplete = true,
+        )
+        assertThat(fixture.newRepository().pendingCommands(now)).isEmpty()
+        assertThat(fixture.newRepository().isMobileSessionSuperseded("a".repeat(64), "b".repeat(64))).isTrue()
+        assertThrows(IllegalStateException::class.java) {
+            fixture.repository.acceptCommand(fixture.mobileClear(now, matrixHash = null), now)
+        }
+    }
+
+    @Test
     fun `signed offline entry survives process recreation without resetting its deadline`() {
         val fixture = Fixture(temporaryFolder.root)
         val now = System.currentTimeMillis()
@@ -1302,6 +1325,16 @@ class SignedManagementStateRepositoryTest {
                 notBeforeEpochMillis = notBefore,
                 expiresAtEpochMillis = expiresAt,
                 schemaVersion = 1,
+            )).jsonObject
+            return SignedJsonEnvelopeWire(command = payload, keyId = keyId, signatureBase64 = sign(verifier.canonicalJson(payload)))
+        }
+
+        fun mobileClear(now: Long, matrixHash: String? = "b".repeat(64)): SignedJsonEnvelopeWire {
+            val payload = Json.encodeToJsonElement(CommandWire.serializer(), CommandWire(
+                commandId = "mobile-clear-command", installationId = INSTALLATION_ID, commandType = "CLEAR_ACCOUNT",
+                accountIdHash = "a".repeat(64), contentId = null, version = 1, issuedAtEpochMillis = now,
+                notBeforeEpochMillis = now, expiresAtEpochMillis = now + 60_000, schemaVersion = 2,
+                targetMatrixDeviceIdHash = matrixHash, mobileGeneration = 1, reasonCode = "ACCOUNT_MOBILE_SUPERSEDED",
             )).jsonObject
             return SignedJsonEnvelopeWire(command = payload, keyId = keyId, signatureBase64 = sign(verifier.canonicalJson(payload)))
         }

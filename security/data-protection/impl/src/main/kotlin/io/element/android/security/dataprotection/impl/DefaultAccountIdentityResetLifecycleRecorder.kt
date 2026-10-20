@@ -31,6 +31,46 @@ class DefaultAccountIdentityResetLifecycleRecorder(
     private val deviceTrustService: DeviceTrustService,
     private val accountReactivationScopeStore: AccountReactivationScopeStore,
 ) : AccountIdentityResetLifecycleRecorder {
+    override suspend fun cancelExplicitReset(): Result<Unit> = runCatching {
+        val trust = deviceTrustService.current()
+        val accountHash = accountIdHash(matrixClient.sessionId.value)
+        val deviceHash = sha256Hex(matrixClient.deviceId.value)
+        val before = accountReactivationScopeStore.current(accountHash, trust.installationId, deviceHash)
+            ?.identityResetPreviousKeyHash ?: return@runCatching
+        val current = matrixClient.encryptionService.getIdentityResetCompletionState().getOrThrow()
+        if (current.identityKeyHash == before) {
+            check(accountReactivationScopeStore.cancelIdentityReset(accountHash, trust.installationId, deviceHash, before))
+        } else {
+            // Cancellation raced a remote success. Preserve the reset and reconcile it.
+            check(resumeCompletedReset().getOrThrow()) { "Reset outcome is still unknown." }
+        }
+    }
+
+    override suspend fun beginExplicitReset(): Result<String> = runCatching {
+        val trust = deviceTrustService.current()
+        val accountHash = accountIdHash(matrixClient.sessionId.value)
+        val deviceHash = sha256Hex(matrixClient.deviceId.value)
+        val existing = accountReactivationScopeStore.current(accountHash, trust.installationId, deviceHash)
+        existing?.identityResetPreviousKeyHash?.let { return@runCatching it }
+        check(existing?.pendingExplicitIdentityReset != true) { "The completed reset must be activated before another reset." }
+        val previousHash = checkNotNull(matrixClient.encryptionService.getIdentityResetCompletionState().getOrThrow().identityKeyHash)
+        check(accountReactivationScopeStore.beginIdentityReset(accountHash, trust.installationId, deviceHash, previousHash))
+        previousHash
+    }
+
+    override suspend fun resumeCompletedReset(): Result<Boolean> = runCatching {
+        val trust = deviceTrustService.current()
+        val checkpoint = accountReactivationScopeStore.current(
+            accountIdHash(matrixClient.sessionId.value), trust.installationId, sha256Hex(matrixClient.deviceId.value),
+        ) ?: return@runCatching false
+        if (checkpoint.pendingExplicitIdentityReset) return@runCatching true
+        val before = checkpoint.identityResetPreviousKeyHash ?: return@runCatching false
+        val state = matrixClient.encryptionService.getIdentityResetCompletionState().getOrThrow()
+        if (!state.isComplete || state.identityKeyHash == null || state.identityKeyHash == before) return@runCatching false
+        recordExplicitReset().getOrThrow()
+        true
+    }
+
     override suspend fun recordExplicitReset(): Result<Unit> = runCatching {
         val trust = deviceTrustService.current()
         check(trust.installationId.isNotBlank())

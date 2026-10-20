@@ -10,6 +10,8 @@ package io.element.android.libraries.usersearch.impl
 
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.matrix.api.core.UserId
+import io.element.android.libraries.matrix.api.exception.ClientException
+import io.element.android.libraries.matrix.api.exception.ErrorKind
 import io.element.android.libraries.matrix.api.user.MatrixSearchUserResults
 import io.element.android.libraries.matrix.api.user.MatrixUser
 import io.element.android.libraries.matrix.test.AN_AVATAR_URL
@@ -22,6 +24,23 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
 internal class MatrixUserListDataSourceTest {
+    @Test
+    fun `get profile - absent account is no match`() = runTest {
+        val client = FakeMatrixClient()
+        client.givenGetProfileResult(A_USER_ID, Result.failure(
+            ClientException.MatrixApi(ErrorKind.NotFound, "M_NOT_FOUND", "Profile not found", null)
+        ))
+        assertThat(MatrixUserListDataSource(client).getProfile(A_USER_ID)).isNull()
+    }
+
+    @Test
+    fun `get profile - forbidden is not an absent account`() = runTest {
+        val failure = ClientException.MatrixApi(ErrorKind.Forbidden, "M_FORBIDDEN", "Forbidden", null)
+        val client = FakeMatrixClient()
+        client.givenGetProfileResult(A_USER_ID, Result.failure(failure))
+        assertThat(runCatching { MatrixUserListDataSource(client).getProfile(A_USER_ID) }.exceptionOrNull()).isSameInstanceAs(failure)
+    }
+
     @Test
     fun `search - returns users on success`() = runTest {
         val matrixClient = FakeMatrixClient()
@@ -47,7 +66,7 @@ internal class MatrixUserListDataSourceTest {
     }
 
     @Test
-    fun `search - returns empty list on error`() = runTest {
+    fun `search - preserves error instead of claiming no matches`() = runTest {
         val matrixClient = FakeMatrixClient()
         matrixClient.givenSearchUsersResult(
             searchTerm = "test",
@@ -55,8 +74,7 @@ internal class MatrixUserListDataSourceTest {
         )
         val dataSource = MatrixUserListDataSource(matrixClient)
 
-        val results = dataSource.search("test", 2)
-        assertThat(results).isEmpty()
+        assertThat(runCatching { dataSource.search("test", 2) }.exceptionOrNull()?.message).isEqualTo("Ruhroh")
     }
 
     @Test
@@ -73,7 +91,7 @@ internal class MatrixUserListDataSourceTest {
     }
 
     @Test
-    fun `get profile - returns null on error`() = runTest {
+    fun `get profile - preserves errors other than not found`() = runTest {
         val matrixClient = FakeMatrixClient()
         matrixClient.givenGetProfileResult(
             userId = A_USER_ID,
@@ -81,8 +99,7 @@ internal class MatrixUserListDataSourceTest {
         )
         val dataSource = MatrixUserListDataSource(matrixClient)
 
-        val result = dataSource.getProfile(A_USER_ID)
-        assertThat(result).isNull()
+        assertThat(runCatching { dataSource.getProfile(A_USER_ID) }.exceptionOrNull()?.message).isEqualTo("Ruhroh")
     }
 
     private fun aMatrixUserProfile(

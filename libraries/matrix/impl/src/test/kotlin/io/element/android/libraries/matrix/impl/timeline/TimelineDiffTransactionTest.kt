@@ -8,10 +8,36 @@
 package io.element.android.libraries.matrix.impl.timeline
 
 import com.google.common.truth.Truth.assertThat
+import io.element.android.libraries.matrix.impl.fixtures.fakes.FakeFfiTimelineItem
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.TimelineDiff
 
 class TimelineDiffTransactionTest {
+    @Test
+    fun `ignore list clear followed by incremental call events does not wait forever for Reset`() {
+        val coordinator = TimelineStructuralTransactionCoordinator(TimelineCommitScope(1L))
+        assertThat(coordinator.accept(listOf(TimelineDiff.Clear))).isNull()
+        val append = TimelineDiff.Append(listOf(FakeFfiTimelineItem()))
+        val first = checkNotNull(coordinator.accept(listOf(append)))
+        assertThat(first.diffs).containsExactly(TimelineDiff.Clear, append).inOrder()
+        val push = TimelineDiff.PushBack(FakeFfiTimelineItem())
+        val second = checkNotNull(coordinator.accept(listOf(push)))
+        assertThat(second.diffs).containsExactly(push)
+        assertThat(second.structuralEpoch).isEqualTo(first.structuralEpoch)
+        assertThat(second.sequence).isEqualTo(first.sequence + 1)
+    }
+
+    @Test
+    fun `last Clear and its incremental replacement commit together and discard superseded events`() {
+        val coordinator = TimelineStructuralTransactionCoordinator(TimelineCommitScope(1L))
+        val push = TimelineDiff.PushBack(FakeFfiTimelineItem())
+        val result = checkNotNull(coordinator.accept(listOf(
+            TimelineDiff.Clear, TimelineDiff.Reset(listOf(FakeFfiTimelineItem())), TimelineDiff.Clear, push,
+        )))
+        assertThat(result.diffs).containsExactly(TimelineDiff.Clear, push).inOrder()
+        assertThat(result.structuralEpoch).isEqualTo(2L)
+    }
+
     @Test
     fun `each standalone Reset advances the structural epoch`() {
         val coordinator = TimelineStructuralTransactionCoordinator(TimelineCommitScope(1L))

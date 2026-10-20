@@ -50,7 +50,7 @@ dependencies {
     implementation(libs.coil)
     implementation(libs.coil.compose)
 
-    testCommonDependencies(libs)
+    testCommonDependencies(libs, true)
     testImplementation(projects.features.enterprise.test)
     testImplementation(projects.libraries.matrix.test)
     testImplementation(projects.libraries.mediaupload.test)

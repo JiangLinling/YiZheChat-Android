@@ -20,6 +20,8 @@ class FakeCallWidgetProvider(
     private val url: String = "https://call.element.io",
     private val protectionSession: CallProtectionSession? = null,
 ) : CallWidgetProvider {
+    val contactRevocations = kotlinx.coroutines.flow.MutableSharedFlow<Throwable>()
+    override fun observeContactRevocation(sessionId: SessionId, roomId: RoomId, operationId: String) = contactRevocations
     var getWidgetCalled = false
         private set
     var incomingRequested = false

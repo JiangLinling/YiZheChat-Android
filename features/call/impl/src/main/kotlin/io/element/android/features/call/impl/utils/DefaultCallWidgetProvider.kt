@@ -39,7 +39,38 @@ class DefaultCallWidgetProvider(
     private val callWidgetSettingsProvider: CallWidgetSettingsProvider,
     private val activeRoomsHolder: ActiveRoomsHolder,
     private val callProtectionService: CallProtectionService,
+    private val managementControlService: io.element.android.security.dataprotection.api.ManagementControlService,
 ) : CallWidgetProvider {
+    override fun observeContactRevocation(sessionId: SessionId, roomId: RoomId, operationId: String): Flow<Throwable> = kotlinx.coroutines.flow.flow {
+        if (!NextDeploymentConfig.isNextDeployment) return@flow
+        val client = matrixClientsProvider.getOrRestore(sessionId).getOrThrow()
+        while (true) {
+            kotlinx.coroutines.delay(5_000)
+            val failure = try {
+                kotlinx.coroutines.withTimeout(5_000) {
+                    managementControlService.contactCallTerminationReason(
+                        io.element.android.security.securestorage.api.accountIdHash(sessionId.value),
+                        io.element.android.security.securestorage.api.accountIdHash(client.deviceId.value),
+                        roomId.value,
+                        operationId,
+                    )?.let { IllegalStateException(it) }
+                }
+            } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+                null
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                null
+            }
+            if (failure != null) {
+                emit(failure)
+                return@flow
+            }
+            // The server fences media independently. A failed status read must not be
+            // invented into a "peer blocked you" fact, or renew an existing admission.
+        }
+    }
+
     override suspend fun getWidget(
         sessionId: SessionId,
         roomId: RoomId,
@@ -61,6 +92,13 @@ class DefaultCallWidgetProvider(
             .onFailure { Timber.e("Element Call initialization failed at session restore.") }
             .getOrThrow()
         logPreparationPhase("client_restored")
+        if (NextDeploymentConfig.isNextDeployment) {
+            managementControlService.requireContactRoomAllowed(
+                io.element.android.security.securestorage.api.accountIdHash(sessionId.value),
+                io.element.android.security.securestorage.api.accountIdHash(matrixClient.deviceId.value),
+                roomId.value,
+            )
+        }
         // The widget driver and its Room must come from the same restored Matrix client. An active
         // room can survive a client/activity replacement and still match by session and room id,
         // while its Rust Room no longer exists in the restored client's BaseClient. That stale
@@ -159,6 +197,7 @@ class DefaultCallWidgetProvider(
         }
     }
 }
+
 
 internal data class CallRoomSelection(
     val room: JoinedRoom,

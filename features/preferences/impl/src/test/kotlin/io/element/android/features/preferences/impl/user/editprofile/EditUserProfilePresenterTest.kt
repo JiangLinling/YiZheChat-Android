@@ -396,11 +396,12 @@ class EditUserProfilePresenterTest {
         val matrixClient = FakeMatrixClient()
         val user = aMatrixUser(id = A_USER_ID.value, displayName = "Name", avatarUrl = AN_AVATAR_URL)
         val tmpFile = givenPickerReturnsFile()
+        val cleanup = lambdaRecorder<Uri?, Unit> {}
         val presenter = createEditUserProfilePresenter(
             matrixClient = matrixClient,
             matrixUser = user,
             temporaryUriDeleter = FakeTemporaryUriDeleter(
-                deleteLambda = { assertThat(it).isEqualTo(userAvatarUri) }
+                deleteLambda = cleanup
             ),
         )
         try {
@@ -408,8 +409,13 @@ class EditUserProfilePresenterTest {
                 val initialState = awaitItem()
                 initialState.eventSink(EditUserProfileEvent.HandleAvatarAction(AvatarAction.ChoosePhoto))
                 initialState.eventSink(EditUserProfileEvent.Save)
-                consumeItemsUntilPredicate { matrixClient.uploadAvatarCalled }
+                consumeItemsUntilPredicate { it.saveAction is AsyncAction.Success }
                 assertThat(matrixClient.uploadAvatarCalled).isTrue()
+                assertThat(tmpFile.exists()).isFalse()
+                cleanup.assertions().isCalledExactly(2).withSequence(
+                    listOf(value(userAvatarUri)),
+                    listOf(value(anotherAvatarUri)),
+                )
             }
         } finally {
             tmpFile.delete()

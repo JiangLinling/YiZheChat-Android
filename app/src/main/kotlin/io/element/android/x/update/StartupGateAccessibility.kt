@@ -19,6 +19,7 @@ internal enum class StartupGateUserState {
 internal enum class StartupGatePrimaryAction {
     NONE,
     RETRY_SECURITY_CHECK,
+    TRANSFER_MANAGED_AUTHORIZATION,
     RETRY_RELEASE_CHECK,
     DOWNLOAD_UPDATE,
     RETRY_DOWNLOAD,
@@ -88,9 +89,15 @@ internal fun startupGateAccessibilityContract(reasonCode: String?): StartupGateA
             StartupGateRetrySemantics.RESUME_SAME_READINESS_OPERATION,
             StartupGateAnnouncement.POLITE_STATUS,
         )
+        "COMPATIBILITY_BINDING_CONFLICT" -> contract(
+            stableReason,
+            StartupGateUserState.BLOCKED,
+            StartupGatePrimaryAction.TRANSFER_MANAGED_AUTHORIZATION,
+            StartupGateRetrySemantics.FRESH_VERIFIED_IDENTITY,
+            StartupGateAnnouncement.ASSERTIVE_BLOCKED,
+        )
         "COMPATIBILITY_POLICY_DISABLED",
         "COMPATIBILITY_EVIDENCE_REJECTED",
-        "COMPATIBILITY_BINDING_CONFLICT",
         "DEVICE_TRUST_NOT_READY",
         "DEVICE_SIGNING_KEY_UNAVAILABLE",
         "CONTROL_TLS_REJECTED",

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <application>
+        <activity android:name=".backgroundtest.BackgroundBindingTestActivity"
+            android:exported="true" android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:label="@string/background_binding_test_label" />
+        <service android:name=".backgroundtest.BackgroundBindingTestService"
+            android:exported="true" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:foregroundServiceType="specialUse" android:label="@string/background_binding_test_label">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/background_binding_test" />
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-enabled optional background process continuity with a visible ongoing notification. Does not read screen contents, perform gestures or grant permissions." />
+        </service>
+    </application>
+</manifest>

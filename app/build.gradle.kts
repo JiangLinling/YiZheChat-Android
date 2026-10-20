@@ -92,9 +92,23 @@ if (isNextBuildRequested) {
     canonicalConfig.inputStream().use(nextBuildProperties::load)
 }
 
+val isFormalInternalDeployment = isNextBuildRequested && nextBuildProperties.getProperty("deployment.id") == "internal"
 val nextManifestValues = if (isNextBuildRequested) {
     fun requireNextHttpsUrl(name: String): String {
         val value = nextBuildProperty(name)
+        if (isFormalInternalDeployment) {
+            val approved = mapOf(
+                "next.control.baseUrl" to "https://security.yizhesy.cn",
+                "next.kms.baseUrl" to "https://security.yizhesy.cn",
+                "next.officePreview.baseUrl" to "https://security.yizhesy.cn/office-preview",
+                "next.update.cdnBaseUrl" to "https://security.yizhesy.cn",
+                "next.update.fallbackBaseUrl" to "https://security.yizhesy.cn",
+                "next.matrix.homeserverUrl" to "https://matrix.yizhesy.cn",
+                "next.rtc.elementCallBaseUrl" to "https://matrix.yizhesy.cn/element-call",
+            )
+            check(value == approved[name]) { "$name does not match the formal internal deployment endpoint." }
+            return value
+        }
         val uri = runCatching { URI(value) }.getOrNull()
         val host = uri?.host?.lowercase(Locale.US).orEmpty()
         val stableHosts = setOf("security.yizhesy.cn", "www.yizhesy.cn", "matrix.yizhesy.cn")
@@ -117,6 +131,7 @@ val nextManifestValues = if (isNextBuildRequested) {
 
     fun requireNextUpdateBaseUrl(name: String): String {
         val value = requireNextHttpsUrl(name)
+        if (isFormalInternalDeployment) return value
         val uri = URI(value)
         check((uri.port in 1024..65535) && (uri.path.isEmpty() || uri.path == "/") && uri.query == null && uri.fragment == null) {
             "$name must use a dedicated HTTPS high port with no path, query, or fragment."
@@ -137,6 +152,9 @@ val nextManifestValues = if (isNextBuildRequested) {
     check(nextBuildProperty("next.control.signingKeyId") == derivedKeyId && derivedKeyId != yizheAuthoritySigningKeyId) {
         "Next Control signing key id must match its non-Stable public key."
     }
+    check(!isFormalInternalDeployment || derivedKeyId == "a4acbd84dfe41e3d") {
+        "Formal internal deployment must retain the migrated authority signing identity."
+    }
     val controlPin = requireNextPin("next.control.certificatePin")
     val kmsPins = nextBuildProperty("next.kms.certificatePins").split(',').map(String::trim).map {
         val decoded = runCatching { Base64.getDecoder().decode(it.removePrefix("sha256/")) }.getOrNull()
@@ -147,8 +165,8 @@ val nextManifestValues = if (isNextBuildRequested) {
         "Next KMS pins must contain distinct current and backup pins including the Control pin."
     }
     val updateChannel = nextBuildProperty("next.update.channel")
-    check(updateChannel.matches(Regex("next-[a-z0-9][a-z0-9-]{1,62}"))) {
-        "next.update.channel must be a dedicated next-* channel."
+    check(if (isFormalInternalDeployment) updateChannel == "internal" else updateChannel.matches(Regex("next-[a-z0-9][a-z0-9-]{1,62}"))) {
+        "The update channel must match the selected deployment."
     }
     check(nextBuildProperty("next.kms.maximumOfflineLeaseMillis").toLongOrNull() in 1L..86_400_000L) {
         "next.kms.maximumOfflineLeaseMillis must be between 1 ms and 24 hours."
@@ -160,6 +178,7 @@ val nextManifestValues = if (isNextBuildRequested) {
         "next.kms.clockRollbackToleranceMillis must be between 0 and 2 minutes."
     }
     mapOf(
+        "yizheDeploymentId" to if (isFormalInternalDeployment) "internal" else "next",
         "yizheControlBaseUrl" to requireNextHttpsUrl("next.control.baseUrl"),
         "yizheControlSigningKeyDerB64" to controlSigningKey,
         "yizheControlSigningKeyId" to derivedKeyId,
@@ -192,6 +211,7 @@ android {
         versionName = Versions.VERSION_NAME
         manifestPlaceholders["yizheUnifiedSourceManifestSha256"] = ""
         manifestPlaceholders["yizheControlBaseUrl"] = providers.gradleProperty("yizhe.control.baseUrl").orElse("").get()
+        manifestPlaceholders["yizheDeploymentId"] = "legacy"
         manifestPlaceholders["yizheControlSigningKeyDerB64"] = providers.gradleProperty("yizhe.control.signingKeyDerB64").orElse("").get()
         manifestPlaceholders["yizheControlSigningKeyId"] = providers.gradleProperty("yizhe.control.signingKeyId").orElse("").get()
         manifestPlaceholders["yizheControlCertificatePin"] = providers.gradleProperty("yizhe.control.certificatePin").orElse("").get()
@@ -527,13 +547,31 @@ android {
                 dimension = "store"
                 applicationId = "com.yizhe.chat.next"
                 // Keep cumulative QA upgrades local to Next without invalidating every shared build plugin.
-                versionCode = maxOf(Versions.VERSION_CODE, 20260699)
-                versionName = if (Versions.VERSION_CODE < 20260699) "26.06.99" else Versions.VERSION_NAME
+                versionCode = maxOf(Versions.VERSION_CODE, 20260729)
+                versionName = if (Versions.VERSION_CODE < 20260729) "26.07.29" else Versions.VERSION_NAME
                 signingConfig = nextDebugSigningConfig
                 manifestPlaceholders.putAll(nextManifestValues)
                 manifestPlaceholders["yizheUnifiedSourceManifestSha256"] = unifiedSourceManifestSha256
                 buildConfigFieldStr("SHORT_FLAVOR_DESCRIPTION", "N")
-                buildConfigFieldStr("FLAVOR_DESCRIPTION", "YiZheChat Next")
+                buildConfigFieldStr("FLAVOR_DESCRIPTION", if (isFormalInternalDeployment) "YiZheChat Internal" else "YiZheChat Next")
+            }
+        }
+    }
+
+    // Keep the optional system binding in the internal APK as well as the original
+    // comparison build. Do not pull diagnostic activities or resources into release.
+    if (isNextBuildRequested) {
+        sourceSets {
+            maybeCreate("nextDebug").java.srcDir("src/backgroundBinding/kotlin")
+            maybeCreate("testNextDebug").java.srcDir("src/testBackgroundBinding/kotlin")
+            listOf("nextInternalRelease", "nextInternalDebug").forEach { variant ->
+                maybeCreate(variant).apply {
+                    java.srcDirs("src/backgroundBinding/kotlin", "src/internalBackgroundBinding/kotlin")
+                    res.srcDir("src/internalBackgroundBinding/res")
+                    manifest.srcFile("src/internalBackgroundBinding/AndroidManifest.xml")
+                }
+                maybeCreate("test" + variant.replaceFirstChar { it.uppercaseChar() })
+                    .java.srcDir("src/testBackgroundBinding/kotlin")
             }
         }
     }

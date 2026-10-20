@@ -238,7 +238,7 @@ internal fun CallScreenView(
                 }
             }
         }
-        if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment && !state.isTerminating &&
+        if (io.element.android.appconfig.NextDeploymentConfig.isNextDeployment && (!state.isTerminating || state.urlState is AsyncData.Failure) &&
             (state.urlState !is AsyncData.Success || !state.isCallActive)
         ) {
             CallPreparationView(state)

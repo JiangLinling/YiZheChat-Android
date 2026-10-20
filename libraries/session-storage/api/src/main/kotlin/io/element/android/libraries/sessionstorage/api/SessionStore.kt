@@ -33,6 +33,7 @@ interface SessionStore {
     /**
      * Will update the session data matching the userId, except the value of loginTimestamp.
      * No op if userId is not found in DB.
+     * The Matrix device must still match. Updates cannot revive an invalidated login.
      */
     suspend fun updateData(sessionData: SessionData)
 
@@ -70,6 +71,12 @@ interface SessionStore {
      * Remove the session matching the sessionId.
      */
     suspend fun removeSession(sessionId: String)
+
+    /** Atomically removes only the login owning these paths. A later login is preserved. */
+    suspend fun removeSessionIfPathsMatch(sessionId: String, sessionPath: String, cachePath: String)
+
+    /** Invalidates the exact Matrix login atomically, preserving a later login for the same account. */
+    suspend fun invalidateSessionIfDeviceMatches(sessionId: String, deviceId: String)
 }
 
 fun List<SessionData>.toUserList(): List<String> {

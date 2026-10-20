@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_binding_test_label">YiZhe startup acceleration</string>
+    <string name="background_binding_test_disclosure">Optional: uses an accessibility service connection and an ongoing notification to help keep YiZhe running in the background. It does not read screen content, click, collect events or transmit data. The system may still stop it; fast startup is not guaranteed. You control this service in system Accessibility settings. Message and call services continue independently.</string>
+    <string name="background_binding_test_settings">Open accessibility settings</string>
+    <string name="background_binding_test_settings_help">Find “YiZhe startup acceleration” under installed services or downloaded apps. Use its system switch to enable or disable it. Names vary by phone.</string>
+    <string name="background_binding_test_notification">YiZhe startup acceleration is running</string>
+    <string name="background_binding_test_notification_body">Tap to view status or open settings to turn it off.</string>
+    <string name="background_binding_ready">Connected · background notification active</string>
+    <string name="background_binding_recovering">Connected · restoring background notification</string>
+    <string name="background_binding_waiting">Waiting for the system to connect</string>
+    <string name="background_binding_disabled">Not enabled</string>
+    <string name="background_binding_unknown">Unable to confirm status. Check system Accessibility settings.</string>
+</resources>

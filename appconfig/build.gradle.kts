@@ -36,6 +36,15 @@ fun nextProperty(name: String): String = nextProperties.getProperty(name)?.trim(
 
 fun nextHttpsUrl(name: String): String {
     val value = nextProperty(name)
+    if (nextProperties.getProperty("deployment.id") == "internal") {
+        val approved = mapOf(
+            "next.matrix.homeserverUrl" to "https://matrix.yizhesy.cn",
+            "next.rtc.elementCallBaseUrl" to "https://matrix.yizhesy.cn/element-call",
+            "next.push.registrarBaseUrl" to "https://security.yizhesy.cn/push/registrar",
+        )
+        check(value == approved[name]) { "$name does not match the formal internal deployment endpoint." }
+        return value
+    }
     val uri = runCatching { URI(value) }.getOrNull()
     val host = uri?.host?.lowercase().orEmpty()
     check(uri?.scheme == "https" && host.isNotBlank() && host !in setOf("matrix.yizhesy.cn", "security.yizhesy.cn", "www.yizhesy.cn") &&

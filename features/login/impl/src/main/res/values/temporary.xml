@@ -35,4 +35,10 @@
     <string name="screen_login_registration_password_mismatch">The passwords do not match</string>
     <string name="screen_login_register_action">Register and log in</string>
     <string name="screen_login_error_security_sync">Device security setup could not be synchronized. Please retry. Code: %1$s</string>
+    <string name="screen_registration_agreement_accept">I have read and agree to the internal trial User Agreement and Personal Information Notice, and confirm I am 18 or older.</string>
+    <string name="screen_registration_agreement_read">Read the agreement</string>
+    <string name="screen_registration_agreement_title">User Agreement and Personal Information Notice</string>
+    <string name="screen_registration_agreement_return">Return to registration</string>
+    <string name="screen_registration_agreement_required">Please read the agreement and tick the box before registering.</string>
+    <string name="screen_registration_agreement_changed">The agreement has changed. Update the app, read the current agreement and confirm your choice before registering. Your existing account is unaffected.</string>
 </resources>

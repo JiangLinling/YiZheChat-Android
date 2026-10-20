@@ -11,8 +11,24 @@ import com.google.common.truth.Truth.assertThat
 import io.element.android.features.ftue.api.state.FtueState
 import io.element.android.libraries.matrix.api.verification.SessionVerifiedStatus
 import org.junit.Test
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.test.runTest
 
 class StartupSecurityStateTest {
+    @Test
+    fun `verification completion keeps the recovery child until its callback but revocation changes the root`() = runTest {
+        val recovering = StartupSecurityState(securityReady = false, setupComplete = false,
+            ftueState = FtueState.Unknown, verificationStatus = SessionVerifiedStatus.Unknown,
+            coreReady = false, sessionInitialized = false)
+        val verified = recovering.copy(verificationStatus = SessionVerifiedStatus.Verified)
+        val revoked = verified.copy(failureReasonCode = "DEVICE_REVOKED")
+        val denied = revoked.copy(failureReasonCode = "POLICY_REJECTED")
+        val events = flowOf(recovering, verified, verified.copy(ftueState = FtueState.Complete), revoked, denied)
+            .distinctStartupNavigation().toList()
+        assertThat(events).containsExactly(recovering, revoked, denied).inOrder()
+    }
+
     @Test fun `retained original home permits background receipts but never bypasses known security gates`() {
         val state = StartupSecurityState(securityReady = true, setupComplete = true,
             ftueState = FtueState.Complete, verificationStatus = SessionVerifiedStatus.Verified,

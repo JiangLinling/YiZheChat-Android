@@ -168,10 +168,13 @@ private fun OutgoingVerificationHeader(step: Step, request: VerificationRequest.
             is VerificationRequest.Outgoing.User -> R.string.screen_session_verification_user_initiator_subtitle
         }
         Step.AwaitingOtherDeviceResponse -> R.string.screen_session_verification_waiting_subtitle
-        Step.Canceled -> R.string.screen_session_verification_failed_subtitle
+        Step.Canceled -> when (request) {
+            is VerificationRequest.Outgoing.CurrentSession -> R.string.screen_phone_verification_incomplete
+            is VerificationRequest.Outgoing.User -> R.string.screen_session_verification_failed_subtitle
+        }
         Step.Ready -> R.string.screen_session_verification_ready_subtitle
         Step.Completed -> when (request) {
-            is VerificationRequest.Outgoing.CurrentSession -> R.string.screen_identity_confirmed_subtitle
+            is VerificationRequest.Outgoing.CurrentSession -> R.string.screen_identity_confirmed_continue_setup
             is VerificationRequest.Outgoing.User -> R.string.screen_session_verification_complete_user_subtitle
         }
         is Step.Verifying -> when (step.data) {

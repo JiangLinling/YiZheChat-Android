@@ -132,6 +132,11 @@ class RoomListPresenter(
             val rooms = (contactsSummaries as? AsyncData.Success)?.data ?: return@LaunchedEffect
             seenInvitesStore.observeNotifications(rooms.mapNotNull { it.toNotification() }, completeSnapshot = true)
             seenInvitesStore.updateNotificationProfiles(rooms.associate { it.roomId to (it.name to it.avatarData.url) })
+            seenInvitesStore.updateNotificationKinds(rooms.associate { room -> room.roomId to when {
+                room.isSpace -> io.element.android.features.invite.api.InviteNotification.Kind.SPACE
+                room.isDm -> io.element.android.features.invite.api.InviteNotification.Kind.FRIEND
+                else -> io.element.android.features.invite.api.InviteNotification.Kind.GROUP
+            } })
         }
         LaunchedEffect(contactsSummaries, allRoomSummaries, notificationRecords) {
             val rooms = (contactsSummaries as? AsyncData.Success)?.data ?: return@LaunchedEffect

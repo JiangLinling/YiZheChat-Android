@@ -31,10 +31,13 @@ fun RoomPreviewInfo.toInviteData(): InviteData {
 }
 
 fun RoomInfo.toInviteData(): InviteData {
+    val directInviteName = if (isDm || isDirect) {
+        inviter?.let { it.displayName?.takeIf(String::isNotBlank) ?: it.userId.value }
+    } else null
     return InviteData(
         roomId = id,
-        roomName = name ?: id.value,
-        isDm = isDm,
+        roomName = directInviteName ?: name ?: id.value,
+        isDm = isDm || isDirect,
     )
 }
 
