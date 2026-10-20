@@ -232,6 +232,7 @@ dependencies {
     implementation(projects.services.appnavstate.api)
     implementation(projects.services.toolbox.api)
     implementation(projects.security.dataProtection.api)
+    implementation(projects.security.contentProtection.api)
     implementation(projects.security.secureStorage.api)
     implementation(libs.androidx.webkit)
     implementation(libs.coil.compose)

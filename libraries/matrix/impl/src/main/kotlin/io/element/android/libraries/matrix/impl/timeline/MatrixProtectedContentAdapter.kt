@@ -682,8 +682,16 @@ internal fun MessageContent.withProtectedCaption(caption: ProtectedCaption): Mes
             attachment.copy(caption = caption.caption, formattedCaption = formatted)
         }
         is AudioMessageType -> {
-            require(caption.attachmentMetadata == null)
-            attachment.copy(caption = caption.caption, formattedCaption = formatted)
+            val metadata = caption.attachmentMetadata
+            attachment.copy(
+                filename = metadata?.displayName ?: attachment.filename,
+                caption = caption.caption,
+                formattedCaption = formatted,
+                info = metadata?.let {
+                    attachment.info?.copy(mimetype = it.mimeType, size = it.size)
+                        ?: io.element.android.libraries.matrix.api.media.AudioInfo(duration = null, size = it.size, mimetype = it.mimeType)
+                } ?: attachment.info,
+            )
         }
         is VoiceMessageType -> {
             require(caption.attachmentMetadata == null)

@@ -35,7 +35,14 @@ data class CallFinalizationRecord(
     val connectedAt: Long? = null,
     val recordSent: Boolean = false,
     val createdAt: Long,
+    val recordPublicationStopped: CallRecordPublicationStop? = null,
 )
+
+@Serializable
+enum class CallRecordPublicationStop { CONTACT_RESTRICTED, MEMBERSHIP_ENDED }
+
+internal val CallFinalizationRecord.recordResolved: Boolean
+    get() = recordSent || recordPublicationStopped != null
 
 enum class CallCleanupPhase { ACTIVE, RELEASED, CLEANUP_FAILED }
 

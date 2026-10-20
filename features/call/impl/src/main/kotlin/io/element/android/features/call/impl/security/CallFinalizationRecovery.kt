@@ -14,8 +14,10 @@ import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.room.JoinedRoom
+import io.element.android.libraries.matrix.api.room.CurrentUserMembership
 import io.element.android.libraries.matrix.api.timeline.item.event.CallLifecycleState
 import io.element.android.security.dataprotection.api.*
+import io.element.android.security.contentprotection.api.ContentProtectionException
 import io.element.android.security.securestorage.api.deriveAccountVaultId
 import io.element.android.services.toolbox.api.systemclock.SystemClock
 import kotlinx.coroutines.CancellationException
@@ -168,7 +170,7 @@ class DefaultCallFinalizationRecovery(
                 val existing = operations.operation(record.operationId)
                 if (existing.status.isTerminal) {
                     closeRecoveryRoom(pending.key)
-                    check(record.recordSent && isCompleted(existing)) { "Call finalization has a conflicting terminal authority result." }
+                    check(record.recordResolved && isCompleted(existing)) { "Call finalization has a conflicting terminal authority result." }
                     store.remove(pending.key)
                     retryAt.remove(pending.key)
                     started.remove(pending.key)
@@ -176,7 +178,7 @@ class DefaultCallFinalizationRecovery(
                 }
                 operations.perform(request) {
                     check(protection.observeDeviceAccess(access).first()) { "Call finalization access was revoked." }
-                    if (!record.recordSent) {
+                    if (!record.recordResolved) {
                         val client = clients.getOrRestore(SessionId(record.sessionId)).getOrThrow()
                         check(client.deviceId.value == record.deviceId)
                         val roomId = RoomId(record.roomId)
@@ -184,6 +186,17 @@ class DefaultCallFinalizationRecovery(
                         // Read current metadata without subscribing to a timeline on every retry.
                         val roomInfo = client.getCurrentRoomInfo(roomId).getOrThrow()
                         check(roomInfo.id == roomId)
+                        if (roomInfo.currentUserMembership in setOf(CurrentUserMembership.LEFT, CurrentUserMembership.BANNED)) {
+                            // LC20 acknowledges actual media/native teardown. Leaving a room must not
+                            // require posting a new chat event after membership has ended. Only exact,
+                            // authenticated Matrix departure and provider-absence receipts allow this.
+                            requireAuthoritativeCallClosure(operations.operation(record.operationId), pending)
+                            store.put(pending.vaultId, owner, record.copy(
+                                recordPublicationStopped = CallRecordPublicationStop.MEMBERSHIP_ENDED,
+                            ))
+                            closeRecoveryRoom(pending.key)
+                            return@perform
+                        }
                         val noInvitation = pending.noInvitationConfirmed && record.invitationId == null && !record.incoming && !record.connected
                         if (!roomInfo.isDm || noInvitation) {
                             store.put(pending.vaultId, owner, record.copy(recordSent = true))
@@ -213,7 +226,19 @@ class DefaultCallFinalizationRecovery(
                                 // checkpoint may replay it; the authenticated reducer deduplicates that ID.
                                 val duration = record.connectedAt?.let { began -> pending.releasedAt?.let { (it - began).coerceAtLeast(0) } }
                                 roomOwner.sendAttempted = true
-                                room.liveTimeline.sendCallLifecycle(EventId(invitation), state, duration).getOrThrow()
+                                try {
+                                    room.liveTimeline.sendCallLifecycle(EventId(invitation), state, duration).getOrThrow()
+                                } catch (restricted: ContentProtectionException.ContactRestricted) {
+                                    requireAuthoritativeCallClosure(operations.operation(record.operationId), pending)
+                                    // A policy-denied history update is not "sent", and must never be
+                                    // replayed after unblock. The original six-layer hangup still needs
+                                    // its real Android receipts and authoritative terminal response.
+                                    store.put(pending.vaultId, owner, record.copy(
+                                        recordPublicationStopped = CallRecordPublicationStop.CONTACT_RESTRICTED,
+                                    ))
+                                    closeRecoveryRoom(pending.key)
+                                    return@perform
+                                }
                             }
                         } finally {
                             // An attempted send keeps this exact owner until the
@@ -244,6 +269,24 @@ class DefaultCallFinalizationRecovery(
 
     private fun closeRecoveryRoom(key: String) {
         recoveryRooms.remove(key)?.room?.close()
+    }
+
+    private fun requireAuthoritativeCallClosure(operation: LifecycleOperation, pending: PendingCallFinalization) {
+        check(operation.operationId == pending.operationId && operation.lifecycleId == FullAppLifecycleId.LC_20)
+        check(operation.subjects.accountIdHash == pending.accountHash &&
+            operation.subjects.matrixDeviceIdHash == pending.deviceHash && operation.subjects.roomIdHash == pending.roomHash)
+        val expected = mapOf(
+            LifecycleComponent.CONTROL_PLANE to "CONTROL_PLANE_COMMITTED",
+            LifecycleComponent.DATABASE to "DATABASE_COMMITTED",
+            LifecycleComponent.MATRIX to "MATRIX_RTC_MEMBER_DEPARTED",
+            LifecycleComponent.RTC to "RTC_PARTICIPANT_ABSENT",
+        )
+        check(expected.all { (component, code) ->
+            operation.steps.singleOrNull { it.component == component }?.let {
+                it.required && it.status == LifecycleStepStatus.COMPLETE && it.resultCode == code &&
+                    !it.receiptReference.isNullOrBlank()
+            } == true
+        }) { "Original Matrix and RTC closure facts are not confirmed." }
     }
 
     private fun closeRecoveryRooms() {

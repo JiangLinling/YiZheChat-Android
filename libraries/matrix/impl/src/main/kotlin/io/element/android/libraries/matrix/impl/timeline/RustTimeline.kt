@@ -1012,6 +1012,11 @@ class RustTimeline(
                 caption = caption,
                 formattedCaption = formattedCaption,
                 burnAfterRead = burnAfterRead,
+                attachmentMetadata = ProtectedAttachmentMetadata(
+                    displayName = file.name,
+                    mimeType = audioInfo.mimetype,
+                    size = audioInfo.size ?: file.length(),
+                ),
             ) { protectedFiles, protectedCaption ->
                 val protectedFile = protectedFiles.single()
                 inner.sendAudio(

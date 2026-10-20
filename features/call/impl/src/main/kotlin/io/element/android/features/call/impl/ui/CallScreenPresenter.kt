@@ -151,7 +151,15 @@ class CallScreenPresenter(
         var isGroupCall by remember { mutableStateOf(false) }
         LaunchedEffect(callData) {
             val room = matrixClientsProvider.getOrNull(callData.sessionId)?.getRoom(callData.roomId)
-            room?.info()?.let { peerName = it.name; peerAvatarUrl = it.avatarUrl; isGroupCall = !it.isDm }
+            room?.info()?.let { info ->
+                val peer = info.heroes.filter { it.userId.value != callData.sessionId.value }.singleOrNull()
+                peerName = if (info.isDm) {
+                    peer?.displayName?.takeIf { it.isNotBlank() }
+                        ?: info.name.takeIf { info.activeMembersCount > 1 }
+                } else info.name
+                peerAvatarUrl = if (info.isDm) peer?.avatarUrl ?: info.avatarUrl else info.avatarUrl
+                isGroupCall = !info.isDm
+            }
         }
         val callOperationId = rememberSaveable { UUID.randomUUID().toString() }
         val joinOperationRequest = remember(callOperationId) { callOperationRequest(callOperationId) }

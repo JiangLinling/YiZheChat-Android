@@ -246,12 +246,18 @@ class RoomContentForwarder(
                 check(primary.file.renameTo(aggregateFile)) { "Unable to bind forwarded media shares to one transport aggregate." }
                 preparedMedia = listOf(primary.copy(file = aggregateFile)) + preparedMedia.drop(1)
             }
-            val attachmentMetadata = (source.attachment as? FileMessageType)?.let { file ->
-                ProtectedAttachmentMetadata(
+            val attachmentMetadata = when (val file = source.attachment) {
+                is FileMessageType -> ProtectedAttachmentMetadata(
                     displayName = file.filename,
                     mimeType = file.info?.mimetype,
                     size = file.info?.size ?: source.mainBytes.size.toLong(),
                 )
+                is AudioMessageType -> ProtectedAttachmentMetadata(
+                    displayName = file.filename,
+                    mimeType = file.info?.mimetype,
+                    size = file.info?.size ?: source.mainBytes.size.toLong(),
+                )
+                else -> null
             }
             if (source.attachment.caption != null || source.attachment.formattedCaption != null || attachmentMetadata != null) {
                 preparedCaption = adapter.protectCaption(

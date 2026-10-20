@@ -60,6 +60,23 @@ class CallFinalizationRecoveryTest {
     private val operationId = "join-operation-123456789"
     private var sent = 0
 
+    private fun withConfirmedClosure(omitRtc: Boolean = false) = object : AppOperationalStateCoordinator by operations {
+        override suspend fun operation(operationId: String): LifecycleOperation =
+            this@CallFinalizationRecoveryTest.operations.operation(operationId).let { operation ->
+            val facts = mapOf(
+                LifecycleComponent.CONTROL_PLANE to "CONTROL_PLANE_COMMITTED",
+                LifecycleComponent.DATABASE to "DATABASE_COMMITTED",
+                LifecycleComponent.MATRIX to "MATRIX_RTC_MEMBER_DEPARTED",
+                LifecycleComponent.RTC to "RTC_PARTICIPANT_ABSENT",
+            ).filterKeys { !omitRtc || it != LifecycleComponent.RTC }
+            operation.copy(steps = facts.map { (component, code) ->
+                LifecycleStep("closure-step-${component.name}", component, status = LifecycleStepStatus.COMPLETE,
+                    attemptCount = 1, resultCode = code, receiptReference = "verified-closure:${component.name}",
+                    updatedAtEpochMillis = clock.epochMillisResult)
+            })
+        }
+    }
+
     private fun TestScope.recovery(
         coordinator: AppOperationalStateCoordinator = operations,
         store: CallFinalizationStore = EncryptedCallFinalizationStore(files, roots),
@@ -261,6 +278,69 @@ class CallFinalizationRecoveryTest {
         assertThat(operations.clientReceipts).isEmpty()
     }
 
+    @Test fun `left room closes original media lifecycle only after authoritative departure and absence`() = runTest {
+        room.givenRoomInfo(aRoomInfo(isDm = true).copy(
+            currentUserMembership = io.element.android.libraries.matrix.api.room.CurrentUserMembership.LEFT,
+        ))
+        val store = EncryptedCallFinalizationStore(files, roots)
+        val current = recovery(withConfirmedClosure(), store)
+        current.checkpoint(call, operationId)
+        current.released(call, true)
+        current.recoverOnce { error("Already released") }
+        assertThat(client.getJoinedRoomCalledCount).isEqualTo(0)
+        assertThat(sent).isEqualTo(0)
+        val record = store.read(store.pending().single())
+        assertThat(record.recordSent).isFalse()
+        assertThat(record.recordPublicationStopped).isEqualTo(CallRecordPublicationStop.MEMBERSHIP_ENDED)
+        assertThat(operations.clientReceipts).hasSize(2)
+    }
+
+    @Test fun `left room without provider absence cannot fabricate Android completion`() = runTest {
+        room.givenRoomInfo(aRoomInfo(isDm = true).copy(
+            currentUserMembership = io.element.android.libraries.matrix.api.room.CurrentUserMembership.LEFT,
+        ))
+        val store = EncryptedCallFinalizationStore(files, roots)
+        val current = recovery(withConfirmedClosure(omitRtc = true), store)
+        current.checkpoint(call, operationId)
+        current.released(call, true)
+        current.recoverOnce { error("Already released") }
+        assertThat(store.read(store.pending().single()).recordPublicationStopped).isNull()
+        assertThat(operations.clientReceipts).isEmpty()
+    }
+
+    @Test fun `contact policy denial after confirmed closure does not replay history on unblock`() = runTest {
+        timeline.sendCallLifecycleLambda = { _, _, _ ->
+            sent++
+            Result.failure(io.element.android.security.contentprotection.api.ContentProtectionException.ContactRestricted(true))
+        }
+        val store = EncryptedCallFinalizationStore(files, roots)
+        val current = recovery(withConfirmedClosure(), store)
+        current.checkpoint(call, operationId)
+        current.released(call, true)
+        current.recoverOnce { error("Already released") }
+        val record = store.read(store.pending().single())
+        assertThat(record.recordSent).isFalse()
+        assertThat(record.recordPublicationStopped).isEqualTo(CallRecordPublicationStop.CONTACT_RESTRICTED)
+        assertThat(operations.clientReceipts).hasSize(2)
+        assertThat(roomCloses).isEqualTo(1)
+        timeline.sendCallLifecycleLambda = { _, _, _ -> sent++; Result.success(Unit) }
+        recovery(withConfirmedClosure(), store).recoverOnce { error("Already released") }
+        assertThat(sent).isEqualTo(1)
+    }
+
+    @Test fun `contact policy denial alone does not prove provider shutdown`() = runTest {
+        timeline.sendCallLifecycleLambda = { _, _, _ ->
+            Result.failure(io.element.android.security.contentprotection.api.ContentProtectionException.ContactRestricted(false))
+        }
+        val store = EncryptedCallFinalizationStore(files, roots)
+        val current = recovery(store = store)
+        current.checkpoint(call, operationId)
+        current.released(call, true)
+        current.recoverOnce { error("Already released") }
+        assertThat(store.read(store.pending().single()).recordPublicationStopped).isNull()
+        assertThat(operations.clientReceipts).isEmpty()
+    }
+
     @Test fun `unknown write outcome reuses one room across eligible retries without acknowledging the call`() = runTest {
         val store = EncryptedCallFinalizationStore(files, roots)
         val current = recovery(store = store)
@@ -345,7 +425,9 @@ class CallFinalizationRecoveryTest {
         current.checkpoint(call, operationId)
         current.released(call, true)
         val failure = runCatching { current.recoverOnce { error("Already released") } }.exceptionOrNull()
-        assertThat(failure).isSameInstanceAs(cancelled)
+        assertThat(failure).isInstanceOf(kotlinx.coroutines.CancellationException::class.java)
+        // Coroutine debug stack recovery may copy the exception and retain the original as its cause.
+        assertThat(generateSequence(failure) { it.cause }.any { it === cancelled }).isTrue()
         room.baseRoom.assertDestroyed()
         assertThat(store.read(store.pending().single()).recordSent).isFalse()
         assertThat(operations.clientReceipts).isEmpty()

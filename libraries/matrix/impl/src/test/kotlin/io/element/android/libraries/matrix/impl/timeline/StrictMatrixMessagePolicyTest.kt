@@ -8,9 +8,11 @@ package io.element.android.libraries.matrix.impl.timeline
 
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.core.mimetype.MimeTypes
+import io.element.android.libraries.matrix.api.media.AudioInfo
 import io.element.android.libraries.matrix.api.media.FileInfo
 import io.element.android.libraries.matrix.api.media.MediaSource
 import io.element.android.libraries.matrix.api.timeline.item.event.FileMessageType
+import io.element.android.libraries.matrix.api.timeline.item.event.AudioMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.LiveLocationContent
 import io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
 import io.element.android.libraries.matrix.api.timeline.item.event.OtherMessageType
@@ -21,8 +23,39 @@ import io.element.android.security.contentprotection.api.ContentProtectionExcept
 import io.element.android.security.contentprotection.api.StageThreeDenialReason
 import io.element.android.security.contentprotection.api.StageThreeGateDenied
 import org.junit.Test
+import kotlin.time.Duration.Companion.seconds
 
 class StrictMatrixMessagePolicyTest {
+    @Test
+    fun `authorized audio metadata restores name and type while preserving playable stream and duration`() {
+        val source = MediaSource("mxc://example.invalid/protected-audio")
+        val transport = message(AudioMessageType(
+            filename = "受保护附件", caption = null, formattedCaption = null, source = source,
+            info = AudioInfo(duration = 3.seconds, size = 600L, mimetype = "application/octet-stream"),
+        ))
+        val restored = transport.withProtectedCaption(ProtectedCaption(
+            caption = null, formattedCaption = null,
+            attachmentMetadata = ProtectedAttachmentMetadata("sample3s.mp3", "audio/mpeg", 52079L),
+        ))
+        val audio = restored.type as AudioMessageType
+        assertThat(audio.filename).isEqualTo("sample3s.mp3")
+        assertThat(audio.info).isEqualTo(AudioInfo(3.seconds, 52079L, "audio/mpeg"))
+        assertThat(audio.source).isEqualTo(source)
+        // Unauthorised transport state remains a generic label.
+        assertThat((transport.type as AudioMessageType).filename).isEqualTo("受保护附件")
+    }
+
+    @Test
+    fun `legacy protected audio without metadata remains generic and playable`() {
+        val transport = message(AudioMessageType(
+            filename = "受保护附件", caption = null, formattedCaption = null,
+            source = MediaSource("mxc://example.invalid/protected-audio"),
+            info = AudioInfo(3.seconds, 600L, "audio/mpeg"),
+        ))
+        val restored = transport.withProtectedCaption(ProtectedCaption(null, null))
+        assertThat(restored.type).isEqualTo(transport.type)
+    }
+
     @org.junit.Test fun `preview denial distinguishes app lock from device trust failure`() {
         val allowed = io.element.android.security.dataprotection.api.ProtectedPreviewAccessState(true, true, true)
         assertThat(allowed.copy(applicationUnlocked = false).deniedDisplayState()).isEqualTo(ProtectedMessageDisplayState.VAULT_LOCKED)

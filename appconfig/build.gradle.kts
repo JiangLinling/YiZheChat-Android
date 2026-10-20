@@ -15,7 +15,10 @@ plugins {
     id("io.element.android-library")
 }
 
-val isNextBuildRequested = gradle.startParameter.taskNames.any { it.contains("next", ignoreCase = true) }
+// Targeted library tests have no flavor name in their task path. Honor the same
+// explicit deployment flag as the APK so they exercise its actual security branches.
+val isNextBuildRequested = providers.gradleProperty("yizhe.next.enabled").orNull == "true" ||
+    gradle.startParameter.taskNames.any { it.contains("next", ignoreCase = true) }
 val nextProperties = Properties()
 if (isNextBuildRequested) {
     check(providers.gradleProperty("yizhe.next.enabled").orNull == "true") {
