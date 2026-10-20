@@ -11,8 +11,8 @@ import io.element.android.security.dataprotection.api.PermanentAccountDeletionSt
 import io.element.android.security.securestorage.api.DeviceTrustState
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -47,7 +47,10 @@ class HttpManagementControlServiceTest {
 
     @Test
     fun `sync policy channel decodes the exact nullable R05 revision envelope`() {
-        val json = Json { ignoreUnknownKeys = false; explicitNulls = true }
+        val json = Json {
+            ignoreUnknownKeys = false
+            explicitNulls = true
+        }
         val response = json.decodeFromString(
             SyncResponseWire.serializer(),
             """{

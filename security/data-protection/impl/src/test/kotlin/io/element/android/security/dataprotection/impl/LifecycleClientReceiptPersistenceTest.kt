@@ -25,7 +25,10 @@ class LifecycleClientReceiptPersistenceTest {
         every { context.getSharedPreferences(any(), any()) } returns preferences
         every { preferences.getStringSet(any(), any()) } answers { committed.toSet() }
         every { preferences.edit() } returns editor
-        every { editor.putStringSet(any(), any()) } answers { staged = secondArg<Set<String>>().toSet(); editor }
+        every { editor.putStringSet(any(), any()) } answers {
+            staged = secondArg<Set<String>>().toSet()
+            editor
+        }
         every { editor.commit() } answers {
             if (allowCommit) committed = staged
             allowCommit
@@ -33,8 +36,12 @@ class LifecycleClientReceiptPersistenceTest {
     }
 
     private fun receipt() = LifecycleClientReceipt(
-        "lc13-persisted-receipt-0001", LifecycleComponent.ANDROID_SERVICE, LifecyclePhase.CLIENT_APPLIED,
-        "ANDROID_SERVICE_APPLIED", "android-service:lc13-persisted-receipt-0001", 123456L,
+        "lc13-persisted-receipt-0001",
+        LifecycleComponent.ANDROID_SERVICE,
+        LifecyclePhase.CLIENT_APPLIED,
+        "ANDROID_SERVICE_APPLIED",
+        "android-service:lc13-persisted-receipt-0001",
+        123456L,
     )
 
     @Test

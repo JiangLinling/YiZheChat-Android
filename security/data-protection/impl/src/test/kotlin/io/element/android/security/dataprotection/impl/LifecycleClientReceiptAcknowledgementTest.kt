@@ -16,15 +16,35 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class LifecycleClientReceiptAcknowledgementTest {
-    private val fact = LifecycleClientReceipt("original-operation-12345", LifecycleComponent.ANDROID_SERVICE,
-        LifecyclePhase.CLIENT_APPLIED, "ANDROID_SERVICE_APPLIED", "android-service:original-operation-12345", 150L)
-    private val applied = LifecycleStep("original-android-service-step", fact.component, true,
-        LifecycleStepStatus.COMPLETE, 1, resultCode = fact.resultCode, receiptReference = fact.receiptReference, updatedAtEpochMillis = 160L)
+    private val fact = LifecycleClientReceipt(
+        "original-operation-12345",
+        LifecycleComponent.ANDROID_SERVICE,
+        LifecyclePhase.CLIENT_APPLIED,
+        "ANDROID_SERVICE_APPLIED",
+        "android-service:original-operation-12345",
+        150L
+    )
+    private val applied = LifecycleStep(
+        "original-android-service-step",
+        fact.component,
+        true,
+        LifecycleStepStatus.COMPLETE,
+        1,
+        resultCode = fact.resultCode,
+        receiptReference = fact.receiptReference,
+        updatedAtEpochMillis = 160L
+    )
     private fun operation(status: LifecycleOperationStatus, steps: List<LifecycleStep>) = LifecycleOperation(
-        operationId = fact.operationId, lifecycleId = FullAppLifecycleId.LC_16, idempotencyKey = "original-idempotency-12345",
+        operationId = fact.operationId,
+        lifecycleId = FullAppLifecycleId.LC_16,
+        idempotencyKey = "original-idempotency-12345",
         subjects = LifecycleSubjectHashes(accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64)),
-        status = status, currentPhase = LifecyclePhase.RECEIPTED, steps = steps,
-        deadlineEpochMillis = 1000L, createdAtEpochMillis = 100L, updatedAtEpochMillis = 200L,
+        status = status,
+        currentPhase = LifecyclePhase.RECEIPTED,
+        steps = steps,
+        deadlineEpochMillis = 1000L,
+        createdAtEpochMillis = 100L,
+        updatedAtEpochMillis = 200L,
         terminalReceiptId = "original-terminal-receipt-12345",
     )
 
@@ -66,16 +86,21 @@ class LifecycleClientReceiptAcknowledgementTest {
     @Test
     fun `ambiguous duplicate component cannot retire a local fact`() {
         assertThrows(IllegalStateException::class.java) {
-            requireTerminalClientFactAcknowledged(fact, operation(LifecycleOperationStatus.SUCCEEDED,
-                listOf(applied, applied.copy(stepId = "another-android-step"))))
+            requireTerminalClientFactAcknowledged(fact, operation(
+                LifecycleOperationStatus.SUCCEEDED,
+                listOf(applied, applied.copy(stepId = "another-android-step"))
+            ))
         }
     }
 
     @Test
     fun `another operation cannot acknowledge the retained fact`() {
         assertThrows(IllegalStateException::class.java) {
-            requireTerminalClientFactAcknowledged(fact, operation(LifecycleOperationStatus.SUCCEEDED, listOf(applied))
-                .copy(operationId = "other-operation-123456"))
+            requireTerminalClientFactAcknowledged(
+                fact,
+                operation(LifecycleOperationStatus.SUCCEEDED, listOf(applied))
+                .copy(operationId = "other-operation-123456")
+            )
         }
     }
 

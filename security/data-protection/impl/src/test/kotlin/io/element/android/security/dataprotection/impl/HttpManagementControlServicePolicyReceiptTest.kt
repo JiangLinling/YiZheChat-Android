@@ -27,6 +27,7 @@ import io.element.android.security.securestorage.api.DeviceTrustService
 import io.element.android.security.securestorage.api.DeviceTrustSnapshot
 import io.element.android.security.securestorage.api.DeviceTrustState
 import io.element.android.security.securestorage.api.HardwareSecurityLevel
+import io.mockk.EqMatcher
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -41,11 +42,11 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -76,10 +77,21 @@ class HttpManagementControlServicePolicyReceiptTest {
         withFixture { fixture ->
             fixture.mediaResourceDispatcher()
             val reservation = mediaReservation()
-            val seal = io.element.android.security.dataprotection.api.LifecycleMediaSeal(reservation,
-                "f".repeat(64), 1791551188185, io.element.android.security.dataprotection.api.LifecycleMediaOutcome.SUCCEEDED)
-            val fact = io.element.android.security.dataprotection.api.LifecycleMediaRuntimeCleanup(reservation.operationId,
-                reservation.subjects, "c".repeat(64), 1791551188184, true, true, true)
+            val seal = io.element.android.security.dataprotection.api.LifecycleMediaSeal(
+                reservation,
+                "f".repeat(64),
+                1791551188185,
+                io.element.android.security.dataprotection.api.LifecycleMediaOutcome.SUCCEEDED
+            )
+            val fact = io.element.android.security.dataprotection.api.LifecycleMediaRuntimeCleanup(
+                reservation.operationId,
+                reservation.subjects,
+                "c".repeat(64),
+                1791551188184,
+                true,
+                true,
+                true
+            )
             withContext(LifecycleOperationContext("unrelated-original-start", FullAppLifecycleId.LC_17)) {
                 fixture.service.reserveMediaResources(reservation)
                 assertThat(fixture.service.recordMediaRuntimeCleanup(fact)).startsWith("android-media-runtime-cleanup:v1:")
@@ -101,8 +113,12 @@ class HttpManagementControlServicePolicyReceiptTest {
     fun `live seal server rejection retains phase and status without its response body`() = runTest {
         withFixture { fixture ->
             fixture.server.enqueue(MockResponse().setResponseCode(403).setBody("{\"detail\":\"SECRET_BODY_TOKEN\"}"))
-            val seal = io.element.android.security.dataprotection.api.LifecycleMediaSeal(mediaReservation(),
-                "f".repeat(64), 1791551188185, io.element.android.security.dataprotection.api.LifecycleMediaOutcome.SUCCEEDED)
+            val seal = io.element.android.security.dataprotection.api.LifecycleMediaSeal(
+                mediaReservation(),
+                "f".repeat(64),
+                1791551188185,
+                io.element.android.security.dataprotection.api.LifecycleMediaOutcome.SUCCEEDED
+            )
             val failure = runCatching { fixture.service.sealMediaResources(seal) }.exceptionOrNull() as MediaClosureDeliveryFailure
             assertThat(failure.purpose).isEqualTo("MEDIA_RESOURCE_SEAL_ACK")
             assertThat(failure.reasonCode).isEqualTo("SERVER_REJECTED")
@@ -116,8 +132,12 @@ class HttpManagementControlServicePolicyReceiptTest {
     fun `live seal rejects a signed replacement operation instead of accepting cleanup success`() = runTest {
         withFixture { fixture ->
             fixture.mediaResourceDispatcher("operation")
-            val seal = io.element.android.security.dataprotection.api.LifecycleMediaSeal(mediaReservation(),
-                "f".repeat(64), 1791551188185, io.element.android.security.dataprotection.api.LifecycleMediaOutcome.SUCCEEDED)
+            val seal = io.element.android.security.dataprotection.api.LifecycleMediaSeal(
+                mediaReservation(),
+                "f".repeat(64),
+                1791551188185,
+                io.element.android.security.dataprotection.api.LifecycleMediaOutcome.SUCCEEDED
+            )
             val failure = runCatching { fixture.service.sealMediaResources(seal) }.exceptionOrNull() as MediaClosureDeliveryFailure
             assertThat(failure.purpose).isEqualTo("MEDIA_RESOURCE_SEAL_ACK")
             assertThat(failure.reasonCode).isEqualTo("ACK_VERIFICATION_REJECTED")
@@ -126,10 +146,20 @@ class HttpManagementControlServicePolicyReceiptTest {
     }
 
     private fun mediaReservation() = io.element.android.security.dataprotection.api.LifecycleMediaReservation(
-        "original-live-stop-operation", io.element.android.security.dataprotection.api.LifecycleSubjectHashes(
-            installationId = INSTALLATION_ID, accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64), roomIdHash = "d".repeat(64)),
-        listOf(io.element.android.security.dataprotection.api.LifecycleMediaResource(
-            io.element.android.security.dataprotection.api.LifecycleMediaResourceType.ANDROID_MEDIA_RUNTIME, "c".repeat(64))))
+        "original-live-stop-operation",
+        io.element.android.security.dataprotection.api.LifecycleSubjectHashes(
+            installationId = INSTALLATION_ID,
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64),
+            roomIdHash = "d".repeat(64)
+        ),
+        listOf(
+            io.element.android.security.dataprotection.api.LifecycleMediaResource(
+                io.element.android.security.dataprotection.api.LifecycleMediaResourceType.ANDROID_MEDIA_RUNTIME,
+                "c".repeat(64)
+            )
+        )
+    )
 
     @Test
     fun `relay ciphertext retry checks fresh exact signed authority without new operation or key request`() = runTest {
@@ -156,8 +186,11 @@ class HttpManagementControlServicePolicyReceiptTest {
                 fixture.relayRetryDispatcher(fault)
                 var rejected = false
                 withContext(LifecycleOperationContext("relay-edit-original-0001", FullAppLifecycleId.LC_15)) {
-                    try { fixture.service.authorizePreparedRelayRetry(originQuery(), "relay-edit-original-0001", "!relay:test") }
-                    catch (_: IllegalStateException) { rejected = true }
+                    try {
+                        fixture.service.authorizePreparedRelayRetry(originQuery(), "relay-edit-original-0001", "!relay:test")
+                    } catch (_: IllegalStateException) {
+                        rejected = true
+                    }
                 }
                 org.junit.Assert.assertTrue(fault, rejected)
                 assertThat(fixture.server.requestCount).isEqualTo(1)
@@ -168,12 +201,17 @@ class HttpManagementControlServicePolicyReceiptTest {
     @Test
     fun `relay ciphertext retry cannot inherit another lifecycle or operation`() = runTest {
         withFixture { fixture ->
-            for (context in listOf(LifecycleOperationContext("another-operation-0001", FullAppLifecycleId.LC_15),
-                LifecycleOperationContext("relay-edit-original-0001", FullAppLifecycleId.LC_13))) {
+            for (context in listOf(
+                    LifecycleOperationContext("another-operation-0001", FullAppLifecycleId.LC_15),
+                LifecycleOperationContext("relay-edit-original-0001", FullAppLifecycleId.LC_13)
+                )) {
                 var rejected = false
                 withContext(context) {
-                    try { fixture.service.authorizePreparedRelayRetry(originQuery(), "relay-edit-original-0001", "!relay:test") }
-                    catch (_: IllegalArgumentException) { rejected = true }
+                    try {
+                        fixture.service.authorizePreparedRelayRetry(originQuery(), "relay-edit-original-0001", "!relay:test")
+                    } catch (_: IllegalArgumentException) {
+                        rejected = true
+                    }
                 }
                 assertThat(rejected).isTrue()
             }
@@ -185,13 +223,19 @@ class HttpManagementControlServicePolicyReceiptTest {
         val room = "!relay:test"
         val operation = "relay-edit-original-0001"
         return io.element.android.security.dataprotection.api.ProtectedRelayPreparationQuery(
-            "a".repeat(64), "b".repeat(64), sha256(room.encodeToByteArray()).toHex(), "d".repeat(64),
-            operation, room, java.util.UUID.nameUUIDFromBytes("relay-edit-v1\u0000$room\u0000$operation".encodeToByteArray()).toString(),
+            "a".repeat(64),
+            "b".repeat(64),
+            sha256(room.encodeToByteArray()).toHex(),
+            "d".repeat(64),
+            operation,
+            room,
+            java.util.UUID.nameUUIDFromBytes("relay-edit-v1\u0000$room\u0000$operation".encodeToByteArray()).toString(),
         )
     }
 
     @Test fun `original relay erasure probe retains signed failure or unknown without admission key or Android receipts`() = runTest {
-        for (terminal in listOf(false, true)) withFixture { fixture ->
+        for (terminal in listOf(false, true)) {
+            withFixture { fixture ->
             fixture.relayPreparationDispatcher(terminal = terminal)
             val result = withContext(LifecycleOperationContext(preparationQuery().operationId, FullAppLifecycleId.LC_15)) {
                 fixture.service.reconcileRelayPreparation(preparationQuery())
@@ -205,18 +249,39 @@ class HttpManagementControlServicePolicyReceiptTest {
             assertThat(sent.getHeader("X-YiZhe-Signature")).isNotEmpty()
             assertThat(fixture.server.requestCount).isEqualTo(1)
         }
+        }
     }
 
     @Test fun `original relay erasure probe rejects signature replay freshness terminal and original scope faults`() = runTest {
-        for (fault in listOf("nonce", "installation", "expired", "future", "duration", "purpose", "signature",
-            "operation", "lifecycle", "account", "device", "room", "event", "owner", "receipt", "steps")) {
+        for (fault in listOf(
+                "nonce",
+                "installation",
+                "expired",
+                "future",
+                "duration",
+                "purpose",
+                "signature",
+            "operation",
+                "lifecycle",
+                "account",
+                "device",
+                "room",
+                "event",
+                "owner",
+                "receipt",
+                "steps"
+            )) {
             withFixture { fixture ->
                 fixture.relayPreparationDispatcher(fault)
                 var rejected = false
                 withContext(LifecycleOperationContext(preparationQuery().operationId, FullAppLifecycleId.LC_15)) {
-                    try { fixture.service.reconcileRelayPreparation(preparationQuery()) }
-                    catch (_: IllegalStateException) { rejected = true }
-                    catch (_: IllegalArgumentException) { rejected = true }
+                    try {
+                        fixture.service.reconcileRelayPreparation(preparationQuery())
+                    } catch (_: IllegalStateException) {
+                        rejected = true
+                    } catch (_: IllegalArgumentException) {
+                        rejected = true
+                    }
                 }
                 org.junit.Assert.assertTrue(fault, rejected)
                 assertThat(fixture.server.requestCount).isEqualTo(1)
@@ -225,16 +290,23 @@ class HttpManagementControlServicePolicyReceiptTest {
     }
 
     private fun originQuery() = io.element.android.security.dataprotection.api.ProtectedEventOriginQuery(
-        "a".repeat(64), "b".repeat(64), "c".repeat(64), "d".repeat(64), "e".repeat(64), "f".repeat(64),
-        "origin-content-0001", "RELAY_OPERATION", "origin-kms-reference-0001", 4,
+        "a".repeat(64),
+        "b".repeat(64),
+        "c".repeat(64),
+        "d".repeat(64),
+        "e".repeat(64),
+        "f".repeat(64),
+        "origin-content-0001",
+        "RELAY_OPERATION",
+        "origin-kms-reference-0001",
+        4,
     )
 
     @Test
     fun `signed historical ordinary location recovers original LC17 without a new operation`() = runTest {
         withFixture { fixture ->
             val query = originQuery().copy(contentKind = "LOCATION")
-            fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(
-                fixture.originResponse(legacy = true, kind = "LOCATION", lifecycle = "LC-17")))
+            fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(fixture.originResponse(legacy = true, kind = "LOCATION", lifecycle = "LC-17")))
             val result = withContext(LifecycleOperationContext("unrelated-receive-operation", FullAppLifecycleId.LC_13)) {
                 fixture.service.protectedEventOrigin(query)
             }
@@ -255,8 +327,7 @@ class HttpManagementControlServicePolicyReceiptTest {
         for (kind in listOf("LIVE_LOCATION", "LIVE_LOCATION_OPERATION")) {
             withFixture { fixture ->
                 val query = originQuery().copy(contentKind = kind)
-                fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(
-                    fixture.originResponse(legacy = true, kind = kind, lifecycle = "LC-17")))
+                fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(fixture.originResponse(legacy = true, kind = kind, lifecycle = "LC-17")))
                 val result = withContext(LifecycleOperationContext("unrelated-receive-operation", FullAppLifecycleId.LC_13)) {
                     fixture.service.protectedEventOrigin(query)
                 }
@@ -272,17 +343,18 @@ class HttpManagementControlServicePolicyReceiptTest {
             }
         }
     }
-    
 
     @Test
     fun `LC17 original location lookup cannot authorize another protected kind`() = runTest {
         for (kind in listOf("TEXT", "POLL", "REACTION", "RELAY_OPERATION")) {
             withFixture { fixture ->
-                fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(
-                    fixture.originResponse(kind = kind, lifecycle = "LC-17")))
+                fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(fixture.originResponse(kind = kind, lifecycle = "LC-17")))
                 var rejected = false
-                try { fixture.service.protectedEventOrigin(originQuery().copy(contentKind = kind)) }
-                catch (_: IllegalStateException) { rejected = true }
+                try {
+                    fixture.service.protectedEventOrigin(originQuery().copy(contentKind = kind))
+                } catch (_: IllegalStateException) {
+                    rejected = true
+                }
                 org.junit.Assert.assertTrue(kind, rejected)
             }
         }
@@ -292,11 +364,15 @@ class HttpManagementControlServicePolicyReceiptTest {
     fun `historical location lookup retains signature freshness and exact request checks`() = runTest {
         for (fault in listOf("query", "installation", "expired", "future", "duration", "purpose", "lifecycle", "signature", "resolution")) {
             withFixture { fixture ->
-                fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(
-                    fixture.originResponse(fault, legacy = true, kind = "LOCATION", lifecycle = "LC-17")))
+                fixture.server.enqueue(
+                    MockResponse().setResponseCode(200).setBody(fixture.originResponse(fault, legacy = true, kind = "LOCATION", lifecycle = "LC-17"))
+                )
                 var rejected = false
-                try { fixture.service.protectedEventOrigin(originQuery().copy(contentKind = "LOCATION")) }
-                catch (_: IllegalStateException) { rejected = true }
+                try {
+                    fixture.service.protectedEventOrigin(originQuery().copy(contentKind = "LOCATION"))
+                } catch (_: IllegalStateException) {
+                    rejected = true
+                }
                 org.junit.Assert.assertTrue(fault, rejected)
                 assertThat(fixture.server.requestCount).isEqualTo(1)
             }
@@ -349,7 +425,11 @@ class HttpManagementControlServicePolicyReceiptTest {
             withFixture { fixture ->
                 fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(fixture.originResponse(fault)))
                 var rejected = false
-                try { fixture.service.protectedEventOrigin(originQuery()) } catch (_: IllegalStateException) { rejected = true }
+                try {
+                    fixture.service.protectedEventOrigin(originQuery())
+                } catch (_: IllegalStateException) {
+                    rejected = true
+                }
                 org.junit.Assert.assertTrue(fault, rejected)
                 assertThat(fixture.server.requestCount).isEqualTo(1)
             }
@@ -362,12 +442,21 @@ class HttpManagementControlServicePolicyReceiptTest {
             fixture.recoverySessions()
             fixture.server.enqueue(MockResponse().setResponseCode(403).setBody("admission test stop"))
             val request = io.element.android.security.dataprotection.api.lifecycleOperationRequest(
-                io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_08, "recovery_key_entered",
+                io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_08,
+                "recovery_key_entered",
                 accountIdHash = sha256("@alice:test.invalid".encodeToByteArray()).toHex(),
-                matrixDeviceIdHash = sha256("test-device".encodeToByteArray()).toHex())
-            withContext(io.element.android.security.dataprotection.api.LifecycleOperationContext(
-                "previous-failed-recovery-0001", io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_08)) {
-                try { fixture.service.startLifecycleOperation(request) } catch (_: Exception) { }
+                matrixDeviceIdHash = sha256("test-device".encodeToByteArray()).toHex()
+            )
+            withContext(
+                io.element.android.security.dataprotection.api.LifecycleOperationContext(
+                    "previous-failed-recovery-0001",
+                    io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_08
+                )
+            ) {
+                try {
+                    fixture.service.startLifecycleOperation(request)
+                } catch (_: Exception) {
+                    }
             }
             val sent = fixture.server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)!!
             assertThat(sent.path).isEqualTo("/v1/lifecycle/operations")
@@ -383,14 +472,19 @@ class HttpManagementControlServicePolicyReceiptTest {
     fun `managed room request signs original lifecycle and selected friends`() = runTest {
         withFixture { fixture ->
             val operationId = "managed-group-http-operation-0001"
-            fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(
-                """{"operation_id":"$operationId","room_id":"!managed:test.invalid"}"""))
+            fixture.server.enqueue(MockResponse().setResponseCode(200).setBody("""{"operation_id":"$operationId","room_id":"!managed:test.invalid"}"""))
             val room = withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_12)) {
                 fixture.service.createManagedRoom(io.element.android.security.dataprotection.api.ManagedRoomCreationRequest(
-                    creatorUserId = "@creator:test.invalid", name = "Team", topic = null,
-                    invitees = listOf("@friend:test.invalid"), profileKind = "CONFIDENTIAL",
-                    visibility = "private", joinRule = "invite", parentRoomId = null,
-                    roomAliasName = null, avatarUrl = null,
+                    creatorUserId = "@creator:test.invalid",
+                    name = "Team",
+                    topic = null,
+                    invitees = listOf("@friend:test.invalid"),
+                    profileKind = "CONFIDENTIAL",
+                    visibility = "private",
+                    joinRule = "invite",
+                    parentRoomId = null,
+                    roomAliasName = null,
+                    avatarUrl = null,
                 ))
             }
             assertThat(room).isEqualTo("!managed:test.invalid")
@@ -409,17 +503,27 @@ class HttpManagementControlServicePolicyReceiptTest {
     @Test
     fun `managed room response from another operation cannot be accepted`() = runTest {
         withFixture { fixture ->
-            fixture.server.enqueue(MockResponse().setResponseCode(200).setBody(
-                """{"operation_id":"another-operation-0001","room_id":"!managed:test.invalid"}"""))
+            fixture.server.enqueue(
+                MockResponse().setResponseCode(200).setBody("""{"operation_id":"another-operation-0001","room_id":"!managed:test.invalid"}""")
+            )
             var rejected = false
             withContext(LifecycleOperationContext("managed-group-http-operation-0002", FullAppLifecycleId.LC_12)) {
                 try {
                     fixture.service.createManagedRoom(io.element.android.security.dataprotection.api.ManagedRoomCreationRequest(
-                        creatorUserId = "@creator:test.invalid", name = "Team", topic = null,
-                        invitees = emptyList(), profileKind = "CONFIDENTIAL", visibility = "private",
-                        joinRule = "invite", parentRoomId = null, roomAliasName = null, avatarUrl = null,
+                        creatorUserId = "@creator:test.invalid",
+                        name = "Team",
+                        topic = null,
+                        invitees = emptyList(),
+                        profileKind = "CONFIDENTIAL",
+                        visibility = "private",
+                        joinRule = "invite",
+                        parentRoomId = null,
+                        roomAliasName = null,
+                        avatarUrl = null,
                     ))
-                } catch (_: IllegalStateException) { rejected = true }
+                } catch (_: IllegalStateException) {
+                    rejected = true
+                }
             }
             assertThat(rejected).isTrue()
         }
@@ -429,10 +533,14 @@ class HttpManagementControlServicePolicyReceiptTest {
     fun `expired recovery recheck leaves caller UI thread and signs original owned operation`() = runTest {
         withFixture { fixture ->
             fixture.server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
-            val scope = io.element.android.security.dataprotection.api.RecoveryIntentScope(
-                "a".repeat(64), INSTALLATION_ID, "b".repeat(64))
+            val scope = io.element.android.security.dataprotection.api.RecoveryIntentScope("a".repeat(64), INSTALLATION_ID, "b".repeat(64))
             val owner = io.element.android.security.dataprotection.api.RecoveryIntentRecord(
-                scope, "expired-recovery-operation-0001", "original-intent-0001", NOW - 1, 1)
+                scope,
+                "expired-recovery-operation-0001",
+                "original-intent-0001",
+                NOW - 1,
+                1
+            )
             java.util.concurrent.Executors.newSingleThreadExecutor { task -> Thread(task, "QA-caller-UI") }
                 .asCoroutineDispatcher().use { caller ->
                     withContext(caller) { fixture.service.expireRecoveryOperation(owner) }
@@ -464,8 +572,8 @@ class HttpManagementControlServicePolicyReceiptTest {
                 fixture.service.synchronize()
             }
 
-            assertThat(report.status).isEqualTo(ManagementSyncStatus.SECURITY_REJECTED)
             assertThat(report.errorCode).isEqualTo("POLICY_APPLICATION_BLOCKED_VERSION")
+            assertThat(report.status).isEqualTo(ManagementSyncStatus.SECURITY_REJECTED)
             assertThat(report.acceptedPolicyVersion).isEqualTo(2L)
             assertThat(fixture.requests.map(CapturedRequest::path)).containsExactly(
                 RECEIPT_PATH,
@@ -548,20 +656,26 @@ class HttpManagementControlServicePolicyReceiptTest {
     fun `LC08 selects live SDK token instead of persisted credential envelope`() = runTest {
         withFixture { f ->
             f.recoverySessions()
-            assertThat(f.service.recoveryMatrixToken(sha256("@alice:test.invalid".encodeToByteArray()).toHex(),
-                sha256("test-device".encodeToByteArray()).toHex())).isEqualTo("dedicated-runtime-token-123456")
+            assertThat(f.service.recoveryMatrixToken(
+                sha256("@alice:test.invalid".encodeToByteArray()).toHex(),
+                sha256("test-device".encodeToByteArray()).toHex()
+            )).isEqualTo("dedicated-runtime-token-123456")
         }
     }
 
     @Test
     fun `LC08 rejects swapped SDK device and encrypted envelope as runtime proof`() = runTest {
         withFixture { f ->
-            for ((device, token) in listOf("other-device" to "dedicated-runtime-token-123456",
-                "test-device" to "yzvault1:sealed-not-a-token")) {
+            for ((device, token) in listOf(
+                    "other-device" to "dedicated-runtime-token-123456",
+                "test-device" to "yzvault1:sealed-not-a-token"
+                )) {
                 f.recoverySessions(runtimeDevice = device, runtimeToken = token)
                 assertThat(runCatching {
-                    f.service.recoveryMatrixToken(sha256("@alice:test.invalid".encodeToByteArray()).toHex(),
-                        sha256("test-device".encodeToByteArray()).toHex())
+                    f.service.recoveryMatrixToken(
+                        sha256("@alice:test.invalid".encodeToByteArray()).toHex(),
+                        sha256("test-device".encodeToByteArray()).toHex()
+                    )
                 }.isFailure).isTrue()
             }
         }
@@ -573,8 +687,10 @@ class HttpManagementControlServicePolicyReceiptTest {
             for ((valid, copies) in listOf(true to 0, false to 1, true to 2)) {
                 f.recoverySessions(valid = valid, copies = copies)
                 assertThat(runCatching {
-                    f.service.recoveryMatrixToken(sha256("@alice:test.invalid".encodeToByteArray()).toHex(),
-                        sha256("test-device".encodeToByteArray()).toHex())
+                    f.service.recoveryMatrixToken(
+                        sha256("@alice:test.invalid".encodeToByteArray()).toHex(),
+                        sha256("test-device".encodeToByteArray()).toHex()
+                    )
                 }.isFailure).isTrue()
             }
         }
@@ -587,11 +703,19 @@ class HttpManagementControlServicePolicyReceiptTest {
             for ((status, detail) in listOf(404 to "secret-token private-user-content", 409 to "LC12_MEMBERSHIP_PROTOCOL_UNAVAILABLE")) {
                 f.server.enqueue(MockResponse().setResponseCode(status).setBody("{\"detail\":\"$detail\"}"))
                 val failure = runCatching {
-                    f.service.prepareRoomMembership(sha256("@alice:test.invalid".encodeToByteArray()).toHex(),
-                        sha256("test-device".encodeToByteArray()).toHex(), "!dm:test.invalid", "@alice:test.invalid", "leave", null)
+                    f.service.prepareRoomMembership(
+                        sha256("@alice:test.invalid".encodeToByteArray()).toHex(),
+                        sha256("test-device".encodeToByteArray()).toHex(),
+                        "!dm:test.invalid",
+                        "@alice:test.invalid",
+                        "leave",
+                        null
+                    )
                 }.exceptionOrNull() as io.element.android.security.dataprotection.api.RoomMembershipFailure
-                assertThat(failure.diagnostic).isEqualTo("LC12_PREPARE:HTTP_$status" +
-                    if (status == 409) "_LC12_MEMBERSHIP_PROTOCOL_UNAVAILABLE" else "")
+                assertThat(failure.diagnostic).isEqualTo(
+                    "LC12_PREPARE:HTTP_$status" +
+                    if (status == 409) "_LC12_MEMBERSHIP_PROTOCOL_UNAVAILABLE" else ""
+                )
                 val sent = f.server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)!!
                 assertThat(sent.path).isEqualTo("/v1/lifecycle/membership/prepare")
                 assertThat(sent.getHeader("X-YiZhe-Lifecycle-Operation-Id")).isNull()
@@ -610,8 +734,14 @@ class HttpManagementControlServicePolicyReceiptTest {
         withFixture { f ->
             f.recoverySessions(runtimeDevice = "OTHER")
             val failure = runCatching {
-                f.service.prepareRoomMembership(sha256("@alice:test.invalid".encodeToByteArray()).toHex(),
-                    sha256("test-device".encodeToByteArray()).toHex(), "!dm:test.invalid", "@alice:test.invalid", "leave", null)
+                f.service.prepareRoomMembership(
+                    sha256("@alice:test.invalid".encodeToByteArray()).toHex(),
+                    sha256("test-device".encodeToByteArray()).toHex(),
+                    "!dm:test.invalid",
+                    "@alice:test.invalid",
+                    "leave",
+                    null
+                )
             }.exceptionOrNull() as io.element.android.security.dataprotection.api.RoomMembershipFailure
             assertThat(failure.diagnostic).isEqualTo("MATRIX_SESSION:STATE_REJECTED")
             assertThat(f.server.requestCount).isEqualTo(0)
@@ -642,15 +772,24 @@ class HttpManagementControlServicePolicyReceiptTest {
             }
         }
         val root = temporaryFolder.newFolder()
-        val atomicFileHarness = AtomicFileHarness(root.resolve("security/management/control-state-v1.json"))
+        val stateFile = root.resolve("security/management/control-state-v1.json")
+        val atomicFiles = listOf(
+            stateFile,
+            root.resolve("security/management/offline-entry-v1.json"),
+            root.resolve("security/management/local-list-entry-v1.json"),
+        ).associateWith(::AtomicFileHarness)
+        val atomicFileHarness = atomicFiles.getValue(stateFile)
         mockkConstructor(AtomicFile::class)
-        every { anyConstructed<AtomicFile>().openRead() } answers { atomicFileHarness.openRead() }
-        every { anyConstructed<AtomicFile>().startWrite() } answers { atomicFileHarness.startWrite() }
-        every { anyConstructed<AtomicFile>().finishWrite(any()) } answers {
-            atomicFileHarness.finishWrite(firstArg())
-        }
-        every { anyConstructed<AtomicFile>().failWrite(any()) } answers {
-            atomicFileHarness.failWrite(firstArg())
+        atomicFiles.forEach { (file, harness) ->
+            every { constructedWith<AtomicFile>(EqMatcher(file)).baseFile } returns file
+            every { constructedWith<AtomicFile>(EqMatcher(file)).openRead() } answers { harness.openRead() }
+            every { constructedWith<AtomicFile>(EqMatcher(file)).startWrite() } answers { harness.startWrite() }
+            every { constructedWith<AtomicFile>(EqMatcher(file)).finishWrite(any()) } answers { harness.finishWrite(firstArg()) }
+            every { constructedWith<AtomicFile>(EqMatcher(file)).failWrite(any()) } answers { harness.failWrite(firstArg()) }
+            every { constructedWith<AtomicFile>(EqMatcher(file)).delete() } answers {
+                file.delete()
+                Unit
+            }
         }
         var fixture: Fixture? = null
         try {
@@ -662,7 +801,7 @@ class HttpManagementControlServicePolicyReceiptTest {
                 fixture?.close()
             } finally {
                 try {
-                    atomicFileHarness.close()
+                    atomicFiles.values.forEach(AtomicFileHarness::close)
                 } finally {
                     try {
                         unmockkConstructor(AtomicFile::class)
@@ -743,8 +882,11 @@ class HttpManagementControlServicePolicyReceiptTest {
         fun recoverySessions(runtimeDevice: String = "test-device", runtimeToken: String = "dedicated-runtime-token-123456",
             valid: Boolean = true, copies: Int = 1) {
             val stored = io.element.android.libraries.sessionstorage.test.aSessionData(
-                sessionId = "@alice:test.invalid", deviceId = "test-device", isTokenValid = valid,
-                accessToken = "yzvault1:sealed-not-a-token")
+                sessionId = "@alice:test.invalid",
+                deviceId = "test-device",
+                isTokenValid = valid,
+                accessToken = "yzvault1:sealed-not-a-token"
+            )
             coEvery { sessionStore.getAllSessions() } returns List(copies) { stored }
             val client = mockk<io.element.android.libraries.matrix.api.MatrixClient>()
             every { client.sessionId } returns io.element.android.libraries.matrix.api.core.UserId(stored.userId)
@@ -777,8 +919,14 @@ class HttpManagementControlServicePolicyReceiptTest {
                         "/v1/lifecycle/media-runtime-cleanup" -> "ANDROID_MEDIA_RUNTIME_CLEANUP_ACK"
                         else -> return MockResponse().setResponseCode(404)
                     }
-                    val fact = if (fault == "operation") JsonObject(original +
-                        ("operation_id" to kotlinx.serialization.json.JsonPrimitive("another-original-operation"))) else original
+                    val fact = if (fault == "operation") {
+                        JsonObject(
+                            original +
+                        ("operation_id" to kotlinx.serialization.json.JsonPrimitive("another-original-operation"))
+                        )
+                    } else {
+                        original
+                    }
                     val digest = sha256Hex(verifier.canonicalJson(fact))
                     val reference = when (purpose) {
                         "MEDIA_RESOURCE_SEAL_ACK" -> "android-media-manifest:v1:$digest:" +
@@ -797,8 +945,11 @@ class HttpManagementControlServicePolicyReceiptTest {
                             put("accepted_at_ms", kotlinx.serialization.json.JsonPrimitive(1791551189433L))
                         }
                     }
-                    return jsonResponse(JsonObject(payload + ("signature_b64" to kotlinx.serialization.json.JsonPrimitive(
-                        authoritySignature(verifier.canonicalJson(payload))))).toString())
+                    return jsonResponse(
+                        JsonObject(
+                            payload + ("signature_b64" to kotlinx.serialization.json.JsonPrimitive(authoritySignature(verifier.canonicalJson(payload))))
+                        ).toString()
+                    )
                 }
             }
         }
@@ -978,31 +1129,66 @@ class HttpManagementControlServicePolicyReceiptTest {
                         "idempotency_key":"relay-edit-original-0001",
                         "subjects":{"installation_id":"${if (fault == "owner") "another-installation" else INSTALLATION_ID}",
                             "account_id_hash":"${if (fault == "account") "e".repeat(64) else query.getValue("account_id_hash").jsonPrimitive.content}",
-                            "matrix_device_id_hash":"${if (fault == "device") "e".repeat(64) else query.getValue("matrix_device_id_hash").jsonPrimitive.content}",
+                            "matrix_device_id_hash":"${if (fault == "device") {
+                        "e".repeat(
+                            64
+                        )
+                    } else {
+                        query.getValue("matrix_device_id_hash").jsonPrimitive.content
+                    }}",
                             "room_id_hash":"${if (fault == "room") "e".repeat(64) else query.getValue("room_id_hash").jsonPrimitive.content}",
                             "event_id_hash":"${if (fault == "event") "e".repeat(64) else query.getValue("event_id_hash").jsonPrimitive.content}"},
                         "state":"${if (terminal) "FAILED_FINAL" else "RUNNING"}","current_phase":"RECEIPTED",
-                        "authority_revisions":{},"steps":[],"deadline_ms":${now-60_000},
+                        "authority_revisions":{},"steps":[],"deadline_ms":${now - 60_000},
                         "compensation_state":"${if (terminal) "PENDING" else "NOT_REQUIRED"}",
                         "terminal_receipt_id":${if (terminal && fault != "receipt") "\"original-terminal-erasure-receipt\"" else "null"},
-                        "created_at_ms":${now-120_000},"updated_at_ms":$now
+                        "created_at_ms":${now - 120_000},"updated_at_ms":$now
                     }""").jsonObject
                     val steps = kotlinx.serialization.json.JsonArray(
                         (if (fault == "steps") emptyList() else listOf("ANDROID_FRONTEND", "ANDROID_SERVICE", "CONTROL_PLANE", "DATABASE", "MATRIX", "KMS"))
-                            .map { component -> JSON.parseToJsonElement("""{"step_id":"original-step-$component",
-                                "component":"$component","required":true,"state":"PENDING","attempt_count":0,"updated_at_ms":$now}""") },
+                            .map { component ->
+                                JSON.parseToJsonElement("""{"step_id":"original-step-$component",
+                                "component":"$component","required":true,"state":"PENDING","attempt_count":0,"updated_at_ms":$now}""")
+                            },
                     )
                     val payload = kotlinx.serialization.json.buildJsonObject {
                         put("schema_version", kotlinx.serialization.json.JsonPrimitive(1))
-                        put("purpose", kotlinx.serialization.json.JsonPrimitive(if (fault == "purpose") "OTHER_PURPOSE" else "PROTECTED_RELAY_PREPARATION_RECONCILIATION"))
-                        put("query", if (fault == "nonce") JsonObject(query + ("request_nonce" to kotlinx.serialization.json.JsonPrimitive("0".repeat(64)))) else query)
-                        put("installation_id", kotlinx.serialization.json.JsonPrimitive(if (fault == "installation") "another-installation" else INSTALLATION_ID))
+                        put("purpose", kotlinx.serialization.json.JsonPrimitive(if (fault ==
+                            "purpose") {
+                                "OTHER_PURPOSE"
+                            } else {
+                                "PROTECTED_RELAY_PREPARATION_RECONCILIATION"
+                            }))
+                        put("query", if (fault ==
+                            "nonce") {
+                                JsonObject(query + ("request_nonce" to kotlinx.serialization.json.JsonPrimitive("0".repeat(64))))
+                            } else {
+                                query
+                            })
+                        put("installation_id", kotlinx.serialization.json.JsonPrimitive(if (fault ==
+                            "installation") {
+                                "another-installation"
+                            } else {
+                                INSTALLATION_ID
+                            }))
                         put("operation", JsonObject(operation + ("steps" to steps)))
                         put("issued_at_ms", kotlinx.serialization.json.JsonPrimitive(if (fault == "future") now + 10_000 else now - 1))
-                        put("expires_at_ms", kotlinx.serialization.json.JsonPrimitive(if (fault == "expired") now - 1 else if (fault == "duration") now + 30_000 else now + 14_000))
+                        put("expires_at_ms", kotlinx.serialization.json.JsonPrimitive(if (fault ==
+                            "expired") {
+                                now - 1
+                            } else if (fault == "duration") {
+                                now + 30_000
+                            } else {
+                                now + 14_000
+                            }))
                         put("signing_key_id", kotlinx.serialization.json.JsonPrimitive(keyId))
                     }
-                    val signature = if (fault == "signature") Base64.getEncoder().encodeToString(ByteArray(72)) else authoritySignature(verifier.canonicalJson(payload))
+                    val signature = if (fault ==
+                        "signature") {
+                            Base64.getEncoder().encodeToString(ByteArray(72))
+                        } else {
+                            authoritySignature(verifier.canonicalJson(payload))
+                        }
                     return jsonResponse(JsonObject(payload + ("signature_b64" to kotlinx.serialization.json.JsonPrimitive(signature))).toString())
                 }
             }
@@ -1015,20 +1201,36 @@ class HttpManagementControlServicePolicyReceiptTest {
                     val now = System.currentTimeMillis()
                     val payload = kotlinx.serialization.json.buildJsonObject {
                         put("schema_version", kotlinx.serialization.json.JsonPrimitive(1))
-                        put("purpose", kotlinx.serialization.json.JsonPrimitive(
-                            if (fault == "purpose") "OTHER_PURPOSE" else "PROTECTED_RELAY_RETRY_AUTHORIZATION"))
-                        put("query", if (fault == "nonce") JsonObject(query + ("request_nonce" to
-                            kotlinx.serialization.json.JsonPrimitive("0".repeat(64)))) else query)
-                        put("installation_id", kotlinx.serialization.json.JsonPrimitive(
-                            if (fault == "installation") "another-installation" else INSTALLATION_ID))
+                        put(
+                            "purpose",
+                            kotlinx.serialization.json.JsonPrimitive(if (fault == "purpose") "OTHER_PURPOSE" else "PROTECTED_RELAY_RETRY_AUTHORIZATION")
+                        )
+                        put("query", if (fault == "nonce") {
+                            JsonObject(query + ("request_nonce" to
+                            kotlinx.serialization.json.JsonPrimitive("0".repeat(64))))
+                        } else {
+                            query
+                        })
+                        put(
+                            "installation_id",
+                            kotlinx.serialization.json.JsonPrimitive(if (fault == "installation") "another-installation" else INSTALLATION_ID)
+                        )
                         put("authorized", kotlinx.serialization.json.JsonPrimitive(fault != "denied"))
                         put("issued_at_ms", kotlinx.serialization.json.JsonPrimitive(if (fault == "future") now + 10_000 else now - 1))
-                        put("expires_at_ms", kotlinx.serialization.json.JsonPrimitive(
-                            if (fault == "expired") now - 1 else if (fault == "duration") now + 30_000 else now + 14_000))
+                        put("expires_at_ms", kotlinx.serialization.json.JsonPrimitive(if (fault == "expired") {
+                                now - 1
+                            } else if (fault == "duration") {
+                                now + 30_000
+                            } else {
+                                now + 14_000
+                            }))
                         put("signing_key_id", kotlinx.serialization.json.JsonPrimitive(keyId))
                     }
-                    val signature = if (fault == "signature") Base64.getEncoder().encodeToString(ByteArray(72))
-                        else authoritySignature(verifier.canonicalJson(payload))
+                    val signature = if (fault == "signature") {
+                        Base64.getEncoder().encodeToString(ByteArray(72))
+                    } else {
+                        authoritySignature(verifier.canonicalJson(payload))
+                    }
                     return jsonResponse(JsonObject(payload + ("signature_b64" to
                         kotlinx.serialization.json.JsonPrimitive(signature))).toString())
                 }
@@ -1052,20 +1254,37 @@ class HttpManagementControlServicePolicyReceiptTest {
                 put("purpose", kotlinx.serialization.json.JsonPrimitive(if (fault == "purpose") "OTHER_PURPOSE" else "PROTECTED_SEND_ORIGIN_LOOKUP"))
                 put("installation_id", kotlinx.serialization.json.JsonPrimitive(if (fault == "installation") "other-installation" else INSTALLATION_ID))
                 put("query", query)
-                put("origin", if (unknown) kotlinx.serialization.json.JsonNull else kotlinx.serialization.json.buildJsonObject {
+                put("origin", if (unknown) {
+                    kotlinx.serialization.json.JsonNull
+                } else {
+                    kotlinx.serialization.json.buildJsonObject {
                     put("operation_id", kotlinx.serialization.json.JsonPrimitive("original-send-operation-0001"))
                     put("lifecycle_id", kotlinx.serialization.json.JsonPrimitive(if (fault == "lifecycle") "LC-14" else lifecycle))
-                    if (legacy || fault == "resolution") put("scope_resolution", kotlinx.serialization.json.JsonPrimitive(
-                        if (fault == "resolution") "UNVERIFIED_PROJECTION" else "LEGACY_INSTALLATION_AND_AUTHORITY_FACTS"))
+                    if (legacy || fault == "resolution") {
+                        put(
+                            "scope_resolution",
+                            kotlinx.serialization.json.JsonPrimitive(
+                                if (fault == "resolution") "UNVERIFIED_PROJECTION" else "LEGACY_INSTALLATION_AND_AUTHORITY_FACTS"
+                            )
+                        )
+                    }
+                }
                 })
-                val issued = when (fault) { "expired" -> now-120_000; "future" -> now+30_000; else -> now-1_000 }
+                val issued = when (fault) {
+                    "expired" -> now - 120_000
+                    "future" -> now + 30_000
+                    else -> now - 1_000
+                }
                 put("issued_at_ms", kotlinx.serialization.json.JsonPrimitive(issued))
-                put("expires_at_ms", kotlinx.serialization.json.JsonPrimitive(issued+if (fault == "duration") 120_000 else 60_000))
+                put("expires_at_ms", kotlinx.serialization.json.JsonPrimitive(issued + if (fault == "duration") 120_000 else 60_000))
                 put("signing_key_id", kotlinx.serialization.json.JsonPrimitive(keyId))
             }
             val signature = authoritySignature(verifier.canonicalJson(payload))
-            return JsonObject(payload + ("signature_b64" to kotlinx.serialization.json.JsonPrimitive(
-                if (fault == "signature") Base64.getEncoder().encodeToString(ByteArray(72)) else signature))).toString()
+            return JsonObject(
+                payload + ("signature_b64" to kotlinx.serialization.json.JsonPrimitive(
+                    if (fault == "signature") Base64.getEncoder().encodeToString(ByteArray(72)) else signature
+                ))
+            ).toString()
         }
 
         override fun close() {
