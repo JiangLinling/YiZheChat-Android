@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-20261021-functional-repair-r7",
-  "frozen_utc": "2026-10-20T22:58:17.503337+00:00",
+  "revision": "unified-20261021-functional-repair-r8",
+  "frozen_utc": "2026-10-20T23:23:44.648617+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -436,7 +436,7 @@
     "appnav/src/main/kotlin/io/element/android/appnav/root/RootStateProvider.kt": "afd067e64cd641de0996278b16320162633fbb58c7b60f5f9e4891c90ba6f6e8",
     "appnav/src/main/kotlin/io/element/android/appnav/root/RootView.kt": "3dd8f881de6e168f117dba91766b5d12d443506e08998534db2e37b50e9eeac4",
     "appnav/src/main/kotlin/io/element/android/appnav/securitysetup/DeviceCapabilitySetupView.kt": "d5966333a6904f9354347143f44a1f2cb7e8b4e8a6dc636369787463d147e55a",
-    "appnav/src/main/kotlin/io/element/android/appnav/securitysetup/SecuritySetupView.kt": "e59dc4aed198b3041c7bdba4d57a45e3687169f7f39342bf4503e95a3d0e1a22",
+    "appnav/src/main/kotlin/io/element/android/appnav/securitysetup/SecuritySetupView.kt": "264c6219f73033c0b815b9822a079e5968ecc3e1c6f9872dafb027805a8705f7",
     "appnav/src/main/kotlin/io/element/android/appnav/securitysetup/StartupDeviceReadiness.kt": "1437fe51a938cda065e21e9bb809f9d970df123b04d888118c4d4ec26cdd362a",
     "appnav/src/main/res/values-be/translations.xml": "f760e686fad3213576b29a45e958d70b509b058b1f8813c5382769dafc126c82",
     "appnav/src/main/res/values-ca/translations.xml": "2c6315f20b50905a55f6694eb116bcfaadd4d863d0ba43ceec1cc752f80c09e0",

@@ -794,6 +794,10 @@ fun SecuritySetupRoute(
                     recoveryAwaitingCompletion = true
                     coroutineScope.launch {
                         suspend {
+                            // A retained form can outlive LC-06. An explicit key attempt
+                            // reconciles that original admission before LC-08, using the
+                            // same signed expiry/retirement path as a new app launch.
+                            startRecoveryVerification()
                             recoveryKeySubmissionService.recover(recoveryKey).getOrThrow()
                         }.runCatchingUpdatingState(recoveryKeyAction)
                     }
