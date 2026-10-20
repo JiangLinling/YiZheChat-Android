@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="screen_notification_settings_sound_yizhe_default">YiZheChat default</string>
+    <string name="screen_notification_settings_sound_yizhe_fade">YiZheChat fade</string>
     <string name="screen_chat_security_startup_binding">Startup assistance (optional)</string>
     <string name="screen_chat_security_startup_binding_description">Review the explanation, status and system switch. The system may still stop the service; messaging and calls work independently.</string>
     <string name="screen_chat_security_startup_binding_ready">Connected</string>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="screen_poll_card_title">Group poll</string>
+    <string name="screen_poll_card_title">Poll</string>
     <string name="screen_poll_ended">Ended</string>
     <string name="screen_poll_open">Open</string>
     <string name="screen_poll_single_choice">Choose one option</string>

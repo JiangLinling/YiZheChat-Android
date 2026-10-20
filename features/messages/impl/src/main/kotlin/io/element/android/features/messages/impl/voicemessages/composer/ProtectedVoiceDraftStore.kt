@@ -18,6 +18,7 @@ import io.element.android.libraries.matrix.api.room.JoinedRoom
 import io.element.android.libraries.voicerecorder.api.VoiceRecorderState
 import io.element.android.security.dataprotection.api.AppOperationalCoordinatorState
 import io.element.android.security.dataprotection.api.AppOperationalSnapshot
+import io.element.android.security.dataprotection.api.AppOperationalStatus
 import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
 import io.element.android.security.dataprotection.api.DataProtectionPolicyProvider
 import io.element.android.security.dataprotection.api.DataProtectionPolicySource
@@ -446,7 +447,17 @@ private fun AppOperationalCoordinatorState.canRefreshVoiceDraftSourceAuthorizati
         snapshot.matrixDeviceIdHash == matrixDeviceIdHash &&
         snapshot.hasLocalVoiceDraftSourceDenial()
     ) {
-        return false
+        // An expired access-session observation is recoverable after ordinary
+        // signed management synchronization issues a new ticket. Refresh only
+        // that named condition; a fresh denial, device revocation, account
+        // destruction or KMS denial still blocks at this boundary.
+        val access = snapshot.components["access_session"]
+        return nowEpochMillis >= snapshot.expiresAtEpochMillis &&
+            access?.status == AppOperationalStatus.BLOCKED &&
+            access.reasonCode == "ACCESS_SESSION_EXPIRED" &&
+            listOf("device_trust", "cleanup", "matrix", "kms").all { name ->
+                snapshot.components[name]?.status == AppOperationalStatus.READY
+            }
     }
     if (snapshot.accountIdHash != accountIdHash || snapshot.matrixDeviceIdHash != matrixDeviceIdHash) return true
     return nowEpochMillis >= snapshot.localVoiceDraftSourceExpiresAtEpochMillis

@@ -457,8 +457,8 @@ private fun MessageSoundDialog(state: NotificationSettingsState) {
         title = stringResource(id = R.string.screen_notification_settings_message_sound_dialog_title),
         subtitle = subtitle,
         options = persistentListOf(
-            ListOption(title = stringResource(id = R.string.screen_notification_settings_sound_element_default)),
-            ListOption(title = stringResource(id = R.string.screen_notification_settings_sound_element_fade)),
+            ListOption(title = stringResource(id = R.string.screen_notification_settings_sound_yizhe_default)),
+            ListOption(title = stringResource(id = R.string.screen_notification_settings_sound_yizhe_fade)),
             ListOption(title = stringResource(id = R.string.screen_notification_settings_sound_system_default)),
             ListOption(title = stringResource(id = R.string.screen_notification_settings_message_sound_dialog_choose_other)),
         ),

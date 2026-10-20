@@ -34,7 +34,7 @@
     <string name="screen_room_relay_title_label">接龙主题</string>
     <string name="screen_room_relay_create_action">发起</string>
     <string name="screen_room_relay_cancel_action">取消</string>
-    <string name="screen_room_relay_result_title">群接龙</string>
+    <string name="screen_room_relay_result_title">接龙</string>
     <string name="screen_room_relay_send_action">发送</string>
     <string name="screen_room_relay_topic_label">接龙主题</string>
     <string name="screen_room_relay_entry_placeholder">填写接龙内容</string>
@@ -45,7 +45,7 @@
     <string name="screen_room_relay_save_edit">保存修改</string>
     <string name="screen_room_relay_cancel_edit">取消编辑</string>
     <string name="screen_room_relay_edit_conflict">该条目已更新，请重新选择后编辑。</string>
-    <string name="screen_room_relay_card_heading">群接龙</string>
+    <string name="screen_room_relay_card_heading">接龙</string>
     <string name="screen_room_relay_empty">暂无人参与</string>
     <string name="screen_room_relay_more_entries">还有 %1$d 项</string>
     <string name="screen_room_relay_participate">参与接龙</string>
@@ -158,7 +158,7 @@
     <string name="screen_room_relay_submit_failed">提交失败，内容已保留，请重试。</string>
     <string name="screen_room_relay_pending">已提交，等待名单同步，请勿重复提交。</string>
     <string name="screen_room_relay_back">返回群聊</string>
-    <string name="screen_room_relay_publish">发布到群聊</string>
+    <string name="screen_room_relay_publish">发送到当前聊天</string>
     <string name="screen_room_relay_submit">提交接龙</string>
     <string name="screen_room_relay_close_confirmation">结束这项接龙？结束后不再接受新条目，已有名单仍可查看。</string>
     <string name="screen_room_relay_entry_count">%1$d 条接龙</string>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="embedded_ntfy_channel_name">消息连接服务</string>
+    <string name="embedded_ntfy_foreground_title">乙者消息服务正在运行</string>
+    <string name="embedded_ntfy_foreground_message">保持安全连接，以接收新消息和来电</string>
+</resources>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="screen_poll_card_title">群投票</string>
+    <string name="screen_poll_card_title">投票</string>
     <string name="screen_poll_ended">已结束</string>
     <string name="screen_poll_open">进行中</string>
     <string name="screen_poll_single_choice">单选 · 选择一个选项</string>

@@ -196,6 +196,52 @@ class ProtectedVoiceDraftSourceAuthorizationTest {
     }
 
     @Test
+    fun `expired access session denial rechecks signed authority after ticket renewal`() = runTest {
+        val base = snapshot(issuedAt = 500, expiresAt = 1_000)
+        val expired = base.copy(overallStatus = AppOperationalStatus.BLOCKED,
+            components = base.components + ("access_session" to base.components.getValue("access_session").copy(
+            status = AppOperationalStatus.BLOCKED, reasonCode = "ACCESS_SESSION_EXPIRED",
+        )))
+        val renewed = snapshot(issuedAt = 1_500, expiresAt = 3_000)
+        val coordinator = RecordingRefreshCoordinator(AppOperationalCoordinatorState.Available(expired), renewed)
+        assertThat(resolveVoiceDraftSourceAuthorization(coordinator, ACCOUNT_HASH, DEVICE_HASH, nowEpochMillis = { 2_000 }))
+            .isSameInstanceAs(renewed)
+        assertThat(coordinator.refreshRequests).containsExactly(ACCOUNT_HASH to DEVICE_HASH)
+
+        // The request itself is not authorization. A still-denied signed reply
+        // must not issue a lease or accept the expired original snapshot.
+        val stillDenied = renewed.copy(overallStatus = AppOperationalStatus.BLOCKED,
+            components = renewed.components + ("access_session" to
+            renewed.components.getValue("access_session").copy(status = AppOperationalStatus.BLOCKED, reasonCode = "ACCESS_SESSION_EXPIRED")))
+        val denied = RecordingRefreshCoordinator(AppOperationalCoordinatorState.Available(expired), stillDenied)
+        assertThat(runCatching {
+            resolveVoiceDraftSourceAuthorization(denied, ACCOUNT_HASH, DEVICE_HASH, nowEpochMillis = { 2_000 })
+        }.isFailure).isTrue()
+        assertThat(denied.refreshRequests).hasSize(1)
+    }
+
+    @Test
+    fun `fresh access denial and expired revoked device are not refreshed by a voice draft`() = runTest {
+        val base = snapshot(issuedAt = 500, expiresAt = 3_000)
+        val denied = base.copy(overallStatus = AppOperationalStatus.BLOCKED,
+            components = base.components + ("access_session" to base.components.getValue("access_session").copy(
+            status = AppOperationalStatus.BLOCKED, reasonCode = "ACCESS_SESSION_EXPIRED",
+        )))
+        val fresh = RecordingRefreshCoordinator(AppOperationalCoordinatorState.Available(denied), base)
+        assertThat(runCatching {
+            resolveVoiceDraftSourceAuthorization(fresh, ACCOUNT_HASH, DEVICE_HASH, nowEpochMillis = { 2_000 })
+        }.isFailure).isTrue()
+        assertThat(fresh.refreshRequests).isEmpty()
+        val revoked = denied.copy(expiresAtEpochMillis = 1_000,
+            components = denied.components + ("device_trust" to base.components.getValue("device_trust").copy(status = AppOperationalStatus.BLOCKED)))
+        val revokedCoordinator = RecordingRefreshCoordinator(AppOperationalCoordinatorState.Available(revoked), base)
+        assertThat(runCatching {
+            resolveVoiceDraftSourceAuthorization(revokedCoordinator, ACCOUNT_HASH, DEVICE_HASH, nowEpochMillis = { 2_000 })
+        }.isFailure).isTrue()
+        assertThat(revokedCoordinator.refreshRequests).isEmpty()
+    }
+
+    @Test
     fun `usable cached authorization does not refresh`() = runTest {
         val cached = snapshot(issuedAt = 1_000, expiresAt = 3_000)
         val coordinator = RecordingRefreshCoordinator(

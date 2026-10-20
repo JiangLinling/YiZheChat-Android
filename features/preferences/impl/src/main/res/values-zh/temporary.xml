@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="screen_notification_settings_sound_yizhe_default">乙者默认</string>
+    <string name="screen_notification_settings_sound_yizhe_fade">乙者渐响</string>
     <string name="screen_chat_security_startup_binding">启动加速（可选）</string>
     <string name="screen_chat_security_startup_binding_description">查看功能说明、实际状态和系统开关。系统仍可能停止服务，消息和来电功能独立运行。</string>
     <string name="screen_chat_security_startup_binding_ready">已连接</string>

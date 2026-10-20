@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="screen_poll_create_heading">发起投票</string>
-    <string name="screen_poll_publish">发布到群聊</string>
+    <string name="screen_poll_publish">发送到当前聊天</string>
     <string name="screen_poll_publish_failed">发布失败，内容已保留，请重试。</string>
     <string name="screen_poll_topic">投票主题</string>
     <string name="screen_poll_options">投票选项 · 单选</string>
