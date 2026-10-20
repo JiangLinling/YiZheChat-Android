@@ -466,8 +466,9 @@ class DefaultAppOperationalStateCoordinator internal constructor(
         operationId: String, roomId: String,
     ) = managementControlService.authorizePreparedRelayRetry(query, operationId, roomId)
 
-    override suspend fun protectedEventOrigin(query: io.element.android.security.dataprotection.api.ProtectedEventOriginQuery): io.element.android.security.dataprotection.api.ProtectedEventOrigin? =
-        managementControlService.protectedEventOrigin(query)
+    override suspend fun protectedEventOrigin(
+        query: io.element.android.security.dataprotection.api.ProtectedEventOriginQuery,
+    ): io.element.android.security.dataprotection.api.ProtectedEventOrigin? = managementControlService.protectedEventOrigin(query)
 
     override suspend fun recordMediaObjectCleanup(fact: io.element.android.security.dataprotection.api.LifecycleMediaObjectCleanup): String =
         managementControlService.recordMediaObjectCleanup(fact)

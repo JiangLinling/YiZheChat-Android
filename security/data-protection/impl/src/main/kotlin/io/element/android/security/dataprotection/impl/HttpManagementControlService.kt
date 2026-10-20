@@ -50,7 +50,6 @@ import io.element.android.security.dataprotection.api.LifecycleMediaReservation
 import io.element.android.security.dataprotection.api.LifecycleMediaRuntimeCleanup
 import io.element.android.security.dataprotection.api.LifecycleMediaSeal
 import io.element.android.security.dataprotection.api.LifecycleOperation
-import io.element.android.security.dataprotection.api.LifecycleOperationContext
 import io.element.android.security.dataprotection.api.LifecycleOperationRequest
 import io.element.android.security.dataprotection.api.LifecycleOperationStatus
 import io.element.android.security.dataprotection.api.LifecyclePhase
