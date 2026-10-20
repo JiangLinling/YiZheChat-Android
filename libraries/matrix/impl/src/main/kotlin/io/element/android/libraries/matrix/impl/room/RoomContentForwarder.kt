@@ -8,7 +8,6 @@
 
 package io.element.android.libraries.matrix.impl.room
 
-import io.element.android.libraries.androidutils.file.safeDelete
 import io.element.android.libraries.core.coroutine.parallelMap
 import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.core.mimetype.MimeTypes
@@ -20,6 +19,8 @@ import io.element.android.libraries.matrix.api.media.AudioInfo
 import io.element.android.libraries.matrix.api.media.FileInfo
 import io.element.android.libraries.matrix.api.media.ImageInfo
 import io.element.android.libraries.matrix.api.media.MatrixMediaLoader
+import io.element.android.libraries.matrix.api.media.MediaCaptionOperationContext
+import io.element.android.libraries.matrix.api.media.MediaSubmissionContext
 import io.element.android.libraries.matrix.api.media.VideoInfo
 import io.element.android.libraries.matrix.api.room.ForwardEventException
 import io.element.android.libraries.matrix.api.timeline.item.event.AudioMessageType
@@ -36,21 +37,29 @@ import io.element.android.libraries.matrix.api.timeline.item.event.StickerMessag
 import io.element.android.libraries.matrix.api.timeline.item.event.TextMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.VideoMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.VoiceMessageType
-import io.element.android.libraries.matrix.impl.media.ProtectedMatrixMedia
 import io.element.android.libraries.matrix.impl.media.map
 import io.element.android.libraries.matrix.impl.room.member.RoomMemberMapper
 import io.element.android.libraries.matrix.impl.roomlist.roomOrNull
-import io.element.android.libraries.matrix.impl.timeline.MatrixProtectedContentAdapter
 import io.element.android.libraries.matrix.impl.timeline.MatrixProtectedContentAdapterFactory
-import io.element.android.libraries.matrix.impl.timeline.PROTECTED_CAPTION_PREFIX
 import io.element.android.libraries.matrix.impl.timeline.ProtectedAttachmentMetadata
 import io.element.android.libraries.matrix.impl.timeline.ProtectedMatrixPayload
 import io.element.android.libraries.matrix.impl.timeline.ProtectedPollAnswer
+import io.element.android.libraries.matrix.impl.timeline.RustTimeline
 import io.element.android.libraries.matrix.impl.timeline.runWithTimelineListenerRegistered
 import io.element.android.libraries.matrix.impl.util.MessageEventContent
 import io.element.android.security.contentprotection.api.ContentAccessDestroyReason
 import io.element.android.security.contentprotection.api.ContentKind
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.LifecycleComponent
+import io.element.android.security.dataprotection.api.LifecycleOperationContext
+import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
+import io.element.android.security.dataprotection.api.performForComponent
 import io.element.android.security.securestorage.api.accountIdHash
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.RoomListService
@@ -82,6 +91,8 @@ class RoomContentForwarder(
     private val protectedContentAdapterFactory: MatrixProtectedContentAdapterFactory? = null,
     private val matrixMediaLoader: (() -> MatrixMediaLoader)? = null,
     private val cacheDirectory: File? = null,
+    private val lifecycleCoordinator: AppOperationalStateCoordinator? = null,
+    private val targetTimeline: (suspend (RoomId) -> RustTimeline?)? = null,
 ) {
     /** Performs only checks that are known to happen before the first Matrix send. */
     suspend fun validateForwardPair(fromTimeline: Timeline, eventId: EventId, roomId: RoomId): Result<Unit> = runCatchingExceptions {
@@ -140,7 +151,7 @@ class RoomContentForwarder(
         }
     }
 
-    suspend fun forwardProtected(content: EventContent, toRoomIds: List<RoomId>, timeoutMs: Long = 5_000L) {
+    suspend fun forwardProtected(content: EventContent, toRoomIds: List<RoomId>, timeoutMs: Long = 5_000L, operationId: String? = null) {
         val source = content as? MessageContent ?: error("Protected source content is unavailable.")
         check(source.isContentProtectionAuthorized && source.protectedMessageStatus == null && !source.isBurnAfterRead) {
             "Protected source content is not authorized for forwarding."
@@ -170,7 +181,7 @@ class RoomContentForwarder(
                         check(adapter.enabled())
                         val targetTimeline = targetRoom.timeline()
                         if (sourceMedia != null) {
-                            forwardProtectedAttachment(sourceMedia, adapter, targetTimeline, timeoutMs)
+                            forwardProtectedAttachment(sourceMedia, roomId, requireNotNull(operationId))
                         } else {
                             val payload = content.toForwardPayload()
                             val prepared = adapter.protectInteraction(ContentKind.FORWARD, payload)
@@ -222,87 +233,64 @@ class RoomContentForwarder(
         }
     }
 
-    private suspend fun forwardProtectedAttachment(
-        source: SourceAttachment,
-        adapter: MatrixProtectedContentAdapter,
-        targetTimeline: Timeline,
-        timeoutMs: Long,
-    ) {
-        var preparedMedia = emptyList<ProtectedMatrixMedia>()
-        var preparedCaption: io.element.android.libraries.matrix.impl.timeline.PreparedProtectedContent? = null
+    private suspend fun forwardProtectedAttachment(source: SourceAttachment, roomId: RoomId, pairOperationId: String) {
+        val coordinator = requireNotNull(lifecycleCoordinator)
+        val parent = coordinator.operation(requireNotNull(currentLifecycleOperationContext()).operationId)
+        check(parent.deadlineEpochMillis > System.currentTimeMillis()) { "Original forward deadline expired." }
+        val timeline = requireNotNull(targetTimeline).invoke(roomId) ?: throw ForwardTargetUnavailableException(roomId)
+        val directory = requireNotNull(cacheDirectory)
+        val account = accountIdHash(requireNotNull(sessionId).value)
+        val device = accountIdHash(requireNotNull(deviceId).value)
+        val room = accountIdHash(roomId.value)
+        val uploadId = "forward-upload-" + accountIdHash("$pairOperationId:${roomId.value}")
+        val captionId = "media-caption-" + accountIdHash("$uploadId:caption")
+        val metadata = when (val attachment = source.attachment) {
+            is FileMessageType -> ProtectedAttachmentMetadata(attachment.filename, attachment.info?.mimetype,
+                attachment.info?.size ?: source.mainBytes.size.toLong())
+            is AudioMessageType -> ProtectedAttachmentMetadata(attachment.filename, attachment.info?.mimetype,
+                attachment.info?.size ?: source.mainBytes.size.toLong())
+            else -> null
+        }
+        val media = listOf(source.mainBytes to source.attachment.contentKind()) +
+            listOfNotNull(source.thumbnailBytes?.let { it to ContentKind.IMAGE })
+        var accepted = false
         try {
-            val workingDirectory = checkNotNull(cacheDirectory) {
-                "Protected media forwarding requires a secure encrypted-output directory."
-            }
-            preparedMedia += adapter.protectMedia(source.mainBytes, workingDirectory, source.attachment.contentKind())
-            source.thumbnailBytes?.let { preparedMedia += adapter.protectMedia(it, workingDirectory, ContentKind.IMAGE) }
-            if (preparedMedia.size > 1) {
-                val primary = preparedMedia.first()
-                val stickerPrefix = if (primary.file.name.startsWith(".yizhe-sticker-")) "sticker-" else ""
-                val aggregateFile = File(
-                    requireNotNull(primary.file.parentFile),
-                    ".yizhe-$stickerPrefix${preparedMedia.joinToString("~") { it.contentId.value }}.yzm",
-                )
-                check(primary.file.renameTo(aggregateFile)) { "Unable to bind forwarded media shares to one transport aggregate." }
-                preparedMedia = listOf(primary.copy(file = aggregateFile)) + preparedMedia.drop(1)
-            }
-            val attachmentMetadata = when (val file = source.attachment) {
-                is FileMessageType -> ProtectedAttachmentMetadata(
-                    displayName = file.filename,
-                    mimeType = file.info?.mimetype,
-                    size = file.info?.size ?: source.mainBytes.size.toLong(),
-                )
-                is AudioMessageType -> ProtectedAttachmentMetadata(
-                    displayName = file.filename,
-                    mimeType = file.info?.mimetype,
-                    size = file.info?.size ?: source.mainBytes.size.toLong(),
-                )
-                else -> null
-            }
-            if (source.attachment.caption != null || source.attachment.formattedCaption != null || attachmentMetadata != null) {
-                preparedCaption = adapter.protectCaption(
-                    caption = source.attachment.caption,
-                    formattedCaption = source.attachment.formattedCaption?.body,
-                    attachmentMetadata = attachmentMetadata,
-                )
-            }
-            val protectedFiles = preparedMedia.map(ProtectedMatrixMedia::file)
-            val captionCarrier = preparedCaption?.let { PROTECTED_CAPTION_PREFIX + it.encodedEnvelope }
-            targetTimeline.runWithTimelineListenerRegistered {
-                withTimeout(timeoutMs.milliseconds) {
-                    source.attachment.sendProtected(
-                        timeline = targetTimeline,
-                        main = protectedFiles.first(),
-                        thumbnail = protectedFiles.getOrNull(1),
-                        captionCarrier = captionCarrier,
-                    ).join()
+            coordinator.perform(lifecycleOperationRequest(
+                lifecycleId = FullAppLifecycleId.LC_16, trigger = "upload", operationId = uploadId,
+                accountIdHash = account, matrixDeviceIdHash = device, roomIdHash = room,
+                deadlineEpochMillis = parent.deadlineEpochMillis,
+            )) {
+                val uploadContext = LifecycleOperationContext(uploadId, FullAppLifecycleId.LC_16)
+                val send: suspend () -> Unit = {
+                    withContext(MediaSubmissionContext(
+                        beforeSdk = {},
+                        accepted = {},
+                        originalDeadline = { parent.deadlineEpochMillis },
+                    )) {
+                        timeline.sendForwardedAttachment(media, directory, source.attachment.caption,
+                            source.attachment.formattedCaption?.body, metadata) { native, files, carrier ->
+                            source.attachment.sendProtected(native, files.first(), files.getOrNull(1), carrier)
+                        }.getOrThrow().await().getOrThrow()
+                    }
+                    accepted = true
+                }
+                if (metadata == null && source.attachment.caption == null && source.attachment.formattedCaption == null) {
+                    send()
+                } else {
+                    coordinator.performForComponent(lifecycleOperationRequest(
+                        lifecycleId = FullAppLifecycleId.LC_15, trigger = "media_caption", operationId = captionId,
+                        accountIdHash = account, matrixDeviceIdHash = device, roomIdHash = room,
+                        deadlineEpochMillis = parent.deadlineEpochMillis,
+                    ), LifecycleComponent.ANDROID_FRONTEND) {
+                        withContext(uploadContext + MediaCaptionOperationContext(uploadId, captionId, account, device, room)) { send() }
+                    }
                 }
             }
         } catch (failure: Exception) {
-            val cleanupFailures = mutableListOf<Throwable>()
-            preparedMedia.forEach { media ->
-                runCatchingExceptions {
-                    check(adapter.destroyMedia(media, ContentAccessDestroyReason.ADMINISTRATIVE_REVOCATION)) {
-                        "KMS refused to clean failed forwarded media."
-                    }
-                }.exceptionOrNull()?.let(cleanupFailures::add)
-            }
-            preparedCaption?.let { caption ->
-                runCatchingExceptions {
-                    check(adapter.destroyPrepared(caption, ContentAccessDestroyReason.ADMINISTRATIVE_REVOCATION)) {
-                        "KMS refused to clean a failed forwarded caption."
-                    }
-                }.exceptionOrNull()?.let(cleanupFailures::add)
-            }
-            if (cleanupFailures.isNotEmpty()) {
-                throw IllegalStateException("Failed forwarded content could not be fully retired from KMS.").also { cleanupFailure ->
-                    cleanupFailure.addSuppressed(failure)
-                    cleanupFailures.forEach(cleanupFailure::addSuppressed)
-                }
-            }
-            throw failure
-        } finally {
-            preparedMedia.forEach { it.file.safeDelete() }
+            if (!accepted || failure is CancellationException) throw failure
+            // Native commit is confirmed. Pending receipt delivery belongs to the original
+            // coordinator and must not turn a successful forward into a second send.
+            Timber.w("Forwarded media accepted; lifecycle receipt confirmation remains pending")
         }
     }
 

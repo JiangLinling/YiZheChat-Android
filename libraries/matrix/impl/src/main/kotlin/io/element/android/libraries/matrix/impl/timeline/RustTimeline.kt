@@ -1138,7 +1138,10 @@ class RustTimeline(
         runCatchingExceptions {
             if (protectedContentAdapter.enabled()) {
                 val content = requireForwardableProtectedSource(eventId)
-                roomContentForwarder.forwardProtected(content, roomIds)
+                roomContentForwarder.forwardProtected(
+                    content, roomIds,
+                    operationId = currentLifecycleOperationContext()?.let { accountIdHash(it.operationId + ":" + eventId.value) },
+                )
             } else {
                 roomContentForwarder.forward(fromTimeline = inner, eventId = eventId, toRoomIds = roomIds)
             }
@@ -1160,7 +1163,14 @@ class RustTimeline(
             ForwardEventPairResult.Failed(preflight.exceptionOrNull()?.message)
         } else {
             // From this point the existing SDK path may have accepted a send before returning an error.
-            forwardEvent(eventId, listOf(roomId)).fold(
+            val sent = if (protectedContentAdapter.enabled()) {
+                runCatchingExceptions {
+                    roomContentForwarder.forwardProtected(requireForwardableProtectedSource(eventId), listOf(roomId), operationId = operationId)
+                }
+            } else {
+                forwardEvent(eventId, listOf(roomId))
+            }
+            sent.fold(
                 onSuccess = { ForwardEventPairResult.Success },
                 onFailure = {
                     if (it is ForwardTargetUnavailableException) ForwardEventPairResult.Failed(it.message)
@@ -1796,6 +1806,28 @@ class RustTimeline(
     override suspend fun mediaSubmissionFact(transportName: String): MediaSubmissionFact? =
         acceptedMediaSubmission(timelineDiffProcessor.rawMediaItems(transportName), transportName)
 
+    /** Forwarded plaintext stays in memory and uses the same native commit and caption binding owner as uploads. */
+    internal suspend fun sendForwardedAttachment(
+        media: List<Pair<ByteArray, ContentKind>>,
+        workingDirectory: File,
+        caption: String?,
+        formattedCaption: String?,
+        attachmentMetadata: ProtectedAttachmentMetadata?,
+        handle: (InnerTimeline, List<File>, String?) -> SendAttachmentJoinHandle,
+    ): Result<MediaUploadHandler> {
+        check(protectedContentAdapter.enabled())
+        require(media.isNotEmpty())
+        return sendProtectedAttachment(
+            plaintextFiles = emptyList(),
+            mediaToProtect = emptyList(),
+            caption = caption,
+            formattedCaption = formattedCaption,
+            attachmentMetadata = attachmentMetadata,
+            inMemoryMedia = media,
+            encryptedOutputDirectory = workingDirectory,
+        ) { files, carrier -> handle(inner, files, carrier) }
+    }
+
     private suspend fun sendProtectedAttachment(
         plaintextFiles: List<File>,
         mediaToProtect: List<Pair<File, ContentKind>>,
@@ -1804,6 +1836,8 @@ class RustTimeline(
         burnAfterRead: Boolean = false,
         attachmentMetadata: ProtectedAttachmentMetadata? = null,
         mediaAlbum: ProtectedMediaAlbum? = null,
+        inMemoryMedia: List<Pair<ByteArray, ContentKind>> = emptyList(),
+        encryptedOutputDirectory: File? = null,
         handle: (List<File>, String?) -> SendAttachmentJoinHandle,
     ): Result<MediaUploadHandler> = runCatchingExceptions {
         var preparedMedia = emptyList<ProtectedMatrixMedia>()
@@ -1857,6 +1891,15 @@ class RustTimeline(
                 currentCoroutineContext().ensureActive()
                 cancelOwner?.beforeProtection()
                 preparedMedia = preparedMedia + protectedContentAdapter.protectMedia(file, kind, lifecycle)
+                cancelOwner?.afterProtection()
+                currentCoroutineContext().ensureActive()
+            }
+            inMemoryMedia.forEach { (bytes, kind) ->
+                currentCoroutineContext().ensureActive()
+                cancelOwner?.beforeProtection()
+                preparedMedia = preparedMedia + protectedContentAdapter.protectMedia(
+                    bytes, requireNotNull(encryptedOutputDirectory), kind, lifecycle,
+                )
                 cancelOwner?.afterProtection()
                 currentCoroutineContext().ensureActive()
             }

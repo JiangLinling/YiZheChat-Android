@@ -28,7 +28,13 @@ fun ForwardMessagesView(
             onForwardSuccess(it)
         },
         errorMessage = {
-            stringResource(id = CommonStrings.error_unknown)
+            stringResource(
+                id = if (state.pairStates.values.any { it is ForwardPairState.Ambiguous || it is ForwardPairState.Sending }) {
+                    CommonStrings.error_forward_result_unconfirmed
+                } else {
+                    CommonStrings.error_forward_incomplete
+                },
+            )
         },
         onErrorDismiss = {
             if (state.pairStates.values.any { it is ForwardPairState.Failed }) {

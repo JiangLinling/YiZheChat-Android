@@ -429,11 +429,22 @@ class RustTimelineTest {
         originalRoomCloseRecovery(localBeforeClose = false, commitBeforeJoin = true, expireOriginalDeadline = true)
     }
 
+    @Test
+    fun `forwarded in-memory attachment preserves original caption binding across navigation close`() = runTest {
+        originalRoomCloseRecovery(localBeforeClose = false, inMemoryForward = true)
+    }
+
+    @Test
+    fun `forwarded in-memory attachment waits for native commit and original caption binding`() = runTest {
+        originalRoomCloseRecovery(localBeforeClose = false, commitBeforeJoin = true, inMemoryForward = true)
+    }
+
     private suspend fun TestScope.originalRoomCloseRecovery(
         localBeforeClose: Boolean,
         cancelSession: Boolean = false,
         commitBeforeJoin: Boolean = false,
         expireOriginalDeadline: Boolean = false,
+        inMemoryForward: Boolean = false,
     ) {
         var deadlineQueries = 0
         val nativeJoined = kotlinx.coroutines.CompletableDeferred<Unit>()
@@ -441,7 +452,7 @@ class RustTimelineTest {
         val captionBindingFinished = kotlinx.coroutines.CompletableDeferred<Unit>()
         var emitLocal: (() -> Unit)? = null
         val directory = Files.createTempDirectory("caption-context-").toFile()
-        val source = File(directory, "file.txt").apply { writeText("test") }
+        val source = File(directory, "file.txt").apply { if (!inMemoryForward) writeText("test") }
         val encrypted = File(directory, ".yizhe-content.yzm").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val contexts = mutableListOf<Pair<String, FullAppLifecycleId>>()
         val boundTransactions = mutableListOf<String>()
@@ -453,6 +464,16 @@ class RustTimelineTest {
         val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
             override suspend fun enabled() = true
             override suspend fun protectMedia(file: File, kind: ContentKind, lifecycle: ContentLifecycle): ProtectedMatrixMedia {
+                val c = requireNotNull(currentLifecycleOperationContext())
+                contexts += c.operationId to c.lifecycleId
+                return ProtectedMatrixMedia(encrypted, ContentId("content"))
+            }
+            override suspend fun protectMedia(bytes: ByteArray, workingDirectory: File, kind: ContentKind,
+                lifecycle: ContentLifecycle): ProtectedMatrixMedia {
+                assertThat(source.exists()).isFalse()
+                assertThat(bytes.decodeToString()).isEqualTo("test")
+                assertThat(workingDirectory).isEqualTo(directory)
+                assertThat(kind).isEqualTo(ContentKind.ATTACHMENT)
                 val c = requireNotNull(currentLifecycleOperationContext())
                 contexts += c.operationId to c.lifecycleId
                 return ProtectedMatrixMedia(encrypted, ContentId("content"))
@@ -533,7 +554,19 @@ class RustTimelineTest {
                 if (expireOriginalDeadline) System.currentTimeMillis() + 5_000L else null
             },
         )) {
-            val handler = sut.sendFile(source, FileInfo("text/plain", 4, null, null), null, null, null, false).getOrThrow()
+            val handler = if (inMemoryForward) {
+                (sut as RustTimeline).sendForwardedAttachment(
+                    listOf("test".encodeToByteArray() to ContentKind.ATTACHMENT), directory, null, null,
+                    ProtectedAttachmentMetadata("file.txt", "text/plain", 4),
+                ) { native, files, caption ->
+                    native.sendFile(
+                        UploadParameters(UploadSource.File(files.single().path), caption, null, null, null),
+                        org.matrix.rustcomponents.sdk.FileInfo(null, null, null, null),
+                    )
+                }.getOrThrow()
+            } else {
+                sut.sendFile(source, FileInfo("text/plain", 4, null, null), null, null, null, false).getOrThrow()
+            }
             assertThat(currentLifecycleOperationContext()).isSameInstanceAs(uploadContext)
             handler
         }
@@ -1062,7 +1095,7 @@ class RustTimelineTest {
             assertThat(result).isInstanceOf(ForwardEventPairResult.Failed::class.java)
             assertThat((result as ForwardEventPairResult.Failed).reason).contains("not authorized")
             assertThat(inner.sentMessageCount).isEqualTo(0)
-            coVerify(exactly = 0) { forwarder.forwardProtected(any(), any(), any()) }
+            coVerify(exactly = 0) { forwarder.forwardProtected(any(), any(), any(), any()) }
         }
     }
 
@@ -1091,7 +1124,7 @@ class RustTimelineTest {
         val authorized = aMessageContent(body = "ordinary authorized message").copy(isContentProtectionAuthorized = true)
         val forwarder = mockk<RoomContentForwarder>()
         coEvery { forwarder.validateTargetRoom(roomId) } returns Result.success(Unit)
-        coEvery { forwarder.forwardProtected(authorized, listOf(roomId), any()) } returns Unit
+        coEvery { forwarder.forwardProtected(authorized, listOf(roomId), any(), any()) } returns Unit
         val sut = createRustTimeline(inner, roomContentForwarder = forwarder, protectedContentAdapter = ProjectedForwardSourceAdapter(authorized))
 
         sut.timelineItems.test {
@@ -1101,7 +1134,7 @@ class RustTimelineTest {
             assertThat(expectMostRecentItem().filterIsInstance<MatrixTimelineItem.Event>().single().event.content).isEqualTo(authorized)
 
             assertThat(sut.forwardEventPair(EventId(eventId), roomId, "operation-1234567890")).isEqualTo(ForwardEventPairResult.Success)
-            coVerify(exactly = 1) { forwarder.forwardProtected(authorized, listOf(roomId), any()) }
+            coVerify(exactly = 1) { forwarder.forwardProtected(authorized, listOf(roomId), any(), "operation-1234567890") }
         }
     }
 

@@ -346,6 +346,8 @@ class RustMatrixClient(
             protectedContentAdapterFactory = matrixProtectedContentAdapterFactory,
             matrixMediaLoader = { matrixMediaLoader },
             cacheDirectory = baseCacheDirectory,
+            lifecycleCoordinator = appOperationalStateCoordinator,
+            targetTimeline = { roomId -> getJoinedRoom(roomId)?.liveTimeline as? io.element.android.libraries.matrix.impl.timeline.RustTimeline },
         ),
         roomSyncSubscriber = roomSyncSubscriber,
         timelineEventFilterFactory = timelineEventFilterFactory,
