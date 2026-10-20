@@ -1473,7 +1473,7 @@ class AttachmentsPreviewPresenter(
             timelineController.updateOptimisticMediaProgress(it, PREPARATION_PROGRESS_END)
         }
         val needsCaption = caption != null || mediaAlbum != null ||
-            (mediaUploadInfo is MediaUploadInfo.AnyFile && !burnAfterRead)
+            (!burnAfterRead && (mediaUploadInfo is MediaUploadInfo.AnyFile || mediaUploadInfo is MediaUploadInfo.Audio))
         val uploadContext = requireNotNull(currentLifecycleOperationContext())
         var sdkAccepted = false
         val send: suspend () -> Unit = {

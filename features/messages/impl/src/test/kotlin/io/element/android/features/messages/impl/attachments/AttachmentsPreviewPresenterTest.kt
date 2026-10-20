@@ -644,6 +644,52 @@ class AttachmentsPreviewPresenterTest {
     }
 
     @Test
+    fun `audio metadata without user caption has its own lifecycle before upload`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        var sent = false
+        val timeline = object : Timeline by FakeTimeline() {
+            override suspend fun sendAudio(
+                file: File,
+                audioInfo: AudioInfo,
+                caption: String?,
+                formattedCaption: String?,
+                inReplyToEventId: EventId?,
+                burnAfterRead: Boolean,
+            ): Result<MediaUploadHandler> {
+                val owner = requireNotNull(currentCoroutineContext()[
+                    io.element.android.libraries.matrix.api.media.MediaCaptionOperationContext
+                ])
+                val upload = requireNotNull(
+                    io.element.android.security.dataprotection.api.currentLifecycleOperationContext()
+                )
+                assertThat(caption).isNull()
+                assertThat(upload.operationId).isEqualTo(owner.uploadOperationId)
+                assertThat(coordinator.startedRequests.last().operationId).isEqualTo(owner.captionOperationId)
+                assertThat(coordinator.startedRequests.last().lifecycleId).isEqualTo(FullAppLifecycleId.LC_15)
+                assertThat(owner.roomIdHash).isEqualTo("c".repeat(64))
+                sent = true
+                return Result.success(FakeMediaUploadHandler())
+            }
+        }
+        createAttachmentsPreviewPresenter(
+            localMedia = aLocalMedia(mockMediaUrl, anAudioMediaInfo()).copy(lifecycleRoomIdHash = "c".repeat(64)),
+            room = FakeJoinedRoom(liveTimeline = timeline),
+            mediaPreProcessor = FakeMediaPreProcessor().apply { givenAudioResult() },
+            appOperationalStateCoordinator = coordinator,
+            onDoneListener = {},
+        ).test {
+            val initial = awaitItem()
+            initial.eventSink(AttachmentsPreviewEvent.SendAttachment)
+            consumeItemsUntilPredicate { it.sendActionState == SendActionState.Done }
+            assertThat(sent).isTrue()
+            val caption = coordinator.startedRequests.single { it.trigger == "media_caption" }
+            assertThat(coordinator.clientReceipts.filter { it.operationId == caption.operationId }.map { it.component })
+                .containsExactly(LifecycleComponent.ANDROID_FRONTEND)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `present - send audio with caption success scenario`() = runTest {
         val sendAudioResult =
             lambdaRecorder<File, AudioInfo, String?, String?, EventId?, Result<FakeMediaUploadHandler>> { _, _, _, _, _ ->

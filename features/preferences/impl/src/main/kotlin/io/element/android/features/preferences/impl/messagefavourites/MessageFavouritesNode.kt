@@ -389,7 +389,9 @@ private fun MessageFavouritesView(
                             supportingContent = {
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text(
-                                        text = "${favourite.roomName} · ${favourite.senderName}",
+                                        text = listOf(favourite.roomName, favourite.senderName)
+                                            .filter(String::isNotBlank)
+                                            .joinToString(" · "),
                                         color = ElementTheme.colors.textSecondary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,

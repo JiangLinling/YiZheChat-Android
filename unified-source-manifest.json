@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-20261021-functional-repair-r4",
-  "frozen_utc": "2026-10-20T20:56:59.567668+00:00",
+  "revision": "unified-20261021-functional-repair-r5",
+  "frozen_utc": "2026-10-20T21:24:11.901918+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -2284,7 +2284,7 @@
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/attachments/preview/AttachmentThumbnail.kt": "13930194f21eaf63b318bf0c64f7a4edd538b1e94760df4e2466772dc89f5af8",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/attachments/preview/AttachmentsPreviewEvent.kt": "e50b11ff159f7809cbb0f0bdeec35c71532e1e3faaced7d405e139eb6b5c8f86",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/attachments/preview/AttachmentsPreviewNode.kt": "1413a16bf6bcc3ba2bb03afa25b352bcc9219fc0a63fd712a11170b142b71fd0",
-    "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/attachments/preview/AttachmentsPreviewPresenter.kt": "4334ae5946c51ce19416a4121465be0cc20383ccb9eda038304648cebfbec4d6",
+    "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/attachments/preview/AttachmentsPreviewPresenter.kt": "889570cf362a23a4413ee2df3e3845f974b844ab6a83629863b63c3656c3351d",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/attachments/preview/AttachmentsPreviewState.kt": "0f70047b0516715fe4f5757f19548847b4cc7f5272d5a4dd650a04b4467f65e7",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/attachments/preview/AttachmentsPreviewStateProvider.kt": "be42d5c248a09c9862af036b108bc8847d7cb57218b8d75d0e1d8c97c2bc5d7c",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/attachments/preview/AttachmentsPreviewView.kt": "3062dce0d40e387a557b96b35a8087b9f07e8d51c3fececf0ed0626dad32a35c",
@@ -2678,7 +2678,7 @@
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/actionlist/model/TimelineItemActionComparatorTest.kt": "fbb6a8c2b735889839323f44a4eaf0e0be24591d4bf6dd40cb850886ec0e2805",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/attachments/AttachmentGalleryFlagsTest.kt": "3be482fad2605078c677ee2c421d3fad262edd47899d961b4ce4c6f7b25446b6",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/attachments/AttachmentsFilePreviewViewTest.kt": "068858ec376da01fb9e595c760bd171597f138f16cf90c2299e0e8bd798b890e",
-    "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/attachments/AttachmentsPreviewPresenterTest.kt": "849d462a9e306d2865b36f2942eb63dff741496c2bafb9409f91151059fdad1a",
+    "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/attachments/AttachmentsPreviewPresenterTest.kt": "2391a38d8c39155356d104bc85fb753a16930a3fec5775807d964ee8440136b5",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/attachments/AttachmentsPreviewRecoveryViewTest.kt": "9400695abd23e6651223f77b4d31b5d952d76599c858ce8529d959ec81e3f0d2",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/attachments/OriginalMediaRecoveryTest.kt": "7fc9599ff5c29e7642a1d54ffc0190c5e782ed2c4945de3fd3508e74fa825f13",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/attachments/OriginalMediaUploadCompletionTest.kt": "a06df0f81874f8192518ea05e5b01b52125b871f8b5df9504b1cc00b5ef9bf86",
@@ -3049,7 +3049,7 @@
     "features/preferences/impl/src/main/kotlin/io/element/android/features/preferences/impl/labs/LabsState.kt": "b4cef432e15c8694b24d73e81837bb35e7f1b40b6903c6c940f7d233232a386b",
     "features/preferences/impl/src/main/kotlin/io/element/android/features/preferences/impl/labs/LabsStateProvider.kt": "156a73f30354a8facd8148f5df6928b2e56187ba92c90664cc24c89e0dd113ff",
     "features/preferences/impl/src/main/kotlin/io/element/android/features/preferences/impl/labs/LabsView.kt": "9fe1c3aeee5c483f626a2d701586e4a716917d3bbc394b46a4f354d5b8850e69",
-    "features/preferences/impl/src/main/kotlin/io/element/android/features/preferences/impl/messagefavourites/MessageFavouritesNode.kt": "1fe881d58cebc53db617e31636952d228d9833512160dcf4992d68b5826c536e",
+    "features/preferences/impl/src/main/kotlin/io/element/android/features/preferences/impl/messagefavourites/MessageFavouritesNode.kt": "875a21f12f2cc7d119d1ea7ec983351b9fef7e777c37317055debb2cfc4e5513",
     "features/preferences/impl/src/main/kotlin/io/element/android/features/preferences/impl/model/EnabledFeature.kt": "ecc9c63452127598751d73a5b55efafc310b94cc6b97b49d1935836ae98fb8f8",
     "features/preferences/impl/src/main/kotlin/io/element/android/features/preferences/impl/notifications/NotificationSettingsEvents.kt": "6a200e5fc1fb5818b663800de705ff48345799ed1b4a058a14098645c759d7aa",
     "features/preferences/impl/src/main/kotlin/io/element/android/features/preferences/impl/notifications/NotificationSettingsNode.kt": "f88ffae6d84e7af4b7dd575e1e868e3743f2e5998b246a1559a461bc4e8b82bc",
