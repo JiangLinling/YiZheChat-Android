@@ -8,8 +8,8 @@ import io.element.android.security.securestorage.api.DeviceTrustService
 import io.element.android.security.securestorage.api.DeviceTrustSnapshot
 import io.element.android.security.securestorage.api.DeviceTrustState
 import io.element.android.security.securestorage.api.HardwareSecurityLevel
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.util.Base64

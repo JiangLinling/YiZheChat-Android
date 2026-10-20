@@ -9,9 +9,9 @@ package io.element.android.security.dataprotection.impl
 
 import io.element.android.security.dataprotection.api.DataProtectionPolicyV1
 import io.element.android.security.dataprotection.api.HardwareTrustRequirement
+import io.element.android.security.dataprotection.api.ManagementPolicyApplicationState
 import io.element.android.security.dataprotection.api.NotificationExposure
 import io.element.android.security.dataprotection.api.OfflineAccessMode
-import io.element.android.security.dataprotection.api.ManagementPolicyApplicationState
 import io.element.android.security.dataprotection.api.PolicyApplicationEvidence
 import io.element.android.security.dataprotection.api.ScreenCapturePolicy
 import kotlinx.serialization.json.Json

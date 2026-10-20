@@ -57,6 +57,7 @@ class SignedManagementStateRepository(
     private val stateFile = File(context.noBackupFilesDir, "security/management/control-state-v1.json")
     private val offlineEntryFile = AtomicFile(File(context.noBackupFilesDir, "security/management/offline-entry-v1.json"))
     private val lock = ReentrantLock()
+
     // One bounded decoded snapshot, not an authorization cache. Every reader still opens
     // AtomicFile and compares its complete bytes before reusing this private immutable model.
     private data class ParsedState(val bytes: ByteArray, val state: PersistedManagementState)
@@ -477,7 +478,9 @@ class SignedManagementStateRepository(
         check(release.schemaVersion == 2 && release.versionCode == state.highestReleaseVersion)
         check(release.issuedAtEpochMillis in 1..trustedNowMs && release.expiresAtEpochMillis > trustedNowMs)
         buildJsonObject {
-            put("release", payload); put("key_id", exact.keyId); put("signature_b64", exact.signatureBase64)
+            put("release", payload)
+            put("key_id", exact.keyId)
+            put("signature_b64", exact.signatureBase64)
         }
     }
 
@@ -492,8 +495,11 @@ class SignedManagementStateRepository(
             ?: error("Current signed policy authority is unavailable.")
         check(policy.version == state.highestPolicyVersion && policy.version == expected.currentPolicyVersion)
         VerifiedNextCurrentAccountAuthority.select(
-            state.activationReceipts, expected, trustedNowMs,
-            verifiedDeletedIdentityRecords(state).any { it.accountIdHash == expected.accountIdHash }, verifier,
+            state.activationReceipts,
+            expected,
+            trustedNowMs,
+            verifiedDeletedIdentityRecords(state).any { it.accountIdHash == expected.accountIdHash },
+            verifier,
         )
     }
 
@@ -533,13 +539,21 @@ class SignedManagementStateRepository(
             if (!verifier.verify(it)) null else json.decodeFromJsonElement(TrustDecisionWire.serializer(), it.payload())
         }
         // Keep a signed denial/absence as a watermark too: an older success must not reopen it.
-        if (previous != null && (incoming.issuedAtEpochMillis < previous.issuedAtEpochMillis ||
-                incoming.issuedAtEpochMillis == previous.issuedAtEpochMillis && (previous.localListEntry == null || previousAnchor?.permitted != true))) return@withLock
+        if (previous != null &&
+            (incoming.issuedAtEpochMillis < previous.issuedAtEpochMillis ||
+                incoming.issuedAtEpochMillis == previous.issuedAtEpochMillis && (previous.localListEntry == null || previousAnchor?.permitted != true))) {
+                    return@withLock
+                }
         if (previous != null && incoming.issuedAtEpochMillis == previous.issuedAtEpochMillis && permitted &&
-            incoming.localListEntry != null && incoming.localListEntry == previous.localListEntry) return@withLock
-        val anchor = LocalListAnchorWire(envelope,
+            incoming.localListEntry != null && incoming.localListEntry == previous.localListEntry) {
+                return@withLock
+            }
+        val anchor = LocalListAnchorWire(
+            envelope,
             android.provider.Settings.Global.getInt(context.contentResolver, "boot_count", -1),
-            android.os.SystemClock.elapsedRealtime(), permitted)
+            android.os.SystemClock.elapsedRealtime(),
+            permitted
+        )
         writeLocalListAnchor(anchor)
     }
 
@@ -578,15 +592,23 @@ class SignedManagementStateRepository(
         if (application != null && application.state != "APPLIED") return localListUnavailable("POLICY_NOT_APPLIED")
         val decision = json.decodeFromJsonElement(TrustDecisionWire.serializer(), anchor.decision.payload())
         val grant = decision.localListEntry ?: return localListUnavailable("GRANT_ABSENT")
-        val now = boundedOfflineNow(grant.issuedAtEpochMillis, anchor.elapsedRealtimeMillis,
-            android.os.SystemClock.elapsedRealtime(), anchor.bootCount,
-            android.provider.Settings.Global.getInt(context.contentResolver, "boot_count", -1), System.currentTimeMillis()) ?: return localListUnavailable("CLOCK_CONTINUITY")
+        val now = boundedOfflineNow(
+            grant.issuedAtEpochMillis,
+            anchor.elapsedRealtimeMillis,
+            android.os.SystemClock.elapsedRealtime(),
+            anchor.bootCount,
+            android.provider.Settings.Global.getInt(context.contentResolver, "boot_count", -1),
+            System.currentTimeMillis()
+        )
+                ?: return localListUnavailable("CLOCK_CONTINUITY")
         val policy = (currentPolicyState(state, now) as? CurrentPolicyState.Active)?.policy ?: return localListUnavailable("POLICY_INACTIVE")
         if (grant.protocolVersion != 1 || grant.entryPolicyVersion <= 0 || grant.policyVersion != policy.version ||
             grant.allowedScopes != listOf("LOCAL_CHAT_LIST") || grant.accountBindings.isEmpty() ||
             decision.trustState !in setOf("TRUSTED", "MANAGED") || grant.issuedAtEpochMillis != decision.issuedAtEpochMillis ||
             grant.expiresAtEpochMillis <= grant.issuedAtEpochMillis ||
-            grant.expiresAtEpochMillis - grant.issuedAtEpochMillis > 3_600_000L) return localListUnavailable("GRANT_BINDING_INVALID")
+            grant.expiresAtEpochMillis - grant.issuedAtEpochMillis > 3_600_000L) {
+                return localListUnavailable("GRANT_BINDING_INVALID")
+            }
         val deadline = minOf(grant.expiresAtEpochMillis, decision.expiresAtEpochMillis, policy.expiresAtEpochMillis ?: Long.MAX_VALUE)
         if (now >= deadline || pendingCommands(state, System.currentTimeMillis()).isNotEmpty()) return localListUnavailable("EXPIRED_OR_PENDING_COMMAND")
         decision to (deadline - now)
@@ -760,7 +782,9 @@ class SignedManagementStateRepository(
             if (decodeCommand(persisted.envelope).commandId != report.commandId) return@mapNotNull persisted
             if (removeWhenComplete && report.state == ManagementCommandState.COMPLETE &&
                 decodeCommand(persisted.envelope).reasonCode != "ACCOUNT_MOBILE_SUPERSEDED"
-            ) return@mapNotNull null
+            ) {
+                return@mapNotNull null
+            }
             persisted.copy(state = report.state.name, progress = report.progress, errorCode = report.errorCode)
         }
         writeState(current.copy(commands = updated))

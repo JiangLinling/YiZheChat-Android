@@ -25,7 +25,11 @@ internal enum class NextPolicyRequestPhase { ARTIFACT, CHALLENGE, RECEIPT }
 internal class NextPolicyRequestJournal(private val file: NextPolicyJournalFile) {
     constructor(context: Context) : this(AndroidNextPolicyJournalFile(context))
 
-    private val json = Json { ignoreUnknownKeys = false; encodeDefaults = true; explicitNulls = true }
+    private val json = Json {
+        ignoreUnknownKeys = false
+        encodeDefaults = true
+        explicitNulls = true
+    }
 
     /** Invoke only after verifying current authority. Persist before the first network attempt.
      * The validator also runs on the ORIGINAL stored bytes during an ambiguous retry.
@@ -215,5 +219,7 @@ internal class AndroidNextPolicyJournalFile(
         }
     }
 
-    private companion object { val locks = ConcurrentHashMap<String, ReentrantLock>() }
+    private companion object {
+        val locks = ConcurrentHashMap<String, ReentrantLock>()
+    }
 }

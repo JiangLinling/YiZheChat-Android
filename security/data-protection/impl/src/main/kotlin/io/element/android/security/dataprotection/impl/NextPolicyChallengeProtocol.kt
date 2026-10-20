@@ -4,8 +4,8 @@
  */
 package io.element.android.security.dataprotection.impl
 
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -167,6 +167,14 @@ private val NEXT_ID = Regex("[A-Za-z0-9][A-Za-z0-9._:-]{0,255}")
 private val NEXT_CAPABILITIES = setOf("SCREEN_CAPTURE", "NOTIFICATION_EXPOSURE", "KMS_LEASE", "SECURE_STORAGE", "CLIPBOARD", "RTC")
 private val NEXT_RESULTS = setOf("APPLIED", "APPLIED_CLEANUP_PENDING", "BLOCKED", "FAILED")
 private val NEXT_RECEIPT_BINDINGS = setOf(
-    "operationId", "policyDomain", "policyId", "policyVersion", "policyDigestSha256", "installationId",
-    "accountIdHash", "challengeId", "challengeNonceB64", "targetSnapshot",
+    "operationId",
+    "policyDomain",
+    "policyId",
+    "policyVersion",
+    "policyDigestSha256",
+    "installationId",
+    "accountIdHash",
+    "challengeId",
+    "challengeNonceB64",
+    "targetSnapshot",
 )

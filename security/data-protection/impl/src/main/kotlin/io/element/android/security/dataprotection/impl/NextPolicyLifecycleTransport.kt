@@ -34,7 +34,11 @@ internal data class NextPolicyLifecycleScope(
 
 /** Separate immutable original LC01/LC09 intents. Never retires legacy operations or cleanup. */
 internal class NextPolicyLifecycleJournal(private val file: NextPolicyJournalFile) {
-    private val json = Json { ignoreUnknownKeys = false; encodeDefaults = true; explicitNulls = true }
+    private val json = Json {
+        ignoreUnknownKeys = false
+        encodeDefaults = true
+        explicitNulls = true
+    }
 
     fun prepare(scope: NextPolicyLifecycleScope): NextPolicyLifecycleIntent = file.locked {
         validateScope(scope)
@@ -68,23 +72,36 @@ internal class NextPolicyLifecycleJournal(private val file: NextPolicyJournalFil
         fun body(id: FullAppLifecycleId, trigger: String): String {
             val suffix = id.wireValue.lowercase()
             val request = LifecycleOperationRequest(
-                operationId = "next-$suffix-$identity", lifecycleId = id, trigger = trigger,
-                idempotencyKey = "next-$suffix-$identity", accountIdHash = scope.accountIdHash,
-                matrixDeviceIdHash = scope.matrixDeviceIdHash, deadlineEpochMillis = scope.deadlineEpochMillis,
+                operationId = "next-$suffix-$identity",
+                lifecycleId = id,
+                trigger = trigger,
+                idempotencyKey = "next-$suffix-$identity",
+                accountIdHash = scope.accountIdHash,
+                matrixDeviceIdHash = scope.matrixDeviceIdHash,
+                deadlineEpochMillis = scope.deadlineEpochMillis,
             )
             val wire = LifecycleOperationStartWire(
-                operationId = request.operationId, lifecycleId = id.wireValue, trigger = trigger,
-                idempotencyKey = request.idempotencyKey, accountIdHash = request.accountIdHash,
-                matrixDeviceIdHash = request.matrixDeviceIdHash, deadlineEpochMillis = request.deadlineEpochMillis,
+                operationId = request.operationId,
+                lifecycleId = id.wireValue,
+                trigger = trigger,
+                idempotencyKey = request.idempotencyKey,
+                accountIdHash = request.accountIdHash,
+                matrixDeviceIdHash = request.matrixDeviceIdHash,
+                deadlineEpochMillis = request.deadlineEpochMillis,
             )
             return Base64.getEncoder().encodeToString(json.encodeToString(wire).encodeToByteArray())
         }
-        return NextPolicyLifecycleIntent(scope, body(FullAppLifecycleId.LC_01, "periodic_release_check"),
-            body(FullAppLifecycleId.LC_09, "policy_changed"))
+        return NextPolicyLifecycleIntent(
+            scope,
+            body(FullAppLifecycleId.LC_01, "periodic_release_check"),
+            body(FullAppLifecycleId.LC_09, "policy_changed")
+        )
     }
 
     @Serializable private data class State(val schemaVersion: Int = 1, val intents: List<NextPolicyLifecycleIntent> = emptyList())
-    private companion object { const val MAX_FILE_BYTES = 4 * 1024 * 1024 }
+    private companion object {
+        const val MAX_FILE_BYTES = 4 * 1024 * 1024
+    }
 }
 
 @Serializable
@@ -109,7 +126,11 @@ internal class NextPolicyLifecycleTransport(
     private val post: suspend (path: String, originalBody: ByteArray, lifecycleOperationId: String) -> ByteArray,
 ) {
     private val mutex = Mutex()
-    private val json = Json { ignoreUnknownKeys = false; encodeDefaults = true; explicitNulls = true }
+    private val json = Json {
+        ignoreUnknownKeys = false
+        encodeDefaults = true
+        explicitNulls = true
+    }
 
     suspend fun send(
         scope: NextPolicyLifecycleScope,
@@ -134,9 +155,15 @@ internal class NextPolicyLifecycleTransport(
         check(operation.operationId == expected.operationId && operation.idempotencyKey == sha256Hex(expected.idempotencyKey))
         check(operation.lifecycleId.wireValue == expected.lifecycleId && operation.deadlineEpochMillis == expected.deadlineEpochMillis)
         check(operation.subjects.installationId == scope.installationId && operation.subjects.accountIdHash == scope.accountIdHash)
-        check(operation.subjects.matrixDeviceIdHash == scope.matrixDeviceIdHash && operation.subjects.roomIdHash == null && operation.subjects.eventIdHash == null)
-        check(operation.status !in setOf(LifecycleOperationStatus.BLOCKED, LifecycleOperationStatus.CANCELLED,
-            LifecycleOperationStatus.FAILED_FINAL, LifecycleOperationStatus.TERMINATED))
+        check(
+            operation.subjects.matrixDeviceIdHash == scope.matrixDeviceIdHash && operation.subjects.roomIdHash == null && operation.subjects.eventIdHash == null
+        )
+        check(operation.status !in setOf(
+            LifecycleOperationStatus.BLOCKED,
+            LifecycleOperationStatus.CANCELLED,
+            LifecycleOperationStatus.FAILED_FINAL,
+            LifecycleOperationStatus.TERMINATED
+        ))
         validateCurrentAuthority()
         validateOriginalBody(original.copyOf())
         val response = post(path, original.copyOf(), expected.operationId).copyOf()

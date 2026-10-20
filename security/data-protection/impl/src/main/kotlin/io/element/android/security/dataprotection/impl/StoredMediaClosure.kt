@@ -51,10 +51,12 @@ internal data class StoredMediaClosure(
         put("reservation", mediaResourceRequest(reservation))
         put("producer_process", producerProcessSha256)
         put("admitted", buildJsonArray {
-            reservation.resources.filter { it in admitted }.forEach { resource -> add(buildJsonObject {
+            reservation.resources.filter { it in admitted }.forEach { resource ->
+                add(buildJsonObject {
                 put("type", resource.type.name)
                 put("identity", resource.recordSha256)
-            }) }
+            })
+            }
         })
         put("runtime_facts", buildJsonObject { runtimeFacts.toSortedMap().forEach { (id, fact) -> put(id, mediaRuntimeRequest(fact)) } })
         put("runtime_acknowledgements", buildJsonObject { runtimeAcknowledgements.toSortedMap().forEach { (id, ref) -> put(id, ref) } })
@@ -67,34 +69,65 @@ internal data class StoredMediaClosure(
             require(value.long("schema") == 1L)
             val request = value.getValue("reservation").jsonObject
             require(request.long("protocol_version") == 1L)
-            val subjects = LifecycleSubjectHashes(installationId = request.string("installation_id"),
-                accountIdHash = request.string("account_id_hash"), matrixDeviceIdHash = request.string("matrix_device_id_hash"),
-                roomIdHash = request.optional("room_id_hash"), eventIdHash = request.optional("event_id_hash"))
-            val reservation = LifecycleMediaReservation(request.string("operation_id"), subjects,
-                request.getValue("resources").jsonArray.map { entry -> entry.jsonObject.let {
+            val subjects = LifecycleSubjectHashes(
+                installationId = request.string("installation_id"),
+                accountIdHash = request.string("account_id_hash"),
+                matrixDeviceIdHash = request.string("matrix_device_id_hash"),
+                roomIdHash = request.optional("room_id_hash"),
+                eventIdHash = request.optional("event_id_hash")
+            )
+            val reservation = LifecycleMediaReservation(
+                request.string("operation_id"),
+                subjects,
+                request.getValue("resources").jsonArray.map { entry ->
+                    entry.jsonObject.let {
                     LifecycleMediaResource(LifecycleMediaResourceType.valueOf(it.string("resource_type")), it.string("resource_id_hash"))
-                } })
-            val facts = value.getValue("runtime_facts").jsonObject.mapValues { (_, entry) -> entry.jsonObject.let {
+                }
+                }
+            )
+            val facts = value.getValue("runtime_facts").jsonObject.mapValues { (_, entry) ->
+                entry.jsonObject.let {
                 require(it.long("protocol_version") == 1L)
                 require(it.string("operation_id") == reservation.operationId)
-                require(it.string("installation_id") == subjects.installationId && it.string("account_id_hash") == subjects.accountIdHash &&
+                require(
+                    it.string("installation_id") == subjects.installationId && it.string("account_id_hash") == subjects.accountIdHash &&
                     it.string("matrix_device_id_hash") == subjects.matrixDeviceIdHash && it.optional("room_id_hash") == subjects.roomIdHash &&
-                    it.optional("event_id_hash") == subjects.eventIdHash)
-                LifecycleMediaRuntimeCleanup(reservation.operationId, subjects, it.string("record_sha256"), it.long("released_at_ms"),
-                    it.getValue("runtime_released").jsonPrimitive.boolean, it.getValue("active_work_finished").jsonPrimitive.boolean,
-                    it.getValue("owned_payload_cleared").jsonPrimitive.boolean)
-            } }
+                    it.optional("event_id_hash") == subjects.eventIdHash
+                )
+                LifecycleMediaRuntimeCleanup(
+                    reservation.operationId,
+                    subjects,
+                    it.string("record_sha256"),
+                    it.long("released_at_ms"),
+                    it.getValue("runtime_released").jsonPrimitive.boolean,
+                    it.getValue("active_work_finished").jsonPrimitive.boolean,
+                    it.getValue("owned_payload_cleared").jsonPrimitive.boolean
+                )
+            }
+            }
             val seal = value["seal"]?.takeUnless { it is JsonNull }?.jsonObject?.let {
-                val decoded = LifecycleMediaSeal(reservation, it.string("owner_process_sha256"), it.long("sealed_at_ms"),
-                    LifecycleMediaOutcome.valueOf(it.string("outcome")))
+                val decoded = LifecycleMediaSeal(
+                    reservation,
+                    it.string("owner_process_sha256"),
+                    it.long("sealed_at_ms"),
+                    LifecycleMediaOutcome.valueOf(it.string("outcome"))
+                )
                 require(mediaSealRequest(decoded) == it)
                 decoded
             }
-            return StoredMediaClosure(reservation, value.string("producer_process"),
-                value.getValue("admitted").jsonArray.map { it.jsonObject.let { resource ->
+            return StoredMediaClosure(
+                reservation,
+                value.string("producer_process"),
+                value.getValue("admitted").jsonArray.map {
+                    it.jsonObject.let { resource ->
                     LifecycleMediaResource(LifecycleMediaResourceType.valueOf(resource.string("type")), resource.string("identity"))
-                } }.toSet(), facts, value.getValue("runtime_acknowledgements").jsonObject.mapValues { it.value.jsonPrimitive.content },
-                seal, value.optional("seal_acknowledgement"))
+                }
+                }.toSet(),
+                facts,
+                value.getValue("runtime_acknowledgements").jsonObject.mapValues { it.value.jsonPrimitive.content },
+                seal,
+                value.optional("seal_acknowledgement")
+            )
         }
     }
 }

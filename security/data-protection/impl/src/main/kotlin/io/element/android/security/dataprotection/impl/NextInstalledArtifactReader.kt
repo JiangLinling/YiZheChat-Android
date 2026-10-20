@@ -129,8 +129,13 @@ internal class VerifiedNextInstalledArtifact private constructor(
             check(source.snapshot().ownedSnapshot() == before) { "Installed package changed during inspection." }
             val observedDigest = digest.digest().installedHex()
             check(observedDigest == release.apkSha256) { "Installed bytes differ from the signed published artifact." }
-            return VerifiedNextInstalledArtifact(before.packageName, before.versionCode, observedDigest,
-                before.currentSignerSha256.single(), release.buildId)
+            return VerifiedNextInstalledArtifact(
+                before.packageName,
+                before.versionCode,
+                observedDigest,
+                before.currentSignerSha256.single(),
+                release.buildId
+            )
         }
     }
 }
@@ -145,5 +150,18 @@ private fun installedDigest(bytes: ByteArray) = MessageDigest.getInstance("SHA-2
 private fun ByteArray.installedHex() = joinToString("") { "%02x".format(it.toInt() and 0xff) }
 private val INSTALLED_SHA256 = Regex("[0-9a-f]{64}")
 private const val MAX_BASE_APK_BYTES = 2L * 1024 * 1024 * 1024
-private val RELEASE_FIELDS = setOf("schema_version", "version_code", "version_name", "package_name", "apk_url", "apk_fallback_url",
-    "apk_sha256", "build_id", "signing_certificate_sha256", "release_notes", "mandatory", "issued_at_epoch_millis", "expires_at_epoch_millis")
+private val RELEASE_FIELDS = setOf(
+    "schema_version",
+    "version_code",
+    "version_name",
+    "package_name",
+    "apk_url",
+    "apk_fallback_url",
+    "apk_sha256",
+    "build_id",
+    "signing_certificate_sha256",
+    "release_notes",
+    "mandatory",
+    "issued_at_epoch_millis",
+    "expires_at_epoch_millis"
+)
