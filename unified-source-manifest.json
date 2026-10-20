@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-20261021-functional-repair-r1",
-  "frozen_utc": "2026-10-20T18:08:12.502864+00:00",
+  "revision": "unified-20261021-functional-repair-r2",
+  "frozen_utc": "2026-10-20T18:25:55.413412+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -7883,7 +7883,7 @@
     "security/data-protection/api/build.gradle.kts": "48922fd9a9171b8a151e584a9a242246410cfef2fbc39cb12282f25db2dd39c9",
     "security/data-protection/api/src/main/kotlin/io/element/android/security/dataprotection/api/AccountHistoryAccessBoundary.kt": "482c4a15d244571b85f3031cbfffb8ce3e7b9deed4ddc66aca64d38a41f08bc3",
     "security/data-protection/api/src/main/kotlin/io/element/android/security/dataprotection/api/AppLifecycleContracts.kt": "d9f0484d6567f7e834fa7bace76f834d04c8a36bc3039b5585336875c564828e",
-    "security/data-protection/api/src/main/kotlin/io/element/android/security/dataprotection/api/AppOperationalStateCoordinator.kt": "383efca60f81fc18e6f3090a45ceada2ddae2354583ab28c705f2279a279f3a6",
+    "security/data-protection/api/src/main/kotlin/io/element/android/security/dataprotection/api/AppOperationalStateCoordinator.kt": "5103e86127323e8c3616c690eef2e8a5b2f8ce6a8acd0053e6a2c01804ce0983",
     "security/data-protection/api/src/main/kotlin/io/element/android/security/dataprotection/api/BurnConsumptionStore.kt": "755bdb606d73aa9c4ee9fed5296b0accb37f85df41a22f899f6c71679fd2164f",
     "security/data-protection/api/src/main/kotlin/io/element/android/security/dataprotection/api/DataDeletionCoordinator.kt": "410e4b3901d71a47e5ba895d25dd0b9f84235f0d06ca113c6227b3c4282dab94",
     "security/data-protection/api/src/main/kotlin/io/element/android/security/dataprotection/api/DataProtectionActionDeniedException.kt": "248f8a0ffc4246b2c6f0f3a696645195e961a1e8c0a3bd1d1e7e0518e4cbc4fc",
@@ -7927,7 +7927,7 @@
     "security/data-protection/api/src/test/kotlin/io/element/android/security/dataprotection/api/LifecycleStageTimingTest.kt": "b86e5f242ee287828d4d7d766349aed4771994e366cccfeccf03bc7d9b652449",
     "security/data-protection/api/src/test/kotlin/io/element/android/security/dataprotection/api/ManagedRoomCreationProtocolTest.kt": "5ca5dcf01a21cf21ea30a109b4ed5f68575172e36a9848590918d36e2b80de84",
     "security/data-protection/api/src/test/kotlin/io/element/android/security/dataprotection/api/OnboardingPasswordPolicyTest.kt": "51ec691cd8e1aca121dab3e5c7e3025b6f464b285211f33cfa4fb19ea6da971c",
-    "security/data-protection/api/src/test/kotlin/io/element/android/security/dataprotection/api/RelayEditLifecycleRetryTest.kt": "7597029404764f94bd19341c12d2d28b9f1e2756c6e2b45c536ff422f87574de",
+    "security/data-protection/api/src/test/kotlin/io/element/android/security/dataprotection/api/RelayEditLifecycleRetryTest.kt": "27d0acc78bf25a4957d0dc07bc52bb570fe8e0bc393fb6a29bc8db8a666033b5",
     "security/data-protection/api/src/test/kotlin/io/element/android/security/dataprotection/api/RoomMembershipFailureTest.kt": "23807e5386f34916691e254b843679c506b16080cd8e5c08d20915c6efcfad77",
     "security/data-protection/impl/build.gradle.kts": "307ac3645892f58966331abf871eed023fabf3473cbf220615b204bf29741a8f",
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/AccountLocalStateCleaner.kt": "0833322599674a29c7009d3228d7ede0ba03a1c04fe791209658936eee3d228a",

@@ -328,7 +328,12 @@ private fun requireOriginalRelayEditOperation(request: LifecycleOperationRequest
 
 private fun requireRelayEditSuccess(operation: LifecycleOperation, required: List<LifecycleStep>) {
     require(!operation.terminalReceiptId.isNullOrBlank() && required.all {
-        it.status == LifecycleStepStatus.COMPLETE && !it.authorityRevision.isNullOrBlank() && !it.receiptReference.isNullOrBlank()
+        // The installation-authenticated client-receipts v1 protocol carries no
+        // authority revision for Android facts. External authorities do provide
+        // revisions. Both still require their original, complete receipt.
+        val clientFact = it.component in setOf(LifecycleComponent.ANDROID_FRONTEND, LifecycleComponent.ANDROID_SERVICE)
+        it.status == LifecycleStepStatus.COMPLETE && !it.receiptReference.isNullOrBlank() &&
+            (clientFact || !it.authorityRevision.isNullOrBlank())
     })
 }
 

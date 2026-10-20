@@ -163,6 +163,45 @@ class RelayEditLifecycleRetryTest {
         assertThat(coordinator.receipts).isEmpty()
     }
 
+    @Test fun `client receipts v1 without authority revision resolve the exact accepted edit`() = runTest {
+        val original = operation(request, LifecycleOperationStatus.SUCCEEDED).let { operation ->
+            operation.copy(steps = operation.steps.map {
+                if (it.component in android) it.copy(authorityRevision = null) else it
+            })
+        }
+        val coordinator = Coordinator { original }.apply { started = original }
+        var verified = 0
+        var resolved = 0
+        coordinator.performIdempotentRelayEdit(request, { verified++ }) { error("Do not resend an accepted edit") }
+        assertThat(coordinator.reconcileOriginalRelayEdit(request, { verified++ }, { resolved++ })).isTrue()
+        assertThat(verified).isEqualTo(2)
+        assertThat(resolved).isEqualTo(1)
+        assertThat(coordinator.persisted).isEmpty()
+        assertThat(coordinator.receipts).isEmpty()
+    }
+
+    @Test fun `client revision compatibility never accepts missing receipts or external revisions`() = runTest {
+        val original = operation(request, LifecycleOperationStatus.SUCCEEDED)
+        components.forEach { component ->
+            // Wire decoding cannot construct a completed required step without
+            // its receipt, before reconciliation is even reached.
+            assertThat(runCatching {
+                original.steps.single { it.component == component }.copy(receiptReference = null)
+            }.exceptionOrNull()).isInstanceOf(IllegalArgumentException::class.java)
+        }
+        (components - android).forEach { component ->
+            val invalid = original.copy(steps = original.steps.map {
+                if (it.component == component) it.copy(authorityRevision = null) else it
+            })
+            val coordinator = Coordinator { invalid }.apply { started = invalid }
+            var callbacks = 0
+            reject {
+                coordinator.reconcileOriginalRelayEdit(request, { callbacks++ }, { callbacks++ })
+            }
+            assertThat(callbacks).isEqualTo(0)
+        }
+    }
+
     @Test fun `reconciliation rejects incomplete terminal conflict expiry and revoked authority without resolving`() = runTest {
         val success = operation(request, LifecycleOperationStatus.SUCCEEDED)
         assertThat(runCatching { success.copy(terminalReceiptId = null) }.isFailure).isTrue()
