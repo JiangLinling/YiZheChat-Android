@@ -75,8 +75,10 @@ class DefaultNextInternalCutoverMigrationTest {
     }
 
     private class Fixture {
-        var sessions = listOf(aSessionData(sessionId = "@alice:matrix-next.yizhesy.cn")
-            .copy(homeserverUrl = "https://matrix-next.yizhesy.cn:18443"))
+        var sessions = listOf(
+            aSessionData(sessionId = "@alice:matrix-next.yizhesy.cn")
+            .copy(homeserverUrl = "https://matrix-next.yizhesy.cn:18443")
+        )
         var deletionCompletes = true
         val requests = mutableListOf<DeletionRequest>()
         val preferences = mutableMapOf("next_internal_cutover_migration_v1" to mutableMapOf("complete" to true))

@@ -1,7 +1,15 @@
 package io.element.android.security.dataprotection.impl
 
 import com.google.common.truth.Truth.assertThat
-import io.element.android.security.dataprotection.api.*
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.LifecycleOperationStatus
+import io.element.android.security.dataprotection.api.ManagementControlService
+import io.element.android.security.dataprotection.api.RecoveryIntentJournal
+import io.element.android.security.dataprotection.api.RecoveryIntentRecord
+import io.element.android.security.dataprotection.api.RecoveryIntentRejected
+import io.element.android.security.dataprotection.api.RecoveryIntentResolution
+import io.element.android.security.dataprotection.api.RecoveryIntentScope
+import io.element.android.security.dataprotection.api.RecoveryOperationContext
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -15,7 +23,10 @@ class DefaultRecoveryIntentAuthorityTest {
     private class MemoryJournal : RecoveryIntentJournal {
         val entries = mutableMapOf<RecoveryIntentScope, RecoveryIntentRecord>()
         override fun read(scope: RecoveryIntentScope) = entries[scope]
-        override fun clearAccount(accountIdHash: String): Boolean { entries.keys.removeAll { it.accountIdHash == accountIdHash }; return true }
+        override fun clearAccount(accountIdHash: String): Boolean {
+            entries.keys.removeAll { it.accountIdHash == accountIdHash }
+            return true
+        }
         override fun compareAndSet(scope: RecoveryIntentScope, expectedRevision: Long?, next: RecoveryIntentRecord?): Boolean {
             if (entries[scope]?.revision != expectedRevision) return false
             if (next == null) entries.remove(scope) else entries[scope] = next
@@ -24,19 +35,36 @@ class DefaultRecoveryIntentAuthorityTest {
     }
     private fun context(record: RecoveryIntentRecord = original, status: LifecycleOperationStatus = LifecycleOperationStatus.RUNNING,
         now: Long = 10_000, code: String? = null) = RecoveryOperationContext(
-        operationId = record.operationId, scope = record.scope, trigger = "recovery_key_entered",
-        identityGeneration = record.identityGeneration ?: "c".repeat(64), mobileGeneration = record.mobileGeneration ?: 1,
-        currentIdentityGeneration = record.identityGeneration ?: "c".repeat(64), currentMobileGeneration = record.mobileGeneration ?: 1,
-        scopeValid = true, rootValid = true, currentRootValid = true, status = status,
+        operationId = record.operationId,
+            scope = record.scope,
+            trigger = "recovery_key_entered",
+        identityGeneration = record.identityGeneration ?: "c".repeat(64),
+            mobileGeneration = record.mobileGeneration ?: 1,
+        currentIdentityGeneration = record.identityGeneration ?: "c".repeat(64),
+            currentMobileGeneration = record.mobileGeneration ?: 1,
+        scopeValid = true,
+            rootValid = true,
+            currentRootValid = true,
+            status = status,
         terminalReceiptId = if (status.isTerminal) "signed-original-terminal-receipt" else null,
-        deadlineEpochMillis = record.deadlineEpochMillis, serverTimeEpochMillis = now, matrixComplete = true,
-        recoveryId = record.recoveryId, recoveryExpiresAtEpochMillis = record.recoveryExpiresAtEpochMillis,
+        deadlineEpochMillis = record.deadlineEpochMillis,
+            serverTimeEpochMillis = now,
+            matrixComplete = true,
+        recoveryId = record.recoveryId,
+            recoveryExpiresAtEpochMillis = record.recoveryExpiresAtEpochMillis,
         terminalResultCode = code,
         idempotencyKeySha256 = MessageDigest.getInstance("SHA-256").digest(record.idempotencyKey.encodeToByteArray())
-            .joinToString("") { "%02x".format(it.toInt() and 255) })
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        )
     private fun resolution(record: RecoveryIntentRecord, admitted: Boolean = false, now: Long = 10_000) =
-        RecoveryIntentResolution(record.operationId, record.scope, context(record).idempotencyKeySha256,
-            record.deadlineEpochMillis, now, admitted)
+        RecoveryIntentResolution(
+            record.operationId,
+            record.scope,
+            context(record).idempotencyKeySha256,
+            record.deadlineEpochMillis,
+            now,
+            admitted
+        )
     private fun services(journal: MemoryJournal): Triple<DefaultRecoveryIntentAuthority, AppOperationalStateCoordinator, ManagementControlService> {
         val coordinator = mockk<AppOperationalStateCoordinator>()
         val management = mockk<ManagementControlService>()
@@ -58,7 +86,11 @@ class DefaultRecoveryIntentAuthorityTest {
     @Test fun `another account installation or Matrix device never adopts original journal`() = runTest {
         val journal = MemoryJournal().apply { entries[scope] = original }
         val (authority, coordinator, _) = services(journal)
-        for (other in listOf(scope.copy(accountIdHash = "d".repeat(64)), scope.copy(installationId = "other-installation-001"), scope.copy(matrixDeviceIdHash = "e".repeat(64)))) {
+        for (other in listOf(
+                scope.copy(accountIdHash = "d".repeat(64)),
+                scope.copy(installationId = "other-installation-001"),
+                scope.copy(matrixDeviceIdHash = "e".repeat(64))
+            )) {
             assertThat(authority.restore(other)).isNull()
         }
         assertThat(journal.read(scope)).isEqualTo(original)
@@ -99,10 +131,16 @@ class DefaultRecoveryIntentAuthorityTest {
         coEvery { management.expireRecoveryOperation(original) } answers { expired = true }
         coEvery { management.recoveryOperationContext(any()) } answers {
             val record = firstArg<RecoveryIntentRecord>()
-            if (record.operationId == original.operationId) context(record,
+            if (record.operationId == original.operationId) {
+                context(
+                    record,
                 if (expired) LifecycleOperationStatus.FAILED_FINAL else LifecycleOperationStatus.RUNNING,
-                now = 100_001, code = if (expired) "RECOVERY_OPERATION_EXPIRED" else null)
-            else context(record)
+                now = 100_001,
+                    code = if (expired) "RECOVERY_OPERATION_EXPIRED" else null
+                )
+            } else {
+                context(record)
+            }
         }
         val fresh = authority.admit(scope)
         assertThat(fresh.operationId).isNotEqualTo(original.operationId)
@@ -124,7 +162,12 @@ class DefaultRecoveryIntentAuthorityTest {
         val (authority, coordinator, management) = services(journal)
         coEvery { management.recoveryOperationContext(any()) } answers {
             val record = firstArg<RecoveryIntentRecord>()
-            if (record.operationId == original.operationId) context(record, LifecycleOperationStatus.FAILED_FINAL, code = "RECOVERY_SECRET_STORAGE_REJECTED") else context(record)
+            if (record.operationId ==
+                original.operationId) {
+                    context(record, LifecycleOperationStatus.FAILED_FINAL, code = "RECOVERY_SECRET_STORAGE_REJECTED")
+                } else {
+                    context(record)
+                }
         }
         assertThat(runCatching { authority.restore(scope) }.isFailure).isTrue()
         coVerify(exactly = 0) { coordinator.start(any()) }
@@ -132,10 +175,17 @@ class DefaultRecoveryIntentAuthorityTest {
     }
     @Test fun `signed generation invalidation clears only matching local owner`() = runTest {
         val other = scope.copy(accountIdHash = "d".repeat(64))
-        val journal = MemoryJournal().apply { entries[scope] = original; entries[other] = original.copy(scope = other) }
+        val journal = MemoryJournal().apply {
+            entries[scope] = original
+            entries[other] = original.copy(scope = other)
+        }
         val (authority, _, management) = services(journal)
-        coEvery { management.recoveryOperationContext(original) } returns context().copy(scopeValid = false, rootValid = false,
-            currentRootValid = true, currentIdentityGeneration = "e".repeat(64))
+        coEvery { management.recoveryOperationContext(original) } returns context().copy(
+            scopeValid = false,
+            rootValid = false,
+            currentRootValid = true,
+            currentIdentityGeneration = "e".repeat(64)
+        )
         assertThat(authority.restore(scope)).isNull()
         assertThat(journal.read(scope)).isNull()
         assertThat(journal.read(other)).isNotNull()
@@ -143,8 +193,11 @@ class DefaultRecoveryIntentAuthorityTest {
     @Test fun `mismatched signed identity never clears owner on generation change`() = runTest {
         val journal = MemoryJournal().apply { entries[scope] = original }
         val (authority, _, management) = services(journal)
-        coEvery { management.recoveryOperationContext(original) } returns context().copy(operationId = "other-operation-0001",
-            scopeValid = false, currentIdentityGeneration = "d".repeat(64))
+        coEvery { management.recoveryOperationContext(original) } returns context().copy(
+            operationId = "other-operation-0001",
+            scopeValid = false,
+            currentIdentityGeneration = "d".repeat(64)
+        )
         assertThat(runCatching { authority.restore(scope) }.isFailure).isTrue()
         assertThat(journal.read(scope)).isEqualTo(original)
     }
@@ -170,7 +223,10 @@ class DefaultRecoveryIntentAuthorityTest {
     @Test fun `signed expired nonadmission retires only local draft on cold restore`() = runTest {
         val draft = original.copy(identityGeneration = null, mobileGeneration = null)
         val other = scope.copy(accountIdHash = "d".repeat(64))
-        val journal = MemoryJournal().apply { entries[scope] = draft; entries[other] = original.copy(scope = other) }
+        val journal = MemoryJournal().apply {
+            entries[scope] = draft
+            entries[other] = original.copy(scope = other)
+        }
         val (authority, coordinator, management) = services(journal)
         coEvery { management.resolveRecoveryIntent(draft) } returns resolution(draft, now = 100_001)
         assertThat(authority.restore(scope)).isNull()
@@ -199,10 +255,12 @@ class DefaultRecoveryIntentAuthorityTest {
         coEvery { management.resolveRecoveryIntent(draft) } throws java.io.IOException("unavailable")
         assertThat(runCatching { authority.restore(scope) }.isFailure).isTrue()
         assertThat(journal.read(scope)).isEqualTo(draft)
-        val invalid = listOf(resolution(draft, now = 100_001).copy(operationId = "another-operation-001"),
+        val invalid = listOf(
+            resolution(draft, now = 100_001).copy(operationId = "another-operation-001"),
             resolution(draft, now = 100_001).copy(scope = scope.copy(matrixDeviceIdHash = "d".repeat(64))),
             resolution(draft, now = 100_001).copy(idempotencyKeySha256 = "f".repeat(64)),
-            resolution(draft, now = 100_001).copy(deadlineEpochMillis = 99_999))
+            resolution(draft, now = 100_001).copy(deadlineEpochMillis = 99_999)
+        )
         for (proof in invalid) {
             coEvery { management.resolveRecoveryIntent(draft) } returns proof
             assertThat(runCatching { authority.restore(scope) }.isFailure).isTrue()

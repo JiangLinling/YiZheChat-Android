@@ -32,9 +32,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
@@ -42,19 +42,34 @@ import java.util.concurrent.atomic.AtomicInteger
 class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `terminal coordination without the original Android fact cannot retire persisted receipt after restart`() = runTest {
-        val request = lifecycleOperationRequest(FullAppLifecycleId.LC_16, "download",
-            operationId = "media-cleanup-original-0001", accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
-        val receipt = LifecycleClientReceipt(request.operationId, LifecycleComponent.ANDROID_SERVICE,
-            LifecyclePhase.CLIENT_APPLIED, "ANDROID_SERVICE_APPLIED", "android-service:${request.operationId}", 123L)
+        val request = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_16,
+            "download",
+            operationId = "media-cleanup-original-0001",
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        )
+        val receipt = LifecycleClientReceipt(
+            request.operationId,
+            LifecycleComponent.ANDROID_SERVICE,
+            LifecyclePhase.CLIENT_APPLIED,
+            "ANDROID_SERVICE_APPLIED",
+            "android-service:${request.operationId}",
+            123L
+        )
         val missing = io.element.android.security.dataprotection.api.LifecycleStep(
-            stepId = "media-original-android-step", component = receipt.component,
+            stepId = "media-original-android-step",
+            component = receipt.component,
             status = io.element.android.security.dataprotection.api.LifecycleStepStatus.PENDING,
-            attemptCount = 0, updatedAtEpochMillis = 123L,
+            attemptCount = 0,
+            updatedAtEpochMillis = 123L,
         )
         val ended = operation(request).copy(
             subjects = operation(request).subjects.copy(installationId = "installation-test-0001"),
-            status = LifecycleOperationStatus.FAILED_FINAL, currentPhase = LifecyclePhase.RECEIPTED,
-            terminalReceiptId = "original-coordination-timeout-receipt", steps = listOf(missing),
+            status = LifecycleOperationStatus.FAILED_FINAL,
+            currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "original-coordination-timeout-receipt",
+            steps = listOf(missing),
         )
         val store = FakeLifecycleOperationIdStore().apply { savePendingClientReceipts(listOf(receipt)) }
         val service = mockk<ManagementControlService>()
@@ -70,18 +85,34 @@ class DefaultAppOperationalStateCoordinatorTest {
 
     @Test
     fun `receipt endpoint terminal response without matching step keeps the original pending fact`() = runTest {
-        val request = lifecycleOperationRequest(FullAppLifecycleId.LC_16, "download",
-            operationId = "media-cleanup-response-0001", accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
-        val receipt = LifecycleClientReceipt(request.operationId, LifecycleComponent.ANDROID_SERVICE,
-            LifecyclePhase.CLIENT_APPLIED, "ANDROID_SERVICE_APPLIED", "android-service:${request.operationId}", 123L)
+        val request = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_16,
+            "download",
+            operationId = "media-cleanup-response-0001",
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        )
+        val receipt = LifecycleClientReceipt(
+            request.operationId,
+            LifecycleComponent.ANDROID_SERVICE,
+            LifecyclePhase.CLIENT_APPLIED,
+            "ANDROID_SERVICE_APPLIED",
+            "android-service:${request.operationId}",
+            123L
+        )
         val missing = io.element.android.security.dataprotection.api.LifecycleStep(
-            stepId = "media-original-android-step", component = receipt.component,
+            stepId = "media-original-android-step",
+            component = receipt.component,
             status = io.element.android.security.dataprotection.api.LifecycleStepStatus.PENDING,
-            attemptCount = 0, updatedAtEpochMillis = 123L,
+            attemptCount = 0,
+            updatedAtEpochMillis = 123L,
         )
         val admitted = operation(request).copy(steps = listOf(missing))
-        val ended = admitted.copy(status = LifecycleOperationStatus.FAILED_FINAL,
-            currentPhase = LifecyclePhase.RECEIPTED, terminalReceiptId = "original-response-timeout-receipt")
+        val ended = admitted.copy(
+            status = LifecycleOperationStatus.FAILED_FINAL,
+            currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "original-response-timeout-receipt"
+        )
         val service = mockk<ManagementControlService>()
         coEvery { service.startLifecycleOperation(request) } returns admitted
         coEvery { service.recordLifecycleClientReceipt(receipt) } returns ended
@@ -94,19 +125,36 @@ class DefaultAppOperationalStateCoordinatorTest {
 
     @Test
     fun `terminal failure elsewhere can acknowledge an independently completed exact Android fact`() = runTest {
-        val request = lifecycleOperationRequest(FullAppLifecycleId.LC_16, "download",
-            operationId = "media-cleanup-observed-0001", accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
-        val receipt = LifecycleClientReceipt(request.operationId, LifecycleComponent.ANDROID_SERVICE,
-            LifecyclePhase.CLIENT_APPLIED, "ANDROID_SERVICE_APPLIED", "android-service:${request.operationId}", 123L)
+        val request = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_16,
+            "download",
+            operationId = "media-cleanup-observed-0001",
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        )
+        val receipt = LifecycleClientReceipt(
+            request.operationId,
+            LifecycleComponent.ANDROID_SERVICE,
+            LifecyclePhase.CLIENT_APPLIED,
+            "ANDROID_SERVICE_APPLIED",
+            "android-service:${request.operationId}",
+            123L
+        )
         val step = io.element.android.security.dataprotection.api.LifecycleStep(
-            stepId = "media-original-android-step", component = receipt.component,
-            status = io.element.android.security.dataprotection.api.LifecycleStepStatus.COMPLETE, attemptCount = 1,
-            resultCode = receipt.resultCode, receiptReference = receipt.receiptReference, updatedAtEpochMillis = 123L,
+            stepId = "media-original-android-step",
+            component = receipt.component,
+            status = io.element.android.security.dataprotection.api.LifecycleStepStatus.COMPLETE,
+            attemptCount = 1,
+            resultCode = receipt.resultCode,
+            receiptReference = receipt.receiptReference,
+            updatedAtEpochMillis = 123L,
         )
         val ended = operation(request).copy(
             subjects = operation(request).subjects.copy(installationId = "installation-test-0001"),
-            status = LifecycleOperationStatus.FAILED_FINAL, currentPhase = LifecyclePhase.RECEIPTED,
-            terminalReceiptId = "original-independent-failure-receipt", steps = listOf(step),
+            status = LifecycleOperationStatus.FAILED_FINAL,
+            currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "original-independent-failure-receipt",
+            steps = listOf(step),
         )
         val store = FakeLifecycleOperationIdStore().apply { savePendingClientReceipts(listOf(receipt)) }
         val service = mockk<ManagementControlService>()
@@ -121,13 +169,20 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `verified same installation terminal receipt retires observer intent without account transport`() = runTest {
         val request = lifecycleOperationRequest(FullAppLifecycleId.LC_07, "heartbeat", operationId = "terminal-observer-original-0001")
-        val receipt = LifecycleClientReceipt(request.operationId, LifecycleComponent.ANDROID_FRONTEND,
-            LifecyclePhase.CLIENT_APPLIED, "ANDROID_FRONTEND_APPLIED", "android-frontend:${request.operationId}", 123L)
+        val receipt = LifecycleClientReceipt(
+            request.operationId,
+            LifecycleComponent.ANDROID_FRONTEND,
+            LifecyclePhase.CLIENT_APPLIED,
+            "ANDROID_FRONTEND_APPLIED",
+            "android-frontend:${request.operationId}",
+            123L
+        )
         for (installation in listOf("installation-test-0001", "other-installation-0001")) {
             val service = mockk<ManagementControlService>()
             val completed = operation(request).copy(
                 subjects = LifecycleSubjectHashes(installationId = installation),
-                status = LifecycleOperationStatus.SUCCEEDED, currentPhase = LifecyclePhase.RECEIPTED,
+                status = LifecycleOperationStatus.SUCCEEDED,
+                currentPhase = LifecyclePhase.RECEIPTED,
                 terminalReceiptId = "verified-terminal-observer-receipt-0001",
             )
             val store = FakeLifecycleOperationIdStore().apply { savePendingClientReceipts(listOf(receipt)) }
@@ -145,8 +200,13 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `ordinary product completion commits both facts before any failing transport and replays after process death`() = runTest {
         val service = mockk<ManagementControlService>()
-        val request = lifecycleOperationRequest(FullAppLifecycleId.LC_14, "draft_change",
-            operationId = "durable-draft-original-0001", accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
+        val request = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_14,
+            "draft_change",
+            operationId = "durable-draft-original-0001",
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        )
         val accepted = operation(request)
         val store = FakeLifecycleOperationIdStore()
         coEvery { service.startLifecycleOperation(request) } returns accepted
@@ -156,7 +216,12 @@ class DefaultAppOperationalStateCoordinatorTest {
         }
         val original = DefaultAppOperationalStateCoordinator(service, store)
         var actionCount = 0
-        assertThat(runCatching { original.perform(request) { actionCount++; Unit } }.isFailure).isTrue()
+        assertThat(runCatching {
+            original.perform(request) {
+            actionCount++
+            Unit
+        }
+        }.isFailure).isTrue()
         assertThat(actionCount).isEqualTo(1)
         val committed = store.pendingClientReceipts()
         assertThat(committed).hasSize(2)
@@ -177,10 +242,20 @@ class DefaultAppOperationalStateCoordinatorTest {
     fun `direct receipt failure retains original occurrence time across retries`() = runTest {
         val service = mockk<ManagementControlService>()
         val store = FakeLifecycleOperationIdStore()
-        val request = lifecycleOperationRequest(FullAppLifecycleId.LC_02, "foreground",
-            accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
-        val receipt = LifecycleClientReceipt(request.operationId, LifecycleComponent.ANDROID_SERVICE,
-            LifecyclePhase.CLIENT_APPLIED, "ANDROID_SERVICE_APPLIED", "android-service:${request.operationId}", 123L)
+        val request = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_02,
+            "foreground",
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        )
+        val receipt = LifecycleClientReceipt(
+            request.operationId,
+            LifecycleComponent.ANDROID_SERVICE,
+            LifecyclePhase.CLIENT_APPLIED,
+            "ANDROID_SERVICE_APPLIED",
+            "android-service:${request.operationId}",
+            123L
+        )
         coEvery { service.recordLifecycleClientReceipt(any()) } throws java.io.IOException("TEST_TRANSPORT_LOST")
         val coordinator = DefaultAppOperationalStateCoordinator(service, store)
         assertThat(runCatching { coordinator.recordClientReceipt(receipt) }.isFailure).isTrue()
@@ -192,11 +267,21 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `installation restoration receipt replay is limited to exact installation without resource subjects`() = runTest {
         val request = lifecycleOperationRequest(FullAppLifecycleId.LC_02, "process_create", operationId = "restore-installation-original-0001")
-        val receipt = LifecycleClientReceipt(request.operationId, LifecycleComponent.ANDROID_SERVICE,
-            LifecyclePhase.CLIENT_APPLIED, "ANDROID_SERVICE_APPLIED", "android-service:${request.operationId}", 123L)
+        val receipt = LifecycleClientReceipt(
+            request.operationId,
+            LifecycleComponent.ANDROID_SERVICE,
+            LifecyclePhase.CLIENT_APPLIED,
+            "ANDROID_SERVICE_APPLIED",
+            "android-service:${request.operationId}",
+            123L
+        )
         val scope = LifecycleSubjectHashes(installationId = "installation-test-0001")
-        val cases = listOf(scope to true, scope.copy(installationId = "other-installation-0001") to false,
-            scope.copy(roomIdHash = "c".repeat(64)) to false, scope.copy(eventIdHash = "d".repeat(64)) to false)
+        val cases = listOf(
+            scope to true,
+            scope.copy(installationId = "other-installation-0001") to false,
+            scope.copy(roomIdHash = "c".repeat(64)) to false,
+            scope.copy(eventIdHash = "d".repeat(64)) to false
+        )
         for ((subjects, allowed) in cases) {
             val service = mockk<ManagementControlService>()
             val accepted = operation(request).copy(subjects = subjects)
@@ -213,8 +298,12 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `first activation reconciliation reads signed scope without admitted snapshot`() = runTest {
         val service = mockk<ManagementControlService>()
-        val request = lifecycleOperationRequest(FullAppLifecycleId.LC_05, "first_activation",
-            accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
+        val request = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_05,
+            "first_activation",
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        )
         val recovered = operation(request)
         coEvery { service.startupLifecycleOperations(any(), any(), "first_activation", any()) } returns listOf(recovered)
         val coordinator = DefaultAppOperationalStateCoordinator(service)
@@ -227,8 +316,12 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `first activation rejects cross-account recovery without publishing any receipt`() = runTest {
         val service = mockk<ManagementControlService>()
-        val wrong = lifecycleOperationRequest(FullAppLifecycleId.LC_05, "first_activation",
-            accountIdHash = "c".repeat(64), matrixDeviceIdHash = "b".repeat(64))
+        val wrong = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_05,
+            "first_activation",
+            accountIdHash = "c".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        )
         coEvery { service.startupLifecycleOperations(any(), any(), "first_activation", any()) } returns listOf(operation(wrong))
         val coordinator = DefaultAppOperationalStateCoordinator(service)
         assertThat(runCatching { coordinator.reconcileFirstActivation("a".repeat(64), "b".repeat(64)) }.isFailure).isTrue()
@@ -252,8 +345,13 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `cold login reconciles server owner before creating any new operation`() = runTest {
         val service = mockk<ManagementControlService>()
-        val old = lifecycleOperationRequest(FullAppLifecycleId.LC_06, "post_login", operationId = "cold-login-original-0001",
-            accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
+        val old = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_06,
+            "post_login",
+            operationId = "cold-login-original-0001",
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        )
         val next = old.copy(operationId = "cold-login-next-intent-0001", idempotencyKey = "cold-login-next-intent-0001")
         val recovered = operation(old)
         coEvery { service.startupLifecycleOperations(any(), any(), "post_login") } returns listOf(recovered)
@@ -269,8 +367,13 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `cold login unavailable authority cannot create a competing startup`() = runTest {
         val service = mockk<ManagementControlService>()
-        val request = lifecycleOperationRequest(FullAppLifecycleId.LC_06, "post_login", operationId = "cold-login-unavailable-0001",
-            accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
+        val request = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_06,
+            "post_login",
+            operationId = "cold-login-unavailable-0001",
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        )
         coEvery { service.startupLifecycleOperations(any(), any(), "post_login") } throws java.io.IOException("TEST_AUTHORITY_UNAVAILABLE")
         val coordinator = DefaultAppOperationalStateCoordinator(service)
         assertThat(runCatching { coordinator.performResuming(request) { error("Cannot execute without provenance") } }.isFailure).isTrue()
@@ -281,8 +384,13 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `fresh candidate starts only after an empty verified startup index`() = runTest {
         val service = mockk<ManagementControlService>()
-        val request = lifecycleOperationRequest(FullAppLifecycleId.LC_06, "post_login", operationId = "fresh-candidate-login-0001",
-            accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
+        val request = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_06,
+            "post_login",
+            operationId = "fresh-candidate-login-0001",
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        )
         val admitted = operation(request)
         coEvery { service.startupLifecycleOperations(any(), any(), "post_login") } returns emptyList()
         coEvery { service.startLifecycleOperation(request) } returns admitted
@@ -296,8 +404,13 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `startup reconciliation rejects another account before publishing it`() = runTest {
         val service = mockk<ManagementControlService>()
-        val request = lifecycleOperationRequest(FullAppLifecycleId.LC_06, "post_login", operationId = "candidate-scope-login-0001",
-            accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
+        val request = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_06,
+            "post_login",
+            operationId = "candidate-scope-login-0001",
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        )
         coEvery { service.startupLifecycleOperations(any(), any(), "post_login") } returns listOf(
             operation(request.copy(accountIdHash = "c".repeat(64)))
         )
@@ -310,8 +423,13 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `known response lost login is retried with original identity without empty snapshot replacement`() = runTest {
         val service = mockk<ManagementControlService>()
-        val original = lifecycleOperationRequest(FullAppLifecycleId.LC_06, "post_login", operationId = "cold-login-response-lost-0001",
-            accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64))
+        val original = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_06,
+            "post_login",
+            operationId = "cold-login-response-lost-0001",
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64)
+        )
         val next = original.copy(operationId = "cold-login-response-next-0001", idempotencyKey = "cold-login-response-next-0001")
         val accepted = operation(original)
         coEvery { service.startLifecycleOperation(original) } throws java.io.IOException("TEST_RESPONSE_LOST") andThen accepted
@@ -323,14 +441,17 @@ class DefaultAppOperationalStateCoordinatorTest {
         coVerify(exactly = 0) { service.startLifecycleOperation(next) }
     }
 
-
     @Test
     fun `cancelled submitted start retains original retry identity without client completion`() = runTest {
         val service = mockk<ManagementControlService>()
         val request = lifecycleOperationRequest(FullAppLifecycleId.LC_16, "download", operationId = "submitted-media-original-0001")
         val entered = CompletableDeferred<Unit>()
         val response = CompletableDeferred<Unit>()
-        coEvery { service.startLifecycleOperation(request) } coAnswers { entered.complete(Unit); response.await(); operation(request) }
+        coEvery { service.startLifecycleOperation(request) } coAnswers {
+            entered.complete(Unit)
+            response.await()
+            operation(request)
+        }
         val store = FakeLifecycleOperationIdStore()
         val coordinator = DefaultAppOperationalStateCoordinator(service, store)
         val caller = async { coordinator.perform(request) { error("Product must not execute after this caller cancellation") } }
@@ -355,7 +476,10 @@ class DefaultAppOperationalStateCoordinatorTest {
         val accepted = operation(request)
         val allowReceipt = CompletableDeferred<Unit>()
         coEvery { service.startLifecycleOperation(request) } returns accepted
-        coEvery { service.recordLifecycleClientReceipt(any()) } coAnswers { allowReceipt.await(); accepted }
+        coEvery { service.recordLifecycleClientReceipt(any()) } coAnswers {
+            allowReceipt.await()
+            accepted
+        }
         val store = FakeLifecycleOperationIdStore()
         val coordinator = DefaultAppOperationalStateCoordinator(service, store, backgroundScope, StandardTestDispatcher(testScheduler))
 
@@ -433,13 +557,20 @@ class DefaultAppOperationalStateCoordinatorTest {
         val service = mockk<ManagementControlService>()
         val request = lifecycleOperationRequest(FullAppLifecycleId.LC_05, "matrix_login", operationId = "public-login-rejected-original-0001")
         val accepted = operation(request).copy(subjects = LifecycleSubjectHashes(installationId = "installation-test-0001"))
-        val receipt = LifecycleClientReceipt(request.operationId, LifecycleComponent.ANDROID_SERVICE, LifecyclePhase.CLIENT_APPLIED,
-            "MATRIX_AUTHENTICATION_REJECTED", "android-login-rejected:${request.operationId}", 123L)
+        val receipt = LifecycleClientReceipt(
+            request.operationId,
+            LifecycleComponent.ANDROID_SERVICE,
+            LifecyclePhase.CLIENT_APPLIED,
+            "MATRIX_AUTHENTICATION_REJECTED",
+            "android-login-rejected:${request.operationId}",
+            123L
+        )
         val store = FakeLifecycleOperationIdStore().apply { savePendingClientReceipts(listOf(receipt)) }
         coEvery { service.appOperationalSnapshot(any(), any()) } returns snapshot(100L)
         coEvery { service.lifecycleOperation(request.operationId) } returns accepted
         coEvery { service.recordLifecycleClientReceipt(receipt) } returns accepted.copy(
-            status = LifecycleOperationStatus.FAILED_FINAL, terminalReceiptId = "public-login-rejected-terminal-0001",
+            status = LifecycleOperationStatus.FAILED_FINAL,
+            terminalReceiptId = "public-login-rejected-terminal-0001",
         )
 
         val coordinator = DefaultAppOperationalStateCoordinator(service, store)
@@ -455,8 +586,14 @@ class DefaultAppOperationalStateCoordinatorTest {
     fun `public rejection exception cannot transport success other installation or account bound receipts`() = runTest {
         val request = lifecycleOperationRequest(FullAppLifecycleId.LC_05, "matrix_login", operationId = "public-login-rejected-boundary-0001")
         val subjects = LifecycleSubjectHashes(installationId = "installation-test-0001")
-        val failure = LifecycleClientReceipt(request.operationId, LifecycleComponent.ANDROID_SERVICE, LifecyclePhase.CLIENT_APPLIED,
-            "MATRIX_AUTHENTICATION_REJECTED", "android-login-rejected:${request.operationId}", 123L)
+        val failure = LifecycleClientReceipt(
+            request.operationId,
+            LifecycleComponent.ANDROID_SERVICE,
+            LifecyclePhase.CLIENT_APPLIED,
+            "MATRIX_AUTHENTICATION_REJECTED",
+            "android-login-rejected:${request.operationId}",
+            123L
+        )
         val cases = listOf(
             operation(request).copy(subjects = subjects.copy(installationId = "another-installation-0001")) to failure,
             operation(request).copy(subjects = subjects) to failure.copy(resultCode = "ANDROID_SERVICE_APPLIED"),
@@ -658,17 +795,27 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `expired unconfirmed process startup retry keeps identity and uses current submission deadline`() = runTest {
         val service = mockk<ManagementControlService>()
-        val original = lifecycleOperationRequest(FullAppLifecycleId.LC_02, "process_create",
-            operationId = "startup-expired-operation-0001", deadlineEpochMillis = System.currentTimeMillis() + 20_000)
-        val retry = original.copy(operationId = "startup-current-operation-0002", idempotencyKey = "startup-current-intent-0002",
-            deadlineEpochMillis = original.deadlineEpochMillis + 20_000)
+        val original = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_02,
+            "process_create",
+            operationId = "startup-expired-operation-0001",
+            deadlineEpochMillis = System.currentTimeMillis() + 20_000
+        )
+        val retry = original.copy(
+            operationId = "startup-current-operation-0002",
+            idempotencyKey = "startup-current-intent-0002",
+            deadlineEpochMillis = original.deadlineEpochMillis + 20_000
+        )
         val expected = original.copy(deadlineEpochMillis = retry.deadlineEpochMillis)
         val accepted = operation(expected)
         coEvery { service.startLifecycleOperation(original) } throws java.io.IOException("TEST_OFFLINE")
         coEvery { service.startLifecycleOperation(expected) } returns accepted
         coEvery { service.recordLifecycleClientReceipt(any()) } returns accepted
-        val coordinator = DefaultAppOperationalStateCoordinator(service, FakeLifecycleOperationIdStore(),
-            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        val coordinator = DefaultAppOperationalStateCoordinator(
+            service,
+            FakeLifecycleOperationIdStore(),
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+        )
         assertThat(runCatching { coordinator.start(original) }.isFailure).isTrue()
         assertThat(coordinator.performResuming(retry) { it }).isEqualTo(original.operationId)
         coVerify(exactly = 1) { service.startLifecycleOperation(expected) }
@@ -679,16 +826,26 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `new submission deadline never replaces an already admitted server deadline`() = runTest {
         val service = mockk<ManagementControlService>()
-        val original = lifecycleOperationRequest(FullAppLifecycleId.LC_02, "process_create",
-            operationId = "startup-expired-operation-0003", deadlineEpochMillis = System.currentTimeMillis() + 20_000)
-        val retry = original.copy(operationId = "startup-current-operation-0004", idempotencyKey = "startup-current-intent-0004",
-            deadlineEpochMillis = original.deadlineEpochMillis + 20_000)
+        val original = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_02,
+            "process_create",
+            operationId = "startup-expired-operation-0003",
+            deadlineEpochMillis = System.currentTimeMillis() + 20_000
+        )
+        val retry = original.copy(
+            operationId = "startup-current-operation-0004",
+            idempotencyKey = "startup-current-intent-0004",
+            deadlineEpochMillis = original.deadlineEpochMillis + 20_000
+        )
         val authoritative = operation(original)
         coEvery { service.startLifecycleOperation(original) } throws java.io.IOException("TEST_RESPONSE_LOST")
         coEvery { service.startLifecycleOperation(original.copy(deadlineEpochMillis = retry.deadlineEpochMillis)) } returns authoritative
         coEvery { service.recordLifecycleClientReceipt(any()) } returns authoritative
-        val coordinator = DefaultAppOperationalStateCoordinator(service, FakeLifecycleOperationIdStore(),
-            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        val coordinator = DefaultAppOperationalStateCoordinator(
+            service,
+            FakeLifecycleOperationIdStore(),
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+        )
         assertThat(runCatching { coordinator.start(original) }.isFailure).isTrue()
         assertThat(runCatching { coordinator.performResuming(retry) { error("expired admission must not execute") } }.isFailure).isTrue()
         coVerify(exactly = 0) { service.recordLifecycleClientReceipt(any()) }
@@ -699,13 +856,23 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `process retry reconciles terminal timeout and preserves original pending facts`() = runTest {
         val service = mockk<ManagementControlService>()
-        val original = lifecycleOperationRequest(FullAppLifecycleId.LC_02, "process_create",
-            deadlineEpochMillis = System.currentTimeMillis() + 20_000)
-        val retry = original.copy(operationId = "fresh-process-operation-0002", idempotencyKey = "fresh-process-intent-0002",
-            deadlineEpochMillis = original.deadlineEpochMillis + 60_000)
+        val original = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_02,
+            "process_create",
+            deadlineEpochMillis = System.currentTimeMillis() + 20_000
+        )
+        val retry = original.copy(
+            operationId = "fresh-process-operation-0002",
+            idempotencyKey = "fresh-process-intent-0002",
+            deadlineEpochMillis = original.deadlineEpochMillis + 60_000
+        )
         val old = operation(original)
-        val ended = old.copy(status = LifecycleOperationStatus.FAILED_FINAL, currentPhase = LifecyclePhase.RECEIPTED,
-            terminalReceiptId = "signed-process-timeout-receipt", updatedAtEpochMillis = old.updatedAtEpochMillis + 1)
+        val ended = old.copy(
+            status = LifecycleOperationStatus.FAILED_FINAL,
+            currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "signed-process-timeout-receipt",
+            updatedAtEpochMillis = old.updatedAtEpochMillis + 1
+        )
         val fresh = operation(retry)
         coEvery { service.startLifecycleOperation(original) } returns old
         coEvery { service.resumeLifecycleOperation(original.operationId) } returns ended
@@ -713,11 +880,20 @@ class DefaultAppOperationalStateCoordinatorTest {
         coEvery { service.startLifecycleOperation(retry) } returns fresh
         coEvery { service.recordLifecycleClientReceipt(any()) } returns fresh
         val store = FakeLifecycleOperationIdStore()
-        val coordinator = DefaultAppOperationalStateCoordinator(service, store,
-            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        val coordinator = DefaultAppOperationalStateCoordinator(
+            service,
+            store,
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+        )
         coordinator.start(original)
-        val fact = LifecycleClientReceipt(original.operationId, LifecycleComponent.ANDROID_SERVICE,
-            LifecyclePhase.CLIENT_APPLIED, "ANDROID_SERVICE_APPLIED", "original-local-fact-0001", System.currentTimeMillis())
+        val fact = LifecycleClientReceipt(
+            original.operationId,
+            LifecycleComponent.ANDROID_SERVICE,
+            LifecyclePhase.CLIENT_APPLIED,
+            "ANDROID_SERVICE_APPLIED",
+            "original-local-fact-0001",
+            System.currentTimeMillis()
+        )
         coordinator.persistClientReceipts(listOf(fact))
         assertThat(coordinator.performResuming(retry) { it }).isEqualTo(retry.operationId)
         assertThat(coordinator.operations.value[original.operationId]).isEqualTo(ended)
@@ -730,17 +906,26 @@ class DefaultAppOperationalStateCoordinatorTest {
     fun `process rejection or unverifiable expiry never executes startup or creates replacement`() = runTest {
         for (status in listOf(LifecycleOperationStatus.CANCELLED, LifecycleOperationStatus.FAILED_FINAL)) {
             val service = mockk<ManagementControlService>()
-            val original = lifecycleOperationRequest(FullAppLifecycleId.LC_02, "process_create",
-                deadlineEpochMillis = System.currentTimeMillis() + 20_000)
-            val retry = original.copy(operationId = "new-rejected-process-0002", idempotencyKey = "new-rejected-intent-0002",
-                deadlineEpochMillis = original.deadlineEpochMillis + 60_000)
+            val original = lifecycleOperationRequest(
+                FullAppLifecycleId.LC_02,
+                "process_create",
+                deadlineEpochMillis = System.currentTimeMillis() + 20_000
+            )
+            val retry = original.copy(
+                operationId = "new-rejected-process-0002",
+                idempotencyKey = "new-rejected-intent-0002",
+                deadlineEpochMillis = original.deadlineEpochMillis + 60_000
+            )
             val old = operation(original)
             val ended = old.copy(status = status, terminalReceiptId = "rejected-original-receipt-0001")
             coEvery { service.startLifecycleOperation(original) } returns old
             coEvery { service.resumeLifecycleOperation(original.operationId) } returns ended
             coEvery { service.verifyStartupCoordinationExpiry(any(), any()) } returns false
-            val coordinator = DefaultAppOperationalStateCoordinator(service, FakeLifecycleOperationIdStore(),
-                pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+            val coordinator = DefaultAppOperationalStateCoordinator(
+                service,
+                FakeLifecycleOperationIdStore(),
+                pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+            )
             coordinator.start(original)
             assertThat(runCatching { coordinator.performResuming(retry) { error("must remain closed") } }.isFailure).isTrue()
             coVerify(exactly = 0) { service.startLifecycleOperation(retry) }
@@ -751,12 +936,19 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `startup without a new intent cannot renew an unconfirmed deadline`() = runTest {
         val service = mockk<ManagementControlService>()
-        val original = lifecycleOperationRequest(FullAppLifecycleId.LC_02, "process_create",
-            operationId = "startup-expired-operation-0005", deadlineEpochMillis = System.currentTimeMillis() + 20_000)
+        val original = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_02,
+            "process_create",
+            operationId = "startup-expired-operation-0005",
+            deadlineEpochMillis = System.currentTimeMillis() + 20_000
+        )
         val retry = original.copy(deadlineEpochMillis = original.deadlineEpochMillis + 20_000)
         coEvery { service.startLifecycleOperation(original) } throws java.io.IOException("TEST_OFFLINE")
-        val coordinator = DefaultAppOperationalStateCoordinator(service, FakeLifecycleOperationIdStore(),
-            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        val coordinator = DefaultAppOperationalStateCoordinator(
+            service,
+            FakeLifecycleOperationIdStore(),
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+        )
         assertThat(runCatching { coordinator.start(original) }.isFailure).isTrue()
         assertThat(runCatching { coordinator.performResuming(retry, hasNewStartupIntent = false) { error("must stay closed") } }.isFailure).isTrue()
         coVerify(exactly = 2) { service.startLifecycleOperation(original) }
@@ -766,13 +958,23 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `different startup subjects cannot renew the old submission deadline`() = runTest {
         val service = mockk<ManagementControlService>()
-        val original = lifecycleOperationRequest(FullAppLifecycleId.LC_02, "process_create",
-            operationId = "startup-expired-operation-0006", deadlineEpochMillis = System.currentTimeMillis() + 20_000)
-        val retry = original.copy(accountIdHash = "a".repeat(64), matrixDeviceIdHash = "b".repeat(64),
-            deadlineEpochMillis = original.deadlineEpochMillis + 20_000)
+        val original = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_02,
+            "process_create",
+            operationId = "startup-expired-operation-0006",
+            deadlineEpochMillis = System.currentTimeMillis() + 20_000
+        )
+        val retry = original.copy(
+            accountIdHash = "a".repeat(64),
+            matrixDeviceIdHash = "b".repeat(64),
+            deadlineEpochMillis = original.deadlineEpochMillis + 20_000
+        )
         coEvery { service.startLifecycleOperation(original) } throws java.io.IOException("TEST_OFFLINE")
-        val coordinator = DefaultAppOperationalStateCoordinator(service, FakeLifecycleOperationIdStore(),
-            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        val coordinator = DefaultAppOperationalStateCoordinator(
+            service,
+            FakeLifecycleOperationIdStore(),
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+        )
         assertThat(runCatching { coordinator.start(original) }.isFailure).isTrue()
         assertThat(runCatching { coordinator.performResuming(retry) { error("must stay closed") } }.isFailure).isTrue()
         coVerify(exactly = 2) { service.startLifecycleOperation(original) }
@@ -782,12 +984,19 @@ class DefaultAppOperationalStateCoordinatorTest {
     @Test
     fun `expired unconfirmed non startup operation keeps its original request`() = runTest {
         val service = mockk<ManagementControlService>()
-        val original = lifecycleOperationRequest(FullAppLifecycleId.LC_01, "cold_start",
-            operationId = "cold-start-expired-operation-0007", deadlineEpochMillis = System.currentTimeMillis() + 20_000)
+        val original = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_01,
+            "cold_start",
+            operationId = "cold-start-expired-operation-0007",
+            deadlineEpochMillis = System.currentTimeMillis() + 20_000
+        )
         val retry = original.copy(deadlineEpochMillis = original.deadlineEpochMillis + 20_000)
         coEvery { service.startLifecycleOperation(original) } throws java.io.IOException("TEST_OFFLINE")
-        val coordinator = DefaultAppOperationalStateCoordinator(service, FakeLifecycleOperationIdStore(),
-            pendingStartRetryClock = { original.deadlineEpochMillis + 1 })
+        val coordinator = DefaultAppOperationalStateCoordinator(
+            service,
+            FakeLifecycleOperationIdStore(),
+            pendingStartRetryClock = { original.deadlineEpochMillis + 1 }
+        )
         assertThat(runCatching { coordinator.start(original) }.isFailure).isTrue()
         assertThat(runCatching { coordinator.performResuming(retry) { error("must stay closed") } }.isFailure).isTrue()
         coVerify(exactly = 2) { service.startLifecycleOperation(original) }
@@ -1088,7 +1297,10 @@ class DefaultAppOperationalStateCoordinatorTest {
         val store = FakeLifecycleOperationIdStore()
         val release = CompletableDeferred<Unit>()
         coEvery { service.startLifecycleOperation(request) } returns accepted
-        coEvery { service.recordLifecycleClientReceipt(any()) } coAnswers { release.await(); accepted }
+        coEvery { service.recordLifecycleClientReceipt(any()) } coAnswers {
+            release.await()
+            accepted
+        }
         val coordinator = DefaultAppOperationalStateCoordinator(service, store)
         val job = launch { coordinator.perform(request) { Unit } }
         runCurrent()
@@ -1107,9 +1319,18 @@ class DefaultAppOperationalStateCoordinatorTest {
         val service = mockk<ManagementControlService>()
         val store = FakeLifecycleOperationIdStore()
         val release = CompletableDeferred<Unit>()
-        val receipt = LifecycleClientReceipt(request.operationId, LifecycleComponent.ANDROID_SERVICE,
-            LifecyclePhase.CLIENT_APPLIED, "ANDROID_SERVICE_APPLIED", "android-service:${request.operationId}", 123L)
-        coEvery { service.recordLifecycleClientReceipt(receipt) } coAnswers { release.await(); accepted }
+        val receipt = LifecycleClientReceipt(
+            request.operationId,
+            LifecycleComponent.ANDROID_SERVICE,
+            LifecyclePhase.CLIENT_APPLIED,
+            "ANDROID_SERVICE_APPLIED",
+            "android-service:${request.operationId}",
+            123L
+        )
+        coEvery { service.recordLifecycleClientReceipt(receipt) } coAnswers {
+            release.await()
+            accepted
+        }
         val coordinator = DefaultAppOperationalStateCoordinator(service, store)
         val first = async { coordinator.recordClientReceipt(receipt) }
         val second = async { coordinator.recordClientReceipt(receipt) }
@@ -1127,19 +1348,28 @@ class DefaultAppOperationalStateCoordinatorTest {
         val service = mockk<ManagementControlService>()
         val store = FakeLifecycleOperationIdStore()
         val releaseOld = CompletableDeferred<Unit>()
-        val completeSteps = accepted.steps.map { step -> step.copy(
+        val completeSteps = accepted.steps.map { step ->
+            step.copy(
             status = io.element.android.security.dataprotection.api.LifecycleStepStatus.COMPLETE,
             resultCode = "${step.component.name}_APPLIED",
             receiptReference = "${step.component.name.lowercase().replace('_', '-')}:${request.operationId}",
-        ) }
-        val completed = accepted.copy(status = LifecycleOperationStatus.SUCCEEDED, currentPhase = LifecyclePhase.RECEIPTED,
-            terminalReceiptId = "signed-terminal-receipt", steps = completeSteps, updatedAtEpochMillis = accepted.updatedAtEpochMillis + 10)
+        )
+        }
+        val completed = accepted.copy(
+            status = LifecycleOperationStatus.SUCCEEDED,
+            currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "signed-terminal-receipt",
+            steps = completeSteps,
+            updatedAtEpochMillis = accepted.updatedAtEpochMillis + 10
+        )
         coEvery { service.startLifecycleOperation(request) } returns accepted
         coEvery { service.recordLifecycleClientReceipt(any()) } coAnswers {
             if (firstArg<LifecycleClientReceipt>().component == LifecycleComponent.ANDROID_SERVICE) {
                 releaseOld.await()
                 accepted.copy(steps = completeSteps.take(1) + accepted.steps.drop(1))
-            } else completed
+            } else {
+                completed
+            }
         }
         val coordinator = DefaultAppOperationalStateCoordinator(service, store)
         val result = async { coordinator.perform(request) { Unit } }
@@ -1162,8 +1392,14 @@ class DefaultAppOperationalStateCoordinatorTest {
         val service = mockk<ManagementControlService>()
         val store = FakeLifecycleOperationIdStore()
         val release = CompletableDeferred<Unit>()
-        val receipt = LifecycleClientReceipt(request.operationId, LifecycleComponent.ANDROID_SERVICE,
-            LifecyclePhase.CLIENT_APPLIED, "ANDROID_SERVICE_APPLIED", "android-service:${request.operationId}", 123L)
+        val receipt = LifecycleClientReceipt(
+            request.operationId,
+            LifecycleComponent.ANDROID_SERVICE,
+            LifecyclePhase.CLIENT_APPLIED,
+            "ANDROID_SERVICE_APPLIED",
+            "android-service:${request.operationId}",
+            123L
+        )
         coEvery { service.recordLifecycleClientReceipt(receipt) } coAnswers {
             release.await()
             throw java.io.IOException("transport lost")
@@ -1186,9 +1422,11 @@ class DefaultAppOperationalStateCoordinatorTest {
     private fun startupOperation(request: LifecycleOperationRequest): LifecycleOperation = operation(request).copy(
         steps = listOf(LifecycleComponent.ANDROID_SERVICE, LifecycleComponent.ANDROID_FRONTEND).map { component ->
             io.element.android.security.dataprotection.api.LifecycleStep(
-                stepId = "${component.name}:${request.operationId}", component = component,
+                stepId = "${component.name}:${request.operationId}",
+                component = component,
                 status = io.element.android.security.dataprotection.api.LifecycleStepStatus.PENDING,
-                attemptCount = 0, updatedAtEpochMillis = System.currentTimeMillis(),
+                attemptCount = 0,
+                updatedAtEpochMillis = System.currentTimeMillis(),
             )
         }
     )
@@ -1251,7 +1489,9 @@ class DefaultAppOperationalStateCoordinatorTest {
 
         override fun pendingClientReceipts(): List<LifecycleClientReceipt> = receipts.toList()
 
-        override fun savePendingClientReceipts(receipts: List<LifecycleClientReceipt>) { this.receipts = receipts.toList() }
+        override fun savePendingClientReceipts(receipts: List<LifecycleClientReceipt>) {
+            this.receipts = receipts.toList()
+        }
 
         override fun remember(operation: LifecycleOperation) {
             if (operation.lifecycleId == FullAppLifecycleId.LC_05) {
