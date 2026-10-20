@@ -18,10 +18,12 @@ import kotlinx.serialization.json.put
 internal fun mediaResourceRequest(request: LifecycleMediaReservation): JsonObject = buildJsonObject {
     putMediaScope(request.operationId, request.subjects)
     put("resources", buildJsonArray {
-        request.resources.forEach { resource -> add(buildJsonObject {
+        request.resources.forEach { resource ->
+            add(buildJsonObject {
             put("resource_type", resource.type.name)
             put("resource_id_hash", resource.recordSha256)
-        }) }
+        })
+        }
     })
 }
 
@@ -59,8 +61,11 @@ internal fun requireMediaResourceAcknowledgement(
     purpose: String,
 ): String? {
     check(purpose in setOf("MEDIA_RESOURCE_RESERVATION_ACK", "MEDIA_RESOURCE_SEAL_ACK", "ANDROID_MEDIA_RUNTIME_CLEANUP_ACK"))
-    check(verifier.verifyDetached(JsonObject(payload.filterKeys { it != "signature_b64" }),
-        payload.getValue("signing_key_id").jsonPrimitive.content, payload.getValue("signature_b64").jsonPrimitive.content))
+    check(verifier.verifyDetached(
+        JsonObject(payload.filterKeys { it != "signature_b64" }),
+        payload.getValue("signing_key_id").jsonPrimitive.content,
+        payload.getValue("signature_b64").jsonPrimitive.content
+    ))
     check(payload.getValue("schema_version").jsonPrimitive.content == "1" && payload.getValue("purpose").jsonPrimitive.content == purpose)
     val field = if (purpose == "ANDROID_MEDIA_RUNTIME_CLEANUP_ACK") "observation" else "request"
     check(payload.getValue(field) == request) { "Media acknowledgement changed the original resource fact." }

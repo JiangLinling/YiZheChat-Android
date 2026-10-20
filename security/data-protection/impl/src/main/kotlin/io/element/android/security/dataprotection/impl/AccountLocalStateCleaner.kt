@@ -14,8 +14,8 @@ import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.SingleIn
 import io.element.android.libraries.di.annotations.ApplicationContext
 import io.element.android.security.dataprotection.api.DeletionScope
-import io.element.android.security.securestorage.api.SecureMediaLeaseManager
 import io.element.android.security.securestorage.api.AccountVaultId
+import io.element.android.security.securestorage.api.SecureMediaLeaseManager
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest

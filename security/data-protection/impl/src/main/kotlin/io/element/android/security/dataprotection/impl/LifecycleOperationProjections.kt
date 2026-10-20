@@ -5,8 +5,8 @@ package io.element.android.security.dataprotection.impl
 
 import io.element.android.security.dataprotection.api.FullAppLifecycleId
 import io.element.android.security.dataprotection.api.LifecycleOperation
-import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.PersistentMap
+import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.SendChannel

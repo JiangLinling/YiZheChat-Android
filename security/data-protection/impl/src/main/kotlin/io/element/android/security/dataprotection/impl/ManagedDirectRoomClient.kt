@@ -4,7 +4,13 @@
 package io.element.android.security.dataprotection.impl
 
 import io.element.android.security.dataprotection.api.ManagedDirectRoomResult
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.util.UUID
 
 internal class ManagedDirectRoomClient(
@@ -26,13 +32,18 @@ internal class ManagedDirectRoomClient(
             require(account.matches(Regex("[a-f0-9]{64}")) && device.matches(Regex("[a-f0-9]{64}")))
             require(peer.matches(Regex("@[^\\s:]+:[^\\s]+")))
             put("action", if (create) "invite" else "resolve")
-            put("account_id_hash", account); put("matrix_device_id_hash", device); put("peer_user_id", peer)
+            put("account_id_hash", account)
+            put("matrix_device_id_hash", device)
+            put("peer_user_id", peer)
             put("request_nonce", UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", ""))
             expectedGeneration?.let { put("expected_generation", it) }
         }
         val payload = send(query)
-        check(verifier.verifyDetached(JsonObject(payload.filterKeys { it != "signature_b64" }),
-            payload.text("signing_key_id"), payload.text("signature_b64"))) { "LC11 direct room signature rejected" }
+        check(verifier.verifyDetached(
+            JsonObject(payload.filterKeys { it != "signature_b64" }),
+            payload.text("signing_key_id"),
+            payload.text("signature_b64")
+        )) { "LC11 direct room signature rejected" }
         check(payload.text("schema_version") == "1" && payload.text("purpose") == "MANAGED_DIRECT_ROOM_${query.text("action").uppercase()}")
         check(payload["query"] == query && payload.text("installation_id") == installation())
         val issued = payload.text("issued_at_ms").toLong()
@@ -58,7 +69,9 @@ internal class ManagedDirectRoomClient(
             val child = result.text("creation_operation_id")
             check(parent.matches(Regex("direct-[a-f0-9]{64}")) && child == "dmroom-${parent.removePrefix("direct-")}")
             check(operations.all { it == parent || it == child })
-        } else check(operations.isEmpty() && status == "ACCEPTED")
+        } else {
+            check(operations.isEmpty() && status == "ACCEPTED")
+        }
         return ManagedDirectRoomResult(room, status, operations) to generation
     }
 

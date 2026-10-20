@@ -15,10 +15,10 @@ import io.element.android.security.contentprotection.api.ContentAccessDestroyRea
 import io.element.android.security.contentprotection.api.ContentId
 import io.element.android.security.contentprotection.api.ContentProtectionService
 import io.element.android.security.dataprotection.api.DataDeletionCoordinator
+import io.element.android.security.dataprotection.api.DeletionReason
 import io.element.android.security.dataprotection.api.DeletionRecoveryReport
 import io.element.android.security.dataprotection.api.DeletionReport
 import io.element.android.security.dataprotection.api.DeletionRequest
-import io.element.android.security.dataprotection.api.DeletionReason
 import io.element.android.security.dataprotection.api.DeletionScope
 import io.element.android.security.dataprotection.api.DeletionStep
 import io.element.android.security.dataprotection.api.PermanentAccountLocalResourceCleaner

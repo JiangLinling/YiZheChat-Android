@@ -3,7 +3,13 @@
  */
 package io.element.android.security.dataprotection.impl
 
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.util.UUID
 
 internal class ManagedContactPolicyClient(
@@ -74,8 +80,11 @@ internal class ManagedContactPolicyClient(
 
     private suspend fun verifiedResult(query: JsonObject): JsonObject {
         val response = send(query)
-        check(verifier.verifyDetached(JsonObject(response.filterKeys { it != "signature_b64" }),
-            response.text("signing_key_id"), response.text("signature_b64"))) { "Contact policy signature rejected" }
+        check(verifier.verifyDetached(
+            JsonObject(response.filterKeys { it != "signature_b64" }),
+            response.text("signing_key_id"),
+            response.text("signature_b64")
+        )) { "Contact policy signature rejected" }
         check(response.text("schema_version") == "1" && response.text("purpose") == "CONTACT_POLICY_${query.text("action").uppercase()}")
         check(response["query"] == query && response.text("installation_id") == installation())
         val issued = response.text("issued_at_ms").toLong()

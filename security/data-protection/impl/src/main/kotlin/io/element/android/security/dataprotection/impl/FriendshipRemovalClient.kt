@@ -6,7 +6,17 @@ package io.element.android.security.dataprotection.impl
 import io.element.android.security.dataprotection.api.FriendshipRemovalIntent
 import io.element.android.security.dataprotection.api.FriendshipRemovalSnapshot
 import io.element.android.security.dataprotection.api.FriendshipRemovalStatus
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -52,15 +62,20 @@ internal class FriendshipRemovalClient(
     suspend fun complete(intent: FriendshipRemovalIntent) {
         val snapshot = intent.snapshot
         check(snapshot.installationId == installation())
-        val query = JsonObject(request("complete", snapshot.accountIdHash, snapshot.matrixDeviceIdHash, snapshot.peerUserId) +
-            ("operation_id" to JsonPrimitive(intent.operationId)))
+        val query = JsonObject(
+            request("complete", snapshot.accountIdHash, snapshot.matrixDeviceIdHash, snapshot.peerUserId) +
+            ("operation_id" to JsonPrimitive(intent.operationId))
+        )
         val payload = call(query)
         val result = payload.getValue("result").jsonObject
         check(result.text("status") == "REMOVED" && result.text("operation_id") == intent.operationId)
         val receipt = result.getValue("receipt").jsonObject
         check(receipt.text("schema_version") == "1" && receipt.text("catalog_id") == "yizhechat-full-app-lifecycle-v1")
-        check(verifier.verifyDetached(JsonObject(receipt.filterKeys { it != "signature_b64" }),
-            payload.text("signing_key_id"), receipt.text("signature_b64"))) { "LC11 receipt signature rejected" }
+        check(verifier.verifyDetached(
+            JsonObject(receipt.filterKeys { it != "signature_b64" }),
+            payload.text("signing_key_id"),
+            receipt.text("signature_b64")
+        )) { "LC11 receipt signature rejected" }
         check(receipt.text("lifecycle_id") == "LC-11" && receipt.text("operation_id") == intent.operationId &&
             receipt.text("terminal_state") == "SUCCEEDED" && receipt.text("receipt_id").length >= 8)
         val subjects = receipt.getValue("subjects").jsonObject
@@ -73,16 +88,21 @@ internal class FriendshipRemovalClient(
         check(scope.getValue("rooms").jsonObject.keys == intent.roomIds)
         val steps = receipt.getValue("required_step_receipts").jsonObject
         check(steps.keys == setOf("matrix", "control_plane", "database").map { intent.operationId + ":" + it }.toSet())
-        check(steps.values.map { it.jsonPrimitive.content }.toSet().size == 1 &&
-            steps.values.all { it.jsonPrimitive.content.matches(Regex("friendship-revoked:[a-f0-9]{64}")) })
+        check(
+            steps.values.map { it.jsonPrimitive.content }.toSet().size == 1 &&
+            steps.values.all { it.jsonPrimitive.content.matches(Regex("friendship-revoked:[a-f0-9]{64}")) }
+        )
         check(receipt.text("policy_version").toLong() >= 0)
         check(receipt.text("completed_at_ms").toLong() >= receipt.text("started_at_ms").toLong())
     }
 
     private suspend fun call(query: JsonObject): JsonObject {
         val payload = send(query)
-        check(verifier.verifyDetached(JsonObject(payload.filterKeys { it != "signature_b64" }),
-            payload.text("signing_key_id"), payload.text("signature_b64")))
+        check(verifier.verifyDetached(
+            JsonObject(payload.filterKeys { it != "signature_b64" }),
+            payload.text("signing_key_id"),
+            payload.text("signature_b64")
+        ))
         check(payload.text("schema_version") == "1" && payload.text("purpose") == "FRIENDSHIP_REMOVAL_${query.text("action").uppercase()}")
         check(payload["query"] == query && payload.text("installation_id") == installation())
         val issued = payload.text("issued_at_ms").toLong()
@@ -95,12 +115,17 @@ internal class FriendshipRemovalClient(
     private fun request(action: String, account: String, device: String, peer: String) = buildJsonObject {
         check(account.matches(Regex("[a-f0-9]{64}")) && device.matches(Regex("[a-f0-9]{64}")))
         check(peer.startsWith('@') && ':' in peer)
-        put("action", action); put("account_id_hash", account); put("matrix_device_id_hash", device); put("peer_user_id", peer)
+        put("action", action)
+        put("account_id_hash", account)
+        put("matrix_device_id_hash", device)
+        put("peer_user_id", peer)
         put("request_nonce", UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", ""))
     }
 
     private fun JsonObject.text(key: String) = getValue(key).jsonPrimitive.content
     private fun sha(text: String) = sha(text.encodeToByteArray())
     private fun sha(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
-    private companion object { val OPERATION = Regex("friend-[a-f0-9]{64}") }
+    private companion object {
+        val OPERATION = Regex("friend-[a-f0-9]{64}")
+    }
 }

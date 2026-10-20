@@ -50,6 +50,7 @@ import io.element.android.security.dataprotection.api.LifecycleMediaReservation
 import io.element.android.security.dataprotection.api.LifecycleMediaRuntimeCleanup
 import io.element.android.security.dataprotection.api.LifecycleMediaSeal
 import io.element.android.security.dataprotection.api.LifecycleOperation
+import io.element.android.security.dataprotection.api.LifecycleOperationContext
 import io.element.android.security.dataprotection.api.LifecycleOperationRequest
 import io.element.android.security.dataprotection.api.LifecycleOperationStatus
 import io.element.android.security.dataprotection.api.LifecyclePhase
@@ -58,11 +59,11 @@ import io.element.android.security.dataprotection.api.LifecycleStepStatus
 import io.element.android.security.dataprotection.api.LifecycleSubjectHashes
 import io.element.android.security.dataprotection.api.ManagedAppRelease
 import io.element.android.security.dataprotection.api.ManagedDeviceSecurityState
+import io.element.android.security.dataprotection.api.ManagedRoomCreationRequest
 import io.element.android.security.dataprotection.api.ManagementCommandExecutionReport
 import io.element.android.security.dataprotection.api.ManagementCommandState
 import io.element.android.security.dataprotection.api.ManagementCommandType
 import io.element.android.security.dataprotection.api.ManagementControlService
-import io.element.android.security.dataprotection.api.ManagedRoomCreationRequest
 import io.element.android.security.dataprotection.api.ManagementHeartbeatReport
 import io.element.android.security.dataprotection.api.ManagementHeartbeatStatus
 import io.element.android.security.dataprotection.api.ManagementPolicyApplication
@@ -94,7 +95,6 @@ import io.element.android.security.dataprotection.api.SignedOfficePreviewGrant
 import io.element.android.security.dataprotection.api.VerifiedManagementCommand
 import io.element.android.security.dataprotection.api.VerifiedOnboardingInvitation
 import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
-import io.element.android.security.dataprotection.api.LifecycleOperationContext
 import io.element.android.security.dataprotection.api.lifecycleOperationRequest
 import io.element.android.security.securestorage.api.DeviceAttestationEvidence
 import io.element.android.security.securestorage.api.DeviceTrustService
@@ -110,9 +110,9 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import okhttp3.CertificatePinner
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -262,8 +262,11 @@ class HttpManagementControlService(
                 put("account_id_hash", record.scope.accountIdHash)
                 put("matrix_device_id_hash", record.scope.matrixDeviceIdHash)
             }
-            executeSignedPost("$LIFECYCLE_OPERATIONS_PATH/${record.operationId}/expire-recovery",
-                request.toString().encodeToByteArray(), record.operationId)
+            executeSignedPost(
+                "$LIFECYCLE_OPERATIONS_PATH/${record.operationId}/expire-recovery",
+                request.toString().encodeToByteArray(),
+                record.operationId
+            )
         }
     }
 
@@ -328,18 +331,31 @@ class HttpManagementControlService(
         val response = executeSignedPost("/v1/lifecycle/recovery-intents/resolve", request.toString().encodeToByteArray(), bindLifecycle = false)
         val envelope = json.parseToJsonElement(response.decodeToString()).jsonObject
         val payload = envelope.getValue("resolution").jsonObject
-        check(signatureVerifier.verifyDetached(payload, envelope.getValue("key_id").jsonPrimitive.content,
-            envelope.getValue("signature_b64").jsonPrimitive.content)) { "RECOVERY_RESOLUTION_SIGNATURE_REJECTED" }
+        check(signatureVerifier.verifyDetached(
+            payload,
+            envelope.getValue("key_id").jsonPrimitive.content,
+            envelope.getValue("signature_b64").jsonPrimitive.content
+        )) { "RECOVERY_RESOLUTION_SIGNATURE_REJECTED" }
         fun text(name: String) = payload.getValue(name).jsonPrimitive.content
         check(text("protocol_version") == "1" && text("request_nonce_b64") == nonce)
         val serverTime = text("server_time_ms").toLong()
         check(kotlin.math.abs(System.currentTimeMillis() - serverTime) <= 300_000L)
-        val admitted = when (text("admitted")) { "true" -> true; "false" -> false; else -> error("RECOVERY_RESOLUTION_INVALID") }
+        val admitted = when (text("admitted")) {
+            "true" -> true
+            "false" -> false
+            else -> error("RECOVERY_RESOLUTION_INVALID")
+        }
         check(text("operation_id") == record.operationId && text("account_id_hash") == record.scope.accountIdHash &&
             text("installation_id") == record.scope.installationId && text("matrix_device_id_hash") == record.scope.matrixDeviceIdHash &&
             text("idempotency_key_sha256") == idempotencyHash && text("deadline_ms").toLong() == record.deadlineEpochMillis)
-        io.element.android.security.dataprotection.api.RecoveryIntentResolution(record.operationId, record.scope,
-            idempotencyHash, record.deadlineEpochMillis, serverTime, admitted)
+        io.element.android.security.dataprotection.api.RecoveryIntentResolution(
+            record.operationId,
+            record.scope,
+            idempotencyHash,
+            record.deadlineEpochMillis,
+            serverTime,
+            admitted
+        )
     }
 
     override suspend fun recoveryOperationContext(
@@ -355,28 +371,49 @@ class HttpManagementControlService(
             put("matrix_access_token", token)
             record.recoveryId?.let { put("recovery_id", it) }
         }
-        val response = executeSignedPost("$LIFECYCLE_OPERATIONS_PATH/${record.operationId}/recovery-context",
-            request.toString().encodeToByteArray(), record.operationId)
+        val response = executeSignedPost(
+            "$LIFECYCLE_OPERATIONS_PATH/${record.operationId}/recovery-context",
+            request.toString().encodeToByteArray(),
+            record.operationId
+        )
         val envelope = json.parseToJsonElement(response.decodeToString()).jsonObject
         val payload = envelope.getValue("context").jsonObject
-        check(signatureVerifier.verifyDetached(payload, envelope.getValue("key_id").jsonPrimitive.content,
-            envelope.getValue("signature_b64").jsonPrimitive.content)) { "RECOVERY_CONTEXT_SIGNATURE_REJECTED" }
+        check(signatureVerifier.verifyDetached(
+            payload,
+            envelope.getValue("key_id").jsonPrimitive.content,
+            envelope.getValue("signature_b64").jsonPrimitive.content
+        )) { "RECOVERY_CONTEXT_SIGNATURE_REJECTED" }
         fun text(name: String) = payload.getValue(name).jsonPrimitive.content
         fun number(name: String) = text(name).toLong()
-        fun boolean(name: String) = when (text(name)) { "true" -> true; "false" -> false; else -> error("RECOVERY_CONTEXT_INVALID") }
+        fun boolean(name: String) = when (text(name)) {
+            "true" -> true
+            "false" -> false
+            else -> error("RECOVERY_CONTEXT_INVALID")
+        }
         fun optional(name: String) = payload[name]?.takeUnless { it is kotlinx.serialization.json.JsonNull }?.jsonPrimitive?.content
         check(text("protocol_version") == "1" && text("request_nonce_b64") == nonce)
         val serverTime = number("server_time_ms")
         check(kotlin.math.abs(System.currentTimeMillis() - serverTime) <= 300_000L)
         io.element.android.security.dataprotection.api.RecoveryOperationContext(
-            text("operation_id"), io.element.android.security.dataprotection.api.RecoveryIntentScope(
-                text("account_id_hash"), text("installation_id"), text("matrix_device_id_hash")),
-            text("trigger"), text("identity_generation"), number("mobile_generation"),
-            text("current_identity_generation"), number("current_mobile_generation"), boolean("scope_valid"), boolean("root_valid"),
-            LifecycleOperationStatus.valueOf(text("operation_state")), optional("terminal_receipt_id"),
-            number("deadline_ms"), serverTime, boolean("matrix_complete"), optional("recovery_id"),
-            optional("recovery_expires_at_ms")?.toLong(), optional("terminal_result_code"),
-            text("idempotency_key_sha256"), boolean("current_root_valid"),
+            text("operation_id"),
+            io.element.android.security.dataprotection.api.RecoveryIntentScope(text("account_id_hash"), text("installation_id"), text("matrix_device_id_hash")),
+            text("trigger"),
+            text("identity_generation"),
+            number("mobile_generation"),
+            text("current_identity_generation"),
+            number("current_mobile_generation"),
+            boolean("scope_valid"),
+            boolean("root_valid"),
+            LifecycleOperationStatus.valueOf(text("operation_state")),
+            optional("terminal_receipt_id"),
+            number("deadline_ms"),
+            serverTime,
+            boolean("matrix_complete"),
+            optional("recovery_id"),
+            optional("recovery_expires_at_ms")?.toLong(),
+            optional("terminal_result_code"),
+            text("idempotency_key_sha256"),
+            boolean("current_root_valid"),
         ).also { context ->
             check(context.operationId == record.operationId && context.scope == record.scope &&
                 context.trigger == "recovery_key_entered" && context.deadlineEpochMillis == record.deadlineEpochMillis)
@@ -407,12 +444,17 @@ class HttpManagementControlService(
         ).jsonObject
         fun value(name: String) = checkNotNull(payload[name]).jsonPrimitive.content
         check(signatureVerifier.verifyDetached(
-            JsonObject(payload.filterKeys { it != "signature_b64" }), value("signing_key_id"), value("signature_b64")
+            JsonObject(payload.filterKeys { it != "signature_b64" }),
+            value("signing_key_id"),
+            value("signature_b64")
         )) { "Startup operation index signature verification failed." }
         val issued = value("issued_at_ms").toLong()
         val expires = value("expires_at_ms").toLong()
         val now = System.currentTimeMillis()
-        check(value("schema_version") == "1" && value("purpose") == (if (trigger == "first_activation") "LC05_STARTUP_RECONCILIATION" else "LC06_STARTUP_RECONCILIATION"))
+        check(
+            value("schema_version") == "1" &&
+                value("purpose") == (if (trigger == "first_activation") "LC05_STARTUP_RECONCILIATION" else "LC06_STARTUP_RECONCILIATION")
+        )
         check(value("installation_id") == deviceTrustService.current().installationId)
         check(value("account_id_hash") == accountIdHash && value("matrix_device_id_hash") == matrixDeviceIdHash)
         check(value("trigger") == trigger)
@@ -462,14 +504,19 @@ class HttpManagementControlService(
                     json.parseToJsonElement(encoded).jsonObject.forEach { (key, value) -> put(key, value) }
                     put("matrix_access_token", token)
                 }.toString()
-            } else encoded
+            } else {
+                encoded
+            }
         }.encodeToByteArray()
         val observedAttestationVersion = deviceTrustService.current().attestationVersion
         val response = try {
             // A new recovery intent must not inherit the old failed operation header.
             // The body still carries the exact candidate subjects and runtime Matrix session proof.
-            executeSignedPost(LIFECYCLE_OPERATIONS_PATH, body,
-                bindLifecycle = !(request.lifecycleId == FullAppLifecycleId.LC_08 && request.trigger == "recovery_key_entered"))
+            executeSignedPost(
+                LIFECYCLE_OPERATIONS_PATH,
+                body,
+                bindLifecycle = !(request.lifecycleId == FullAppLifecycleId.LC_08 && request.trigger == "recovery_key_entered")
+            )
         } catch (failure: HttpStatusException) {
             logDebugFailure(failure)
             if (
@@ -498,12 +545,16 @@ class HttpManagementControlService(
         check(operation.lifecycleId == FullAppLifecycleId.LC_04)
         val body = kotlinx.serialization.json.buildJsonObject {
             put("operation_id", operation.operationId)
-            put("user_id", userId); put("room_id", roomId)
+            put("user_id", userId)
+            put("room_id", roomId)
             token?.let { put("token", it) }
         }
         val response = try {
-            executeSignedPost("/v1/group-shares/" + if (token == null) "issue" else "redeem",
-                body.toString().encodeToByteArray(), operation.operationId)
+            executeSignedPost(
+                "/v1/group-shares/" + if (token == null) "issue" else "redeem",
+                body.toString().encodeToByteArray(),
+                operation.operationId
+            )
         } catch (failure: HttpStatusException) {
             logDebugFailure(failure)
             if (failure.statusCode == 403 && failure.safeDetail == "GROUP_SHARE_INVITE_FORBIDDEN") {
@@ -518,8 +569,11 @@ class HttpManagementControlService(
 
     override suspend fun issueGroupShare(userId: String, roomId: String) = withContext(Dispatchers.IO) {
         val response = groupShareRequest(userId, roomId)
-        io.element.android.security.dataprotection.api.GroupShareCapability(roomId,
-            response.getValue("token").jsonPrimitive.content, response.getValue("expires_at_ms").jsonPrimitive.content.toLong())
+        io.element.android.security.dataprotection.api.GroupShareCapability(
+            roomId,
+            response.getValue("token").jsonPrimitive.content,
+            response.getValue("expires_at_ms").jsonPrimitive.content.toLong()
+        )
     }
 
     override suspend fun redeemGroupShare(userId: String, roomId: String, token: String): Unit = withContext(Dispatchers.IO) {
@@ -528,13 +582,20 @@ class HttpManagementControlService(
 
     override val supportsManagedRoomCreation: Boolean get() = configuration.isNextDeployment
 
-    private fun friendshipRemovalClient() = FriendshipRemovalClient(signatureVerifier,
-        { deviceTrustService.current().installationId }) { query ->
-        val token = recoveryMatrixToken(query.getValue("account_id_hash").jsonPrimitive.content,
-            query.getValue("matrix_device_id_hash").jsonPrimitive.content)
+    private fun friendshipRemovalClient() = FriendshipRemovalClient(
+        signatureVerifier,
+        { deviceTrustService.current().installationId }
+    ) { query ->
+        val token = recoveryMatrixToken(
+            query.getValue("account_id_hash").jsonPrimitive.content,
+            query.getValue("matrix_device_id_hash").jsonPrimitive.content
+        )
         val body = JsonObject(query + ("matrix_access_token" to kotlinx.serialization.json.JsonPrimitive(token)))
-        json.parseToJsonElement(executeSignedPost("/v1/lifecycle/friendship-removal",
-            body.toString().encodeToByteArray(), bindLifecycle = false).decodeToString()).jsonObject
+        json.parseToJsonElement(executeSignedPost(
+            "/v1/lifecycle/friendship-removal",
+            body.toString().encodeToByteArray(),
+            bindLifecycle = false
+        ).decodeToString()).jsonObject
     }
 
     override suspend fun friendshipRemovalPreview(accountIdHash: String, matrixDeviceIdHash: String, peerUserId: String) =
@@ -574,7 +635,8 @@ class HttpManagementControlService(
             } catch (failure: HttpStatusException) {
                 throw io.element.android.security.dataprotection.api.RoomMembershipFailure(
                     io.element.android.security.dataprotection.api.MembershipStage.LC12_PREPARE,
-                    membershipHttpCode(failure.statusCode, failure.safeDetail), failure,
+                    membershipHttpCode(failure.statusCode, failure.safeDetail),
+                    failure,
                 )
             }
             json.parseToJsonElement(response.decodeToString()).jsonObject
@@ -591,8 +653,11 @@ class HttpManagementControlService(
             ManagedDirectRoomClient(signatureVerifier, { deviceTrustService.current().installationId }) { query ->
                 val token = recoveryMatrixToken(accountIdHash, matrixDeviceIdHash)
                 val body = JsonObject(query + ("matrix_access_token" to kotlinx.serialization.json.JsonPrimitive(token)))
-                json.parseToJsonElement(executeSignedPost("/v1/lifecycle/direct-room", body.toString().encodeToByteArray(),
-                    bindLifecycle = false).decodeToString()).jsonObject
+                json.parseToJsonElement(executeSignedPost(
+                    "/v1/lifecycle/direct-room",
+                    body.toString().encodeToByteArray(),
+                    bindLifecycle = false
+                ).decodeToString()).jsonObject
             }.execute(accountIdHash, matrixDeviceIdHash, peerUserId, create)
         }
 
@@ -602,8 +667,11 @@ class HttpManagementControlService(
             ManagedContactPolicyClient(signatureVerifier, { deviceTrustService.current().installationId }) { query ->
                 val token = recoveryMatrixToken(accountIdHash, matrixDeviceIdHash)
                 val body = JsonObject(query + ("matrix_access_token" to kotlinx.serialization.json.JsonPrimitive(token)))
-                json.parseToJsonElement(executeSignedPost("/v1/lifecycle/contact-policy", body.toString().encodeToByteArray(),
-                    bindLifecycle = false).decodeToString()).jsonObject
+                json.parseToJsonElement(executeSignedPost(
+                    "/v1/lifecycle/contact-policy",
+                    body.toString().encodeToByteArray(),
+                    bindLifecycle = false
+                ).decodeToString()).jsonObject
             }.setBlocked(accountIdHash, matrixDeviceIdHash, peerUserId, blocked)
         }
 
@@ -613,8 +681,11 @@ class HttpManagementControlService(
             ManagedContactPolicyClient(signatureVerifier, { deviceTrustService.current().installationId }) { query ->
                 val token = recoveryMatrixToken(accountIdHash, matrixDeviceIdHash)
                 val body = JsonObject(query + ("matrix_access_token" to kotlinx.serialization.json.JsonPrimitive(token)))
-                json.parseToJsonElement(executeSignedPost("/v1/lifecycle/contact-policy", body.toString().encodeToByteArray(),
-                    bindLifecycle = false).decodeToString()).jsonObject
+                json.parseToJsonElement(executeSignedPost(
+                    "/v1/lifecycle/contact-policy",
+                    body.toString().encodeToByteArray(),
+                    bindLifecycle = false
+                ).decodeToString()).jsonObject
             }.requireRoomAllowed(accountIdHash, matrixDeviceIdHash, roomId)
         }
 
@@ -624,8 +695,11 @@ class HttpManagementControlService(
             ManagedContactPolicyClient(signatureVerifier, { deviceTrustService.current().installationId }) { query ->
                 val token = recoveryMatrixToken(accountIdHash, matrixDeviceIdHash)
                 val body = JsonObject(query + ("matrix_access_token" to kotlinx.serialization.json.JsonPrimitive(token)))
-                json.parseToJsonElement(executeSignedPost("/v1/lifecycle/contact-policy", body.toString().encodeToByteArray(),
-                    bindLifecycle = false).decodeToString()).jsonObject
+                json.parseToJsonElement(executeSignedPost(
+                    "/v1/lifecycle/contact-policy",
+                    body.toString().encodeToByteArray(),
+                    bindLifecycle = false
+                ).decodeToString()).jsonObject
             }.callTerminationReason(accountIdHash, matrixDeviceIdHash, roomId, operationId)
         }
 
@@ -660,10 +734,16 @@ class HttpManagementControlService(
         val receiptId = operation.terminalReceiptId ?: return@withContext false
         require(receiptId.matches(Regex("[A-Za-z0-9_-]{8,256}")))
         val receipt = json.parseToJsonElement(executeSignedGet(
-            "/v1/lifecycle/receipts/$receiptId", operation.operationId,
+            "/v1/lifecycle/receipts/$receiptId",
+            operation.operationId,
         ).decodeToString()).jsonObject
-        verifyStartupExpiryReceipt(receipt, operation, trigger, deviceTrustService.current().installationId,
-            System.currentTimeMillis()) { payload, signature ->
+        verifyStartupExpiryReceipt(
+            receipt,
+            operation,
+            trigger,
+            deviceTrustService.current().installationId,
+            System.currentTimeMillis()
+        ) { payload, signature ->
             signatureVerifier.verifyDetached(payload, configuration.signingKeyId, signature)
         }
     }
@@ -683,23 +763,38 @@ class HttpManagementControlService(
         require(operation?.lifecycleId == FullAppLifecycleId.LC_15 && operation.operationId == operationId)
         require(operationId.matches(LIFECYCLE_OPERATION_ID_PATTERN))
         val request = kotlinx.serialization.json.buildJsonObject {
-            put("account_id_hash", query.accountIdHash); put("matrix_device_id_hash", query.matrixDeviceIdHash)
-            put("room_id_hash", query.roomIdHash); put("event_id_hash", query.eventIdHash)
-            put("carrier_sha256", query.carrierSha256); put("immutable_context_sha256", query.immutableContextSha256)
-            put("content_id", query.contentId); put("content_kind", query.contentKind); put("kms_reference", query.kmsReference)
+            put("account_id_hash", query.accountIdHash)
+            put("matrix_device_id_hash", query.matrixDeviceIdHash)
+            put("room_id_hash", query.roomIdHash)
+            put("event_id_hash", query.eventIdHash)
+            put("carrier_sha256", query.carrierSha256)
+            put("immutable_context_sha256", query.immutableContextSha256)
+            put("content_id", query.contentId)
+            put("content_kind", query.contentKind)
+            put("kms_reference", query.kmsReference)
             put("generation", query.generation?.let { kotlinx.serialization.json.JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull)
             put("operation_id", operationId)
             put("room_id", roomId)
-            put("request_nonce", java.util.UUID.randomUUID().toString().replace("-", "") +
-                java.util.UUID.randomUUID().toString().replace("-", ""))
+            put(
+                "request_nonce",
+                java.util.UUID.randomUUID().toString().replace("-", "") +
+                java.util.UUID.randomUUID().toString().replace("-", "")
+            )
         }
         val payload = json.parseToJsonElement(executeSignedPost(
-            "/v1/lifecycle/protected-relay-retry", request.toString().encodeToByteArray(), bindLifecycle = false,
+            "/v1/lifecycle/protected-relay-retry",
+            request.toString().encodeToByteArray(),
+            bindLifecycle = false,
         ).decodeToString()).jsonObject
-        check(signatureVerifier.verifyDetached(JsonObject(payload.filterKeys { it != "signature_b64" }),
-            payload.getValue("signing_key_id").jsonPrimitive.content, payload.getValue("signature_b64").jsonPrimitive.content))
-        check(payload.getValue("schema_version").jsonPrimitive.content == "1" &&
-            payload.getValue("purpose").jsonPrimitive.content == "PROTECTED_RELAY_RETRY_AUTHORIZATION")
+        check(signatureVerifier.verifyDetached(
+            JsonObject(payload.filterKeys { it != "signature_b64" }),
+            payload.getValue("signing_key_id").jsonPrimitive.content,
+            payload.getValue("signature_b64").jsonPrimitive.content
+        ))
+        check(
+            payload.getValue("schema_version").jsonPrimitive.content == "1" &&
+            payload.getValue("purpose").jsonPrimitive.content == "PROTECTED_RELAY_RETRY_AUTHORIZATION"
+        )
         check(payload.getValue("query") == request && payload.getValue("authorized").jsonPrimitive.content == "true")
         check(payload.getValue("installation_id").jsonPrimitive.content == deviceTrustService.current().installationId)
         val issued = payload.getValue("issued_at_ms").jsonPrimitive.content.toLong()
@@ -714,19 +809,33 @@ class HttpManagementControlService(
         val context = currentLifecycleOperationContext()
         require(context?.lifecycleId == FullAppLifecycleId.LC_15 && context.operationId == query.operationId)
         val request = kotlinx.serialization.json.buildJsonObject {
-            put("account_id_hash", query.accountIdHash); put("matrix_device_id_hash", query.matrixDeviceIdHash)
-            put("room_id_hash", query.roomIdHash); put("event_id_hash", query.eventIdHash)
-            put("operation_id", query.operationId); put("room_id", query.roomId); put("content_id", query.contentId)
-            put("request_nonce", java.util.UUID.randomUUID().toString().replace("-", "") +
-                java.util.UUID.randomUUID().toString().replace("-", ""))
+            put("account_id_hash", query.accountIdHash)
+            put("matrix_device_id_hash", query.matrixDeviceIdHash)
+            put("room_id_hash", query.roomIdHash)
+            put("event_id_hash", query.eventIdHash)
+            put("operation_id", query.operationId)
+            put("room_id", query.roomId)
+            put("content_id", query.contentId)
+            put(
+                "request_nonce",
+                java.util.UUID.randomUUID().toString().replace("-", "") +
+                java.util.UUID.randomUUID().toString().replace("-", "")
+            )
         }
         val payload = json.parseToJsonElement(executeSignedPost(
-            "/v1/lifecycle/protected-relay-preparation", request.toString().encodeToByteArray(), bindLifecycle = false,
+            "/v1/lifecycle/protected-relay-preparation",
+            request.toString().encodeToByteArray(),
+            bindLifecycle = false,
         ).decodeToString()).jsonObject
-        check(signatureVerifier.verifyDetached(JsonObject(payload.filterKeys { it != "signature_b64" }),
-            payload.getValue("signing_key_id").jsonPrimitive.content, payload.getValue("signature_b64").jsonPrimitive.content))
-        check(payload.getValue("schema_version").jsonPrimitive.content == "1" &&
-            payload.getValue("purpose").jsonPrimitive.content == "PROTECTED_RELAY_PREPARATION_RECONCILIATION")
+        check(signatureVerifier.verifyDetached(
+            JsonObject(payload.filterKeys { it != "signature_b64" }),
+            payload.getValue("signing_key_id").jsonPrimitive.content,
+            payload.getValue("signature_b64").jsonPrimitive.content
+        ))
+        check(
+            payload.getValue("schema_version").jsonPrimitive.content == "1" &&
+            payload.getValue("purpose").jsonPrimitive.content == "PROTECTED_RELAY_PREPARATION_RECONCILIATION"
+        )
         check(payload.getValue("query") == request)
         val installation = deviceTrustService.current().installationId
         check(payload.getValue("installation_id").jsonPrimitive.content == installation)
@@ -735,15 +844,21 @@ class HttpManagementControlService(
         val now = System.currentTimeMillis()
         check(issued <= now + 5_000 && expires > now && expires > issued && expires - issued <= 15_000)
         val result = json.decodeFromJsonElement(LifecycleOperationWire.serializer(), payload.getValue("operation")).toApi()
-        check(result.operationId == query.operationId && result.lifecycleId == FullAppLifecycleId.LC_15 &&
+        check(
+            result.operationId == query.operationId && result.lifecycleId == FullAppLifecycleId.LC_15 &&
             result.subjects.installationId == installation && result.subjects.accountIdHash == query.accountIdHash &&
             result.subjects.matrixDeviceIdHash == query.matrixDeviceIdHash && result.subjects.roomIdHash == query.roomIdHash &&
-            result.subjects.eventIdHash == query.eventIdHash)
+            result.subjects.eventIdHash == query.eventIdHash
+        )
         check(result.status.isTerminal == !result.terminalReceiptId.isNullOrBlank())
         val required = result.steps.filter { it.required }
         check(required.size == 6 && required.map { it.component }.toSet() == setOf(
-            LifecycleComponent.ANDROID_FRONTEND, LifecycleComponent.ANDROID_SERVICE, LifecycleComponent.CONTROL_PLANE,
-            LifecycleComponent.DATABASE, LifecycleComponent.MATRIX, LifecycleComponent.KMS,
+            LifecycleComponent.ANDROID_FRONTEND,
+            LifecycleComponent.ANDROID_SERVICE,
+            LifecycleComponent.CONTROL_PLANE,
+            LifecycleComponent.DATABASE,
+            LifecycleComponent.MATRIX,
+            LifecycleComponent.KMS,
         ))
         result
     }
@@ -752,26 +867,38 @@ class HttpManagementControlService(
         query: io.element.android.security.dataprotection.api.ProtectedEventOriginQuery,
     ): LifecycleOperationContext? = withContext(Dispatchers.IO) {
         val request = kotlinx.serialization.json.buildJsonObject {
-            put("account_id_hash", query.accountIdHash); put("matrix_device_id_hash", query.matrixDeviceIdHash)
-            put("room_id_hash", query.roomIdHash); put("event_id_hash", query.eventIdHash)
-            put("carrier_sha256", query.carrierSha256); put("immutable_context_sha256", query.immutableContextSha256)
-            put("content_id", query.contentId); put("content_kind", query.contentKind); put("kms_reference", query.kmsReference)
+            put("account_id_hash", query.accountIdHash)
+            put("matrix_device_id_hash", query.matrixDeviceIdHash)
+            put("room_id_hash", query.roomIdHash)
+            put("event_id_hash", query.eventIdHash)
+            put("carrier_sha256", query.carrierSha256)
+            put("immutable_context_sha256", query.immutableContextSha256)
+            put("content_id", query.contentId)
+            put("content_kind", query.contentKind)
+            put("kms_reference", query.kmsReference)
             put("generation", query.generation?.let { kotlinx.serialization.json.JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull)
         }
         val payload = json.parseToJsonElement(executeSignedPost(
-            "/v1/lifecycle/protected-event-origin", request.toString().encodeToByteArray(), bindLifecycle = false,
+            "/v1/lifecycle/protected-event-origin",
+            request.toString().encodeToByteArray(),
+            bindLifecycle = false,
         ).decodeToString()).jsonObject
         val signedPayload = JsonObject(payload.filterKeys { it != "signature_b64" })
-        check(signatureVerifier.verifyDetached(signedPayload, payload.getValue("signing_key_id").jsonPrimitive.content,
-            payload.getValue("signature_b64").jsonPrimitive.content)) { "Protected origin signature was rejected." }
-        check(payload.getValue("schema_version").jsonPrimitive.content == "1" &&
-            payload.getValue("purpose").jsonPrimitive.content == "PROTECTED_SEND_ORIGIN_LOOKUP")
+        check(signatureVerifier.verifyDetached(
+            signedPayload,
+            payload.getValue("signing_key_id").jsonPrimitive.content,
+            payload.getValue("signature_b64").jsonPrimitive.content
+        )) { "Protected origin signature was rejected." }
+        check(
+            payload.getValue("schema_version").jsonPrimitive.content == "1" &&
+            payload.getValue("purpose").jsonPrimitive.content == "PROTECTED_SEND_ORIGIN_LOOKUP"
+        )
         check(payload.getValue("query") == request) { "Protected origin query identity changed." }
         check(payload.getValue("installation_id").jsonPrimitive.content == deviceTrustService.current().installationId)
         val issued = payload.getValue("issued_at_ms").jsonPrimitive.content.toLong()
         val expires = payload.getValue("expires_at_ms").jsonPrimitive.content.toLong()
         val now = System.currentTimeMillis()
-        check(issued <= now+5_000 && expires > now && expires > issued && expires-issued <= 60_000)
+        check(issued <= now + 5_000 && expires > now && expires > issued && expires - issued <= 60_000)
         val raw = payload.getValue("origin")
         if (raw == kotlinx.serialization.json.JsonNull) return@withContext null
         val origin = raw.jsonObject
@@ -782,8 +909,10 @@ class HttpManagementControlService(
         val operationId = origin.getValue("operation_id").jsonPrimitive.content
         check(operationId.matches(LIFECYCLE_OPERATION_ID_PATTERN))
         val lifecycleId = FullAppLifecycleId.entries.single { it.wireValue == origin.getValue("lifecycle_id").jsonPrimitive.content }
-        check(lifecycleId == FullAppLifecycleId.LC_13 || lifecycleId == FullAppLifecycleId.LC_15 ||
-            lifecycleId == FullAppLifecycleId.LC_17 && query.contentKind in setOf("LOCATION", "LIVE_LOCATION", "LIVE_LOCATION_OPERATION"))
+        check(
+            lifecycleId == FullAppLifecycleId.LC_13 || lifecycleId == FullAppLifecycleId.LC_15 ||
+            lifecycleId == FullAppLifecycleId.LC_17 && query.contentKind in setOf("LOCATION", "LIVE_LOCATION", "LIVE_LOCATION_OPERATION")
+        )
         LifecycleOperationContext(operationId, lifecycleId)
     }
 
@@ -834,24 +963,38 @@ class HttpManagementControlService(
         val request = mediaCleanupRequest(fact)
         // This is a past cleanup fact, not authorization to resume the original (possibly terminal) operation.
         val payload = json.parseToJsonElement(executeSignedPost(
-            "/v1/lifecycle/media-object-cleanup", request.toString().encodeToByteArray(), bindLifecycle = false,
+            "/v1/lifecycle/media-object-cleanup",
+            request.toString().encodeToByteArray(),
+            bindLifecycle = false,
         ).decodeToString()).jsonObject
         requireMediaCleanupAcknowledgement(request, payload, signatureVerifier)
     }
 
     override suspend fun reserveMediaResources(request: LifecycleMediaReservation) {
-        sendMediaResourceFact("/v1/lifecycle/media-resources/reserve", request.subjects.installationId,
-            mediaResourceRequest(request), "MEDIA_RESOURCE_RESERVATION_ACK")
+        sendMediaResourceFact(
+            "/v1/lifecycle/media-resources/reserve",
+            request.subjects.installationId,
+            mediaResourceRequest(request),
+            "MEDIA_RESOURCE_RESERVATION_ACK"
+        )
     }
 
     override suspend fun sealMediaResources(request: LifecycleMediaSeal): String = checkNotNull(
-        sendMediaResourceFact("/v1/lifecycle/media-resources/seal", request.reservation.subjects.installationId,
-            mediaSealRequest(request), "MEDIA_RESOURCE_SEAL_ACK")
+        sendMediaResourceFact(
+            "/v1/lifecycle/media-resources/seal",
+            request.reservation.subjects.installationId,
+            mediaSealRequest(request),
+            "MEDIA_RESOURCE_SEAL_ACK"
+        )
     )
 
     override suspend fun recordMediaRuntimeCleanup(fact: LifecycleMediaRuntimeCleanup): String = checkNotNull(
-        sendMediaResourceFact("/v1/lifecycle/media-runtime-cleanup", fact.subjects.installationId,
-            mediaRuntimeRequest(fact), "ANDROID_MEDIA_RUNTIME_CLEANUP_ACK")
+        sendMediaResourceFact(
+            "/v1/lifecycle/media-runtime-cleanup",
+            fact.subjects.installationId,
+            mediaRuntimeRequest(fact),
+            "ANDROID_MEDIA_RUNTIME_CLEANUP_ACK"
+        )
     )
 
     private suspend fun sendMediaResourceFact(path: String, installationId: String?, request: JsonObject, purpose: String): String? =
@@ -1702,12 +1845,17 @@ class HttpManagementControlService(
     internal suspend fun readCurrentNextInstalledArtifact(trustedNowMs: Long): VerifiedNextInstalledArtifact = withContext(Dispatchers.IO) {
         check(configuration.isConfigured && trustedNowMs > 0)
         val request = Request.Builder()
-            .url(configuration.baseUrl + PUBLIC_APP_RELEASE_PATH +
-                "?package_name=${context.packageName}&app_version_code=${buildMeta.versionCode}")
+            .url(
+                configuration.baseUrl + PUBLIC_APP_RELEASE_PATH +
+                "?package_name=${context.packageName}&app_version_code=${buildMeta.versionCode}"
+            )
             .get().build()
         val original = json.decodeFromString(JsonObject.serializer(), execute(request, bootstrapClient).decodeToString())
         val installed = VerifiedNextInstalledArtifact.inspect(
-            AndroidNextInstalledPackageSource(context), original, trustedNowMs, signatureVerifier,
+            AndroidNextInstalledPackageSource(context),
+            original,
+            trustedNowMs,
+            signatureVerifier,
         )
         val envelope = json.decodeFromJsonElement(SignedJsonEnvelopeWire.serializer(), original)
         repository.acceptRelease(envelope, trustedNowMs)
@@ -1741,8 +1889,10 @@ class HttpManagementControlService(
             start = { original ->
                 // Creation has no existing LC header. This is the original signed lifecycle
                 // creation route; every modern phase below binds its explicit durable LC ID.
-                json.decodeFromString(LifecycleOperationWire.serializer(),
-                    executeSignedPost(LIFECYCLE_OPERATIONS_PATH, original, bindLifecycle = false).decodeToString()).toApi()
+                json.decodeFromString(
+                    LifecycleOperationWire.serializer(),
+                    executeSignedPost(LIFECYCLE_OPERATIONS_PATH, original, bindLifecycle = false).decodeToString()
+                ).toApi()
             },
             post = { path, original, operationId -> executeSignedPost(path, original, operationId) },
         )
@@ -2296,8 +2446,9 @@ class HttpManagementControlService(
                     throw PermanentAccountDeletionSubmissionBlockedException()
                 }
                 if (request.url.encodedPath == "/v1/lifecycle/direct-room") {
-                    Timber.tag("YZDirectRoom").w(managedDirectRoomFailureDiagnostic(
-                        response.code, safeServerDetail(bytes), request.header("X-YiZhe-Request-Id")))
+                    Timber.tag(
+                        "YZDirectRoom"
+                    ).w(managedDirectRoomFailureDiagnostic(response.code, safeServerDetail(bytes), request.header("X-YiZhe-Request-Id")))
                 }
                 throw HttpStatusException(response.code, safeServerDetail(bytes), parseRetryAfterMillis(response.header("Retry-After")))
             }

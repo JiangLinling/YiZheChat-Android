@@ -142,6 +142,7 @@ class DefaultAppOperationalStateCoordinator internal constructor(
     private val operationProjections = LifecycleOperationProjections()
     private val mutableOperations = operationProjections.state
     private val verifiedOperationVersions = mutableMapOf<String, LifecycleOperation>()
+
     // A bounded snapshot is a projection, not authority to revoke an admitted execution.
     // Count overlapping callers so one cancellation cannot discard another caller's owner.
     private val resumingOperationUsers = mutableMapOf<String, Int>()
@@ -289,7 +290,8 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                 )
                 snapshotRevision += 1
                 mutableState.value = AppOperationalCoordinatorState.Available(snapshot)
-                operationProjections.replace(mutableOperations.value
+                operationProjections.replace(
+                    mutableOperations.value
                     .filterValues { operation ->
                         operation.status.isTerminal ||
                             operation.operationId in pendingDraftStarts ||
@@ -297,7 +299,8 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                             pendingClientReceipts.keys.any { it.first == operation.operationId } ||
                             operation.operationId in activeIds ||
                             operation.operationId !in operationsBeforeRefresh
-                    })
+                    }
+                )
                 // Operation replies can predate the snapshot or a concurrently applied receipt.
                 // Use the same monotonic authority guard as direct start/resume/receipt replies.
                 recovered.values.forEach(::remember)
@@ -610,7 +613,9 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                 // same intent. Receipts/actions have their own durable recovery paths.
                 val delayMillis = 1_000L shl retry
                 if (request.lifecycleId != FullAppLifecycleId.LC_06 || enteredAction || retry >= 3 ||
-                    pendingStartRetryClock() + delayMillis >= request.deadlineEpochMillis) throw failure
+                    pendingStartRetryClock() + delayMillis >= request.deadlineEpochMillis) {
+                        throw failure
+                    }
                 retry += 1
                 timber.log.Timber.tag("YiZheLifecycle").i("YZLC_STARTUP_ADMISSION_RETRY attempt=%d", retry)
                 delay(delayMillis)
@@ -749,7 +754,9 @@ class DefaultAppOperationalStateCoordinator internal constructor(
         }
         if (expiredPredecessor != null) {
             val recovered = managementControlService.startupLifecycleOperations(
-                checkNotNull(request.accountIdHash), checkNotNull(request.matrixDeviceIdHash), request.trigger,
+                checkNotNull(request.accountIdHash),
+                checkNotNull(request.matrixDeviceIdHash),
+                request.trigger,
             )
             val expiredIds = mutation.withLock {
                 check(recovered.all {
@@ -761,9 +768,11 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                 check(recovered.none { it.operationId == expiredPredecessor.operationId }) {
                     "Original startup remains in the authoritative resumable index."
                 }
-                check(verifiedOperationVersions[expiredPredecessor.operationId] == expiredPredecessor &&
+                check(
+                    verifiedOperationVersions[expiredPredecessor.operationId] == expiredPredecessor &&
                     expiredPredecessor.operationId !in pendingStarts && expiredPredecessor.operationId !in resumingOperationUsers &&
-                    pendingClientReceipts.keys.none { it.first == expiredPredecessor.operationId }) {
+                    pendingClientReceipts.keys.none { it.first == expiredPredecessor.operationId }
+                ) {
                     "Original startup changed while reconciling its eligibility."
                 }
                 recovered.forEach(::remember)
@@ -782,8 +791,13 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                 }.mapTo(mutableSetOf()) { it.operationId }
             }
             timber.log.Timber.tag("YiZheLifecycle").i("YZLC_STARTUP_EXPIRED_INDEX_RECONCILED")
-            return performResuming(request, hasNewStartupIntent, allowTerminalHandoff = false,
-                excludedExpiredStartupIds = expiredIds, block = block)
+            return performResuming(
+                request,
+                hasNewStartupIntent,
+                allowTerminalHandoff = false,
+                excludedExpiredStartupIds = expiredIds,
+                block = block
+            )
         }
         // A timeout is not a policy rejection. Only the exact authority-signed expiry receipt
         // can authorize moving on to a different, explicit launch intent. Old facts remain intact.
@@ -804,10 +818,12 @@ class DefaultAppOperationalStateCoordinator internal constructor(
         val admitted = mutation.withLock {
             val latest = checkNotNull(verifiedOperationVersions[operation.operationId]) { "Lifecycle admission is unavailable." }
             if (isStartup) {
-                require(latest.lifecycleId == request.lifecycleId &&
+                require(
+                    latest.lifecycleId == request.lifecycleId &&
                     latest.subjects.accountIdHash == request.accountIdHash && latest.subjects.matrixDeviceIdHash == request.matrixDeviceIdHash &&
                     latest.subjects.roomIdHash == request.roomIdHash && latest.subjects.eventIdHash == request.eventIdHash &&
-                    (installation == null || latest.subjects.installationId == installation)) {
+                    (installation == null || latest.subjects.installationId == installation)
+                ) {
                     "Startup admission does not match the current intent."
                 }
                 // A retained process can discover that its old startup finished while it
@@ -844,8 +860,11 @@ class DefaultAppOperationalStateCoordinator internal constructor(
             withContext(NonCancellable) {
                 mutation.withLock {
                     val users = resumingOperationUsers.getValue(admitted.operationId)
-                    if (users == 1) resumingOperationUsers.remove(admitted.operationId)
-                    else resumingOperationUsers[admitted.operationId] = users - 1
+                    if (users == 1) {
+                        resumingOperationUsers.remove(admitted.operationId)
+                    } else {
+                        resumingOperationUsers[admitted.operationId] = users - 1
+                    }
                 }
             }
         }

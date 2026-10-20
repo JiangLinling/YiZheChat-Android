@@ -14,10 +14,10 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import io.element.android.libraries.di.annotations.ApplicationContext
 import io.element.android.security.dataprotection.api.FullAppLifecycleId
-import io.element.android.security.dataprotection.api.LifecycleOperation
-import io.element.android.security.dataprotection.api.LifecycleOperationRequest
 import io.element.android.security.dataprotection.api.LifecycleClientReceipt
 import io.element.android.security.dataprotection.api.LifecycleComponent
+import io.element.android.security.dataprotection.api.LifecycleOperation
+import io.element.android.security.dataprotection.api.LifecycleOperationRequest
 import io.element.android.security.dataprotection.api.LifecyclePhase
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject

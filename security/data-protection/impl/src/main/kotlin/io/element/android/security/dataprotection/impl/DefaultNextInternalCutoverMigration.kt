@@ -112,7 +112,13 @@ class DefaultNextInternalCutoverMigration(
     private fun sameHomeserver(stored: String, expected: String): Boolean {
         val left = runCatching { URI(stored) }.getOrNull() ?: return false
         val right = runCatching { URI(expected) }.getOrNull() ?: return false
-        fun port(uri: URI): Int = if (uri.port >= 0) uri.port else if (uri.scheme.equals("https", true)) 443 else 80
+        fun port(uri: URI): Int = if (uri.port >= 0) {
+            uri.port
+        } else if (uri.scheme.equals("https", true)) {
+            443
+        } else {
+            80
+        }
         return left.scheme.equals("https", true) && right.scheme.equals("https", true) &&
             left.host != null && left.host.equals(right.host, true) && port(left) == port(right)
     }
@@ -122,6 +128,7 @@ class DefaultNextInternalCutoverMigration(
         const val FORMAL_PREFERENCES = "formal_internal_cutover_migration_v1"
         const val PENDING = "pending"
         const val COMPLETE = "complete"
+
         // Public key ID read from the old internal-test control plane during the 2026-10-17 cutover.
         const val OLD_CONTROL_KEY_ID = "5e347cd737ddf238"
     }

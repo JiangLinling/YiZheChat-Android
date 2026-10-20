@@ -7,7 +7,9 @@ import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import io.element.android.libraries.di.annotations.ApplicationContext
-import io.element.android.security.dataprotection.api.*
+import io.element.android.security.dataprotection.api.RecoveryIntentJournal
+import io.element.android.security.dataprotection.api.RecoveryIntentRecord
+import io.element.android.security.dataprotection.api.RecoveryIntentScope
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
@@ -60,12 +62,17 @@ class AtomicRecoveryIntentJournal(@ApplicationContext context: Context) : Recove
         check(data.getInt("schema") == 1)
         val storedScope = RecoveryIntentScope(data.getString("account"), data.getString("installation"), data.getString("device"))
         check(storedScope == scope) { "RECOVERY_JOURNAL_SCOPE_MISMATCH" }
-        RecoveryIntentRecord(storedScope, data.getString("operation"), data.getString("idempotency"),
-            data.getLong("deadline"), data.getLong("revision"),
+        RecoveryIntentRecord(
+            storedScope,
+            data.getString("operation"),
+            data.getString("idempotency"),
+            data.getLong("deadline"),
+            data.getLong("revision"),
             if (data.has("identityGeneration")) data.getString("identityGeneration") else null,
             if (data.has("mobileGeneration")) data.getLong("mobileGeneration") else null,
             if (data.has("recovery")) data.getString("recovery") else null,
-            if (data.has("recoveryExpiry")) data.getLong("recoveryExpiry") else null)
+            if (data.has("recoveryExpiry")) data.getLong("recoveryExpiry") else null
+        )
     }
     override fun compareAndSet(scope: RecoveryIntentScope, expectedRevision: Long?, next: RecoveryIntentRecord?): Boolean = synchronized(mutationLock) {
         val current = read(scope)
@@ -88,9 +95,16 @@ class AtomicRecoveryIntentJournal(@ApplicationContext context: Context) : Recove
         next.recoveryId?.let { data.put("recovery", it) }
         next.recoveryExpiresAtEpochMillis?.let { data.put("recoveryExpiry", it) }
         val stream = atomic.startWrite()
-        try { stream.write(data.toString().encodeToByteArray()); atomic.finishWrite(stream) }
-        catch (failure: Throwable) { atomic.failWrite(stream); throw failure }
+        try {
+            stream.write(data.toString().encodeToByteArray())
+            atomic.finishWrite(stream)
+        } catch (failure: Throwable) {
+            atomic.failWrite(stream)
+            throw failure
+        }
         true
     }
-    private companion object { val mutationLock = Any() }
+    private companion object {
+        val mutationLock = Any()
+    }
 }

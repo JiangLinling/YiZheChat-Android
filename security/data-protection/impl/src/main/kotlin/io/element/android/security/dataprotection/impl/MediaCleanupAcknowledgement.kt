@@ -30,10 +30,15 @@ internal fun requireMediaCleanupAcknowledgement(
     payload: JsonObject,
     verifier: ManagementSignatureVerifier,
 ): String {
-    check(verifier.verifyDetached(JsonObject(payload.filterKeys { it != "signature_b64" }),
-        payload.getValue("signing_key_id").jsonPrimitive.content, payload.getValue("signature_b64").jsonPrimitive.content))
-    check(payload.getValue("schema_version").jsonPrimitive.content == "1" &&
-        payload.getValue("purpose").jsonPrimitive.content == "LOCAL_MEDIA_OBJECT_CLEANUP_ACK")
+    check(verifier.verifyDetached(
+        JsonObject(payload.filterKeys { it != "signature_b64" }),
+        payload.getValue("signing_key_id").jsonPrimitive.content,
+        payload.getValue("signature_b64").jsonPrimitive.content
+    ))
+    check(
+        payload.getValue("schema_version").jsonPrimitive.content == "1" &&
+        payload.getValue("purpose").jsonPrimitive.content == "LOCAL_MEDIA_OBJECT_CLEANUP_ACK"
+    )
     check(payload.getValue("observation") == request) { "Media cleanup acknowledgement changed the original fact." }
     val digest = MessageDigest.getInstance("SHA-256").digest(verifier.canonicalJson(request))
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }

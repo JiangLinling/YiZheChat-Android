@@ -4,7 +4,17 @@ import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
-import io.element.android.security.dataprotection.api.*
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.LifecycleOperationStatus
+import io.element.android.security.dataprotection.api.ManagementControlService
+import io.element.android.security.dataprotection.api.RecoveryIntentAuthority
+import io.element.android.security.dataprotection.api.RecoveryIntentJournal
+import io.element.android.security.dataprotection.api.RecoveryIntentRecord
+import io.element.android.security.dataprotection.api.RecoveryIntentRejected
+import io.element.android.security.dataprotection.api.RecoveryIntentScope
+import io.element.android.security.dataprotection.api.RecoveryOperationContext
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -44,8 +54,12 @@ class DefaultRecoveryIntentAuthority(
     override suspend fun admit(scope: RecoveryIntentScope): RecoveryIntentRecord = mutation.withLock {
         var record = journal.read(scope)
         if (record == null) {
-            val request = lifecycleOperationRequest(FullAppLifecycleId.LC_08, "recovery_key_entered",
-                accountIdHash = scope.accountIdHash, matrixDeviceIdHash = scope.matrixDeviceIdHash)
+            val request = lifecycleOperationRequest(
+                FullAppLifecycleId.LC_08,
+                "recovery_key_entered",
+                accountIdHash = scope.accountIdHash,
+                matrixDeviceIdHash = scope.matrixDeviceIdHash
+            )
             val draft = RecoveryIntentRecord(scope, request.operationId, request.idempotencyKey, request.deadlineEpochMillis, 1)
             record = if (journal.compareAndSet(scope, null, draft)) draft else checkNotNull(journal.read(scope))
         }
@@ -66,8 +80,12 @@ class DefaultRecoveryIntentAuthority(
             context.terminalReceiptId != null && context.terminalResultCode in setOf("RECOVERY_SECRET_STORAGE_REJECTED", "RECOVERY_OPERATION_EXPIRED")) {
             // A new explicitly submitted key is a new attempt, after the original signed rejection.
             check(journal.compareAndSet(scope, owned.revision, null))
-            val request = lifecycleOperationRequest(FullAppLifecycleId.LC_08, "recovery_key_entered",
-                accountIdHash = scope.accountIdHash, matrixDeviceIdHash = scope.matrixDeviceIdHash)
+            val request = lifecycleOperationRequest(
+                FullAppLifecycleId.LC_08,
+                "recovery_key_entered",
+                accountIdHash = scope.accountIdHash,
+                matrixDeviceIdHash = scope.matrixDeviceIdHash
+            )
             val draft = RecoveryIntentRecord(scope, request.operationId, request.idempotencyKey, request.deadlineEpochMillis, 1)
             check(journal.compareAndSet(scope, null, draft))
             coordinator.start(draft.request())
@@ -113,8 +131,12 @@ class DefaultRecoveryIntentAuthority(
     }
 
     private fun newDraft(scope: RecoveryIntentScope): RecoveryIntentRecord {
-        val request = lifecycleOperationRequest(FullAppLifecycleId.LC_08, "recovery_key_entered",
-            accountIdHash = scope.accountIdHash, matrixDeviceIdHash = scope.matrixDeviceIdHash)
+        val request = lifecycleOperationRequest(
+            FullAppLifecycleId.LC_08,
+            "recovery_key_entered",
+            accountIdHash = scope.accountIdHash,
+            matrixDeviceIdHash = scope.matrixDeviceIdHash
+        )
         val draft = RecoveryIntentRecord(scope, request.operationId, request.idempotencyKey, request.deadlineEpochMillis, 1)
         check(journal.compareAndSet(scope, null, draft))
         return draft
@@ -160,8 +182,12 @@ class DefaultRecoveryIntentAuthority(
     private fun requireRunnable(context: RecoveryOperationContext) {
         if (context.deadlineEpochMillis <= context.serverTimeEpochMillis) throw RecoveryIntentRejected("RECOVERY_OPERATION_EXPIRED")
         if (context.status.isTerminal || context.deadlineEpochMillis <= context.serverTimeEpochMillis ||
-            context.status !in setOf(LifecycleOperationStatus.PENDING, LifecycleOperationStatus.RUNNING,
-                LifecycleOperationStatus.WAITING_EXTERNAL, LifecycleOperationStatus.RETRYABLE_FAILURE)) {
+            context.status !in setOf(
+                LifecycleOperationStatus.PENDING,
+                LifecycleOperationStatus.RUNNING,
+                LifecycleOperationStatus.WAITING_EXTERNAL,
+                LifecycleOperationStatus.RETRYABLE_FAILURE
+            )) {
             throw RecoveryIntentRejected("RECOVERY_OPERATION_NOT_RUNNABLE")
         }
     }

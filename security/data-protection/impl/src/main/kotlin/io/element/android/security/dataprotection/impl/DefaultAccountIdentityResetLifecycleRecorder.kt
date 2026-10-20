@@ -61,7 +61,9 @@ class DefaultAccountIdentityResetLifecycleRecorder(
     override suspend fun resumeCompletedReset(): Result<Boolean> = runCatching {
         val trust = deviceTrustService.current()
         val checkpoint = accountReactivationScopeStore.current(
-            accountIdHash(matrixClient.sessionId.value), trust.installationId, sha256Hex(matrixClient.deviceId.value),
+            accountIdHash(matrixClient.sessionId.value),
+            trust.installationId,
+            sha256Hex(matrixClient.deviceId.value),
         ) ?: return@runCatching false
         if (checkpoint.pendingExplicitIdentityReset) return@runCatching true
         val before = checkpoint.identityResetPreviousKeyHash ?: return@runCatching false

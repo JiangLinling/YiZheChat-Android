@@ -97,8 +97,13 @@ internal class VerifiedNextArtifactAcceptance private constructor(
             check(envelope.artifactString("serverSignatureAlgorithm") == "SHA256withECDSA")
             val payload = envelope["payload"] as? JsonObject ?: error("Invalid artifact acceptance payload.")
             check(payload.keys == claimPayload.keys + setOf(
-                "receiptId", "devicePublicKeySha256", "attestationVersion", "claimRequestDigestSha256",
-                "acceptedAtMs", "expiresAtMs", "claimProvenance",
+                "receiptId",
+                "devicePublicKeySha256",
+                "attestationVersion",
+                "claimRequestDigestSha256",
+                "acceptedAtMs",
+                "expiresAtMs",
+                "claimProvenance",
             ))
             check(verifier.verifyDetached(payload, envelope.artifactString("serverKeyId"), envelope.artifactString("serverSignatureB64")))
             check(claimPayload.all { (key, value) -> payload[key] == value })

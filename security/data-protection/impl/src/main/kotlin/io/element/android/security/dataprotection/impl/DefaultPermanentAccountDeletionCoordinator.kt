@@ -11,8 +11,8 @@ import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import io.element.android.security.dataprotection.api.AccountDeletionPreparationRequest
-import io.element.android.security.dataprotection.api.AccountDeletionRecoveryRequest
 import io.element.android.security.dataprotection.api.AccountDeletionReceipt
+import io.element.android.security.dataprotection.api.AccountDeletionRecoveryRequest
 import io.element.android.security.dataprotection.api.AccountReactivationScopeStore
 import io.element.android.security.dataprotection.api.DataDeletionCoordinator
 import io.element.android.security.dataprotection.api.DeletionReason
@@ -23,16 +23,16 @@ import io.element.android.security.dataprotection.api.DeletionStep
 import io.element.android.security.dataprotection.api.FullAppLifecycleId
 import io.element.android.security.dataprotection.api.LifecycleOperationContext
 import io.element.android.security.dataprotection.api.ManagementControlService
-import io.element.android.security.dataprotection.api.PermanentAccountDeletionAwaitingMatrixException
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionAwaitingGlobalDestroyException
+import io.element.android.security.dataprotection.api.PermanentAccountDeletionAwaitingMatrixException
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionClientReceipt
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionCoordinator
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionHandle
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionPreparationExpiredException
-import io.element.android.security.dataprotection.api.PermanentAccountDeletionSubmissionBlockedException
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionRecoveryReport
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionState
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionStatus
+import io.element.android.security.dataprotection.api.PermanentAccountDeletionSubmissionBlockedException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -190,7 +190,9 @@ class DefaultPermanentAccountDeletionCoordinator(
                 PermanentDeletionPhase.RECOVERY_DRAFT,
                 PermanentDeletionPhase.SUBMISSION_BLOCKED,
             )
-        ) return record
+        ) {
+            return record
+        }
         val prepared = try {
             withContext(LifecycleOperationContext(record.handle.value, FullAppLifecycleId.LC_22)) {
                 if (record.phase == PermanentDeletionPhase.RECOVERY_DRAFT) {

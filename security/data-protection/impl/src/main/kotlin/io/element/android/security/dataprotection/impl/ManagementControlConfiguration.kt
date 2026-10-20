@@ -40,6 +40,7 @@ class ManagementControlConfiguration(
 
     val deploymentId: String = metadata?.getString(METADATA_DEPLOYMENT_ID)
         ?: if (updateChannel.startsWith("next-")) "next" else "legacy"
+
     // The protocol remains the same when its public channel changes from Next to internal.
     val isNextDeployment: Boolean = deploymentId in setOf("next", "internal")
 
