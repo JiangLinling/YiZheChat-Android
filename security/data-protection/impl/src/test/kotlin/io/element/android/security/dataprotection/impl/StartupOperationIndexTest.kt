@@ -29,7 +29,12 @@ class StartupOperationIndexTest {
         val result = readStartupOperationIndex(ids) { id ->
             active++
             peak = maxOf(peak, active)
-            try { delay(100); "verified-$id" } finally { active-- }
+            try {
+                delay(100)
+                "verified-$id"
+            } finally {
+                active--
+            }
         }
         assertThat(peak).isEqualTo(4)
         assertThat(active).isEqualTo(0)
@@ -45,10 +50,15 @@ class StartupOperationIndexTest {
             readStartupOperationIndex(listOf("wrong-subject", "valid-one", "valid-two", "valid-three", "queued")) { id ->
                 active++
                 try {
-                    if (id == "wrong-subject") { delay(10); error("installation mismatch") }
+                    if (id == "wrong-subject") {
+                        delay(10)
+                        error("installation mismatch")
+                    }
                     parked.await()
                     id
-                } finally { active-- }
+                } finally {
+                    active--
+                }
             }
         }
         assertThat(result.isFailure).isTrue()
@@ -63,7 +73,11 @@ class StartupOperationIndexTest {
         val reader = backgroundScope.async {
             readStartupOperationIndex((0 until 12).map(Int::toString)) {
                 active++
-                try { parked.await() } finally { active-- }
+                try {
+                    parked.await()
+                } finally {
+                    active--
+                }
             }
         }
         runCurrent()

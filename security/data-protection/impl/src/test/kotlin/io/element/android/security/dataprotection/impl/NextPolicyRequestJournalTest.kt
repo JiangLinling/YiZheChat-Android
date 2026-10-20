@@ -5,25 +5,25 @@
 package io.element.android.security.dataprotection.impl
 
 import com.google.common.truth.Truth.assertThat
-import org.junit.Assert.assertThrows
-import org.junit.Test
-import java.io.IOException
-import io.mockk.every
-import io.mockk.mockk
-import io.mockk.coEvery
-import io.mockk.coVerify
+import io.element.android.security.securestorage.api.DeviceControlRequestSignature
 import io.element.android.security.securestorage.api.DeviceTrustService
 import io.element.android.security.securestorage.api.DeviceTrustSnapshot
 import io.element.android.security.securestorage.api.DeviceTrustState
-import io.element.android.security.securestorage.api.DeviceControlRequestSignature
 import io.element.android.security.securestorage.api.HardwareSecurityLevel
 import io.element.android.security.securestorage.api.ManagedDeviceLicense
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.junit.Assert.assertThrows
+import org.junit.Test
+import java.io.IOException
 import java.security.KeyPairGenerator
 import java.security.MessageDigest
 import java.security.Signature
@@ -53,17 +53,22 @@ class NextPolicyRequestJournalTest {
         val file = MemoryFile()
         val pool = Executors.newFixedThreadPool(4)
         try {
-            val results = pool.invokeAll((1..24).map { Callable {
+            val results = pool.invokeAll((1..24).map {
+                Callable {
                 NextPolicyRequestJournal(file).prepare("op1", HASH, NextPolicyRequestPhase.ARTIFACT, BODY) {}
-            } })
+            }
+            })
             results.forEach { assertThat(it.get()).isEqualTo(BODY) }
             assertThat(file.writes).isEqualTo(1)
-        } finally { pool.shutdownNow() }
+        } finally {
+            pool.shutdownNow()
+        }
     }
 
     @Test
     fun `changed retry nonce signature timestamp or authority cannot overwrite pending`() {
-        val file = MemoryFile(); val journal = NextPolicyRequestJournal(file)
+        val file = MemoryFile()
+        val journal = NextPolicyRequestJournal(file)
         journal.prepare("op1", HASH, NextPolicyRequestPhase.ARTIFACT, BODY) {}
         val original = file.bytes!!.copyOf()
         reject { journal.prepare("op1", HASH, NextPolicyRequestPhase.ARTIFACT, "changed".encodeToByteArray()) {} }
@@ -74,19 +79,23 @@ class NextPolicyRequestJournalTest {
 
     @Test
     fun `failed atomic commit does not expose a first request or damage the last request`() {
-        val file = MemoryFile(); val journal = NextPolicyRequestJournal(file)
+        val file = MemoryFile()
+        val journal = NextPolicyRequestJournal(file)
         file.failWrite = true
         assertThrows(IOException::class.java) { journal.prepare("op1", HASH, NextPolicyRequestPhase.ARTIFACT, BODY) {} }
         assertThat(journal.pending("op1", HASH, NextPolicyRequestPhase.ARTIFACT) {}).isNull()
-        file.failWrite = false; journal.prepare("op1", HASH, NextPolicyRequestPhase.ARTIFACT, BODY) {}
-        val original = file.bytes!!.copyOf(); file.failWrite = true
+        file.failWrite = false
+        journal.prepare("op1", HASH, NextPolicyRequestPhase.ARTIFACT, BODY) {}
+        val original = file.bytes!!.copyOf()
+        file.failWrite = true
         assertThrows(IOException::class.java) { journal.prepare("op1", HASH, NextPolicyRequestPhase.CHALLENGE, BODY) {} }
         assertThat(file.bytes).isEqualTo(original)
     }
 
     @Test
     fun `revalidation failure and invalid phase never mutate journal`() {
-        val file = MemoryFile(); val journal = NextPolicyRequestJournal(file)
+        val file = MemoryFile()
+        val journal = NextPolicyRequestJournal(file)
         reject { journal.prepare("op1", HASH, NextPolicyRequestPhase.CHALLENGE, BODY) {} }
         reject { journal.prepare("op1", HASH, NextPolicyRequestPhase.ARTIFACT, BODY) { error("authority revoked") } }
         assertThat(file.bytes).isNull()
@@ -97,12 +106,14 @@ class NextPolicyRequestJournalTest {
 
     @Test
     fun `validated consumption retains original signed receipt and rejects changed acknowledgement`() {
-        val file = MemoryFile(); val journal = NextPolicyRequestJournal(file)
+        val file = MemoryFile()
+        val journal = NextPolicyRequestJournal(file)
         NextPolicyRequestPhase.entries.forEach { journal.prepare("op1", HASH, it, BODY) {} }
         val ack = "CONSUMED with original projection".encodeToByteArray()
         reject { journal.recordConsumed("op1", HASH, ack) { _, _ -> error("bad authenticated ack") } }
         journal.recordConsumed("op1", HASH, ack) { receipt, actual ->
-            assertThat(receipt).isEqualTo(BODY); assertThat(actual).isEqualTo(ack)
+            assertThat(receipt).isEqualTo(BODY)
+            assertThat(actual).isEqualTo(ack)
         }
         journal.recordConsumed("op1", HASH, ack) { _, _ -> }
         assertThat(file.writes).isEqualTo(4)
@@ -112,21 +123,29 @@ class NextPolicyRequestJournalTest {
 
     @Test
     fun `caller buffers and validator mutations cannot change durable original`() {
-        val file = MemoryFile(); val journal = NextPolicyRequestJournal(file)
+        val file = MemoryFile()
+        val journal = NextPolicyRequestJournal(file)
         val input = BODY.copyOf()
         val output = journal.prepare("op1", HASH, NextPolicyRequestPhase.ARTIFACT, input) { it.fill(0) }
-        input.fill(1); output.fill(2)
+        input.fill(1)
+        output.fill(2)
         val read = journal.pending("op1", HASH, NextPolicyRequestPhase.ARTIFACT) { it.fill(3) }!!
-        assertThat(read).isEqualTo(BODY); read.fill(4)
+        assertThat(read).isEqualTo(BODY)
+        read.fill(4)
         assertThat(journal.pending("op1", HASH, NextPolicyRequestPhase.ARTIFACT) {}).isEqualTo(BODY)
     }
 
     @Test
     fun `corrupt truncated unknown schema digest and noncanonical records fail closed`() {
-        val file = MemoryFile(); val journal = NextPolicyRequestJournal(file)
+        val file = MemoryFile()
+        val journal = NextPolicyRequestJournal(file)
         journal.prepare("op1", HASH, NextPolicyRequestPhase.ARTIFACT, BODY) {}
         val original = file.bytes!!.decodeToString()
-        listOf("{}", original.dropLast(1), original + " ", original.replace("\"schemaVersion\":1", "\"schemaVersion\":2"),
+        listOf(
+            "{}",
+            original.dropLast(1),
+            original + " ",
+            original.replace("\"schemaVersion\":1", "\"schemaVersion\":2"),
             original.replace("\"bodyDigestSha256\":\"", "\"bodyDigestSha256\":\"0"),
             original.replace("\"requests\":", "\"unknown\":1,\"requests\":"),
         ).forEach { changed ->
@@ -138,7 +157,8 @@ class NextPolicyRequestJournalTest {
 
     @Test
     fun `different account policy jobs retain previous pending and capacity fails without eviction`() {
-        val file = MemoryFile(); val journal = NextPolicyRequestJournal(file)
+        val file = MemoryFile()
+        val journal = NextPolicyRequestJournal(file)
         repeat(256) { journal.prepare("op$it", HASH, NextPolicyRequestPhase.ARTIFACT, BODY) {} }
         val original = file.bytes!!.copyOf()
         reject { journal.prepare("op256", OTHER_HASH, NextPolicyRequestPhase.ARTIFACT, BODY) {} }
@@ -148,7 +168,8 @@ class NextPolicyRequestJournalTest {
 
     @Test
     fun `invalid identifiers empty oversized bodies and unreadable store never become success`() {
-        val file = MemoryFile(); val journal = NextPolicyRequestJournal(file)
+        val file = MemoryFile()
+        val journal = NextPolicyRequestJournal(file)
         reject { journal.prepare("../op", HASH, NextPolicyRequestPhase.ARTIFACT, BODY) {} }
         reject { journal.prepare("op1", "bad", NextPolicyRequestPhase.ARTIFACT, BODY) {} }
         listOf(ByteArray(0), ByteArray(256 * 1024 + 1)).forEach {
@@ -163,12 +184,19 @@ class NextPolicyRequestJournalTest {
     fun `device signer signs canonical payload with original DAK and exact nested envelope`() = runTest {
         val f = SignerFixture()
         val envelope = f.sign()
-        assertThat(envelope.keys).containsExactly("contract", "payload", "deviceKeyId", "devicePublicKeySha256",
-            "deviceSignatureAlgorithm", "deviceSignatureB64")
+        assertThat(envelope.keys).containsExactly(
+            "contract",
+            "payload",
+            "deviceKeyId",
+            "devicePublicKeySha256",
+            "deviceSignatureAlgorithm",
+            "deviceSignatureB64"
+        )
         assertThat(envelope["devicePublicKeySha256"]).isEqualTo(JsonPrimitive(f.deviceDigest))
         assertThat(envelope["deviceKeyId"]).isEqualTo(JsonPrimitive(f.deviceDigest.take(16)))
         val verified = Signature.getInstance("SHA256withECDSA").run {
-            initVerify(f.devicePair.public); update(f.verifier.canonicalJson(envelope["payload"]!!))
+            initVerify(f.devicePair.public)
+            update(f.verifier.canonicalJson(envelope["payload"]!!))
             verify(Base64.getDecoder().decode((envelope["deviceSignatureB64"] as JsonPrimitive).content))
         }
         assertThat(verified).isTrue()
@@ -178,7 +206,9 @@ class NextPolicyRequestJournalTest {
     @Test
     fun `key installation attestation or restriction changed during signing rejects envelope`() = runTest {
         val f = SignerFixture()
-        listOf(f.snapshot.copy(installationId = "different"), f.snapshot.copy(attestationVersion = 8),
+        listOf(
+            f.snapshot.copy(installationId = "different"),
+            f.snapshot.copy(attestationVersion = 8),
             f.snapshot.copy(attestationPublicKeySha256 = "9".repeat(64)),
             f.snapshot.copy(trustState = DeviceTrustState.REVOKED),
         ).forEach { changed ->
@@ -190,14 +220,16 @@ class NextPolicyRequestJournalTest {
     @Test
     fun `wrong signature identity empty signature and absent trusted hardware fail closed`() = runTest {
         val f = SignerFixture()
-        listOf(DeviceControlRequestSignature("other", 7, byteArrayOf(1)),
+        listOf(
+            DeviceControlRequestSignature("other", 7, byteArrayOf(1)),
             DeviceControlRequestSignature("installation-1", 8, byteArrayOf(1)),
             DeviceControlRequestSignature("installation-1", 7, ByteArray(0)),
         ).forEach { bad ->
             coEvery { f.trust.signControlStatement(any()) } returns bad
             assertThat(runCatching { f.sign() }.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
         }
-        listOf(f.snapshot.copy(trustState = DeviceTrustState.MANAGED),
+        listOf(
+            f.snapshot.copy(trustState = DeviceTrustState.MANAGED),
             f.snapshot.copy(hardwareSecurityLevel = HardwareSecurityLevel.SOFTWARE),
             f.snapshot.copy(hardwareSecurityLevel = HardwareSecurityLevel.UNKNOWN),
         ).forEach { bad ->
@@ -210,22 +242,33 @@ class NextPolicyRequestJournalTest {
     fun `managed software key signs only with current bound online license`() = runTest {
         val f = SignerFixture()
         val license = ManagedDeviceLicense(
-            licenseId = "managed-license-1", installationId = f.context.installationId,
-            devicePublicKeySha256 = f.deviceDigest, contentShareKeyId = "content-key-1",
-            appPackageName = "com.yizhe.chat.internal", appVersionCode = 123, revision = 1,
-            allowedScopes = setOf("PROTECTED_MESSAGES"), offlineAllowed = false,
-            issuedAtEpochMillis = NOW - 1_000, expiresAtEpochMillis = NOW + 60_000,
+            licenseId = "managed-license-1",
+            installationId = f.context.installationId,
+            devicePublicKeySha256 = f.deviceDigest,
+            contentShareKeyId = "content-key-1",
+            appPackageName = "com.yizhe.chat.internal",
+            appVersionCode = 123,
+            revision = 1,
+            allowedScopes = setOf("PROTECTED_MESSAGES"),
+            offlineAllowed = false,
+            issuedAtEpochMillis = NOW - 1_000,
+            expiresAtEpochMillis = NOW + 60_000,
             accountIdHashes = setOf(f.context.accountIdHash),
         )
         val managed = f.snapshot.copy(
-            trustState = DeviceTrustState.MANAGED, hardwareSecurityLevel = HardwareSecurityLevel.SOFTWARE, managedLicense = license,
+            trustState = DeviceTrustState.MANAGED,
+            hardwareSecurityLevel = HardwareSecurityLevel.SOFTWARE,
+            managedLicense = license,
         )
         coEvery { f.trust.current() } returns managed
         assertThat(f.sign()["devicePublicKeySha256"]).isEqualTo(JsonPrimitive(f.deviceDigest))
         listOf(
-            license.copy(expiresAtEpochMillis = NOW), license.copy(offlineAllowed = true),
-            license.copy(installationId = "old-installation"), license.copy(devicePublicKeySha256 = "9".repeat(64)),
-            license.copy(accountIdHashes = setOf("9".repeat(64))), license.copy(issuedAtEpochMillis = NOW + 20_000),
+            license.copy(expiresAtEpochMillis = NOW),
+            license.copy(offlineAllowed = true),
+            license.copy(installationId = "old-installation"),
+            license.copy(devicePublicKeySha256 = "9".repeat(64)),
+            license.copy(accountIdHashes = setOf("9".repeat(64))),
+            license.copy(issuedAtEpochMillis = NOW + 20_000),
         ).forEach { invalid ->
             coEvery { f.trust.current() } returns managed.copy(managedLicense = invalid)
             assertThat(runCatching { f.sign() }.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
@@ -238,10 +281,14 @@ class NextPolicyRequestJournalTest {
     fun `account generation boot artifact or policy changed during signing retains pending`() = runTest {
         val f = SignerFixture()
         val alteredTarget = JsonObject(f.context.targetSnapshot + ("accountMobileGeneration" to JsonPrimitive(2)))
-        val variants = listOf(f.context.copy(accountIdHash = "9".repeat(64)), f.context.copy(targetSnapshot = alteredTarget),
-            f.context.copy(policyVersion = 8), f.context.copy(policyDigestSha256 = "9".repeat(64)),
+        val variants = listOf(
+            f.context.copy(accountIdHash = "9".repeat(64)),
+            f.context.copy(targetSnapshot = alteredTarget),
+            f.context.copy(policyVersion = 8),
+            f.context.copy(policyDigestSha256 = "9".repeat(64)),
             f.context.copy(targetSnapshot = JsonObject(f.context.targetSnapshot + ("bootId" to JsonPrimitive("new-boot")))),
-            f.context.copy(targetSnapshot = JsonObject(f.context.targetSnapshot + ("appArtifactSha256" to JsonPrimitive("9".repeat(64))))))
+            f.context.copy(targetSnapshot = JsonObject(f.context.targetSnapshot + ("appArtifactSha256" to JsonPrimitive("9".repeat(64)))))
+        )
         variants.forEach { after ->
             var calls = 0
             assertThat(runCatching { f.sign { if (++calls == 1) f.context else after } }.exceptionOrNull())
@@ -256,15 +303,23 @@ class NextPolicyRequestJournalTest {
             val observations = f.observations().map {
                 it.copy(result = result, cleanupOperationIds = if (result == "APPLIED_CLEANUP_PENDING") listOf("cleanup-original") else emptyList())
             }
-            val envelope = NextPolicyReceiptSigner(f.trust, f.verifier).sign(f.verify(), f.context, { f.context },
-                MONOTONIC + 10, NOW + 10, observations)
+            val envelope = NextPolicyReceiptSigner(f.trust, f.verifier).sign(
+                f.verify(),
+                f.context,
+                { f.context },
+                MONOTONIC + 10,
+                NOW + 10,
+                observations
+            )
             assertThat((envelope["payload"] as JsonObject)["result"]).isEqualTo(JsonPrimitive(result))
         }
     }
 
     @Test
     fun `lost HTTP response restarts with original device signature without a second signing call`() = runTest {
-        val f = SignerFixture(); val file = MemoryFile(); val journal = NextPolicyRequestJournal(file)
+        val f = SignerFixture()
+        val file = MemoryFile()
+        val journal = NextPolicyRequestJournal(file)
         val bytes = f.verifier.canonicalJson(f.sign())
         journal.prepare("policy-operation-1", HASH, NextPolicyRequestPhase.ARTIFACT, BODY) {}
         journal.prepare("policy-operation-1", HASH, NextPolicyRequestPhase.CHALLENGE, BODY) {}
@@ -287,45 +342,69 @@ class NextPolicyRequestJournalTest {
         val devicePair = KeyPairGenerator.getInstance("EC").apply { initialize(256) }.generateKeyPair()
         val deviceDigest = digest(devicePair.public.encoded)
         val trust = mockk<DeviceTrustService>()
-        val snapshot = DeviceTrustSnapshot("installation-1", HardwareSecurityLevel.TRUSTED_EXECUTION_ENVIRONMENT,
-            DeviceTrustState.TRUSTED, 7, NOW, attestationPublicKeySha256 = deviceDigest)
+        val snapshot = DeviceTrustSnapshot(
+            "installation-1",
+            HardwareSecurityLevel.TRUSTED_EXECUTION_ENVIRONMENT,
+            DeviceTrustState.TRUSTED,
+            7,
+            NOW,
+            attestationPublicKeySha256 = deviceDigest
+        )
         init {
             coEvery { trust.current() } returns snapshot
             coEvery { trust.signControlStatement(any()) } answers {
                 val signature = Signature.getInstance("SHA256withECDSA").run {
-                    initSign(devicePair.private); update(firstArg<ByteArray>()); sign()
+                    initSign(devicePair.private)
+                    update(firstArg<ByteArray>())
+                    sign()
                 }
                 DeviceControlRequestSignature("installation-1", 7, signature)
             }
         }
         val context = NextPolicyChallengeContext(
-            operationId = "policy-operation-1", policyId = "policy-1", policyVersion = 7,
-            policyDigestSha256 = "a".repeat(64), installationId = "installation-1", accountIdHash = "b".repeat(64),
+            operationId = "policy-operation-1",
+            policyId = "policy-1",
+            policyVersion = 7,
+            policyDigestSha256 = "a".repeat(64),
+            installationId = "installation-1",
+            accountIdHash = "b".repeat(64),
             targetSnapshot = buildJsonObject {
-                put("bootId", "boot-next-1"); put("appVersionCode", 123)
-                put("appArtifactSha256", "c".repeat(64)); put("accountMobileGeneration", 1)
+                put("bootId", "boot-next-1")
+                put("appVersionCode", 123)
+                put("appArtifactSha256", "c".repeat(64))
+                put("accountMobileGeneration", 1)
             },
-            requiredCapabilities = setOf("SCREEN_CAPTURE", "KMS_LEASE"), devicePublicKeySha256 = deviceDigest,
+            requiredCapabilities = setOf("SCREEN_CAPTURE", "KMS_LEASE"),
+            devicePublicKeySha256 = deviceDigest,
         )
         suspend fun sign(current: suspend () -> NextPolicyChallengeContext = { context }) =
             NextPolicyReceiptSigner(trust, verifier).sign(verify(), context, current, MONOTONIC + 10, NOW + 10, observations())
         fun payload(): JsonObject = buildJsonObject {
-            put("operationId", context.operationId); put("policyDomain", "DATA_PROTECTION")
-            put("policyId", context.policyId); put("policyVersion", context.policyVersion)
-            put("policyDigestSha256", context.policyDigestSha256); put("installationId", context.installationId)
-            put("accountIdHash", context.accountIdHash); put("challengeId", "policy-challenge-1")
+            put("operationId", context.operationId)
+            put("policyDomain", "DATA_PROTECTION")
+            put("policyId", context.policyId)
+            put("policyVersion", context.policyVersion)
+            put("policyDigestSha256", context.policyDigestSha256)
+            put("installationId", context.installationId)
+            put("accountIdHash", context.accountIdHash)
+            put("challengeId", "policy-challenge-1")
             put("challengeNonceB64", Base64.getEncoder().encodeToString(ByteArray(32) { 1 }))
-            put("issuedAtMs", NOW); put("expiresAtMs", NOW + 60_000)
+            put("issuedAtMs", NOW)
+            put("expiresAtMs", NOW + 60_000)
             put("requiredCapabilities", JsonArray(context.requiredCapabilities.sorted().map(::JsonPrimitive)))
             put("targetSnapshot", context.targetSnapshot)
         }
         fun envelope(payload: JsonObject = payload()): JsonObject {
             val signature = Signature.getInstance("SHA256withECDSA").run {
-                initSign(pair.private); update(verifier.canonicalJson(payload)); sign()
+                initSign(pair.private)
+                update(verifier.canonicalJson(payload))
+                sign()
             }
             return buildJsonObject {
-                put("contract", "next.policy-apply-challenge.v1"); put("payload", payload)
-                put("serverKeyId", keyDigest.take(16)); put("serverSignatureAlgorithm", "SHA256withECDSA")
+                put("contract", "next.policy-apply-challenge.v1")
+                put("payload", payload)
+                put("serverKeyId", keyDigest.take(16))
+                put("serverSignatureAlgorithm", "SHA256withECDSA")
                 put("serverSignatureB64", Base64.getEncoder().encodeToString(signature))
             }
         }
@@ -346,10 +425,14 @@ class NextPolicyRequestJournalTest {
         var failWrite = false
         var failRead = false
         override fun <T> locked(block: () -> T): T = lock.withLock(block)
-        override fun read(): ByteArray? { if (failRead) throw IOException("synthetic storage read failure"); return bytes?.copyOf() }
+        override fun read(): ByteArray? {
+            if (failRead) throw IOException("synthetic storage read failure")
+            return bytes?.copyOf()
+        }
         override fun write(bytes: ByteArray) {
             if (failWrite) throw IOException("synthetic atomic commit failure")
-            this.bytes = bytes.copyOf(); writes++
+            this.bytes = bytes.copyOf()
+            writes++
         }
     }
     private companion object {

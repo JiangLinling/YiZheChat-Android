@@ -48,8 +48,12 @@ class SignedManagementStateRepositoryTest {
         assertThat(fixture.repository.isMobileSessionSuperseded("a".repeat(64), "c".repeat(64))).isFalse()
         fixture.repository.recordCommandReport(
             io.element.android.security.dataprotection.api.ManagementCommandExecutionReport(
-                command.commandId, command.type, io.element.android.security.dataprotection.api.ManagementCommandState.COMPLETE, 100,
-            ), removeWhenComplete = true,
+                command.commandId,
+                command.type,
+                io.element.android.security.dataprotection.api.ManagementCommandState.COMPLETE,
+                100,
+            ),
+            removeWhenComplete = true,
         )
         assertThat(fixture.newRepository().pendingCommands(now)).isEmpty()
         assertThat(fixture.newRepository().isMobileSessionSuperseded("a".repeat(64), "b".repeat(64))).isTrue()
@@ -101,8 +105,13 @@ class SignedManagementStateRepositoryTest {
         val fixture = Fixture(temporaryFolder.root)
         val now = System.currentTimeMillis()
         android.provider.Settings.Global.putInt(org.robolectric.RuntimeEnvironment.getApplication().contentResolver, "boot_count", 7)
-        fixture.repository.acceptPolicy(fixture.policyEnvelope(version = 1, expiresAtEpochMillis = now + 120_000,
-            maximumOfflineMillis = 0, contentRetentionMillis = 120_000, offlineAccessMode = "ONLINE_REQUIRED"), now)
+        fixture.repository.acceptPolicy(fixture.policyEnvelope(
+            version = 1,
+            expiresAtEpochMillis = now + 120_000,
+            maximumOfflineMillis = 0,
+            contentRetentionMillis = 120_000,
+            offlineAccessMode = "ONLINE_REQUIRED"
+        ), now)
         fixture.repository.acceptLocalListEntry(fixture.localListDecision(now))
         assertThat(fixture.repository.cachedLocalListEntry()).isNotNull()
         assertThat(fixture.repository.cachedOfflineEntry()).isNull()
@@ -116,8 +125,13 @@ class SignedManagementStateRepositoryTest {
         val fixture = Fixture(temporaryFolder.root)
         val now = System.currentTimeMillis()
         android.provider.Settings.Global.putInt(org.robolectric.RuntimeEnvironment.getApplication().contentResolver, "boot_count", 7)
-        fixture.repository.acceptPolicy(fixture.policyEnvelope(version = 1, expiresAtEpochMillis = now + 120_000,
-            maximumOfflineMillis = 0, contentRetentionMillis = 120_000, offlineAccessMode = "ONLINE_REQUIRED"), now)
+        fixture.repository.acceptPolicy(fixture.policyEnvelope(
+            version = 1,
+            expiresAtEpochMillis = now + 120_000,
+            maximumOfflineMillis = 0,
+            contentRetentionMillis = 120_000,
+            offlineAccessMode = "ONLINE_REQUIRED"
+        ), now)
         fixture.repository.acceptLocalListEntry(fixture.localListDecision(now))
         org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofSeconds(10))
         fixture.repository.acceptLocalListEntry(fixture.localListDecision(now))
@@ -136,8 +150,12 @@ class SignedManagementStateRepositoryTest {
         val fixture = Fixture(temporaryFolder.root)
         val now = System.currentTimeMillis()
         android.provider.Settings.Global.putInt(org.robolectric.RuntimeEnvironment.getApplication().contentResolver, "boot_count", 7)
-        fixture.repository.acceptPolicy(fixture.policyEnvelope(version = 1, expiresAtEpochMillis = now + 120_000,
-            maximumOfflineMillis = 60_000, contentRetentionMillis = 120_000), now)
+        fixture.repository.acceptPolicy(fixture.policyEnvelope(
+            version = 1,
+            expiresAtEpochMillis = now + 120_000,
+            maximumOfflineMillis = 60_000,
+            contentRetentionMillis = 120_000
+        ), now)
         fixture.repository.acceptLocalListEntry(fixture.localListDecision(now))
         val file = fixture.stateFile.parentFile.resolve("local-list-entry-v1.json")
         val valid = file.readText()
@@ -145,8 +163,12 @@ class SignedManagementStateRepositoryTest {
         assertThat(fixture.repository.cachedLocalListEntry()).isNull()
         assertThat(fixture.newRepository().cachedLocalListEntry()).isNull()
         file.writeText(valid)
-        fixture.repository.acceptPolicy(fixture.policyEnvelope(version = 2, expiresAtEpochMillis = now + 120_000,
-            maximumOfflineMillis = 60_000, contentRetentionMillis = 120_000), now)
+        fixture.repository.acceptPolicy(fixture.policyEnvelope(
+            version = 2,
+            expiresAtEpochMillis = now + 120_000,
+            maximumOfflineMillis = 60_000,
+            contentRetentionMillis = 120_000
+        ), now)
         assertThat(fixture.repository.cachedLocalListEntry()).isNull()
         assertThat(fixture.newRepository().cachedLocalListEntry()).isNull()
     }
@@ -227,8 +249,13 @@ class SignedManagementStateRepositoryTest {
     fun `unchanged serialized state does not retain a policy past its deadline`() {
         val fixture = Fixture(temporaryFolder.root)
         val now = System.currentTimeMillis()
-        fixture.repository.acceptPolicy(fixture.policyEnvelope(version = 1, expiresAtEpochMillis = now + 10_000,
-            maximumOfflineMillis = 0, contentRetentionMillis = 120_000, offlineAccessMode = "ONLINE_REQUIRED"), now)
+        fixture.repository.acceptPolicy(fixture.policyEnvelope(
+            version = 1,
+            expiresAtEpochMillis = now + 10_000,
+            maximumOfflineMillis = 0,
+            contentRetentionMillis = 120_000,
+            offlineAccessMode = "ONLINE_REQUIRED"
+        ), now)
         assertThat(fixture.repository.currentPolicyState(now)).isInstanceOf(CurrentPolicyState.Active::class.java)
         val original = fixture.stateFile.readBytes()
 
@@ -1308,8 +1335,13 @@ class SignedManagementStateRepositoryTest {
 
         fun prepareLocalList(now: Long) {
             android.provider.Settings.Global.putInt(org.robolectric.RuntimeEnvironment.getApplication().contentResolver, "boot_count", 7)
-            repository.acceptPolicy(policyEnvelope(version = 1, expiresAtEpochMillis = now + 120_000,
-                maximumOfflineMillis = 0, contentRetentionMillis = 120_000, offlineAccessMode = "ONLINE_REQUIRED"), now)
+            repository.acceptPolicy(policyEnvelope(
+                version = 1,
+                expiresAtEpochMillis = now + 120_000,
+                maximumOfflineMillis = 0,
+                contentRetentionMillis = 120_000,
+                offlineAccessMode = "ONLINE_REQUIRED"
+            ), now)
             repository.acceptLocalListEntry(localListDecision(now))
         }
 
@@ -1331,10 +1363,19 @@ class SignedManagementStateRepositoryTest {
 
         fun mobileClear(now: Long, matrixHash: String? = "b".repeat(64)): SignedJsonEnvelopeWire {
             val payload = Json.encodeToJsonElement(CommandWire.serializer(), CommandWire(
-                commandId = "mobile-clear-command", installationId = INSTALLATION_ID, commandType = "CLEAR_ACCOUNT",
-                accountIdHash = "a".repeat(64), contentId = null, version = 1, issuedAtEpochMillis = now,
-                notBeforeEpochMillis = now, expiresAtEpochMillis = now + 60_000, schemaVersion = 2,
-                targetMatrixDeviceIdHash = matrixHash, mobileGeneration = 1, reasonCode = "ACCOUNT_MOBILE_SUPERSEDED",
+                commandId = "mobile-clear-command",
+                installationId = INSTALLATION_ID,
+                commandType = "CLEAR_ACCOUNT",
+                accountIdHash = "a".repeat(64),
+                contentId = null,
+                version = 1,
+                issuedAtEpochMillis = now,
+                notBeforeEpochMillis = now,
+                expiresAtEpochMillis = now + 60_000,
+                schemaVersion = 2,
+                targetMatrixDeviceIdHash = matrixHash,
+                mobileGeneration = 1,
+                reasonCode = "ACCOUNT_MOBILE_SUPERSEDED",
             )).jsonObject
             return SignedJsonEnvelopeWire(command = payload, keyId = keyId, signatureBase64 = sign(verifier.canonicalJson(payload)))
         }

@@ -549,7 +549,10 @@ class PolicyApplicationProtocolTest {
 
     private companion object {
         const val NOW = 2_000_000L
-        val JSON = Json { explicitNulls = true; encodeDefaults = true }
+        val JSON = Json {
+            explicitNulls = true
+            encodeDefaults = true
+        }
 
         fun receipt(
             result: String,
