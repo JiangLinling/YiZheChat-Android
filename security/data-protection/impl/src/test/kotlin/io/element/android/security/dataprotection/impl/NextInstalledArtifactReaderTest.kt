@@ -45,9 +45,14 @@ class NextInstalledArtifactReaderTest {
     @Test
     fun `package version signer actual bytes and malformed build identity cannot be substituted`() {
         val f = Fixture()
-        val changes = mapOf("package_name" to JsonPrimitive("com.other.app"), "version_code" to JsonPrimitive(124),
-            "signing_certificate_sha256" to JsonPrimitive("9".repeat(64)), "apk_sha256" to JsonPrimitive("8".repeat(64)),
-            "build_id" to JsonPrimitive("invalid build"), "schema_version" to JsonPrimitive(1))
+        val changes = mapOf(
+            "package_name" to JsonPrimitive("com.other.app"),
+            "version_code" to JsonPrimitive(124),
+            "signing_certificate_sha256" to JsonPrimitive("9".repeat(64)),
+            "apk_sha256" to JsonPrimitive("8".repeat(64)),
+            "build_id" to JsonPrimitive("invalid build"),
+            "schema_version" to JsonPrimitive(1)
+        )
         changes.forEach { (key, value) -> reject { f.inspect(f.envelope(JsonObject(f.payload() + (key to value)))) } }
     }
 
@@ -57,29 +62,49 @@ class NextInstalledArtifactReaderTest {
             { it.copy(splitApkPaths = listOf("split.apk")) },
             { it.copy(currentSignerSha256 = it.currentSignerSha256 + "9".repeat(64)) },
             { it.copy(currentSignerSha256 = emptyList()) },
-            { it.copy(byteLength = 0) }, { it.copy(byteLength = it.byteLength + 1) },
-            { it.copy(byteLength = it.byteLength - 1) }, { it.copy(canonicalApkPath = "") },
+            { it.copy(byteLength = 0) },
+            { it.copy(byteLength = it.byteLength + 1) },
+            { it.copy(byteLength = it.byteLength - 1) },
+            { it.copy(canonicalApkPath = "") },
         )
-        changes.forEach { change -> val f = Fixture(); f.snapshotTransform = change; reject { f.inspect() } }
+        changes.forEach { change ->
+            val f = Fixture()
+            f.snapshotTransform = change
+            reject { f.inspect() }
+        }
     }
 
     @Test
     fun `package metadata changes during streaming invalidate an otherwise exact digest`() {
         val changes: List<(NextInstalledPackageSnapshot) -> NextInstalledPackageSnapshot> = listOf(
-            { it.copy(versionCode = 124) }, { it.copy(packageName = "com.other.app") },
-            { it.copy(canonicalApkPath = "/another/base.apk") }, { it.copy(lastUpdateTime = 11) },
-            { it.copy(lastModifiedTime = 21) }, { it.copy(byteLength = it.byteLength + 1) },
-            { it.copy(currentSignerSha256 = listOf("9".repeat(64))) }, { it.copy(splitApkPaths = listOf("split.apk")) },
+            { it.copy(versionCode = 124) },
+            { it.copy(packageName = "com.other.app") },
+            { it.copy(canonicalApkPath = "/another/base.apk") },
+            { it.copy(lastUpdateTime = 11) },
+            { it.copy(lastModifiedTime = 21) },
+            { it.copy(byteLength = it.byteLength + 1) },
+            { it.copy(currentSignerSha256 = listOf("9".repeat(64))) },
+            { it.copy(splitApkPaths = listOf("split.apk")) },
         )
-        changes.forEach { change -> val f = Fixture(); f.afterReadTransform = change; reject { f.inspect() }; assertThat(f.streamClosed).isTrue() }
+        changes.forEach { change ->
+            val f = Fixture()
+            f.afterReadTransform = change
+            reject { f.inspect() }
+            assertThat(f.streamClosed).isTrue()
+        }
     }
 
     @Test
     fun `expired future issued string numbers and nonpositive trusted time are rejected`() {
         val f = Fixture()
-        val changes = mapOf("expires_at_epoch_millis" to JsonPrimitive(NOW), "issued_at_epoch_millis" to JsonPrimitive(NOW + 1),
-            "version_code" to JsonPrimitive("123"), "issued_at_epoch_millis" to JsonPrimitive("1000"),
-            "schema_version" to JsonPrimitive("2"), "expires_at_epoch_millis" to JsonPrimitive("2000"))
+        val changes = mapOf(
+            "expires_at_epoch_millis" to JsonPrimitive(NOW),
+            "issued_at_epoch_millis" to JsonPrimitive(NOW + 1),
+            "version_code" to JsonPrimitive("123"),
+            "issued_at_epoch_millis" to JsonPrimitive("1000"),
+            "schema_version" to JsonPrimitive("2"),
+            "expires_at_epoch_millis" to JsonPrimitive("2000")
+        )
         changes.forEach { (key, value) -> reject { f.inspect(f.envelope(JsonObject(f.payload() + (key to value)))) } }
         reject { f.inspect(now = 0) }
     }
@@ -100,32 +125,56 @@ class NextInstalledArtifactReaderTest {
         var afterReadTransform: (NextInstalledPackageSnapshot) -> NextInstalledPackageSnapshot = { it }
         override fun snapshot(): NextInstalledPackageSnapshot {
             snapshots++
-            val value = NextInstalledPackageSnapshot("com.yizhe.chat.next.debug", 123, "/installed/base.apk", emptyList(),
-                listOf("7".repeat(64)), 10, bytes.size.toLong(), 20)
+            val value = NextInstalledPackageSnapshot(
+                "com.yizhe.chat.next.debug",
+                123,
+                "/installed/base.apk",
+                emptyList(),
+                listOf("7".repeat(64)),
+                10,
+                bytes.size.toLong(),
+                20
+            )
             return snapshotTransform(if (streamClosed) afterReadTransform(value) else value)
         }
         override fun openBaseApk(snapshot: NextInstalledPackageSnapshot) = object : ByteArrayInputStream(bytes) {
-            override fun close() { streamClosed = true; super.close() }
+            override fun close() {
+                streamClosed = true
+                super.close()
+            }
         }
         fun payload() = buildJsonObject {
-            put("schema_version", 2); put("version_code", 123); put("version_name", "123")
-            put("package_name", "com.yizhe.chat.next.debug"); put("apk_url", "https://example.invalid/base.apk")
-            put("apk_fallback_url", "https://example.invalid/fallback.apk"); put("apk_sha256", hash(bytes))
-            put("build_id", "next.current.123"); put("signing_certificate_sha256", "7".repeat(64))
-            put("release_notes", ""); put("mandatory", false)
-            put("issued_at_epoch_millis", NOW - 100); put("expires_at_epoch_millis", NOW + 1000)
+            put("schema_version", 2)
+            put("version_code", 123)
+            put("version_name", "123")
+            put("package_name", "com.yizhe.chat.next.debug")
+            put("apk_url", "https://example.invalid/base.apk")
+            put("apk_fallback_url", "https://example.invalid/fallback.apk")
+            put("apk_sha256", hash(bytes))
+            put("build_id", "next.current.123")
+            put("signing_certificate_sha256", "7".repeat(64))
+            put("release_notes", "")
+            put("mandatory", false)
+            put("issued_at_epoch_millis", NOW - 100)
+            put("expires_at_epoch_millis", NOW + 1000)
         }
         fun envelope(payload: JsonObject = payload()): JsonObject {
             val signature = Signature.getInstance("SHA256withECDSA").run {
-                initSign(key.private); update(verifier.canonicalJson(payload)); sign()
+                initSign(key.private)
+                update(verifier.canonicalJson(payload))
+                sign()
             }
             return buildJsonObject {
-                put("release", payload); put("key_id", keyId); put("signature_b64", Base64.getEncoder().encodeToString(signature))
+                put("release", payload)
+                put("key_id", keyId)
+                put("signature_b64", Base64.getEncoder().encodeToString(signature))
             }
         }
         fun inspect(envelope: JsonObject = envelope(), now: Long = NOW) = VerifiedNextInstalledArtifact.inspect(this, envelope, now, verifier)
     }
-    private fun reject(block: () -> Unit) { assertThrows(IllegalStateException::class.java, block) }
+    private fun reject(block: () -> Unit) {
+        assertThrows(IllegalStateException::class.java, block)
+    }
     companion object {
         private const val NOW = 1_000_000L
         private fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }

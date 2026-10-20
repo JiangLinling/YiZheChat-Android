@@ -132,8 +132,12 @@ class NextPolicyChallengeProtocolTest {
         assertThrows(IllegalStateException::class.java) {
             verified.receiptPayload(f.context, MONOTONIC + 10, NOW + 10, listOf(f.observations().first(), pending))
         }
-        val receipt = verified.receiptPayload(f.context, MONOTONIC + 10, NOW + 10,
-            listOf(f.observations().first(), pending.copy(result = "APPLIED_CLEANUP_PENDING")))
+        val receipt = verified.receiptPayload(
+            f.context,
+            MONOTONIC + 10,
+            NOW + 10,
+            listOf(f.observations().first(), pending.copy(result = "APPLIED_CLEANUP_PENDING"))
+        )
         assertThat(receipt["result"]).isEqualTo(JsonPrimitive("APPLIED_CLEANUP_PENDING"))
     }
 
@@ -142,8 +146,12 @@ class NextPolicyChallengeProtocolTest {
         val f = Fixture()
         val verified = f.verify()
         listOf("FAILED", "BLOCKED").forEach { result ->
-            val receipt = verified.receiptPayload(f.context, MONOTONIC + 10, NOW + 10,
-                listOf(f.observations().first().copy(result = result), f.observations().last()))
+            val receipt = verified.receiptPayload(
+                f.context,
+                MONOTONIC + 10,
+                NOW + 10,
+                listOf(f.observations().first().copy(result = result), f.observations().last())
+            )
             assertThat(receipt["result"]).isEqualTo(JsonPrimitive(result))
         }
     }
@@ -173,31 +181,47 @@ class NextPolicyChallengeProtocolTest {
             every { configuration.signingPublicKeyDerBase64 } returns Base64.getEncoder().encodeToString(pair.public.encoded)
         })
         val context = NextPolicyChallengeContext(
-            operationId = "policy-operation-1", policyId = "policy-1", policyVersion = 7,
-            policyDigestSha256 = "a".repeat(64), installationId = "installation-1", accountIdHash = "b".repeat(64),
+            operationId = "policy-operation-1",
+            policyId = "policy-1",
+            policyVersion = 7,
+            policyDigestSha256 = "a".repeat(64),
+            installationId = "installation-1",
+            accountIdHash = "b".repeat(64),
             targetSnapshot = buildJsonObject {
-                put("bootId", "boot-next-1"); put("appVersionCode", 123)
-                put("appArtifactSha256", "c".repeat(64)); put("accountMobileGeneration", 1)
+                put("bootId", "boot-next-1")
+                put("appVersionCode", 123)
+                put("appArtifactSha256", "c".repeat(64))
+                put("accountMobileGeneration", 1)
             },
-            requiredCapabilities = setOf("SCREEN_CAPTURE", "KMS_LEASE"), devicePublicKeySha256 = "d".repeat(64),
+            requiredCapabilities = setOf("SCREEN_CAPTURE", "KMS_LEASE"),
+            devicePublicKeySha256 = "d".repeat(64),
         )
         fun payload(): JsonObject = buildJsonObject {
-            put("operationId", context.operationId); put("policyDomain", "DATA_PROTECTION")
-            put("policyId", context.policyId); put("policyVersion", context.policyVersion)
-            put("policyDigestSha256", context.policyDigestSha256); put("installationId", context.installationId)
-            put("accountIdHash", context.accountIdHash); put("challengeId", "policy-challenge-1")
+            put("operationId", context.operationId)
+            put("policyDomain", "DATA_PROTECTION")
+            put("policyId", context.policyId)
+            put("policyVersion", context.policyVersion)
+            put("policyDigestSha256", context.policyDigestSha256)
+            put("installationId", context.installationId)
+            put("accountIdHash", context.accountIdHash)
+            put("challengeId", "policy-challenge-1")
             put("challengeNonceB64", Base64.getEncoder().encodeToString(ByteArray(32) { 1 }))
-            put("issuedAtMs", NOW); put("expiresAtMs", NOW + 60_000)
+            put("issuedAtMs", NOW)
+            put("expiresAtMs", NOW + 60_000)
             put("requiredCapabilities", JsonArray(context.requiredCapabilities.sorted().map(::JsonPrimitive)))
             put("targetSnapshot", context.targetSnapshot)
         }
         fun envelope(payload: JsonObject = payload()): JsonObject {
             val signature = Signature.getInstance("SHA256withECDSA").run {
-                initSign(pair.private); update(verifier.canonicalJson(payload)); sign()
+                initSign(pair.private)
+                update(verifier.canonicalJson(payload))
+                sign()
             }
             return buildJsonObject {
-                put("contract", "next.policy-apply-challenge.v1"); put("payload", payload)
-                put("serverKeyId", keyDigest.take(16)); put("serverSignatureAlgorithm", "SHA256withECDSA")
+                put("contract", "next.policy-apply-challenge.v1")
+                put("payload", payload)
+                put("serverKeyId", keyDigest.take(16))
+                put("serverSignatureAlgorithm", "SHA256withECDSA")
                 put("serverSignatureB64", Base64.getEncoder().encodeToString(signature))
             }
         }
