@@ -182,7 +182,7 @@ class EmbeddedNtfyConnectionService : Service() {
 
     private suspend fun refreshConnections(reconnectExisting: Boolean): Unit = connectionRefreshMutex.withLock {
         val registrations = try {
-            registrationStore.getAll()
+            registrationStore.getAll().filter { it.matchesPushDeployment() }
         } catch (failure: Exception) {
             Timber.e(failure, "Unable to load built-in push credentials")
             stopSelf()
@@ -226,6 +226,12 @@ class EmbeddedNtfyConnectionService : Service() {
     }
 
     private fun connect(registration: EmbeddedNtfyRegistration) {
+        if (!registration.matchesPushDeployment()) {
+            // Retain encrypted credentials for authoritative retirement. A service
+            // retry cannot migrate credentials or guess an endpoint on its own.
+            Timber.w("Built-in push registration requires active-session deployment refresh")
+            return
+        }
         val request = try {
             val url = registration.server.toHttpUrl().newBuilder()
                 .addPathSegment(registration.topic)

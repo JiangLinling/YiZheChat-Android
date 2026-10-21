@@ -7,9 +7,11 @@
 
 package io.element.android.libraries.pushproviders.unifiedpush.embedded
 
+import io.element.android.appconfig.NextDeploymentConfig
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import okio.ByteString.Companion.decodeBase64
+import java.security.MessageDigest
 
 @Serializable
 data class EmbeddedNtfyRegistration(
@@ -24,7 +26,21 @@ data class EmbeddedNtfyRegistration(
     val expiresAt: Long,
     val lastMessageId: String? = null,
     val strategyVersion: Int = 1,
+    val deploymentBinding: String? = null,
 )
+
+/** Cache provenance only. Authority and credentials still come from the current registrar. */
+internal fun embeddedPushDeploymentBinding(
+    isManagedDeployment: Boolean = NextDeploymentConfig.isNextDeployment,
+    registrarBaseUrl: String = NextDeploymentConfig.pushRegistrarBaseUrl,
+    homeserverUrl: String = NextDeploymentConfig.matrixHomeserverUrl,
+): String? = if (!isManagedDeployment) null else {
+    val descriptor = "embedded-push-deployment-v1\n${registrarBaseUrl.trimEnd('/')}\n${homeserverUrl.trimEnd('/')}"
+    MessageDigest.getInstance("SHA-256").digest(descriptor.encodeToByteArray()).joinToString("") { "%02x".format(it) }
+}
+
+internal fun EmbeddedNtfyRegistration.matchesPushDeployment(binding: String? = embeddedPushDeploymentBinding()): Boolean =
+    binding == null || deploymentBinding == binding
 
 @Serializable
 internal data class EmbeddedNtfyRegistrationState(

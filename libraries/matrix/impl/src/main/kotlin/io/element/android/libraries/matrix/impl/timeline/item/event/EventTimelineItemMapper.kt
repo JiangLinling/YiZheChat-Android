@@ -12,6 +12,7 @@ import io.element.android.libraries.matrix.api.core.DeviceId
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.TransactionId
 import io.element.android.libraries.matrix.api.core.UserId
+import io.element.android.libraries.matrix.api.timeline.item.event.CallNotifyContent
 import io.element.android.libraries.matrix.api.timeline.item.TimelineItemDebugInfo
 import io.element.android.libraries.matrix.api.timeline.item.event.EventReaction
 import io.element.android.libraries.matrix.api.timeline.item.event.EventTimelineItem
@@ -42,6 +43,16 @@ class EventTimelineItemMapper(
     private val contentMapper: TimelineEventContentMapper = TimelineEventContentMapper(),
 ) {
     fun map(eventTimelineItem: RustEventTimelineItem): EventTimelineItem = eventTimelineItem.run {
+        val mappedContent = contentMapper.map(content).let { mapped ->
+            if (mapped is CallNotifyContent) {
+                // The pinned SDK omits notification_type from its RTC content enum. Its original
+                // event JSON contains the decrypted protocol metadata; never retain or log it.
+                val notificationType = runCatching {
+                    rtcNotificationTypeFromSource(lazyProvider.debugInfo().originalJson)
+                }.getOrNull()
+                mapped.copy(notificationType = notificationType)
+            } else mapped
+        }
         EventTimelineItem(
             eventId = eventOrTransactionId.eventId(),
             transactionId = eventOrTransactionId.transactionId(),
@@ -55,7 +66,7 @@ class EventTimelineItemMapper(
             sender = UserId(sender),
             senderProfile = senderProfile.map(),
             timestamp = timestamp.toLong(),
-            content = contentMapper.map(content),
+            content = mappedContent,
             origin = origin?.map(),
             timelineItemDebugInfoProvider = { lazyProvider.debugInfo().map() },
             messageShieldProvider = { strict -> lazyProvider.getShields(strict).map() },

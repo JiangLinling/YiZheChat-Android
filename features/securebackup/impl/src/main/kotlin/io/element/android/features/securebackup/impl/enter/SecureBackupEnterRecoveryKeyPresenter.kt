@@ -223,8 +223,25 @@ class SecureBackupEnterRecoveryKeyPresenter(
                     if (status.state == DeviceRecoveryState.EXPIRED) throw ContentProtectionException.Expired()
                     if (!status.standardAuthorized) throw ContentProtectionException.DeviceRecoveryWaiting(status.recoveryId, status.requestExpiresAtEpochMillis)
                 }
+                var authorityRetryUsed = false
+                suspend fun releaseWithFreshAuthority(): io.element.android.security.contentprotection.api.AccountPrivateProfileKey {
+                    return try {
+                        kmsShareClient.releasePrivateProfileKey(owned.scope.accountIdHash)
+                    } catch (changed: io.element.android.security.contentprotection.api.RecoveryReleaseAuthorityChanged) {
+                        if (authorityRetryUsed) throw changed
+                        authorityRetryUsed = true
+                        // One retry within the SAME durable intent, after fresh signed ownership and
+                        // management checks. Never repeat SDK recovery, admit another intent, or relax KMS checks.
+                        recoveryIntentAuthority.verify(owned)
+                        val refreshed = managementSecurityRefreshService.refreshSecurityAccess()
+                        check(refreshed.status == ManagementSyncStatus.SYNCHRONIZED &&
+                            refreshed.deviceSecurityState == ManagedDeviceSecurityState.READY) { "RECOVERY_MATRIX_AUTHORITY_PENDING" }
+                        recoveryIntentAuthority.verify(owned)
+                        kmsShareClient.releasePrivateProfileKey(owned.scope.accountIdHash)
+                    }
+                }
                 val profileKey = try {
-                    kmsShareClient.releasePrivateProfileKey(owned.scope.accountIdHash)
+                    releaseWithFreshAuthority()
                 } catch (required: ContentProtectionException.DeviceRecoveryRequired) {
                     // Never create another request while the original waiting request is known.
                     if (owned.recoveryId != null) throw required
@@ -233,7 +250,7 @@ class SecureBackupEnterRecoveryKeyPresenter(
                     recoveryState.value = owned.toRecoveryState()
                     if (status.state == DeviceRecoveryState.EXPIRED) throw ContentProtectionException.Expired()
                     if (!status.standardAuthorized) throw ContentProtectionException.DeviceRecoveryWaiting(status.recoveryId, status.requestExpiresAtEpochMillis)
-                    kmsShareClient.releasePrivateProfileKey(owned.scope.accountIdHash)
+                    releaseWithFreshAuthority()
                 }
                 profileKey.keyMaterial.fill(0)
                 recoveryIntentAuthority.verify(owned)

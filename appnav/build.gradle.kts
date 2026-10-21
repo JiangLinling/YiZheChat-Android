@@ -74,6 +74,7 @@ dependencies {
     testImplementation(projects.features.networkmonitor.test)
     testImplementation(projects.features.rageshake.test)
     testImplementation(projects.security.secureStorage.test)
+    testImplementation(projects.security.dataProtection.test)
     testImplementation(projects.services.apperror.test)
     testImplementation(projects.services.appnavstate.test)
     testImplementation(projects.services.analytics.test)

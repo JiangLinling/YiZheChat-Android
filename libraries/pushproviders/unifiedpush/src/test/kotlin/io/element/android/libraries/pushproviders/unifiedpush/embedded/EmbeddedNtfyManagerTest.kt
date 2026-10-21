@@ -53,7 +53,7 @@ class EmbeddedNtfyManagerTest {
             lastMessageId = null,
             strategyVersion = 4,
         )
-        val persisted = refreshed.copy(lastMessageId = existing.lastMessageId)
+        val persisted = refreshed.copy(lastMessageId = existing.lastMessageId, deploymentBinding = embeddedPushDeploymentBinding())
         val registrationStore = mockk<EmbeddedNtfyRegistrationStore>()
         val registrar = mockk<EmbeddedNtfyRegistrar>()
         val gatewayHandler = mockk<UnifiedPushNewGatewayHandler>()
@@ -85,6 +85,62 @@ class EmbeddedNtfyManagerTest {
         coVerify(exactly = 1) { gatewayHandler.handle(persisted.endpoint, persisted.gateway, CLIENT_SECRET) }
         coVerify(exactly = 1) { registrar.confirm(MANAGEMENT_TOKEN) }
         coVerify(exactly = 0) { registrar.unregister(any()) }
+    }
+
+    @Test
+    fun `deployment refresh replaces obsolete origin without revoking the reused credential lease`() = runTest {
+        val binding = embeddedPushDeploymentBinding()
+        assertThat(binding).isNotNull()
+        val previous = EmbeddedNtfyRegistration(
+            clientSecret = CLIENT_SECRET,
+            server = "https://matrix-next.yizhesy.cn:18443/ntfy",
+            topic = "retained-topic",
+            username = "retained-user",
+            password = "test-password",
+            endpoint = "https://matrix-next.yizhesy.cn:18443/ntfy/retained-topic?up=1",
+            gateway = "https://matrix-next.yizhesy.cn:18443/ntfy/_matrix/push/v1/notify?provider=coordinator",
+            managementToken = MANAGEMENT_TOKEN,
+            expiresAt = Long.MAX_VALUE,
+            lastMessageId = "old-origin-cursor",
+            strategyVersion = 4,
+        )
+        val refreshed = previous.copy(
+            server = "https://push.yizhesy.cn",
+            endpoint = "https://push.yizhesy.cn/retained-topic?up=1",
+            gateway = "https://push.yizhesy.cn/_matrix/push/v1/notify?provider=coordinator",
+            lastMessageId = null,
+        )
+        val persisted = refreshed.copy(deploymentBinding = binding)
+        val registrationStore = mockk<EmbeddedNtfyRegistrationStore>()
+        val registrar = mockk<EmbeddedNtfyRegistrar>()
+        val gateway = mockk<UnifiedPushNewGatewayHandler>()
+        coEvery { registrationStore.get(CLIENT_SECRET) } returns previous
+        coEvery { registrationStore.upsert(persisted) } returns Unit
+        coEvery { registrar.register(any(), CLIENT_SECRET, any()) } returns Result.success(refreshed)
+        coEvery { registrar.confirm(MANAGEMENT_TOKEN) } returns Result.success(Unit)
+        coEvery { gateway.handle(persisted.endpoint, persisted.gateway, CLIENT_SECRET) } returns Result.success(Unit)
+        val operations = FakeAppOperationalStateCoordinator()
+        val manager = DefaultEmbeddedNtfyManager(
+            context = mockk<Context>(relaxed = true),
+            registrationStore = registrationStore,
+            registrar = registrar,
+            unifiedPushStore = mockk<UnifiedPushStore>(relaxed = true),
+            newGatewayHandler = gateway,
+            unregisterUnifiedPushUseCase = mockk(),
+            appOperationalStateCoordinator = operations,
+        )
+        val client = FakeMatrixClient(requestOpenIdTokenLambda = {
+            Result.success(OpenIdToken("test-open-id", "Bearer", "yizhesy.cn", 60))
+        })
+
+        manager.register(client, CLIENT_SECRET).getOrThrow()
+
+        coVerify(exactly = 1) { registrar.register(any(), CLIENT_SECRET, any()) }
+        coVerify(exactly = 1) { registrationStore.upsert(persisted) }
+        coVerify(exactly = 1) { registrar.confirm(MANAGEMENT_TOKEN) }
+        coVerify(exactly = 0) { registrar.unregister(any()) }
+        assertThat(persisted.lastMessageId).isNull()
+        assertThat(operations.startedRequests.single().lifecycleId).isEqualTo(FullAppLifecycleId.LC_19)
     }
 
     @Test
@@ -246,6 +302,7 @@ class EmbeddedNtfyManagerTest {
             gateway = "https://push.example.test/gateway",
             managementToken = MANAGEMENT_TOKEN,
             expiresAt = Long.MAX_VALUE,
+            deploymentBinding = embeddedPushDeploymentBinding(),
         )
         val unifiedPushStore = mockk<UnifiedPushStore>(relaxed = true)
         val newGatewayHandler = mockk<UnifiedPushNewGatewayHandler>()

@@ -590,12 +590,12 @@ class TimelinePresenter(
                 }
                 .launchIn(this)
 
-            combine(timelineController.timelineItems(), room.membersStateFlow) { items, membersState ->
+            combine(timelineController.timelineItems(), room.membersStateFlow, room.roomInfoFlow) { items, membersState, currentRoomInfo ->
                 val parent = analyticsService.getLongRunningTransaction(DisplayFirstTimelineItems)
                 val transaction = parent?.startChild("timelineItemsFactory.replaceWith", "Processing timeline items")
                 transaction?.putExtraData(AnalyticsUserData.TIMELINE_ITEM_COUNT, items.count().toString())
                 timelineItemsFactory.replaceWith(
-                    timelineItems = items,
+                    timelineItems = items.withoutDirectCallSignals(currentRoomInfo.isDm),
                     roomMembers = membersState.roomMembers().orEmpty()
                 )
                 transaction?.finish()

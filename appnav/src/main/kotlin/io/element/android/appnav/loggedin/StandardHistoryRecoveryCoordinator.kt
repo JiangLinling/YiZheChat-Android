@@ -26,12 +26,17 @@ import io.element.android.security.contentprotection.api.MatrixContentProtection
 import io.element.android.security.contentprotection.api.StartDeviceRecoveryRequest
 import io.element.android.security.dataprotection.api.AccountHistoryAccessBoundaryProvider
 import io.element.android.security.dataprotection.api.AccountReactivationScopeStore
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.perform
 import io.element.android.security.securestorage.api.DeviceTrustService
 import io.element.android.security.securestorage.api.DeviceTrustSnapshot
 import io.element.android.security.securestorage.api.DeviceTrustState
 import io.element.android.security.securestorage.api.accountIdHash
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,6 +45,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import timber.log.Timber
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
@@ -63,6 +69,7 @@ class StandardHistoryRecoveryCoordinator(
     private val matrixContentProtectionRuntime: MatrixContentProtectionRuntime,
     private val accountReactivationScopeStore: AccountReactivationScopeStore,
     private val accountHistoryAccessBoundaryProvider: AccountHistoryAccessBoundaryProvider,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
     @SessionCoroutineScope private val sessionCoroutineScope: CoroutineScope,
 ) {
     private val started = AtomicBoolean(false)
@@ -129,12 +136,45 @@ class StandardHistoryRecoveryCoordinator(
                         hiddenMessageRecoveryInventory.updateRecoveryStatus(HistoryRecoveryStatus.STANDARD_AUTHORIZED)
                         return@collectLatest
                     }
-                    recoverUntilResolved(
-                        accountHash = accountHash,
-                        installationId = eligibility.installationId,
+                    // The KMS proof requires an admitted LC08 owner even when Matrix recovery
+                    // completed earlier. One check owns all bounded retries and read-only polls;
+                    // neither a transient failure nor a pending approval creates another owner.
+                    val request = lifecycleOperationRequest(
+                        lifecycleId = FullAppLifecycleId.LC_08,
+                        trigger = "new_device",
+                        accountIdHash = accountHash,
                         matrixDeviceIdHash = matrixDeviceIdHash,
-                        candidateRoomIds = eligibility.prerequisites.candidateRoomIds,
                     )
+                    try {
+                        withTimeout((request.deadlineEpochMillis - System.currentTimeMillis()).coerceAtLeast(1L)) {
+                            appOperationalStateCoordinator.perform(request) {
+                                recoverUntilResolved(
+                                    accountHash = accountHash,
+                                    installationId = eligibility.installationId,
+                                    matrixDeviceIdHash = matrixDeviceIdHash,
+                                    candidateRoomIds = eligibility.prerequisites.candidateRoomIds,
+                                )
+                                // A bounded check may end pending, expired, or failed. None of
+                                // those outcomes may emit successful client-applied receipts.
+                                if (mutableState.value != StandardHistoryRecoveryState.STANDARD_AUTHORIZED) {
+                                    throw HistoryRecoveryNotApplied()
+                                }
+                            }
+                        }
+                    } catch (_: HistoryRecoveryNotApplied) {
+                        // Keep the exact public state established by the recovery check.
+                    } catch (_: TimeoutCancellationException) {
+                        updateState(StandardHistoryRecoveryState.REQUEST_EXPIRED, HistoryRecoveryStatus.REQUEST_EXPIRED)
+                    } catch (failure: CancellationException) {
+                        throw failure
+                    } catch (_: java.io.IOException) {
+                        updateState(StandardHistoryRecoveryState.SERVICE_UNAVAILABLE, HistoryRecoveryStatus.KMS_UNAVAILABLE)
+                    } catch (_: ContentProtectionException.KmsUnavailable) {
+                        updateState(StandardHistoryRecoveryState.SERVICE_UNAVAILABLE, HistoryRecoveryStatus.KMS_UNAVAILABLE)
+                    } catch (failure: Exception) {
+                        updateState(StandardHistoryRecoveryState.FAILED_CLOSED, HistoryRecoveryStatus.FAILED_CLOSED)
+                        Timber.tag(DIAGNOSTIC_TAG).w(failure, "Standard history recovery admission rejected fail-closed")
+                    }
                 }
         }
     }
@@ -275,6 +315,8 @@ class StandardHistoryRecoveryCoordinator(
         val candidateRoomIds: Set<String>,
         val networkReady: Boolean,
     )
+
+    private class HistoryRecoveryNotApplied : Exception()
 
     private data class RecoveryEligibility(
         val prerequisites: RecoveryPrerequisites,

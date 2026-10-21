@@ -27,6 +27,7 @@ import io.element.android.security.contentprotection.api.DeviceRecoveryStatus
 import io.element.android.security.contentprotection.api.AccountPrivateProfileKey
 import io.element.android.security.contentprotection.api.ContentProtectionException
 import io.element.android.security.contentprotection.api.KmsShareClient
+import io.element.android.security.contentprotection.api.RecoveryReleaseAuthorityChanged
 import io.element.android.security.contentprotection.api.MatrixAuthorizationRefreshMode
 import io.element.android.security.contentprotection.api.MatrixContentProtectionRuntime
 import io.element.android.security.dataprotection.api.*
@@ -300,6 +301,73 @@ class SecureBackupEnterRecoveryKeyPresenterTest {
         assertThat(presenter.recoveryState.value.requiresGate).isTrue()
         coVerify(exactly = 0) { encryption.recover(any()) }
         coVerify(exactly = 0) { kms.releasePrivateProfileKey(any()) }
+    }
+
+    @Test
+    fun `release snapshot conflict retries once with same owner after fresh signed checks`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val base = RecordingRecoveryIntentAuthority(coordinator)
+        val verifications = mutableListOf<RecoveryIntentRecord>()
+        val authority = object : RecoveryIntentAuthority by base {
+            override suspend fun verify(record: RecoveryIntentRecord): RecoveryOperationContext {
+                verifications += record
+                return base.verify(record)
+            }
+        }
+        val encryption = mockk<EncryptionService>()
+        coEvery { encryption.recover(any()) } returns Result.success(Unit)
+        val kms = authorizedKmsShareClient()
+        var releases = 0
+        coEvery { kms.releasePrivateProfileKey(any()) } coAnswers {
+            if (++releases == 1) throw RecoveryReleaseAuthorityChanged()
+            AccountPrivateProfileKey(1, ByteArray(32))
+        }
+        var refreshes = 0
+        val management = object : ManagementSecurityRefreshService {
+            override suspend fun refreshSecurityAccess(): ManagementSyncReport {
+                refreshes++
+                return ManagementSyncReport(status = ManagementSyncStatus.SYNCHRONIZED, deviceSecurityState = ManagedDeviceSecurityState.READY)
+            }
+        }
+        assertThat(createPresenter(encryptionService = encryption, coordinator = coordinator, kmsShareClient = kms,
+            intentAuthority = authority, managementSecurityRefreshService = management).recover("1234").isSuccess).isTrue()
+        assertThat(releases).isEqualTo(2)
+        assertThat(refreshes).isEqualTo(2)
+        assertThat(verifications).hasSize(5)
+        assertThat(verifications.map { it.operationId }.distinct()).hasSize(1)
+        coVerify(exactly = 1) { encryption.recover(any()) }
+        coVerify(exactly = 0) { kms.startDeviceRecovery(any()) }
+        coVerify(exactly = 0) { kms.ensurePrivateProfileKey(any(), any()) }
+    }
+
+    @Test
+    fun `repeated release snapshot conflict stops after two requests and emits no success`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val kms = authorizedKmsShareClient()
+        coEvery { kms.releasePrivateProfileKey(any()) } throws RecoveryReleaseAuthorityChanged()
+        val result = createPresenter(coordinator = coordinator, kmsShareClient = kms).recover("1234")
+        assertThat(result.exceptionOrNull()).isInstanceOf(RecoveryReleaseAuthorityChanged::class.java)
+        coVerify(exactly = 2) { kms.releasePrivateProfileKey(any()) }
+        assertThat(coordinator.clientReceipts).isEmpty()
+    }
+
+    @Test
+    fun `fresh signed authority rejection prevents conflict retry`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val base = RecordingRecoveryIntentAuthority(coordinator)
+        var verifies = 0
+        val authority = object : RecoveryIntentAuthority by base {
+            override suspend fun verify(record: RecoveryIntentRecord): RecoveryOperationContext {
+                if (++verifies == 3) throw RecoveryIntentRejected("RECOVERY_OPERATION_EXPIRED")
+                return base.verify(record)
+            }
+        }
+        val kms = authorizedKmsShareClient()
+        coEvery { kms.releasePrivateProfileKey(any()) } throws RecoveryReleaseAuthorityChanged()
+        val result = createPresenter(coordinator = coordinator, kmsShareClient = kms, intentAuthority = authority).recover("1234")
+        assertThat(result.exceptionOrNull()).isInstanceOf(RecoveryIntentRejected::class.java)
+        coVerify(exactly = 1) { kms.releasePrivateProfileKey(any()) }
+        assertThat(coordinator.clientReceipts).isEmpty()
     }
 
     private val releaseAfterStart = mutableSetOf<KmsShareClient>()

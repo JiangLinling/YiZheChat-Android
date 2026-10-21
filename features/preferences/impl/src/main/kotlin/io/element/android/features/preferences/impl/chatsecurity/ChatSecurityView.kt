@@ -515,8 +515,8 @@ private fun Context.capabilityState(capability: ChatCapability): CapabilityState
         }
     }
     ChatCapability.MICROPHONE_CAMERA -> {
-        val bluetoothGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || hasPermission(Manifest.permission.BLUETOOTH_CONNECT)
-        if (hasPermission(Manifest.permission.RECORD_AUDIO) && hasPermission(Manifest.permission.CAMERA) && bluetoothGranted) {
+        // Optional Bluetooth routing must not make granted microphone/camera access look missing.
+        if (hasPermission(Manifest.permission.RECORD_AUDIO) && hasPermission(Manifest.permission.CAMERA)) {
             CapabilityState.ENABLED
         } else {
             CapabilityState.ACTION_REQUIRED

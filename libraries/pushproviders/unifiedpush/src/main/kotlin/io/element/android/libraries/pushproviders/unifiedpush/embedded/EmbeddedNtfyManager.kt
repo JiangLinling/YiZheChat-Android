@@ -72,13 +72,17 @@ class DefaultEmbeddedNtfyManager(
         }
         val reusable = existing?.takeIf { registration ->
             registration.expiresAt > Instant.now().epochSecond + RENEW_BEFORE_EXPIRY.inWholeSeconds &&
-            registration.strategyVersion >= minimumCoordinatedStrategyVersion(NextDeploymentConfig.isNextDeployment)
+            registration.strategyVersion >= minimumCoordinatedStrategyVersion(NextDeploymentConfig.isNextDeployment) &&
+            registration.matchesPushDeployment()
         }
         val registration = reusable ?: provision(matrixClient, clientSecret, existing).getOrElse {
             return Result.failure(it)
         }
         val wasProvisioned = reusable == null
-        val replacedCredentials = existing == null || !existing.hasSameNtfyIdentity(registration)
+        // A changed public origin invalidates its replay cursor, but the registrar may
+        // retain the same underlying username/topic lease. Revoking that lease here
+        // would revoke the newly confirmed registration as well.
+        val replacedCredentials = existing == null || !existing.hasSameCredentialLease(registration)
         unifiedPushStore.storeUpEndpoint(clientSecret, registration.endpoint)
         unifiedPushStore.storePushGateway(clientSecret, registration.gateway)
         return newGatewayHandler.handle(registration.endpoint, registration.gateway, clientSecret)
@@ -207,11 +211,10 @@ class DefaultEmbeddedNtfyManager(
         return matrixClient.requestOpenIdToken().fold(
             onSuccess = { token ->
                 registrar.register(token, clientSecret, matrixClient.deviceId.value.sha256()).mapCatching { registration ->
-                    val persisted = if (previous != null && previous.hasSameNtfyIdentity(registration)) {
-                        registration.copy(lastMessageId = previous.lastMessageId)
-                    } else {
-                        registration
-                    }
+                    val persisted = registration.copy(
+                        lastMessageId = previous?.takeIf { it.hasSameNtfyIdentity(registration) }?.lastMessageId,
+                        deploymentBinding = embeddedPushDeploymentBinding(),
+                    )
                     registrationStore.upsert(persisted)
                     persisted
                 }
@@ -223,6 +226,9 @@ class DefaultEmbeddedNtfyManager(
     private fun EmbeddedNtfyRegistration.hasSameNtfyIdentity(other: EmbeddedNtfyRegistration): Boolean {
         return server == other.server && topic == other.topic && username == other.username
     }
+
+    private fun EmbeddedNtfyRegistration.hasSameCredentialLease(other: EmbeddedNtfyRegistration): Boolean =
+        topic == other.topic && username == other.username
 
     private fun String.sha256(): String = MessageDigest.getInstance("SHA-256")
         .digest(encodeToByteArray())

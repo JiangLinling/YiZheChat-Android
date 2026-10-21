@@ -1492,6 +1492,27 @@ class HttpKmsShareClientTest {
         }
     }
 
+    @Test
+    fun `only exact bounded release conflict is a revalidation hint and never retried by HTTP client`() = runTest {
+        val code = "RECOVERY_RELEASE_AUTHORITY_CHANGED"
+        listOf(409 to """{"detail":"$code"}""", 403 to """{"detail":"$code"}""",
+            409 to """{"detail":"RECOVERY_RELEASE_GENERATION_CHANGED"}""", 409 to "not-json",
+            409 to """{"detail":{"code":"$code"}}""", 409 to ("""{"detail":"$code"}""" + " ".repeat(20_000)))
+            .forEachIndexed { index, (status, body) ->
+                val server = MockWebServer()
+                server.start()
+                try {
+                    server.enqueue(MockResponse().setResponseCode(status).setBody(body))
+                    val result = runCatching { client(server, signingKey(), deviceShareKeyService = PrivateProfileDeviceShareKeyService)
+                        .releasePrivateProfileKey(ACCOUNT_HASH) }
+                    if (index == 0) assertThat(result.exceptionOrNull()).isInstanceOf(
+                        io.element.android.security.contentprotection.api.RecoveryReleaseAuthorityChanged::class.java)
+                    else assertThat(result.exceptionOrNull()).isInstanceOf(ContentProtectionException::class.java)
+                    assertThat(server.requestCount).isEqualTo(1)
+                } finally { server.shutdown() }
+            }
+    }
+
     private fun existingProfileReleaseJson(signingKey: KeyPair, requestNonce: String, variant: String): String {
         val account = if (variant == "account") "f".repeat(64) else ACCOUNT_HASH
         val installation = if (variant == "installation") "another-installation-0001" else "installation-private-profile-0001"

@@ -40,6 +40,10 @@ import io.element.android.security.dataprotection.api.AccountReactivationCheckpo
 import io.element.android.security.dataprotection.api.AccountReactivationScopeStore
 import io.element.android.security.dataprotection.api.HistoryRecoveryAttempt
 import io.element.android.security.dataprotection.api.PreparedAccountReactivation
+import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
+import io.element.android.security.dataprotection.api.LifecycleOperationContext
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.security.securestorage.api.DeviceTrustSnapshot
 import io.element.android.security.securestorage.api.DeviceTrustState
 import io.element.android.security.securestorage.api.HardwareSecurityLevel
@@ -64,6 +68,7 @@ class StandardHistoryRecoveryCoordinatorTest {
         runCurrent()
 
         assertThat(fixture.kms.requests).hasSize(1)
+        assertThat(fixture.kms.contexts.single()?.lifecycleId).isEqualTo(FullAppLifecycleId.LC_08)
         assertThat(fixture.kms.requests.single().newInstallationId).isEqualTo(INSTALLATION_ID)
         assertThat(fixture.runtime.refreshModes).containsExactly(MatrixAuthorizationRefreshMode.HISTORY_RECOVERY_DELTA)
         assertThat(fixture.runtime.historyScopes).containsExactly(
@@ -113,6 +118,8 @@ class StandardHistoryRecoveryCoordinatorTest {
         runCurrent()
 
         assertThat(fixture.kms.requests).hasSize(2)
+        assertThat(fixture.kms.contexts.map { it?.operationId }.distinct()).hasSize(1)
+        assertThat(fixture.operations.startedRequests).hasSize(1)
         assertThat(fixture.runtime.refreshModes).containsExactly(MatrixAuthorizationRefreshMode.HISTORY_RECOVERY_DELTA)
         assertThat(fixture.coordinator.state.value).isEqualTo(StandardHistoryRecoveryState.STANDARD_AUTHORIZED)
     }
@@ -148,6 +155,8 @@ class StandardHistoryRecoveryCoordinatorTest {
 
         assertThat(fixture.kms.requests).hasSize(1)
         assertThat(fixture.kms.statusRequests).containsExactly("recovery-0123456789")
+        assertThat(fixture.kms.contexts.map { it?.operationId }.distinct()).hasSize(1)
+        assertThat(fixture.operations.startedRequests).hasSize(1)
         assertThat(fixture.runtime.refreshModes).containsExactly(MatrixAuthorizationRefreshMode.HISTORY_RECOVERY_DELTA)
         assertThat(fixture.coordinator.state.value).isEqualTo(StandardHistoryRecoveryState.STANDARD_AUTHORIZED)
     }
@@ -167,6 +176,22 @@ class StandardHistoryRecoveryCoordinatorTest {
         assertThat(fixture.runtime.refreshModes).isEmpty()
         assertThat(fixture.coordinator.state.value).isEqualTo(StandardHistoryRecoveryState.REQUEST_EXPIRED)
         assertThat(fixture.inventory.recoveryStatus.value).isEqualTo(HistoryRecoveryStatus.REQUEST_EXPIRED)
+        assertThat(fixture.operations.clientReceipts).isEmpty()
+    }
+
+    @Test
+    fun `completed bounded approval polling never receipts an unapplied recovery as success`() = runTest {
+        val fixture = fixture(backgroundScope,
+            outcomes = ArrayDeque(listOf(Result.success(authorizedStatus(standardAuthorized = false)))),
+            statusOutcomes = ArrayDeque(List(5) { Result.success(authorizedStatus(standardAuthorized = false)) }))
+        fixture.coordinator.start(ACCOUNT_ID, MATRIX_DEVICE_ID)
+        runCurrent()
+        advanceTimeBy(525_001)
+        runCurrent()
+        assertThat(fixture.coordinator.state.value).isEqualTo(StandardHistoryRecoveryState.AWAITING_EXTERNAL_APPROVAL)
+        assertThat(fixture.operations.clientReceipts).isEmpty()
+        assertThat(fixture.operations.startedRequests).hasSize(1)
+        assertThat(fixture.kms.contexts.map { it?.operationId }.distinct()).hasSize(1)
     }
 
     @Test
@@ -185,12 +210,27 @@ class StandardHistoryRecoveryCoordinatorTest {
         assertThat(fixture.inventory.recoveryStatus.value).isEqualTo(HistoryRecoveryStatus.IDENTITY_RESET_UNRECOVERABLE)
     }
 
+    @Test
+    fun `failed lifecycle admission never calls KMS or refreshes history`() = runTest {
+        val operations = FakeAppOperationalStateCoordinator(startFailure = { java.io.IOException("TEST_ADMISSION_UNAVAILABLE") })
+        val fixture = fixture(backgroundScope, operations = operations)
+
+        fixture.coordinator.start(ACCOUNT_ID, MATRIX_DEVICE_ID)
+        runCurrent()
+
+        assertThat(fixture.operations.startedRequests).hasSize(1)
+        assertThat(fixture.kms.requests).isEmpty()
+        assertThat(fixture.runtime.refreshModes).isEmpty()
+        assertThat(fixture.coordinator.state.value).isEqualTo(StandardHistoryRecoveryState.SERVICE_UNAVAILABLE)
+    }
+
     private fun fixture(
         sessionCoroutineScope: CoroutineScope,
         trustSnapshot: DeviceTrustSnapshot = trustedSnapshot(),
         outcomes: ArrayDeque<Result<DeviceRecoveryStatus>> = ArrayDeque(listOf(Result.success(authorizedStatus()))),
         statusOutcomes: ArrayDeque<Result<DeviceRecoveryStatus>> = ArrayDeque(),
         historyBoundary: AccountHistoryAccessBoundary? = null,
+        operations: FakeAppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
     ): Fixture {
         val encryptionService = FakeEncryptionService().apply {
             recoveryStateStateFlow.value = RecoveryState.ENABLED
@@ -211,9 +251,10 @@ class StandardHistoryRecoveryCoordinatorTest {
             accountHistoryAccessBoundaryProvider = object : AccountHistoryAccessBoundaryProvider {
                 override suspend fun current(): AccountHistoryAccessBoundary? = historyBoundary
             },
+            appOperationalStateCoordinator = operations,
             sessionCoroutineScope = sessionCoroutineScope,
         )
-        return Fixture(coordinator, kms, runtime, inventory)
+        return Fixture(coordinator, kms, runtime, inventory, operations)
     }
 
     private data class Fixture(
@@ -221,6 +262,7 @@ class StandardHistoryRecoveryCoordinatorTest {
         val kms: TestKmsShareClient,
         val runtime: TestMatrixContentProtectionRuntime,
         val inventory: TestHiddenMessageRecoveryInventory,
+        val operations: FakeAppOperationalStateCoordinator,
     )
 
     private class TestHiddenMessageRecoveryInventory(initialCount: Int) : HiddenMessageRecoveryInventory {
@@ -242,13 +284,16 @@ class StandardHistoryRecoveryCoordinatorTest {
     ) : KmsShareClient {
         val requests = mutableListOf<StartDeviceRecoveryRequest>()
         val statusRequests = mutableListOf<String>()
+        val contexts = mutableListOf<LifecycleOperationContext?>()
 
         override suspend fun startDeviceRecovery(request: StartDeviceRecoveryRequest): DeviceRecoveryStatus {
+            contexts += currentLifecycleOperationContext()
             requests += request
             return (outcomes.removeFirstOrNull() ?: Result.success(authorizedStatus())).getOrThrow()
         }
 
         override suspend fun deviceRecoveryStatus(recoveryId: String): DeviceRecoveryStatus {
+            contexts += currentLifecycleOperationContext()
             statusRequests += recoveryId
             return (statusOutcomes.removeFirstOrNull() ?: Result.success(authorizedStatus())).getOrThrow()
         }

@@ -14,6 +14,7 @@ import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.SingleIn
 import io.element.android.libraries.di.annotations.ApplicationContext
 import io.element.android.security.contentprotection.api.AccountPrivateProfileKey
+import io.element.android.security.contentprotection.api.RecoveryReleaseAuthorityChanged
 import io.element.android.security.contentprotection.api.AcquireRoomEpochRequest
 import io.element.android.security.contentprotection.api.BurnAfterReadEndResult
 import io.element.android.security.contentprotection.api.BurnAfterReadSession
@@ -190,7 +191,7 @@ class HttpKmsShareClient(
         val descriptor = deviceShareKeyService.descriptor()
         val requestNonce = ByteArray(24).also(secureRandom::nextBytes)
         try {
-            val body = requirePrivateProfileEnsureBody(executeAuthorized { api, authorization ->
+            val body = requirePrivateProfileReleaseBody(executeAuthorized { api, authorization ->
                 api.releasePrivateProfileKey(
                     authorization,
                     PrivateProfileReleaseKeyBody(
@@ -1329,6 +1330,21 @@ class HttpKmsShareClient(
             throw ContentProtectionException.AccessDenied()
         }
         return requireBody(response)
+    }
+
+    private fun <T> requirePrivateProfileReleaseBody(response: Response<T>): T {
+        if (response.code() == 409) {
+            val detail = runCatching {
+                response.errorBody()?.use { body ->
+                    val source = body.source()
+                    source.request(MAX_ROOM_EPOCH_ERROR_BODY_BYTES.toLong() + 1)
+                    if (source.buffer.size > MAX_ROOM_EPOCH_ERROR_BODY_BYTES) return@use null
+                    ERROR_JSON.decodeFromString<PrivateProfileErrorResponse>(source.readUtf8()).detail
+                }
+            }.getOrNull()
+            if (detail == "RECOVERY_RELEASE_AUTHORITY_CHANGED") throw RecoveryReleaseAuthorityChanged()
+        }
+        return requirePrivateProfileEnsureBody(response)
     }
 
     private fun <T> requirePrivateProfileEnsureBody(response: Response<T>): T {
