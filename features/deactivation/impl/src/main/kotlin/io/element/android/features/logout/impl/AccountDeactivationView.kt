@@ -287,7 +287,7 @@ private fun Content(
                     }
                 },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Text,
+                    keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Done,
                 ),
                 keyboardActions = KeyboardActions(

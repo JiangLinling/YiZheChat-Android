@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-20261022-functional-repair-r13",
-  "frozen_utc": "2026-10-21T19:04:16.706658+00:00",
+  "revision": "unified-20261022-functional-repair-r14",
+  "frozen_utc": "2026-10-22T00:14:58.240365+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -842,7 +842,7 @@
     "features/deactivation/impl/src/main/kotlin/io/element/android/features/logout/impl/AccountDeactivationPresenter.kt": "ca306ebd8e5ed2b9945359dd60c8190d2d826879b0f7f48ca7b1254de715e398",
     "features/deactivation/impl/src/main/kotlin/io/element/android/features/logout/impl/AccountDeactivationState.kt": "771756ad79d9402390f05cf44345d82e7ff71e104e6ecbe246bf73157a1952aa",
     "features/deactivation/impl/src/main/kotlin/io/element/android/features/logout/impl/AccountDeactivationStateProvider.kt": "11165c51dc84d6e7036149175a455322ad8b9f632175a977f5e1725f350feff4",
-    "features/deactivation/impl/src/main/kotlin/io/element/android/features/logout/impl/AccountDeactivationView.kt": "0efa890615c118dca0cc3520f7d443bb526210ced794441a93b6c557c0c740c2",
+    "features/deactivation/impl/src/main/kotlin/io/element/android/features/logout/impl/AccountDeactivationView.kt": "436f77f7195c1eaf577ecdbc447ec58ed5720da17c3fb87488f5dd6f6b8a0eab",
     "features/deactivation/impl/src/main/kotlin/io/element/android/features/logout/impl/DefaultAccountDeactivationEntryPoint.kt": "7ade1d51c32417c11c7f83eba12d4014fae286b0eef70a1862e9818a634b1148",
     "features/deactivation/impl/src/main/kotlin/io/element/android/features/logout/impl/ui/AccountDeactivationActionDialog.kt": "5c823cbdc154dd969118534da45343f06002c3b1f8425c922fafdd27c6447af9",
     "features/deactivation/impl/src/main/kotlin/io/element/android/features/logout/impl/ui/AccountDeactivationConfirmationDialog.kt": "a41b7f116cda8501bde5d612d8a8ce1b7141d38a7c83707c0f9a06e1f8d32c86",
