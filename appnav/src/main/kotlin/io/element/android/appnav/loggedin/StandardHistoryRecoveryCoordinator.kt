@@ -118,24 +118,35 @@ class StandardHistoryRecoveryCoordinator(
                     networkReady = connectivity == NetworkStatus.Connected && !networkBlocked,
                 )
             }
+            // Scheduling evidence only, recorded after the original operation and receipts finish.
+            // Content reads still require their own current KMS/preview authorization.
+            var completedRecovery: RecoveryEligibility? = null
             combine(prerequisites, deviceTrustService.trust()) { current, trust ->
                 RecoveryEligibility(
                     prerequisites = current,
                     trustedDevice = trust.canRequestStandardRecovery(),
                     installationId = trust.installationId,
+                    // Heartbeat timestamps do not change identity. All trust, key, license and
+                    // attestation facts remain part of the completed-operation boundary.
+                    deviceIdentity = trust.copy(lastVerifiedAtEpochMillis = null, lastEvidenceAtEpochMillis = null),
                 )
             }
                 .distinctUntilChanged()
                 .collectLatest { eligibility ->
+                    if (completedRecovery?.deviceIdentity != eligibility.deviceIdentity) {
+                        completedRecovery = null
+                    }
                     val blockedStatus = eligibility.blockedStatus()
                     if (blockedStatus != null) {
+                        if (blockedStatus != HistoryRecoveryStatus.IDLE) completedRecovery = null
                         updateState(StandardHistoryRecoveryState.WAITING_FOR_PREREQUISITES, blockedStatus)
                         return@collectLatest
                     }
-                    if (mutableState.value == StandardHistoryRecoveryState.STANDARD_AUTHORIZED) {
-                        hiddenMessageRecoveryInventory.updateRecoveryStatus(HistoryRecoveryStatus.STANDARD_AUTHORIZED)
+                    if (completedRecovery?.covers(eligibility) == true) {
+                        updateState(StandardHistoryRecoveryState.STANDARD_AUTHORIZED, HistoryRecoveryStatus.STANDARD_AUTHORIZED)
                         return@collectLatest
                     }
+                    completedRecovery = null
                     // The KMS proof requires an admitted LC08 owner even when Matrix recovery
                     // completed earlier. One check owns all bounded retries and read-only polls;
                     // neither a transient failure nor a pending approval creates another owner.
@@ -161,6 +172,7 @@ class StandardHistoryRecoveryCoordinator(
                                 }
                             }
                         }
+                        completedRecovery = eligibility
                     } catch (_: HistoryRecoveryNotApplied) {
                         // Keep the exact public state established by the recovery check.
                     } catch (_: TimeoutCancellationException) {
@@ -322,13 +334,19 @@ class StandardHistoryRecoveryCoordinator(
         val prerequisites: RecoveryPrerequisites,
         val trustedDevice: Boolean,
         val installationId: String,
+        val deviceIdentity: DeviceTrustSnapshot,
     ) {
+        fun covers(other: RecoveryEligibility): Boolean =
+            deviceIdentity == other.deviceIdentity &&
+                installationId == other.installationId &&
+                prerequisites.candidateRoomIds.containsAll(other.prerequisites.candidateRoomIds)
+
         fun blockedStatus(): HistoryRecoveryStatus? = when {
-            prerequisites.candidateRoomIds.isEmpty() -> HistoryRecoveryStatus.IDLE
             prerequisites.recoveryState != RecoveryState.ENABLED -> HistoryRecoveryStatus.WAITING_FOR_MATRIX_RECOVERY
             prerequisites.verificationState != SessionVerifiedStatus.Verified -> HistoryRecoveryStatus.WAITING_FOR_MATRIX_VERIFICATION
             !prerequisites.networkReady -> HistoryRecoveryStatus.WAITING_FOR_NETWORK
             !trustedDevice -> HistoryRecoveryStatus.WAITING_FOR_DEVICE_TRUST
+            prerequisites.candidateRoomIds.isEmpty() -> HistoryRecoveryStatus.IDLE
             else -> null
         }
     }

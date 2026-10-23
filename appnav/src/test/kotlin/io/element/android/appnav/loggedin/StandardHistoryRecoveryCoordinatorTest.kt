@@ -38,15 +38,19 @@ import io.element.android.security.dataprotection.api.AccountHistoryAccessBounda
 import io.element.android.security.dataprotection.api.AccountReactivationAttempt
 import io.element.android.security.dataprotection.api.AccountReactivationCheckpoint
 import io.element.android.security.dataprotection.api.AccountReactivationScopeStore
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
 import io.element.android.security.dataprotection.api.HistoryRecoveryAttempt
+import io.element.android.security.dataprotection.api.LifecycleClientReceipt
+import io.element.android.security.dataprotection.api.LifecycleOperation
+import io.element.android.security.dataprotection.api.LifecycleOperationContext
 import io.element.android.security.dataprotection.api.PreparedAccountReactivation
 import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
-import io.element.android.security.dataprotection.api.LifecycleOperationContext
-import io.element.android.security.dataprotection.api.FullAppLifecycleId
 import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.security.securestorage.api.DeviceTrustSnapshot
 import io.element.android.security.securestorage.api.DeviceTrustState
 import io.element.android.security.securestorage.api.HardwareSecurityLevel
+import io.element.android.security.securestorage.api.ManagedDeviceLicense
 import io.element.android.security.securestorage.api.accountIdHash
 import io.element.android.security.securestorage.test.FakeDeviceTrustService
 import kotlinx.coroutines.CoroutineScope
@@ -60,6 +64,138 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class StandardHistoryRecoveryCoordinatorTest {
+    @Test
+    fun `additional room still requests its own original recovery path`() = runTest {
+        val fixture = fixture(backgroundScope)
+        fixture.coordinator.start(ACCOUNT_ID, MATRIX_DEVICE_ID)
+        runCurrent()
+        val additionalRoom = RoomId("!additional:example.org")
+        fixture.inventory.candidateCountByRoom.value = mapOf(ROOM_ID to 3, additionalRoom to 1)
+        runCurrent()
+
+        assertThat(fixture.kms.requests).hasSize(2)
+        assertThat(fixture.operations.startedRequests).hasSize(2)
+        assertThat(fixture.runtime.historyScopes.last()).isEqualTo(
+            HistoryScope(accountIdHash(ACCOUNT_ID), setOf(ROOM_ID.value, additionalRoom.value), 2L)
+        )
+    }
+
+    @Test
+    fun `revocation while candidates are empty retires the completed scope`() = runTest {
+        val fixture = fixture(backgroundScope)
+        fixture.coordinator.start(ACCOUNT_ID, MATRIX_DEVICE_ID)
+        runCurrent()
+        fixture.inventory.candidateCountByRoom.value = emptyMap()
+        runCurrent()
+        fixture.trust.set(trustedSnapshot().copy(trustState = DeviceTrustState.REVOKED))
+        runCurrent()
+        assertThat(fixture.inventory.recoveryStatus.value).isEqualTo(HistoryRecoveryStatus.WAITING_FOR_DEVICE_TRUST)
+        fixture.inventory.candidateCountByRoom.value = mapOf(ROOM_ID to 3)
+        runCurrent()
+        assertThat(fixture.kms.requests).hasSize(1)
+        fixture.trust.set(trustedSnapshot())
+        runCurrent()
+        assertThat(fixture.kms.requests).hasSize(2)
+    }
+
+    @Test
+    fun `new installation cannot reuse completed recovery scope`() = runTest {
+        val installation = "installation-replacement"
+        val fixture = fixture(backgroundScope, outcomes = ArrayDeque(listOf(
+            Result.success(authorizedStatus()),
+            Result.success(authorizedStatus().copy(newInstallationId = installation)),
+        )))
+        fixture.coordinator.start(ACCOUNT_ID, MATRIX_DEVICE_ID)
+        runCurrent()
+        fixture.trust.set(trustedSnapshot().copy(installationId = installation))
+        runCurrent()
+        assertThat(fixture.kms.requests).hasSize(2)
+        assertThat(fixture.kms.requests.last().newInstallationId).isEqualTo(installation)
+        assertThat(fixture.runtime.historyScopes.last().recoveryGeneration).isEqualTo(2L)
+    }
+
+    @Test
+    fun `changed device key cannot reuse completed recovery scope`() = runTest {
+        val fixture = fixture(backgroundScope)
+        fixture.coordinator.start(ACCOUNT_ID, MATRIX_DEVICE_ID)
+        runCurrent()
+        fixture.trust.set(trustedSnapshot().copy(attestationPublicKeySha256 = "a".repeat(64)))
+        runCurrent()
+        assertThat(fixture.kms.requests).hasSize(2)
+    }
+
+    @Test
+    fun `heartbeat timestamp alone does not restart completed recovery`() = runTest {
+        val fixture = fixture(backgroundScope)
+        fixture.coordinator.start(ACCOUNT_ID, MATRIX_DEVICE_ID)
+        runCurrent()
+        fixture.trust.set(trustedSnapshot().copy(lastVerifiedAtEpochMillis = 2L, lastEvidenceAtEpochMillis = 2L))
+        runCurrent()
+        assertThat(fixture.kms.requests).hasSize(1)
+    }
+
+    @Test
+    fun `expired managed license cannot reuse completed recovery`() = runTest {
+        val fixture = fixture(backgroundScope)
+        fixture.coordinator.start(ACCOUNT_ID, MATRIX_DEVICE_ID)
+        runCurrent()
+        fixture.trust.set(trustedSnapshot().copy(
+            trustState = DeviceTrustState.MANAGED,
+            managedLicense = ManagedDeviceLicense(
+                licenseId = "expired-license",
+                installationId = INSTALLATION_ID,
+                devicePublicKeySha256 = "a".repeat(64),
+                contentShareKeyId = "share",
+                appPackageName = "com.yizhe.chat.internal",
+                appVersionCode = 1L,
+                revision = 1L,
+                allowedScopes = setOf("content"),
+                offlineAllowed = false,
+                issuedAtEpochMillis = 1L,
+                expiresAtEpochMillis = 2L,
+            ),
+        ))
+        runCurrent()
+        assertThat(fixture.kms.requests).hasSize(1)
+        assertThat(fixture.inventory.recoveryStatus.value).isEqualTo(HistoryRecoveryStatus.WAITING_FOR_DEVICE_TRUST)
+        fixture.trust.set(trustedSnapshot())
+        runCurrent()
+        assertThat(fixture.kms.requests).hasSize(2)
+    }
+
+    @Test
+    fun `failed applied receipt never records completed recovery scope`() = runTest {
+        val fixture = fixture(backgroundScope, failAppliedReceipt = true)
+        fixture.coordinator.start(ACCOUNT_ID, MATRIX_DEVICE_ID)
+        runCurrent()
+        assertThat(fixture.operations.clientReceipts).isEmpty()
+        fixture.inventory.candidateCountByRoom.value = emptyMap()
+        runCurrent()
+        fixture.inventory.candidateCountByRoom.value = mapOf(ROOM_ID to 3)
+        runCurrent()
+        assertThat(fixture.kms.requests).hasSize(2)
+        assertThat(fixture.coordinator.state.value).isEqualTo(StandardHistoryRecoveryState.SERVICE_UNAVAILABLE)
+    }
+
+    @Test
+    fun `temporary empty candidate projection does not restart completed recovery for the same room`() = runTest {
+        val fixture = fixture(backgroundScope)
+        fixture.coordinator.start(ACCOUNT_ID, MATRIX_DEVICE_ID)
+        runCurrent()
+        assertThat(fixture.operations.clientReceipts).isNotEmpty()
+
+        fixture.inventory.candidateCountByRoom.value = emptyMap()
+        runCurrent()
+        fixture.inventory.candidateCountByRoom.value = mapOf(ROOM_ID to 3)
+        runCurrent()
+
+        assertThat(fixture.kms.requests).hasSize(1)
+        assertThat(fixture.operations.startedRequests).hasSize(1)
+        assertThat(fixture.runtime.historyScopes).containsExactly(
+            HistoryScope(accountIdHash(ACCOUNT_ID), setOf(ROOM_ID.value), 1L)
+        )
+    }
+
     @Test
     fun `verified recovered session requests standard authorization and additive refresh`() = runTest {
         val fixture = fixture(backgroundScope)
@@ -181,9 +317,11 @@ class StandardHistoryRecoveryCoordinatorTest {
 
     @Test
     fun `completed bounded approval polling never receipts an unapplied recovery as success`() = runTest {
-        val fixture = fixture(backgroundScope,
+        val fixture = fixture(
+            backgroundScope,
             outcomes = ArrayDeque(listOf(Result.success(authorizedStatus(standardAuthorized = false)))),
-            statusOutcomes = ArrayDeque(List(5) { Result.success(authorizedStatus(standardAuthorized = false)) }))
+            statusOutcomes = ArrayDeque(List(5) { Result.success(authorizedStatus(standardAuthorized = false)) })
+        )
         fixture.coordinator.start(ACCOUNT_ID, MATRIX_DEVICE_ID)
         runCurrent()
         advanceTimeBy(525_001)
@@ -231,6 +369,7 @@ class StandardHistoryRecoveryCoordinatorTest {
         statusOutcomes: ArrayDeque<Result<DeviceRecoveryStatus>> = ArrayDeque(),
         historyBoundary: AccountHistoryAccessBoundary? = null,
         operations: FakeAppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
+        failAppliedReceipt: Boolean = false,
     ): Fixture {
         val encryptionService = FakeEncryptionService().apply {
             recoveryStateStateFlow.value = RecoveryState.ENABLED
@@ -239,22 +378,31 @@ class StandardHistoryRecoveryCoordinatorTest {
         val inventory = TestHiddenMessageRecoveryInventory(initialCount = 3)
         val kms = TestKmsShareClient(outcomes, statusOutcomes)
         val runtime = TestMatrixContentProtectionRuntime()
+        val trust = FakeDeviceTrustService(trustSnapshot)
+        val operationCoordinator = if (failAppliedReceipt) {
+            object : AppOperationalStateCoordinator by operations {
+                override suspend fun recordClientReceipt(receipt: LifecycleClientReceipt): LifecycleOperation =
+                    throw java.io.IOException("TEST_RECEIPT_UNAVAILABLE")
+            }
+        } else {
+            operations
+        }
         val coordinator = StandardHistoryRecoveryCoordinator(
             encryptionService = encryptionService,
             sessionVerificationService = verificationService,
             hiddenMessageRecoveryInventory = inventory,
             networkMonitor = FakeNetworkMonitor(),
             kmsShareClient = kms,
-            deviceTrustService = FakeDeviceTrustService(trustSnapshot),
+            deviceTrustService = trust,
             matrixContentProtectionRuntime = runtime,
             accountReactivationScopeStore = TestAccountReactivationScopeStore(),
             accountHistoryAccessBoundaryProvider = object : AccountHistoryAccessBoundaryProvider {
                 override suspend fun current(): AccountHistoryAccessBoundary? = historyBoundary
             },
-            appOperationalStateCoordinator = operations,
+            appOperationalStateCoordinator = operationCoordinator,
             sessionCoroutineScope = sessionCoroutineScope,
         )
-        return Fixture(coordinator, kms, runtime, inventory, operations)
+        return Fixture(coordinator, kms, runtime, inventory, operations, trust)
     }
 
     private data class Fixture(
@@ -263,11 +411,12 @@ class StandardHistoryRecoveryCoordinatorTest {
         val runtime: TestMatrixContentProtectionRuntime,
         val inventory: TestHiddenMessageRecoveryInventory,
         val operations: FakeAppOperationalStateCoordinator,
+        val trust: FakeDeviceTrustService,
     )
 
     private class TestHiddenMessageRecoveryInventory(initialCount: Int) : HiddenMessageRecoveryInventory {
         override val candidateCount: StateFlow<Int> = MutableStateFlow(initialCount)
-        override val candidateCountByRoom: StateFlow<Map<RoomId, Int>> = MutableStateFlow(
+        override val candidateCountByRoom: MutableStateFlow<Map<RoomId, Int>> = MutableStateFlow(
             if (initialCount > 0) mapOf(ROOM_ID to initialCount) else emptyMap()
         )
         override val recoveryStatus: MutableStateFlow<HistoryRecoveryStatus> = MutableStateFlow(HistoryRecoveryStatus.IDLE)
