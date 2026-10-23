@@ -941,6 +941,9 @@ dependencies {
 
     testCommonDependencies(libs)
     testImplementation(projects.libraries.matrix.test)
+    testImplementation(projects.libraries.sessionStorage.test)
+    testImplementation(projects.security.dataProtection.test)
+    testImplementation(projects.security.secureStorage.test)
     testImplementation(projects.services.toolbox.test)
 
     gplayReleaseImplementation(projects.libraries.pushproviders.huawei)

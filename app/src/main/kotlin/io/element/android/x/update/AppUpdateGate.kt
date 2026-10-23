@@ -693,9 +693,9 @@ private fun SilentStartupSurface(modifier: Modifier) {
 
         modifier = modifier.semantics(mergeDescendants = true) {
 
-            contentDescription = "Startup security and release check"
+            contentDescription = "正在检查设备状态"
 
-            stateDescription = "Checking security and update status"
+            stateDescription = "正在验证，请稍候"
 
             liveRegion = LiveRegionMode.Polite
 
@@ -785,7 +785,7 @@ private fun AppUpdateCheckFailedView(
 
             .semantics(mergeDescendants = true) {
 
-                contentDescription = "Startup security and release status"
+                contentDescription = "设备验证状态"
 
                 stateDescription = accessibility.userState.accessibilityLabel()
 
@@ -937,6 +937,7 @@ internal fun startupGateCopy(reasonCode: String): StartupGateCopy = when (reason
     "SIGNED_POLICY_UNAVAILABLE" -> StartupGateCopy(R.string.screen_startup_error_policy_missing_title, R.string.screen_startup_error_policy_missing_description)
 
     "DEVICE_TRUST_NOT_READY" -> StartupGateCopy(R.string.screen_startup_error_device_trust_title, R.string.screen_startup_error_device_trust_description)
+    "DEVICE_ADMINISTRATIVELY_LOCKED" -> StartupGateCopy(R.string.screen_entry_remote_locked_title, R.string.screen_entry_remote_locked_description)
 
     "SIGNED_POLICY_EXPIRED" -> StartupGateCopy(R.string.screen_startup_error_policy_expired_title, R.string.screen_startup_error_policy_expired_description)
 

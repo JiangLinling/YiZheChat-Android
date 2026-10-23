@@ -1183,11 +1183,18 @@ class SignedManagementStateRepository(
         val type = ManagementCommandType.valueOf(wire.commandType)
         if (wire.schemaVersion == 2) {
             check(type == ManagementCommandType.CLEAR_ACCOUNT)
-            check(wire.targetMatrixDeviceIdHash?.matches(ACCOUNT_HASH_PATTERN) == true)
-            check((wire.mobileGeneration ?: 0) > 0)
-            check(wire.reasonCode == "ACCOUNT_MOBILE_SUPERSEDED")
+            if (wire.reasonCode == "GLOBAL_ACCOUNT_DESTROY") {
+                check(wire.globalDestroyOperationId?.matches(Regex("[A-Za-z0-9_-]{16,256}")) == true)
+                check(wire.targetMatrixDeviceIdHash == null && wire.mobileGeneration == null)
+            } else {
+                check(wire.targetMatrixDeviceIdHash?.matches(ACCOUNT_HASH_PATTERN) == true)
+                check((wire.mobileGeneration ?: 0) > 0)
+                check(wire.reasonCode in setOf("ACCOUNT_MOBILE_SUPERSEDED", "ADMIN_LOCAL_ACCOUNT_CLEAR"))
+                check(wire.globalDestroyOperationId == null)
+            }
         } else {
             check(wire.targetMatrixDeviceIdHash == null && wire.mobileGeneration == null && wire.reasonCode == null)
+            check(wire.globalDestroyOperationId == null)
         }
         check(type != ManagementCommandType.CLEAR_ACCOUNT || wire.accountIdHash?.matches(ACCOUNT_HASH_PATTERN) == true)
         check(type == ManagementCommandType.CLEAR_ACCOUNT || wire.accountIdHash == null)
@@ -1207,6 +1214,7 @@ class SignedManagementStateRepository(
             targetMatrixDeviceIdHash = wire.targetMatrixDeviceIdHash,
             mobileGeneration = wire.mobileGeneration,
             reasonCode = wire.reasonCode,
+            globalDestroyOperationId = wire.globalDestroyOperationId,
         )
     }
 

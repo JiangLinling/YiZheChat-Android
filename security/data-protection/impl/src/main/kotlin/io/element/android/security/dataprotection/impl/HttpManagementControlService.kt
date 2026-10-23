@@ -180,6 +180,7 @@ class HttpManagementControlService(
     }
 
     private val synchronizationMutex = kotlinx.coroutines.sync.Mutex()
+    private var restoredAccessConfirmationPending = false
 
     override suspend fun synchronize(): ManagementSyncReport = withContext(Dispatchers.IO) {
         synchronizationMutex.withLock {
@@ -187,6 +188,7 @@ class HttpManagementControlService(
         runCatchingExceptions {
             ensureDeviceEnrollment()
             policyApplicationReceiptDelivery.flush()
+            val trustBeforeSync = deviceTrustService.current()
             val response = runCatchingExceptions { performSync() }.recoverCatching { failure ->
                 if (failure !is EnrollmentRequiredException) throw failure
                 ensureDeviceEnrollmentLocked(
@@ -195,10 +197,29 @@ class HttpManagementControlService(
                 )
                 performSync()
             }.getOrThrow()
-            val report = acceptSyncResponse(response)
+            var report = acceptSyncResponse(response)
+            if (trustBeforeSync.trustState == DeviceTrustState.STALE && deviceTrustService.current().allowsLocalVaultAccess) {
+                restoredAccessConfirmationPending = true
+            }
+            if (restoredAccessConfirmationPending && deviceTrustService.current().allowsLocalVaultAccess && repository.pendingCommands().isEmpty()) {
+                // The first signed decision restores LOCAL trust. KMS still sees the STALE state
+                // reported in that request. Confirm the restored state in this same lifecycle,
+                // before the coordinator publishes access recovery or retries room projections.
+                report = acceptSyncResponse(performSync())
+                check(!deviceTrustService.current().allowsLocalVaultAccess || accessTicket != null) {
+                    "Restored device access confirmation is pending."
+                }
+                restoredAccessConfirmationPending = false
+            } else if (!deviceTrustService.current().allowsLocalVaultAccess) {
+                restoredAccessConfirmationPending = false
+            }
             policyApplicationReceiptDelivery.flush()
             report
         }.getOrElse { failure ->
+            if (restoredAccessConfirmationPending) {
+                accessTicket = null
+                deviceTrustService.applyRemoteRestriction(DeviceTrustState.STALE, System.currentTimeMillis())
+            }
             logDebugFailure(failure)
             val classifiedReason = managementSyncFailureReasonCode(failure)
             val securityFailure = failure is SecurityException || failure is IllegalStateException ||
@@ -325,6 +346,7 @@ class HttpManagementControlService(
             put("deadline_ms", record.deadlineEpochMillis)
             put("request_nonce_b64", nonce)
             put("matrix_access_token", token)
+            record.recoveryMode?.let { put("recovery_mode", it.name) }
         }
         // The draft may never have been admitted; signing its operation header would create a bootstrap cycle.
         val response = executeSignedPost("/v1/lifecycle/recovery-intents/resolve", request.toString().encodeToByteArray(), bindLifecycle = false)
@@ -353,7 +375,8 @@ class HttpManagementControlService(
             idempotencyHash,
             record.deadlineEpochMillis,
             serverTime,
-            admitted
+            admitted,
+            payload["recovery_mode"]?.jsonPrimitive?.content?.let { io.element.android.security.dataprotection.api.RecoveryHistoryMode.valueOf(it) },
         )
     }
 
@@ -413,9 +436,10 @@ class HttpManagementControlService(
             optional("terminal_result_code"),
             text("idempotency_key_sha256"),
             boolean("current_root_valid"),
+            optional("recovery_mode")?.let { io.element.android.security.dataprotection.api.RecoveryHistoryMode.valueOf(it) },
         ).also { context ->
             check(context.operationId == record.operationId && context.scope == record.scope &&
-                context.trigger == "recovery_key_entered" && context.deadlineEpochMillis == record.deadlineEpochMillis)
+                context.trigger == "recovery_key_entered" && context.deadlineEpochMillis == record.deadlineEpochMillis && context.recoveryMode == record.recoveryMode)
             check(context.identityGeneration.matches(Regex("[a-f0-9]{64}")) && context.mobileGeneration > 0)
             check(context.currentIdentityGeneration.matches(Regex("[a-f0-9]{64}")) && context.currentMobileGeneration > 0)
             check(context.idempotencyKeySha256 == MessageDigest.getInstance("SHA-256").digest(record.idempotencyKey.encodeToByteArray())
@@ -489,6 +513,7 @@ class HttpManagementControlService(
                 eventIdHash = request.eventIdHash,
                 deadlineEpochMillis = request.deadlineEpochMillis,
                 mediaCleanupProtocol = request.mediaCleanupProtocol,
+                recoveryMode = request.recoveryMode?.name,
             )
         ).let { encoded ->
             if (request.roomCreationProtocol != null && configuration.isNextDeployment) {
@@ -1655,13 +1680,19 @@ class HttpManagementControlService(
 
     override suspend fun reportCommand(report: ManagementCommandExecutionReport): Boolean = withContext(Dispatchers.IO) {
         if (!configuration.isConfigured) return@withContext false
+        val globalChild = if (report.commandType == ManagementCommandType.CLEAR_ACCOUNT) {
+            repository.pendingCommands().singleOrNull { it.commandId == report.commandId }?.takeIf {
+                it.type == ManagementCommandType.CLEAR_ACCOUNT && it.reasonCode == "GLOBAL_ACCOUNT_DESTROY" &&
+                    it.globalDestroyOperationId != null
+            }?.also { check(it.installationId == deviceTrustService.current().installationId) }
+        } else null
         val expectedLifecycleId = when (report.commandType) {
             ManagementCommandType.LOCK -> FullAppLifecycleId.LC_09
             ManagementCommandType.REVOKE -> FullAppLifecycleId.LC_07
             ManagementCommandType.CLEAR_ACCOUNT -> FullAppLifecycleId.LC_22
             ManagementCommandType.CLEAR_CONTENT -> FullAppLifecycleId.LC_21
         }
-        check(currentLifecycleOperationContext()?.lifecycleId == expectedLifecycleId) {
+        check(globalChild != null || currentLifecycleOperationContext()?.lifecycleId == expectedLifecycleId) {
             "Management command report requires its command-specific lifecycle context."
         }
         val body = json.encodeToString(
@@ -1673,7 +1704,10 @@ class HttpManagementControlService(
             )
         ).encodeToByteArray()
         runCatchingExceptions {
-            executeSignedPost(COMMAND_REPORT_PATH, body)
+            // This exact verified child belongs to the server's original global root.
+            // Its device signature reports local facts; it must not borrow an ambient
+            // heartbeat operation or implicitly create a second destruction root.
+            executeSignedPost(COMMAND_REPORT_PATH, body, bindLifecycle = globalChild == null)
             repository.recordCommandReport(report, removeWhenComplete = report.state == ManagementCommandState.COMPLETE)
             true
         }.getOrElse { failure ->
@@ -2532,15 +2566,16 @@ class HttpManagementControlService(
             repository.clearOfflineEntry()
             repository.acceptLocalListEntry(response.deviceTrust, permitted = false)
         }
+        val restrictionReason = terminalPolicyError ?: trustDecision.restrictionReasonCode
         return ManagementSyncReport(
-            status = if (terminalPolicyError == null) {
+            status = if (restrictionReason == null) {
                 ManagementSyncStatus.SYNCHRONIZED
             } else {
                 ManagementSyncStatus.SECURITY_REJECTED
             },
             acceptedPolicyVersion = policyVersion ?: repository.currentPolicyVersion(),
             pendingCommandCount = repository.pendingCommands().size,
-            errorCode = terminalPolicyError ?: trustDecision.automaticLicenseErrorCode,
+            errorCode = restrictionReason ?: trustDecision.automaticLicenseErrorCode,
             deviceSecurityState = trustDecision.toManagedDeviceSecurityState(),
             accountHandoverRequiredAccountHashes = trustDecision.accountHandoverRequiredAccountHashes.toSet(),
             locationEvidenceState = DeviceLocationEvidenceState.valueOf(trustDecision.locationEvidenceState),
@@ -2701,6 +2736,10 @@ class HttpManagementControlService(
         check(decision.schemaVersion in 1..3)
         check(decision.issuedAtEpochMillis <= serverTimeEpochMillis + MAX_CLOCK_SKEW_MILLIS)
         check(decision.expiresAtEpochMillis > serverTimeEpochMillis)
+        check(decision.restrictionReasonCode == null ||
+            decision.restrictionReasonCode == "DEVICE_ADMINISTRATIVELY_LOCKED" && decision.trustState == "STALE") {
+            "Signed device restriction contradicts the trust decision."
+        }
         check(decision.accountHandoverRequiredAccountHashes.size <= 32)
         check(decision.accountHandoverRequiredAccountHashes.distinct().size == decision.accountHandoverRequiredAccountHashes.size)
         check(decision.accountHandoverRequiredAccountHashes.all { it.matches(Regex("[0-9a-f]{64}")) })

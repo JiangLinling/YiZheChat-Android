@@ -22,6 +22,8 @@ import io.element.android.security.dataprotection.api.LifecycleOperationContext
 import io.element.android.security.dataprotection.api.ManagementPolicyApplicationState
 import io.element.android.security.dataprotection.api.ManagementSyncStatus
 import io.element.android.security.dataprotection.api.PolicyApplicationEvidence
+import io.element.android.security.dataprotection.api.StartupSecurityReadinessState
+import io.element.android.security.dataprotection.api.toStartupSecurityReadiness
 import io.element.android.security.securestorage.api.DeviceControlRequestSignature
 import io.element.android.security.securestorage.api.DeviceTrustService
 import io.element.android.security.securestorage.api.DeviceTrustSnapshot
@@ -69,6 +71,169 @@ import java.security.Signature
 import java.util.Base64
 
 class HttpManagementControlServicePolicyReceiptTest {
+    @Test
+    fun `verified global child reports original device signed facts without ambient heartbeat or a new root`() = runTest {
+        for (ambientHeartbeat in listOf(false, true)) {
+            withFixture { f ->
+                val command = f.acceptReportCommand()
+                f.serveCommandReports()
+                val pending = io.element.android.security.dataprotection.api.ManagementCommandExecutionReport(
+                    command.commandId, command.type, io.element.android.security.dataprotection.api.ManagementCommandState.WAITING_RESTART, 70,
+                )
+                suspend fun send(): Boolean = f.service.reportCommand(pending)
+                val accepted = if (ambientHeartbeat) {
+                    withContext(LifecycleOperationContext("unrelated-heartbeat-0001", FullAppLifecycleId.LC_07)) { send() }
+                } else send()
+                assertThat(accepted).isTrue()
+                assertThat(f.repository.pendingCommands().single().commandId).isEqualTo(command.commandId)
+                assertThat(f.service.reportCommand(pending.copy(
+                    state = io.element.android.security.dataprotection.api.ManagementCommandState.COMPLETE, progress = 100,
+                ))).isTrue()
+                assertThat(f.repository.pendingCommands()).isEmpty()
+                assertThat(f.requests.map { it.path }).containsExactly("/v1/device/commands/report", "/v1/device/commands/report")
+                f.requests.forEach { request ->
+                    f.assertSignedPost(request, null)
+                    assertThat(JSON.parseToJsonElement(request.body).jsonObject.getValue("command_id").jsonPrimitive.content)
+                        .isEqualTo(command.commandId)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `global child rejected or lost report remains pending and retries the same signed command`() = runTest {
+        for (failureStatus in listOf(409, 503)) {
+            withFixture { f ->
+                val command = f.acceptReportCommand()
+                val report = io.element.android.security.dataprotection.api.ManagementCommandExecutionReport(
+                    command.commandId, command.type, io.element.android.security.dataprotection.api.ManagementCommandState.COMPLETE, 100,
+                )
+                f.serveCommandReports(failureStatus)
+                assertThat(f.service.reportCommand(report)).isFalse()
+                assertThat(f.repository.pendingCommands().single().commandId).isEqualTo(command.commandId)
+                f.serveCommandReports()
+                assertThat(f.service.reportCommand(report)).isTrue()
+                assertThat(f.requests).hasSize(2)
+                assertThat(f.requests[0].body).isEqualTo(f.requests[1].body)
+                f.requests.forEach { f.assertSignedPost(it, null) }
+            }
+        }
+    }
+
+    @Test
+    fun `ordinary local report still requires its lifecycle and unknown global command never sends`() = runTest {
+        withFixture { f ->
+            val command = f.acceptReportCommand(global = false)
+            val report = io.element.android.security.dataprotection.api.ManagementCommandExecutionReport(
+                command.commandId, command.type, io.element.android.security.dataprotection.api.ManagementCommandState.WAITING_RESTART, 70,
+            )
+            for (candidate in listOf(report, report.copy(commandId = "unknown-global-command"))) {
+                val failure = runCatching { f.service.reportCommand(candidate) }.exceptionOrNull()
+                assertThat(failure).isInstanceOf(IllegalStateException::class.java)
+            }
+            val wrongContext = runCatching {
+                withContext(LifecycleOperationContext("wrong-heartbeat-0001", FullAppLifecycleId.LC_07)) { f.service.reportCommand(report) }
+            }.exceptionOrNull()
+            assertThat(wrongContext).isInstanceOf(IllegalStateException::class.java)
+            assertThat(f.requests).isEmpty()
+            f.serveCommandReports()
+            assertThat(withContext(LifecycleOperationContext("original-local-clear-0001", FullAppLifecycleId.LC_22)) {
+                f.service.reportCommand(report)
+            }).isTrue()
+            f.assertSignedPost(f.requests.single(), "original-local-clear-0001")
+        }
+    }
+
+    @Test
+    fun `wrong installation and tampered global parent cannot authorize a report`() = runTest {
+        for (fault in listOf("installation", "parent", "signature")) {
+            withFixture { f ->
+                val command = f.acceptReportCommand(installation = if (fault == "installation") "foreign-installation-0001" else INSTALLATION_ID)
+                if (fault != "installation") f.tamperReportCommand(fault)
+                val report = io.element.android.security.dataprotection.api.ManagementCommandExecutionReport(
+                    command.commandId, command.type, io.element.android.security.dataprotection.api.ManagementCommandState.COMPLETE, 100,
+                )
+                assertThat(runCatching { f.service.reportCommand(report) }.exceptionOrNull()).isNotNull()
+                assertThat(f.requests).isEmpty()
+            }
+        }
+    }
+
+    @Test
+    fun `fresh client gets signed administrative lock reason without replaying completed command`() = runTest {
+        withFixture { f ->
+            f.serveSignedRestriction("STALE", "DEVICE_ADMINISTRATIVELY_LOCKED")
+            val result = withContext(LifecycleOperationContext("original-locked-sync", FullAppLifecycleId.LC_07)) {
+                f.service.synchronize()
+            }
+            assertThat(result.status).isEqualTo(ManagementSyncStatus.SECURITY_REJECTED)
+            assertThat(result.errorCode).isEqualTo("DEVICE_ADMINISTRATIVELY_LOCKED")
+            assertThat(result.pendingCommandCount).isEqualTo(0)
+            val startup = result.toStartupSecurityReadiness(installationId = "test-locked-installation")
+            assertThat(startup.state).isEqualTo(StartupSecurityReadinessState.SECURITY_REJECTED)
+            assertThat(startup.reasonCode).isEqualTo("DEVICE_ADMINISTRATIVELY_LOCKED")
+            assertThat(f.currentTrustState()).isEqualTo(DeviceTrustState.STALE)
+            assertThat(JSON.parseToJsonElement(f.requests.single().body).jsonObject
+                .getValue("restriction_reason_protocol_version").jsonPrimitive.content).isEqualTo("1")
+            f.assertSignedPost(f.requests.single(), "original-locked-sync")
+        }
+    }
+
+    @Test
+    fun `signed administrative lock cannot contradict trusted state`() = runTest {
+        withFixture { f ->
+            f.serveSignedRestriction("TRUSTED", "DEVICE_ADMINISTRATIVELY_LOCKED")
+            val result = withContext(LifecycleOperationContext("original-contradictory-lock", FullAppLifecycleId.LC_07)) {
+                f.service.synchronize()
+            }
+            assertThat(result.status).isEqualTo(ManagementSyncStatus.SECURITY_REJECTED)
+            assertThat(result.errorCode).isEqualTo("CONTROL_SYNC_TRUST_DECISION_REJECTED")
+        }
+    }
+
+    @Test
+    fun `unknown signed restriction is rejected rather than mislabeled as administrative lock`() = runTest {
+        withFixture { f ->
+            f.serveSignedRestriction("STALE", "UNRECOGNIZED_RESTRICTION")
+            val result = withContext(LifecycleOperationContext("original-unknown-restriction", FullAppLifecycleId.LC_07)) {
+                f.service.synchronize()
+            }
+            assertThat(result.status).isEqualTo(ManagementSyncStatus.SECURITY_REJECTED)
+            assertThat(result.errorCode).isEqualTo("CONTROL_SYNC_TRUST_DECISION_REJECTED")
+        }
+    }
+
+    @Test
+    fun `restored trust confirms server eligibility in the same lifecycle before returning success`() = runTest {
+        withFixture { f ->
+            f.beginStaleAccess()
+            f.serveAccessRestoration(failConfirmation = false)
+            val result = withContext(LifecycleOperationContext("original-unlock-sync", FullAppLifecycleId.LC_07)) {
+                f.service.synchronize()
+            }
+            assertThat(result.errorCode).isNull()
+            assertThat(result.status).isEqualTo(ManagementSyncStatus.SYNCHRONIZED)
+            assertThat(f.requests).hasSize(2)
+            assertThat(f.requests.map { JSON.parseToJsonElement(it.body).jsonObject.getValue("attestation_state").jsonPrimitive.content })
+                .containsExactly("STALE", "TRUSTED").inOrder()
+            f.requests.forEach { f.assertSignedPost(it, "original-unlock-sync") }
+            assertThat(f.currentTrustState()).isEqualTo(DeviceTrustState.TRUSTED)
+        }
+    }
+
+    @Test
+    fun `lost restoration confirmation fails closed and preserves retry rather than declaring chat ready`() = runTest {
+        withFixture { f ->
+            f.beginStaleAccess()
+            f.serveAccessRestoration(failConfirmation = true)
+            val result = withContext(LifecycleOperationContext("original-unlock-sync", FullAppLifecycleId.LC_07)) {
+                f.service.synchronize()
+            }
+            assertThat(result.status).isEqualTo(ManagementSyncStatus.RETRY_REQUIRED)
+            assertThat(f.requests).hasSize(2)
+            assertThat(f.currentTrustState()).isEqualTo(DeviceTrustState.STALE)
+        }
+    }
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 
@@ -866,7 +1031,44 @@ class HttpManagementControlServicePolicyReceiptTest {
             every { applicationInfo } returns mockk(relaxed = true)
         }
         val repository = SignedManagementStateRepository(context, verifier)
-        private val trustSnapshot = DeviceTrustSnapshot(
+
+        fun acceptReportCommand(global: Boolean = true, installation: String = INSTALLATION_ID):
+            io.element.android.security.dataprotection.api.VerifiedManagementCommand {
+            val now = System.currentTimeMillis()
+            val payload = JSON.encodeToJsonElement(CommandWire.serializer(), CommandWire(
+                commandId = "original-global-child-command-0001", installationId = installation,
+                commandType = "CLEAR_ACCOUNT", accountIdHash = "a".repeat(64), contentId = null,
+                version = 1, issuedAtEpochMillis = now, notBeforeEpochMillis = now,
+                expiresAtEpochMillis = now + 600_000, schemaVersion = 2,
+                reasonCode = if (global) "GLOBAL_ACCOUNT_DESTROY" else "ADMIN_LOCAL_ACCOUNT_CLEAR",
+                globalDestroyOperationId = if (global) "original-server-global-root-0001" else null,
+                targetMatrixDeviceIdHash = if (global) null else "b".repeat(64), mobileGeneration = if (global) null else 1,
+            )).jsonObject
+            return repository.acceptCommand(SignedJsonEnvelopeWire(command = payload, keyId = keyId,
+                signatureBase64 = authoritySignature(verifier.canonicalJson(payload))), now)
+        }
+
+        fun tamperReportCommand(fault: String) {
+            val file = File(context.noBackupFilesDir, "security/management/control-state-v1.json")
+            val state = JSON.decodeFromString<PersistedManagementState>(file.readText())
+            val old = state.commands.single()
+            val changed = if (fault == "signature") old.envelope.copy(signatureBase64 = "dGFtcGVyZWQ=") else {
+                old.envelope.copy(command = JsonObject(old.envelope.payload() + mapOf(
+                    "global_destroy_operation_id" to kotlinx.serialization.json.JsonPrimitive("foreign-global-root-0001"),
+                )))
+            }
+            file.writeText(JSON.encodeToString(state.copy(commands = listOf(old.copy(envelope = changed)))))
+        }
+
+        fun serveCommandReports(status: Int = 200) {
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    requests += capture(request)
+                    return MockResponse().setResponseCode(status).setHeader("Content-Type", "application/json").setBody("{}")
+                }
+            }
+        }
+        private var trustSnapshot = DeviceTrustSnapshot(
             installationId = INSTALLATION_ID,
             hardwareSecurityLevel = HardwareSecurityLevel.TRUSTED_EXECUTION_ENVIRONMENT,
             trustState = DeviceTrustState.TRUSTED,
@@ -876,8 +1078,15 @@ class HttpManagementControlServicePolicyReceiptTest {
         )
         val controlSigningThreads = java.util.Collections.synchronizedList(mutableListOf<String>())
         private val deviceTrustService = mockk<DeviceTrustService> {
-            coEvery { current() } returns trustSnapshot
-            coEvery { applyRemoteTrust(any(), any()) } returns trustSnapshot
+            coEvery { current() } answers { trustSnapshot }
+            coEvery { applyRemoteTrust(any(), any()) } answers {
+                trustSnapshot = trustSnapshot.copy(trustState = DeviceTrustState.TRUSTED)
+                trustSnapshot
+            }
+            coEvery { applyRemoteRestriction(any(), any()) } answers {
+                trustSnapshot = trustSnapshot.copy(trustState = firstArg())
+                trustSnapshot
+            }
             coEvery { signControlStatement(any()) } answers {
                 controlSigningThreads.add(Thread.currentThread().name)
                 DeviceControlRequestSignature(
@@ -978,9 +1187,57 @@ class HttpManagementControlServicePolicyReceiptTest {
 
         fun failNextStatePublish() = atomicFileHarness.failNextPublish()
 
+        fun beginStaleAccess() { trustSnapshot = trustSnapshot.copy(trustState = DeviceTrustState.STALE) }
+        fun currentTrustState() = trustSnapshot.trustState
+
+        fun serveSignedRestriction(trustState: String, reason: String) {
+            val publication = revisionEnvelope(1, minimumSecurityEpoch = 3)
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val captured = capture(request)
+                    requests += captured
+                    check(captured.path == SYNC_PATH)
+                    val response = JSON.parseToJsonElement(syncResponse(publication)).jsonObject.toMutableMap()
+                    val original = response.getValue("device_trust").jsonObject.getValue("decision").jsonObject
+                    val decision = JsonObject(original + mapOf(
+                        "trust_state" to kotlinx.serialization.json.JsonPrimitive(trustState),
+                        "restriction_reason_code" to kotlinx.serialization.json.JsonPrimitive(reason),
+                    ))
+                    response["device_trust"] = JSON.encodeToJsonElement(SignedJsonEnvelopeWire.serializer(), SignedJsonEnvelopeWire(
+                        decision = decision, keyId = keyId, signatureBase64 = authoritySignature(verifier.canonicalJson(decision)),
+                    ))
+                    return jsonResponse(JsonObject(response).toString())
+                }
+            }
+        }
+
+        fun serveAccessRestoration(failConfirmation: Boolean) {
+            // A real publication is persisted once. Replays retain its exact signed bytes.
+            val publication = revisionEnvelope(1, minimumSecurityEpoch = 3)
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val captured = capture(request)
+                    requests += captured
+                    check(captured.path == SYNC_PATH)
+                    if (requests.size == 2 && failConfirmation) return MockResponse().setResponseCode(503)
+                    val response = JSON.parseToJsonElement(syncResponse(publication)).jsonObject.toMutableMap()
+                    if (requests.size == 2) {
+                        val ticket = DeviceAccessTicketWire(1, "restored-access-ticket-original-01", INSTALLATION_ID,
+                            requireNotNull(trustSnapshot.attestationPublicKeySha256), trustSnapshot.attestationVersion, 1,
+                            NOW - 5, NOW + 120_000, 30_000, 60_000)
+                        val payload = JSON.encodeToJsonElement(DeviceAccessTicketWire.serializer(), ticket).jsonObject
+                        response["access_ticket"] = JSON.encodeToJsonElement(SignedJsonEnvelopeWire.serializer(), SignedJsonEnvelopeWire(
+                            ticket = payload, keyId = keyId, signatureBase64 = authoritySignature(verifier.canonicalJson(payload)),
+                        ))
+                    }
+                    return jsonResponse(JsonObject(response).toString())
+                }
+            }
+        }
+
         fun reopenRepository(): SignedManagementStateRepository = SignedManagementStateRepository(context, verifier)
 
-        fun revisionEnvelope(version: Long): SignedPolicyRevisionEnvelopeWire {
+        fun revisionEnvelope(version: Long, minimumSecurityEpoch: Int = 4): SignedPolicyRevisionEnvelopeWire {
             val policy = PolicyWire(
                 policyId = "global-policy",
                 version = version,
@@ -1016,7 +1273,7 @@ class HttpManagementControlServicePolicyReceiptTest {
                 effectiveAt = policy.effectiveAtEpochMillis,
                 expiresAt = policy.expiresAtEpochMillis,
                 payloadDigest = digest,
-                minSecurityEpoch = 4,
+                minSecurityEpoch = minimumSecurityEpoch,
                 requiredCapabilities = listOf("CAPTURE_BLOCK"),
                 targetSnapshotDigest = "b".repeat(64),
             )

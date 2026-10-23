@@ -76,9 +76,11 @@ class DefaultAccountLocalStateCleaner(
             .joinToString("") { byte -> String.format(Locale.ROOT, "%02x", byte) }
             .take(16)
         val dataStoreRoot = File(context.filesDir, DATASTORE_DIRECTORY).canonicalFile
-        val storeFile = File(dataStoreRoot, "session_${hashedSessionId}_preferences.preferences_pb").canonicalFile
-        require(storeFile.parentFile == dataStoreRoot) { "Session preference path is outside its managed root." }
-        return deleteIfPresent(storeFile) && deleteIfPresent(File(storeFile.path + BACKUP_SUFFIX))
+        return listOf("preferences", "seen-invites").all { owner ->
+            val storeFile = File(dataStoreRoot, "session_${hashedSessionId}_$owner.preferences_pb").canonicalFile
+            require(storeFile.parentFile == dataStoreRoot) { "Session preference path is outside its managed root." }
+            deleteIfPresent(storeFile) && deleteIfPresent(File(storeFile.path + BACKUP_SUFFIX))
+        }
     }
 
     private fun clearAccountPreferenceReferences(scope: DeletionScope.Account, preserveAccountState: Boolean): Boolean {

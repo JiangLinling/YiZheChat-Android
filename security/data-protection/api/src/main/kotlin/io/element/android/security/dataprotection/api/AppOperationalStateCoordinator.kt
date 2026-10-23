@@ -34,6 +34,7 @@ data class LifecycleOperationRequest(
     val deadlineEpochMillis: Long,
     val roomCreationProtocol: String? = null,
     val mediaCleanupProtocol: String? = null,
+    val recoveryMode: RecoveryHistoryMode? = null,
 ) {
     init {
         require(operationId.length in 16..256) { "Lifecycle operation identity length is invalid." }
@@ -42,6 +43,9 @@ data class LifecycleOperationRequest(
         }
         require(idempotencyKey.length in 16..256) { "Lifecycle idempotency key length is invalid." }
         require(deadlineEpochMillis > 0) { "Lifecycle deadline is invalid." }
+        require(recoveryMode == null || (lifecycleId == FullAppLifecycleId.LC_08 && trigger == "recovery_key_entered")) {
+            "Recovery choice requires the original LC08 key intent."
+        }
         require(roomCreationProtocol == null || (roomCreationProtocol == "managed-v1" && lifecycleId == FullAppLifecycleId.LC_12 && trigger == "room_create")) {
             "Managed room creation protocol requires LC-12 room_create."
         }

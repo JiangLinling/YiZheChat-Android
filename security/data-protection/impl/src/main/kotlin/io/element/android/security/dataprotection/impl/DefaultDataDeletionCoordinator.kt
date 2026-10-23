@@ -61,6 +61,7 @@ class DefaultDataDeletionCoordinator(
                     completedSteps = emptySet(),
                     retryRequired = true,
                     errorCode = ERROR_JOURNAL_WRITE_FAILED,
+                    accountIdHash = request.scope.accountHash(),
                 )
             }
             begin.entry.toReport(retryRequired = !begin.alreadyComplete)
@@ -106,6 +107,7 @@ class DefaultDataDeletionCoordinator(
                 completedSteps = emptySet(),
                 retryRequired = true,
                 errorCode = ERROR_JOURNAL_WRITE_FAILED,
+                accountIdHash = request.scope.accountHash(),
             )
         }
         if (begin.alreadyComplete) return begin.entry.toReport(retryRequired = false)
@@ -293,7 +295,14 @@ class DefaultDataDeletionCoordinator(
         completedSteps = completedSteps,
         retryRequired = retryRequired,
         errorCode = errorCode,
+        accountIdHash = request.scope.accountHash(),
     )
+
+    private fun DeletionScope.accountHash(): String = when (this) {
+        is DeletionScope.Account -> accountIdHash
+        is DeletionScope.Content -> accountIdHash
+        is DeletionScope.Asset -> accountIdHash
+    }
 
     private companion object {
         const val ERROR_SCOPED_IDENTIFIER_INVALID = "SCOPED_IDENTIFIER_INVALID"

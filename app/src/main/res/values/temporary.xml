@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="screen_entry_remote_locked_title">此设备已被锁定</string>
+    <string name="screen_entry_remote_locked_description">请联系管理员解锁，解锁后自动恢复。</string>
     <!-- Matches the cream canvas of the full YiZhe emblem during Android 12 splash. -->
     <color name="yizhe_splash_background">#FFFCF3E3</color>
     <string name="yizhechat_app_update_channel">YiZheChat updates</string>

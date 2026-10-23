@@ -32,6 +32,9 @@ class AccountLocalStateCleanerTest {
             parentFile?.mkdirs()
             writeText("sensitive-session-preferences")
         }
+        val invites = File(sessionPreferences.path.replace("_preferences.", "_seen-invites.")).apply { writeText("old-vault-reference") }
+        val invitesBackup = File(invites.path + ".bak").apply { writeText("old-vault-backup") }
+        val otherAccount = sessionPreferencesFile(context, "@other:yizhe.test").apply { writeText("other-account-preferences") }
         context.getSharedPreferences("${context.packageName}_preferences", Context.MODE_PRIVATE)
             .edit()
             .putString(friendProfileReferenceKey(scope.vaultId), "encrypted-reference")
@@ -52,6 +55,9 @@ class AccountLocalStateCleanerTest {
         assertThat(leases.revokedVault).isEqualTo(AccountVaultId(scope.vaultId))
         assertThat(plaintext.targets).containsExactlyElementsIn(LegacyPlaintextTarget.entries)
         assertThat(sessionPreferences.exists()).isFalse()
+        assertThat(invites.exists()).isFalse()
+        assertThat(invitesBackup.exists()).isFalse()
+        assertThat(otherAccount.readText()).isEqualTo("other-account-preferences")
         val defaultPreferences = context.getSharedPreferences("${context.packageName}_preferences", Context.MODE_PRIVATE)
         assertThat(defaultPreferences.contains(friendProfileReferenceKey(scope.vaultId))).isFalse()
         assertThat(defaultPreferences.contains("friend_profiles_sync_pending_${scope.accountIdHash}")).isFalse()
@@ -67,6 +73,7 @@ class AccountLocalStateCleanerTest {
             parentFile?.mkdirs()
             writeText("replacement-session-preferences")
         }
+        val invites = File(preferences.path.replace("_preferences.", "_seen-invites.")).apply { writeText("replacement-invites") }
         val plaintext = RecordingPlaintextCleaner()
         val leases = RecordingLeaseManager()
         assertThat(
@@ -76,6 +83,7 @@ class AccountLocalStateCleanerTest {
         assertThat(leases.revokedVault).isEqualTo(AccountVaultId(scope.vaultId))
         assertThat(plaintext.targets).isEmpty()
         assertThat(preferences.readText()).isEqualTo("replacement-session-preferences")
+        assertThat(invites.readText()).isEqualTo("replacement-invites")
     }
 
     private fun aScope() = DeletionScope.Account(

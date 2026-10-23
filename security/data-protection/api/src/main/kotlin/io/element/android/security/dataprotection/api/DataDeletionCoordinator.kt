@@ -84,6 +84,8 @@ data class DeletionReport(
     val completedSteps: Set<DeletionStep>,
     val retryRequired: Boolean,
     val errorCode: String? = null,
+    /** Full scope recovered from the existing journal; never inferred from an operation-id prefix. */
+    val accountIdHash: String? = null,
 ) {
     val isComplete: Boolean = DeletionStep.COMPLETE in completedSteps && !retryRequired
 }

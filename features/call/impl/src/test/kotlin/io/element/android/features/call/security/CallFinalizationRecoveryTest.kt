@@ -26,6 +26,39 @@ import java.io.File
 import java.io.IOException
 
 class CallFinalizationRecoveryTest {
+    @Test fun `retired subject cleanup never reopens its Vault or sends history and waits for authority completion`() = runTest {
+        val backing = EncryptedCallFinalizationStore(files, roots)
+        var reads = 0
+        val store = object : CallFinalizationStore by backing {
+            override suspend fun read(pending: PendingCallFinalization): CallFinalizationRecord {
+                reads++
+                error("A retired Vault must not be read")
+            }
+        }
+        var confirmed = false
+        val coordinator = object : AppOperationalStateCoordinator by operations {
+            override suspend fun start(request: LifecycleOperationRequest): LifecycleOperation =
+                this@CallFinalizationRecoveryTest.operations.start(request).copy(authorityRevisions = mapOf("RTC_RETIRED_SUBJECT_CLEANUP" to "verified-original-binding"))
+            override suspend fun resume(operationId: String): LifecycleOperation = this@CallFinalizationRecoveryTest.operations.operation(operationId).copy(
+                status = if (confirmed) LifecycleOperationStatus.CANCELLED else LifecycleOperationStatus.RUNNING,
+                terminalReceiptId = if (confirmed) "verified-terminal-receipt" else null,
+                authorityRevisions = if (confirmed) mapOf("RTC_PRE_ADMISSION_CANCEL" to "verified-no-admission") else emptyMap(),
+            )
+        }
+        val current = recovery(coordinator, store)
+        current.checkpoint(call, operationId)
+        current.released(call, true)
+        current.recoverOnce { error("Already released") }
+        assertThat(store.pending()).hasSize(1)
+        assertThat(reads).isEqualTo(0)
+        assertThat(sent).isEqualTo(0)
+        confirmed = true
+        clock.epochMillisResult += 61_000
+        current.recoverOnce { error("Already released") }
+        assertThat(store.pending()).isEmpty()
+        assertThat(reads).isEqualTo(0)
+        assertThat(client.getJoinedRoomCalledCount).isEqualTo(0)
+    }
     @org.junit.Before fun captureFailures() {
         timber.log.Timber.plant(object : timber.log.Timber.Tree() {
             override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {

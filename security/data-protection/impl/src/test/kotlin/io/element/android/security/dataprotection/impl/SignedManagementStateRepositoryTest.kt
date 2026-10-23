@@ -36,6 +36,28 @@ import java.util.Base64
 @RunWith(RobolectricTestRunner::class)
 class SignedManagementStateRepositoryTest {
     @Test
+    fun `signed local clear and global child keep distinct noninterchangeable scopes`() {
+        val now = System.currentTimeMillis()
+        val local = Fixture(temporaryFolder.newFolder()).let { f ->
+            f.repository.acceptCommand(f.mobileClear(now, reason = "ADMIN_LOCAL_ACCOUNT_CLEAR"), now)
+        }
+        assertThat(local.targetMatrixDeviceIdHash).isEqualTo("b".repeat(64))
+        assertThat(local.globalDestroyOperationId).isNull()
+        val global = Fixture(temporaryFolder.newFolder()).let { f ->
+            f.repository.acceptCommand(f.mobileClear(now, matrixHash = null, reason = "GLOBAL_ACCOUNT_DESTROY",
+                generation = null, globalRoot = "original-global-root-00001"), now)
+        }
+        assertThat(global.globalDestroyOperationId).isEqualTo("original-global-root-00001")
+        assertThat(global.targetMatrixDeviceIdHash).isNull()
+        for (reason in listOf("ADMIN_LOCAL_ACCOUNT_CLEAR", "GLOBAL_ACCOUNT_DESTROY", "UNKNOWN_CLEAR")) {
+            val f = Fixture(temporaryFolder.newFolder())
+            assertThrows(IllegalStateException::class.java) {
+                f.repository.acceptCommand(f.mobileClear(now, reason = reason, globalRoot = "mixed-or-missing-scope-0001"), now)
+            }
+        }
+    }
+
+    @Test
     fun `mobile retirement notice is signed and bound to the exact old login after completion`() {
         val fixture = Fixture(temporaryFolder.root)
         val now = System.currentTimeMillis()
@@ -1361,7 +1383,8 @@ class SignedManagementStateRepositoryTest {
             return SignedJsonEnvelopeWire(command = payload, keyId = keyId, signatureBase64 = sign(verifier.canonicalJson(payload)))
         }
 
-        fun mobileClear(now: Long, matrixHash: String? = "b".repeat(64)): SignedJsonEnvelopeWire {
+        fun mobileClear(now: Long, matrixHash: String? = "b".repeat(64), reason: String = "ACCOUNT_MOBILE_SUPERSEDED",
+            generation: Long? = 1, globalRoot: String? = null): SignedJsonEnvelopeWire {
             val payload = Json.encodeToJsonElement(CommandWire.serializer(), CommandWire(
                 commandId = "mobile-clear-command",
                 installationId = INSTALLATION_ID,
@@ -1374,8 +1397,9 @@ class SignedManagementStateRepositoryTest {
                 expiresAtEpochMillis = now + 60_000,
                 schemaVersion = 2,
                 targetMatrixDeviceIdHash = matrixHash,
-                mobileGeneration = 1,
-                reasonCode = "ACCOUNT_MOBILE_SUPERSEDED",
+                mobileGeneration = generation,
+                reasonCode = reason,
+                globalDestroyOperationId = globalRoot,
             )).jsonObject
             return SignedJsonEnvelopeWire(command = payload, keyId = keyId, signatureBase64 = sign(verifier.canonicalJson(payload)))
         }

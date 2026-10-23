@@ -49,6 +49,8 @@ class ManagementControlCoordinatorTest {
             reasonCode = "ACCOUNT_MOBILE_SUPERSEDED", targetMatrixDeviceIdHash = "b".repeat(64), mobileGeneration = 2,
         )
         assertThat(handover.isScopedMobileHandover()).isTrue()
+        assertThat(handover.lifecycleBinding().trigger).isEqualTo("remove_local_account")
+        assertThat(command(ManagementCommandType.CLEAR_ACCOUNT).lifecycleBinding().trigger).isEqualTo("admin_destroy")
         assertThat(handover.copy(reasonCode = "ADMIN_REVOKE").isScopedMobileHandover()).isFalse()
         assertThat(handover.copy(targetMatrixDeviceIdHash = null).isScopedMobileHandover()).isFalse()
         assertThat(handover.copy(mobileGeneration = null).isScopedMobileHandover()).isFalse()

@@ -33,6 +33,7 @@ data class VerifiedManagementCommand(
     val targetMatrixDeviceIdHash: String? = null,
     val mobileGeneration: Long? = null,
     val reasonCode: String? = null,
+    val globalDestroyOperationId: String? = null,
 ) {
     fun targetsAccountSession(accountHash: String, matrixDeviceHash: String): Boolean =
         type == ManagementCommandType.CLEAR_ACCOUNT && accountIdHash == accountHash &&
@@ -902,6 +903,7 @@ fun ManagementSyncReport.toStartupSecurityReadiness(
         status == ManagementSyncStatus.SECURITY_REJECTED && errorCode == "CONTROL_SYNC_TRUST_DECISION_REJECTED" -> "DEVICE_TRUST_NOT_READY"
         status == ManagementSyncStatus.SECURITY_REJECTED && errorCode == "INSTALLATION_IDENTITY_MISMATCH" -> "INSTALLATION_IDENTITY_MISMATCH"
         status == ManagementSyncStatus.SECURITY_REJECTED && errorCode == "LOCAL_ACCESS_RESTRICTED" -> "DEVICE_TRUST_NOT_READY"
+        status == ManagementSyncStatus.SECURITY_REJECTED && errorCode == "DEVICE_ADMINISTRATIVELY_LOCKED" -> "DEVICE_ADMINISTRATIVELY_LOCKED"
         status == ManagementSyncStatus.SECURITY_REJECTED && errorCode == "POLICY_APPLICATION_BLOCKED_VERSION" ->
             "UNSUPPORTED_POLICY_VERSION"
         status == ManagementSyncStatus.SECURITY_REJECTED && errorCode == "POLICY_APPLICATION_FAILED" ->

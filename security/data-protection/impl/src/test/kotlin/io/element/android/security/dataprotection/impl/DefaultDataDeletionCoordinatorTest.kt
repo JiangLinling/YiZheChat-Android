@@ -34,7 +34,9 @@ class DefaultDataDeletionCoordinatorTest {
 
         assertThat(prepared.completedSteps).containsExactly(DeletionStep.REQUESTED)
         assertThat(prepared.errorCode).isNull()
+        assertThat(prepared.accountIdHash).isEqualTo(ACCOUNT_HASH)
         assertThat(recovered.operationReports.single().isComplete).isTrue()
+        assertThat(recovered.operationReports.single().accountIdHash).isEqualTo(ACCOUNT_HASH)
         assertThat(notifications.calls).isEqualTo(1)
         assertThat(notifications.scopes.single().localSessionId).isEqualTo("@alice:example.org")
         assertThat(sessions.calls).isEqualTo(1)
@@ -77,8 +79,10 @@ class DefaultDataDeletionCoordinatorTest {
 
         assertThat(failed.errorCode).isEqualTo("DATABASE_CHECKPOINT_FAILED")
         assertThat(failed.retryRequired).isTrue()
+        assertThat(failed.accountIdHash).isEqualTo(ACCOUNT_HASH)
         assertThat(recovery.operationReports).hasSize(1)
         assertThat(recovery.operationReports.single().isComplete).isTrue()
+        assertThat(recovery.operationReports.single().accountIdHash).isEqualTo(ACCOUNT_HASH)
     }
 
     @Test

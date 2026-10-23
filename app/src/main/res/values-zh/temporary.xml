@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="screen_entry_remote_locked_title">此设备已被锁定</string>
+    <string name="screen_entry_remote_locked_description">请联系管理员解锁，解锁后自动恢复。</string>
     <string name="yizhechat_app_update_channel">YiZheChat 应用更新</string>
     <string name="yizhechat_app_update_title">发现 YiZheChat 新版本 %1$s</string>
     <string name="yizhechat_app_update_ready">打开 YiZheChat 下载并校验更新包</string>
@@ -82,7 +84,7 @@
     <string name="screen_force_update_downloading">正在下载 %1$d%% · %2$s / %3$s</string>
     <string name="screen_force_update_downloading_unknown">正在下载 · %1$s</string>
     <string name="screen_entry_offline_expired_title">请联网验证后继续</string>
-    <string name="screen_entry_offline_expired_description">当前设备需要联网校验后才能继续。账号和聊天数据已保留，联网验证后自动恢复。</string>
+    <string name="screen_entry_offline_expired_description">网络已断开，联网后自动恢复。账号和聊天已保留。</string>
     <string name="screen_entry_service_retry_title">正在重新连接安全服务</string>
     <string name="screen_entry_service_retry_description">服务暂时无法连接，正在重试；恢复后会自动继续。</string>
     <string name="screen_entry_rate_limit_title">请稍候再试</string>

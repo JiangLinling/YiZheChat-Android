@@ -161,7 +161,33 @@ class DefaultCallFinalizationRecovery(
                 // This carries only opaque lifecycle subjects, so the authority can start departure
                 // while the encrypted call record remains inaccessible in the locked Vault.
                 if (pending.key !in started) {
-                    operations.start(request)
+                    val admitted = operations.start(request)
+                    check(admitted.operationId == pending.operationId && admitted.lifecycleId == FullAppLifecycleId.LC_20 &&
+                        admitted.subjects.accountIdHash == pending.accountHash && admitted.subjects.matrixDeviceIdHash == pending.deviceHash &&
+                        admitted.subjects.roomIdHash == pending.roomHash) { "Call cleanup authority subjects changed." }
+                    if (isCompleted(admitted)) {
+                        closeRecoveryRoom(pending.key)
+                        store.remove(pending.key)
+                        retryAt.remove(pending.key)
+                        continue
+                    }
+                    if ("RTC_RETIRED_SUBJECT_CLEANUP" in admitted.authorityRevisions) {
+                        // The authority bound this teardown to the exact retired installation/session.
+                        // RELEASED is the durable local media fact. Do not reopen the old Vault,
+                        // restore its Matrix session or publish history from a retired identity.
+                        operations.perform(request) { }
+                        val terminal = operations.resume(pending.operationId)
+                        if (isCompleted(terminal)) {
+                            closeRecoveryRoom(pending.key)
+                            store.remove(pending.key)
+                            retryAt.remove(pending.key)
+                            started.remove(pending.key)
+                            Timber.i("RTC retired-subject cleanup completed with authoritative terminal receipt")
+                        } else {
+                            retryAt[pending.key] = clock.epochMillis() + 60_000L
+                        }
+                        continue
+                    }
                     started += pending.key
                 }
                 val access = CallProtectionSession(pending.vaultId, EMBEDDED_CALL_WIDGET_ORIGIN, blockScreenCapture = true)

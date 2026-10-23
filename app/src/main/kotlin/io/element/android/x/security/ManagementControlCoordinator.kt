@@ -18,6 +18,7 @@ import dev.zacsweers.metro.SingleIn
 import dev.zacsweers.metro.binding
 import io.element.android.libraries.androidutils.clipboard.InAppClipboard
 import io.element.android.libraries.androidutils.startup.StartupTrace
+import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.core.extensions.runCatchingExceptions
 import io.element.android.libraries.di.annotations.AppCoroutineScope
 import io.element.android.libraries.matrix.api.core.SessionId
@@ -76,6 +77,7 @@ import io.element.android.security.securestorage.api.VaultKeyService
 import io.element.android.security.securestorage.api.accountIdHash
 import io.element.android.security.securestorage.api.deriveAccountVaultId
 import io.element.android.services.appnavstate.api.AppForegroundStateService
+import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -97,7 +99,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import timber.log.Timber
-import java.security.MessageDigest
 
 private const val STARTUP_DIAGNOSTIC_TAG = "YiZheManagement"
 private const val MAX_STARTUP_FAILURE_CAUSES = 8
@@ -121,6 +122,7 @@ class ManagementControlCoordinator(
     private val notificationCleaner: NotificationCleaner,
     private val appForegroundStateService: AppForegroundStateService,
     private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
+    private val coroutineDispatchers: CoroutineDispatchers,
 ) : ManagementSecurityRefreshService, DataProtectionPolicyRevisionProvider, DefaultLifecycleObserver {
     private val synchronizationMutex = Mutex()
     private val startupReadinessMutex = Mutex()
@@ -179,7 +181,16 @@ class ManagementControlCoordinator(
             val readiness = awaitStartupReadiness(
                 System.currentTimeMillis() + STARTUP_READINESS_TIMEOUT_MILLIS,
             )
-            if (readiness.state != StartupSecurityReadinessState.READY_FOR_LC01 && !readiness.offlineEligible) return@launch
+            val trust = deviceTrustService.current()
+            // A verified administrative lock blocks content, not the control channel needed to receive its release.
+            // Keep the original foreground LC-07 owner; other rejected or replaced identities remain fail-closed.
+            val awaitingAdministrativeUnlock = readiness.state == StartupSecurityReadinessState.SECURITY_REJECTED &&
+                readiness.reasonCode == "DEVICE_ADMINISTRATIVELY_LOCKED" &&
+                mutableEntryRestriction.value == "DEVICE_ADMINISTRATIVELY_LOCKED" &&
+                readiness.installationId == trust.installationId && trust.trustState == DeviceTrustState.STALE
+            if (readiness.state != StartupSecurityReadinessState.READY_FOR_LC01 && !readiness.offlineEligible &&
+                !awaitingAdministrativeUnlock
+            ) return@launch
             var nextDelayMillis = DEFAULT_HEARTBEAT_INTERVAL_MILLIS
             while (true) {
                 delay(withJitter(nextDelayMillis))
@@ -192,7 +203,16 @@ class ManagementControlCoordinator(
                             // Keep full refresh/automatic renewal inside this original, still-pending LC-07.
                             // The lightweight receipt remains the actual heartbeat result.
                             val refresh = synchronizeAndExecuteWithReport()
-                            pulse.copy(nextHeartbeatDelayMillis = refresh.heartbeatIntervalMillis ?: DEFAULT_HEARTBEAT_INTERVAL_MILLIS)
+                            val stillAdministrativelyLocked = refresh.errorCode == "DEVICE_ADMINISTRATIVELY_LOCKED" &&
+                                deviceTrustService.current().trustState == DeviceTrustState.STALE
+                            pulse.copy(
+                                status = if (refresh.status == ManagementSyncStatus.SECURITY_REJECTED && !stillAdministrativelyLocked) {
+                                    ManagementHeartbeatStatus.SECURITY_REJECTED
+                                } else {
+                                    pulse.status
+                                },
+                                nextHeartbeatDelayMillis = refresh.heartbeatIntervalMillis ?: DEFAULT_HEARTBEAT_INTERVAL_MILLIS,
+                            )
                         } else {
                             pulse
                         }
@@ -207,12 +227,15 @@ class ManagementControlCoordinator(
                 when (heartbeat.status) {
                     ManagementHeartbeatStatus.ACTIVE -> {
                         mutableEntryIsOffline.value = false
-                        mutableEntryRestriction.value = null
+                        // A pulse confirms connectivity, not release of an administrative lock or local Vault gate.
+                        if (deviceTrustService.current().allowsLocalVaultAccess) mutableEntryRestriction.value = null
                         nextDelayMillis = heartbeat.nextHeartbeatDelayMillis
                     }
                     ManagementHeartbeatStatus.RETRY_REQUIRED -> {
                         mutableEntryIsOffline.value = true
-                        if (managementControlService.offlineEntryStatus() == null) mutableEntryRestriction.value = "OFFLINE_ENTRY_EXPIRED"
+                        if (managementControlService.offlineEntryStatus() == null) {
+                            mutableEntryRestriction.update { current -> current ?: "OFFLINE_ENTRY_EXPIRED" }
+                        }
                         nextDelayMillis = heartbeat.nextHeartbeatDelayMillis
                     }
                     ManagementHeartbeatStatus.POLICY_REFRESH_REQUIRED,
@@ -300,7 +323,7 @@ class ManagementControlCoordinator(
                     now + STARTUP_READINESS_TIMEOUT_MILLIS,
                 )
                 // Policy, key and receipt work must not occupy the UI dispatcher.
-                appCoroutineScope.async(context = Dispatchers.Default, start = CoroutineStart.LAZY) {
+                appCoroutineScope.async(context = coroutineDispatchers.computation, start = CoroutineStart.LAZY) {
                     runStartupReadiness(effectiveDeadline)
                 }.also { startupReadinessJob = it }
             }
@@ -456,10 +479,11 @@ class ManagementControlCoordinator(
         if (syncReport.status == ManagementSyncStatus.SECURITY_REJECTED) {
             mutableEntryRestriction.value = syncReport.toStartupSecurityReadiness().reasonCode ?: "SECURITY_POLICY_REJECTED"
             restrictLocalAccess()
-        } else if (syncReport.status == ManagementSyncStatus.SYNCHRONIZED) {
+        } else if (syncReport.status == ManagementSyncStatus.SYNCHRONIZED && deviceTrustService.current().allowsLocalVaultAccess) {
             mutableEntryRestriction.value = null
         } else if (sessionStore.getAllSessions().isNotEmpty() && managementControlService.offlineEntryStatus() == null) {
-            mutableEntryRestriction.value = "OFFLINE_ENTRY_EXPIRED"
+            // A transport retry cannot replace a known administrative/security restriction.
+            mutableEntryRestriction.update { current -> current ?: "OFFLINE_ENTRY_EXPIRED" }
             // Offline expiry preserves the account, Vault and drafts. The UI gate hides protected projections.
         }
         val commands = if (completingRevokedCommand) {
@@ -578,7 +602,7 @@ class ManagementControlCoordinator(
         val pendingAfterExecution = managementControlService.pendingCommands()
         val remainingSessions = sessionStore.getAllSessions()
         val blockingCommands = pendingAfterExecution.filterNot { command ->
-            command.isScopedMobileHandover() && remainingSessions.none { session ->
+            command.isScopedLocalAccountClear() && remainingSessions.none { session ->
                 session.isTokenValid && command.targetsAccountSession(accountIdHash(session.userId), stableCommandSubjectHash(session.deviceId))
             }
         }
@@ -591,8 +615,11 @@ class ManagementControlCoordinator(
             shouldRejectLocalAccess(
                 allowsLocalVaultAccess = deviceTrust.allowsLocalVaultAccess,
                 managedApprovalPending = deviceTrust.managedApprovalPending,
-            ) ->
-                syncReport.copy(status = ManagementSyncStatus.SECURITY_REJECTED, errorCode = "LOCAL_ACCESS_RESTRICTED")
+            ) -> {
+                val reason = mutableEntryRestriction.value ?: "DEVICE_TRUST_NOT_READY"
+                mutableEntryRestriction.value = reason
+                syncReport.copy(status = ManagementSyncStatus.SECURITY_REJECTED, errorCode = reason)
+            }
             commandExecutionFailed ->
                 syncReport.copy(status = ManagementSyncStatus.RETRY_REQUIRED, errorCode = "COMMAND_EXECUTION_FAILED")
             policyApplyHandshakeFailed ->
@@ -641,12 +668,32 @@ class ManagementControlCoordinator(
     private suspend fun execute(command: VerifiedManagementCommand) {
         val trust = deviceTrustService.current()
         check(command.installationId == trust.installationId)
+        if (command.type == ManagementCommandType.CLEAR_ACCOUNT && command.globalDestroyOperationId != null) {
+            check(command.reasonCode == "GLOBAL_ACCOUNT_DESTROY")
+            // The signed command is the original global saga's CLIENT_CLEAR task. Its authenticated
+            // final report is receipted on that root; a device must not create or take ownership of it.
+            val result = try {
+                executeAccountClear(command)
+            } catch (failure: Exception) {
+                runCatchingExceptions { reportFailure(command) }.onFailure(failure::addSuppressed)
+                throw failure
+            }
+            report(command, result.state, result.progress)
+            return
+        }
+        check(command.type != ManagementCommandType.CLEAR_ACCOUNT || command.isScopedLocalAccountClear()) {
+            "Account clear has no verified local or global intent."
+        }
         val lifecycle = command.lifecycleBinding()
+        val scopedHandover = command.isScopedLocalAccountClear()
+        val commandHash = stableCommandSubjectHash(command.commandId)
         val request = lifecycleOperationRequest(
             lifecycleId = lifecycle.lifecycleId,
             trigger = lifecycle.trigger,
+            accountIdHash = command.accountIdHash.takeIf { scopedHandover },
+            matrixDeviceIdHash = command.targetMatrixDeviceIdHash.takeIf { scopedHandover },
             eventIdHash = command.contentId?.let(::stableCommandSubjectHash),
-            operationId = "managed-command-${stableCommandSubjectHash(command.commandId)}",
+            operationId = if (scopedHandover) "managed-session-exit-$commandHash" else "managed-command-$commandHash",
             deadlineEpochMillis = command.expiresAtEpochMillis,
         )
         appOperationalStateCoordinator.withOperation(request) { operationId ->
@@ -662,6 +709,9 @@ class ManagementControlCoordinator(
                 throw failure
             }
             report(command, result.state, result.progress)
+            // WAITING_RESTART only proves the old login was fenced. Its original deletion journal
+            // must finish (including stopped UI and closed files) before either cleanup receipt is sent.
+            if (scopedHandover && result.state != ManagementCommandState.COMPLETE) return@withOperation
             runCatchingExceptions {
                 appOperationalStateCoordinator.recordClientReceipt(
                     LifecycleClientReceipt(
@@ -673,21 +723,37 @@ class ManagementControlCoordinator(
                         occurredAtEpochMillis = System.currentTimeMillis(),
                     )
                 )
+                if (scopedHandover) {
+                    appOperationalStateCoordinator.recordClientReceipt(
+                        LifecycleClientReceipt(
+                            operationId = operationId,
+                            component = LifecycleComponent.ANDROID_FRONTEND,
+                            phase = LifecyclePhase.CLIENT_APPLIED,
+                            resultCode = "RETIRED_SESSION_UI_CLOSED",
+                            receiptReference = "android-ui:retired-session-cleanup:$operationId",
+                            occurredAtEpochMillis = System.currentTimeMillis(),
+                        )
+                    )
+                }
             }.onFailure { failure ->
-                Log.w(
-                    STARTUP_DIAGNOSTIC_TAG,
-                    "YZMGMT_COMMAND_RECEIPT_PENDING type=${command.type.name} " +
-                        "failure_chain=${startupFailureTypeChain(failure)}",
+                Timber.w(
+                    "Management command receipt pending type=%s failure_chain=%s",
+                    command.type.name,
+                    startupFailureTypeChain(failure),
                 )
             }
         }
     }
 
     private suspend fun executeLock(command: VerifiedManagementCommand): ManagementCommandResult {
+        mutableEntryRestriction.value = "DEVICE_ADMINISTRATIVELY_LOCKED"
         deviceTrustService.applyRemoteRestriction(DeviceTrustState.STALE, command.issuedAtEpochMillis)
         sessionStore.getAllSessions().forEach { session ->
-            vaultKeyService.lock(deriveAccountVaultId(session.userId, session.deviceId))
+            val vaultId = deriveAccountVaultId(session.userId, session.deviceId)
+            secureMediaLeaseManager.revokeVault(vaultId)
+            vaultKeyService.lock(vaultId)
         }
+        io.element.android.libraries.androidutils.clipboard.InAppClipboard.clear()
         return ManagementCommandResult(ManagementCommandState.COMPLETE, 100)
     }
 
@@ -718,7 +784,10 @@ class ManagementControlCoordinator(
             val signedOutOperationId = command.targetMatrixDeviceIdHash?.let { matrixHash ->
                 io.element.android.security.dataprotection.api.signedOutCleanupOperationId(checkNotNull(command.accountIdHash), matrixHash).value
             }
-            if (recovery.operationReports.any { it.operationId.value in setOf(operationId, signedOutOperationId) && !it.isComplete }) {
+            if (recovery.operationReports.any {
+                !it.isComplete && (it.operationId.value in setOf(operationId, signedOutOperationId) ||
+                    (command.globalDestroyOperationId != null && (it.accountIdHash == null || it.accountIdHash == command.accountIdHash)))
+            }) {
                 return ManagementCommandResult(ManagementCommandState.WAITING_RESTART, 70)
             }
             return ManagementCommandResult(ManagementCommandState.COMPLETE, 100)
@@ -728,15 +797,14 @@ class ManagementControlCoordinator(
         // Device-wide trust transitions remain owned by LOCK/REVOKE (LC-09/LC-07).
         sessions.forEach { session ->
             prepareDeletion(command, session, DeletionReason.ADMINISTRATIVE_REVOCATION)
+            secureMediaLeaseManager.revokeVault(deriveAccountVaultId(session.userId, session.deviceId))
             check(vaultKeyService.destroy(
                 deriveAccountVaultId(session.userId, session.deviceId),
                 VaultDestroyReason.ADMINISTRATIVE_REVOCATION,
             )) { "Account key retirement failed." }
-            if (command.isScopedMobileHandover()) {
-                // Keep the durable file cleanup pending until the SDK is closed. Navigation can
-                // already show SignedOut because this exact login no longer has keys or authority.
-                sessionStore.invalidateSessionIfDeviceMatches(session.userId, session.deviceId)
-            }
+            // Stop displaying this exact login immediately. WAITING_RESTART concerns durable SDK/file
+            // cleanup and never permits decrypted UI to remain visible after its key was destroyed.
+            sessionStore.invalidateSessionIfDeviceMatches(session.userId, session.deviceId)
         }
         return ManagementCommandResult(ManagementCommandState.WAITING_RESTART, 70)
     }
@@ -907,6 +975,10 @@ internal fun VerifiedManagementCommand.isScopedMobileHandover(): Boolean =
     type == ManagementCommandType.CLEAR_ACCOUNT && reasonCode == "ACCOUNT_MOBILE_SUPERSEDED" &&
         accountIdHash != null && targetMatrixDeviceIdHash != null && (mobileGeneration ?: 0) > 0
 
+internal fun VerifiedManagementCommand.isScopedLocalAccountClear(): Boolean =
+    type == ManagementCommandType.CLEAR_ACCOUNT && reasonCode in setOf("ACCOUNT_MOBILE_SUPERSEDED", "ADMIN_LOCAL_ACCOUNT_CLEAR") &&
+        accountIdHash != null && targetMatrixDeviceIdHash != null && (mobileGeneration ?: 0) > 0 && globalDestroyOperationId == null
+
 internal fun shouldRejectLocalAccess(
     allowsLocalVaultAccess: Boolean,
     managedApprovalPending: Boolean,
@@ -1071,7 +1143,10 @@ internal data class ManagementCommandLifecycleBinding(
 internal fun VerifiedManagementCommand.lifecycleBinding(): ManagementCommandLifecycleBinding = when (type) {
     ManagementCommandType.LOCK -> ManagementCommandLifecycleBinding(FullAppLifecycleId.LC_09, "policy_changed")
     ManagementCommandType.REVOKE -> ManagementCommandLifecycleBinding(FullAppLifecycleId.LC_07, "device_revoke")
-    ManagementCommandType.CLEAR_ACCOUNT -> ManagementCommandLifecycleBinding(FullAppLifecycleId.LC_22, "admin_destroy")
+    ManagementCommandType.CLEAR_ACCOUNT -> ManagementCommandLifecycleBinding(
+        FullAppLifecycleId.LC_22,
+        if (isScopedLocalAccountClear()) "remove_local_account" else "admin_destroy",
+    )
     ManagementCommandType.CLEAR_CONTENT -> ManagementCommandLifecycleBinding(FullAppLifecycleId.LC_21, "admin_destroy")
 }
 

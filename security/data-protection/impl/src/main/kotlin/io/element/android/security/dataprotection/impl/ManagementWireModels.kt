@@ -60,6 +60,7 @@ internal data class HeartbeatWire(
     @SerialName("offline_entry_protocol_version") val offlineEntryProtocolVersion: Int = 1,
     @SerialName("local_list_entry_protocol_version") val localListEntryProtocolVersion: Int = 1,
     @SerialName("account_handover_protocol_version") val accountHandoverProtocolVersion: Int = 1,
+    @SerialName("restriction_reason_protocol_version") val restrictionReasonProtocolVersion: Int = 1,
     @SerialName("tombstone_sequence") val tombstoneSequence: Long = 0,
 )
 
@@ -365,6 +366,7 @@ internal data class TrustDecisionWire(
     @SerialName("local_list_entry") val localListEntry: OfflineEntryGrantWire? = null,
     @SerialName("automatic_license_error_code") val automaticLicenseErrorCode: String? = null,
     @SerialName("account_handover_required_account_hashes") val accountHandoverRequiredAccountHashes: List<String> = emptyList(),
+    @SerialName("restriction_reason_code") val restrictionReasonCode: String? = null,
 )
 
 @Serializable
@@ -427,6 +429,7 @@ internal data class CommandWire(
     @SerialName("target_matrix_device_id_hash") val targetMatrixDeviceIdHash: String? = null,
     @SerialName("mobile_generation") val mobileGeneration: Long? = null,
     @SerialName("reason_code") val reasonCode: String? = null,
+    @SerialName("global_destroy_operation_id") val globalDestroyOperationId: String? = null,
 )
 
 @Serializable
@@ -816,6 +819,7 @@ internal data class LifecycleOperationStartWire(
     @SerialName("event_id_hash") val eventIdHash: String? = null,
     @SerialName("deadline_epoch_millis") val deadlineEpochMillis: Long,
     @SerialName("media_cleanup_protocol") val mediaCleanupProtocol: String? = null,
+    @SerialName("recovery_mode") val recoveryMode: String? = null,
 )
 
 @Serializable
