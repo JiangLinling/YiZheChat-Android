@@ -1,0 +1,21 @@
+{
+  "exit_code": 0,
+  "elapsed_seconds": 37.54,
+  "command": [
+    "C:/Users/70534/.cargo/bin/cargo.exe",
+    "test",
+    "--offline",
+    "--locked",
+    "-p",
+    "matrix-sdk-ui",
+    "--features",
+    "matrix-sdk/bundled-sqlite",
+    "--test",
+    "integration",
+    "sync_service::test_sync_service",
+    "--",
+    "--test-threads=1"
+  ],
+  "source": "C:\\Users\\70534\\PycharmProjects\\YiZheChat\\w\\formal-rust-sdk",
+  "target_cache": "D:/mr/ephemeral-media-ffi-target"
+}

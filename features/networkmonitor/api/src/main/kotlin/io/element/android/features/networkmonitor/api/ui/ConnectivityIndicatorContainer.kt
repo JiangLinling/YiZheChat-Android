@@ -25,7 +25,10 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.dp
@@ -41,7 +44,11 @@ fun ConnectivityIndicatorContainer(
     modifier: Modifier = Modifier,
     content: @Composable (Modifier) -> Unit = {},
 ) {
-    val isIndicatorVisible = remember { MutableTransitionState(!isOnline) }.apply { targetState = !isOnline }
+    val latestOnline by rememberUpdatedState(isOnline)
+    val stableOnline by produceState(initialValue = isOnline) {
+        snapshotFlow { latestOnline }.stableIndicatorConnectivity().collect { value = it }
+    }
+    val isIndicatorVisible = remember { MutableTransitionState(!stableOnline) }.apply { targetState = !stableOnline }
     Column(modifier = modifier) {
         val statusBarTopPadding = if (LocalInspectionMode.current) {
             // Needed to get valid UI previews

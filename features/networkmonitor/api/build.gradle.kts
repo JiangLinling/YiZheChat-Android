@@ -6,6 +6,8 @@
  * Please see LICENSE files in the repository root for full details.
  */
 
+import extension.testCommonDependencies
+
 plugins {
     id("io.element.android-compose-library")
 }
@@ -18,4 +20,5 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(projects.libraries.designsystem)
     implementation(projects.libraries.uiStrings)
+    testCommonDependencies(libs)
 }

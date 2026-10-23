@@ -1,0 +1,190 @@
+--- a/crates/matrix-sdk-ui/src/sync_service.rs
++++ b/crates/matrix-sdk-ui/src/sync_service.rs
+@@ -38,6 +38,7 @@
+     executor::{JoinHandle, spawn},
+     sleep::sleep,
+ };
++use ruma::api::client::device::get_devices;
+ use thiserror::Error;
+ use tokio::sync::{
+     Mutex as AsyncMutex, OwnedMutexGuard,
+@@ -83,14 +84,15 @@
+     ///
+     /// The [`SyncService`] will enter the offline mode if syncing with the
+     /// server fails, it will then periodically check if the server is
+-    /// available using the `/_matrix/client/versions` endpoint.
++    /// available to the current account using the authenticated
++    /// `/_matrix/client/v3/devices` endpoint, with bounded backoff.
+     ///
+     /// Once the [`SyncService`] receives a 200 response from the
+-    /// `/_matrix/client/versions` endpoint, it will go back into the
++    /// authenticated endpoint, it will go back into the
+     /// [`State::Running`] mode and attempt to sync again.
+     ///
+     /// Calling [`SyncService::start()`] while in this state will abort the
+-    /// `/_matrix/client/versions` checks and attempt to sync immediately.
++    /// account access checks and attempt to sync immediately.
+     ///
+     /// Calling [`SyncService::stop()`] will abort the offline mode and the
+     /// [`SyncService`] will go into the [`State::Idle`] mode.
+@@ -142,7 +144,7 @@
+     /// Check if a homeserver is reachable.
+     ///
+     /// This function handles the offline mode by waiting for either a
+-    /// termination report or a successful `/_matrix/client/versions` response.
++    /// termination report or a successful authenticated account access check.
+     ///
+     /// This function waits for two conditions:
+     ///
+@@ -152,7 +154,7 @@
+     /// 2. Waiting to come back online: This continuously checks server
+     ///    availability.
+     ///
+-    /// If the `/_matrix/client/versions` request succeeds, the function exits
++    /// If the authenticated `GET /devices` request succeeds, the function exits
+     /// without a termination report. If we receive a [`TerminationReport`] from
+     /// the user, we exit immediately and return the termination report.
+     async fn offline_check(
+@@ -184,24 +186,24 @@
+         };
+ 
+         let wait_to_be_online = async move {
++            let mut retry_delay = Duration::from_secs(5);
+             loop {
+-                // Encountering network failures when sending a request which has with no retry
+-                // limit set in the `RequestConfig` are treated as permanent failures and our
+-                // exponential backoff doesn't kick in.
+-                //
+-                // Let's set a retry limit so network failures are retried as well.
+-                let request_config = RequestConfig::default().retry_limit(5);
+-
+-                // We're in an infinite loop, but our request sending already has an exponential
+-                // backoff set up. This will kick in for any request errors that we consider to
+-                // be transient. Common network errors (timeouts, DNS failures) or any server
+-                // error in the 5xx range of HTTP errors are considered to be transient.
+-                //
+-                // Still, as a precaution, we're going to sleep here for a while in the Error
+-                // case.
+-                match client.fetch_server_versions(Some(request_config)).await {
++                // A public /versions response says nothing about this account's access.
++                // In particular, M_USER_LOCKED must not restart both sync loops while
++                // the server itself is healthy. Keep Offline until authenticated access
++                // succeeds. Delay even the first probe to bound repeated sync failures.
++                // The enclosing select keeps stop/restart cancellable during this wait.
++                sleep(retry_delay).await;
++                let request_config = RequestConfig::default()
++                    .retry_limit(0)
++                    .timeout(Duration::from_secs(10));
++                match client
++                    .send(get_devices::v3::Request::new())
++                    .with_request_config(request_config)
++                    .await
++                {
+                     Ok(_) => break,
+-                    Err(_) => sleep(Duration::from_millis(100)).await,
++                    Err(_) => retry_delay = (retry_delay * 2).min(Duration::from_secs(30)),
+                 }
+             }
+         };
+--- a/crates/matrix-sdk-ui/tests/integration/sync_service.rs
++++ b/crates/matrix-sdk-ui/tests/integration/sync_service.rs
+@@ -216,16 +216,16 @@
+     mock_server.mock_sliding_sync().error_unrecognized().expect(1..).mount().await;
+ 
+     {
+-        let _versions_guard = mock_server.mock_versions().error500().mount_as_scoped().await;
++        let _devices_guard = mock_server.mock_devices().error500().mount_as_scoped().await;
+ 
+         sync_service.start().await;
+         assert_next_matches!(states, State::Running);
+         assert_next_matches_with_timeout!(states, 2000, State::Offline);
+     }
+ 
+-    mock_server.mock_versions().ok().expect(1..).mount().await;
+-
+-    assert_next_matches_with_timeout!(states, 1000, State::Running);
++    mock_server.mock_devices().ok().expect(1..).mount().await;
++
++    assert_next_matches_with_timeout!(states, 8000, State::Running);
+ }
+ 
+ #[async_test]
+@@ -237,7 +237,7 @@
+     let mut states = sync_service.state();
+ 
+     mock_server.mock_sliding_sync().error_unrecognized().expect(1..).mount().await;
+-    mock_server.mock_versions().error500().mount().await;
++    mock_server.mock_devices().error500().mount().await;
+ 
+     sync_service.start().await;
+     assert_next_matches!(states, State::Running);
+@@ -256,7 +256,7 @@
+     let mut states = sync_service.state();
+ 
+     mock_server.mock_sliding_sync().error_unrecognized().expect(1..).mount().await;
+-    mock_server.mock_versions().error500().mount().await;
++    mock_server.mock_devices().error500().mount().await;
+ 
+     sync_service.start().await;
+     assert_next_matches!(states, State::Running);
+@@ -267,3 +267,60 @@
+     assert_next_matches_with_timeout!(states, 2000, State::Running);
+     assert_next_matches_with_timeout!(states, 2000, State::Offline);
+ }
++
++#[async_test]
++async fn test_sync_service_offline_locked_account_waits_for_authenticated_recovery() {
++    let server = MatrixMockServer::new().await;
++    let client = server.client_builder().build().await;
++    // A healthy public server must not be mistaken for an unlocked account.
++    server.mock_versions().ok().mount().await;
++    let locked = ResponseTemplate::new(401)
++        .set_body_json(json!({"errcode": "M_USER_LOCKED", "error": "User account has been locked"}));
++    let sync_guard = server.mock_sliding_sync().respond_with(locked.clone()).mount_as_scoped().await;
++    let access_guard = server.mock_devices().respond_with(locked).mount_as_scoped().await;
++    let service = SyncService::builder(client).with_offline_mode().build().await.unwrap();
++    let mut states = service.state();
++    service.start().await;
++    assert_next_matches!(states, State::Running);
++    assert_next_matches_with_timeout!(states, 2000, State::Offline);
++
++    tokio::time::sleep(Duration::from_secs(6)).await;
++    assert_matches!(states.get(), State::Offline);
++    assert_pending!(states);
++    let requests = server.received_requests().await.unwrap();
++    assert_eq!(requests.iter().filter(|r| r.url.path() == "/_matrix/client/v3/devices").count(), 1);
++    assert!(requests.iter().filter(|r| SlidingSyncMatcher.matches(r)).count() <= 2);
++
++    drop(access_guard);
++    drop(sync_guard);
++    server.mock_devices().ok().mount().await;
++    let _sync_guard = setup_mocking_sliding_sync_server(
++        &server, Arc::new(Mutex::new(0)), Arc::new(Mutex::new(0)),
++    ).await;
++    assert_next_matches_with_timeout!(states, 12000, State::Running);
++    tokio::time::sleep(Duration::from_millis(200)).await;
++    assert_matches!(states.get(), State::Running);
++    service.stop().await;
++    assert_next_matches_with_timeout!(states, 2000, State::Idle);
++}
++
++#[async_test]
++async fn test_sync_service_offline_probe_preserves_unknown_token_notification() {
++    let server = MatrixMockServer::new().await;
++    let client = server.client_builder().build().await;
++    let mut session_changes = client.subscribe_to_session_changes();
++    server.mock_sliding_sync().error_unrecognized().mount().await;
++    server.mock_devices().respond_with(ResponseTemplate::new(401).set_body_json(json!({
++        "errcode": "M_UNKNOWN_TOKEN", "error": "Session revoked", "soft_logout": false
++    }))).mount().await;
++    let service = SyncService::builder(client).with_offline_mode().build().await.unwrap();
++    service.start().await;
++    // Use Client::send, retaining its authentication error broadcast. Android's
++    // existing delegate must still invalidate and clean up the revoked session.
++    assert_matches!(
++        tokio::time::timeout(Duration::from_secs(8), session_changes.recv()).await,
++        Ok(Ok(matrix_sdk::SessionChange::UnknownToken(_)))
++    );
++    service.stop().await;
++    assert_matches!(service.state().get(), State::Idle);
++}

@@ -1,0 +1,28 @@
+{
+  "exit_code": 0,
+  "elapsed_seconds": 1270.55,
+  "command": [
+    "C:/Users/70534/.cargo/bin/cargo.exe",
+    "ndk",
+    "--target",
+    "aarch64-linux-android",
+    "-o",
+    "C:\\Users\\70534\\PycharmProjects\\YiZheChat\\artifacts\\consolidation\\20261022-execution\\debug51\\native\\jni",
+    "build",
+    "--offline",
+    "--locked",
+    "--profile",
+    "dist",
+    "--package",
+    "matrix-sdk-ffi",
+    "--features",
+    "sentry"
+  ],
+  "source": "C:\\Users\\70534\\PycharmProjects\\YiZheChat\\w\\formal-rust-sdk",
+  "target_cache": "D:/mr/ephemeral-media-android-target",
+  "native_sha256": "7e73119b019ff070e6eb47371aa65cb9ba187d096f1b7dab19f24b16ecf10f20",
+  "aar_sha256": "a707011204f2b46d0628c4c425ea3f7cefa3b3056ff600fa38e0a0b2399e8a5e",
+  "changed_entries": [
+    "jni/arm64-v8a/libmatrix_sdk_ffi.so"
+  ]
+}

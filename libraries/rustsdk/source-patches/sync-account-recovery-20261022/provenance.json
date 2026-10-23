@@ -1,0 +1,21 @@
+{
+  "base_commit": "1c44fb66214667c6d00acaf72ab592493653708b",
+  "preceding_patch_sets": [
+    "rtc-openid-response-priority",
+    "formal-origin-20261020"
+  ],
+  "changed_sources": [
+    "crates/matrix-sdk-ui/src/sync_service.rs",
+    "crates/matrix-sdk-ui/tests/integration/sync_service.rs"
+  ],
+  "source_files_verified": 1254,
+  "parent_aar_sha256": "4e8f98d557bc1cf3d4005faf55940921e2b1adb8d5362ef999fd09c956c2b02e",
+  "security": "Only authenticated /devices success exits Offline; bounded cancellable backoff. Existing session/device/admission/key protection remains unchanged.",
+  "native_build": "PASS",
+  "native_acceptance": "Recorded separately against installed APK after build",
+  "aar_sha256": "a707011204f2b46d0628c4c425ea3f7cefa3b3056ff600fa38e0a0b2399e8a5e",
+  "native_sha256": "7e73119b019ff070e6eb47371aa65cb9ba187d096f1b7dab19f24b16ecf10f20",
+  "focused_sdk_regression_tests": 6,
+  "android_stability_tests": 2,
+  "native_acceptance_evidence": "artifacts/consolidation/20261022-execution/debug51/native-acceptance.json"
+}

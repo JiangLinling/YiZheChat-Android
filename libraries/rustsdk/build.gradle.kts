@@ -6,7 +6,7 @@ if (isNextBuild) {
     check(reviewedSdk.isFile) { "Next builds require the reviewed Next Rust SDK AAR." }
     val actualSha256 = MessageDigest.getInstance("SHA-256")
         .digest(reviewedSdk.readBytes()).joinToString("") { "%02x".format(it) }
-    check(actualSha256 == "4e8f98d557bc1cf3d4005faf55940921e2b1adb8d5362ef999fd09c956c2b02e") {
+    check(actualSha256 == "a707011204f2b46d0628c4c425ea3f7cefa3b3056ff600fa38e0a0b2399e8a5e") {
         "Next Rust SDK differs from the reviewed cumulative source baseline."
     }
 }
