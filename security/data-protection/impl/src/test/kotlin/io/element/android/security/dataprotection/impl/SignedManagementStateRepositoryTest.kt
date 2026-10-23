@@ -44,8 +44,13 @@ class SignedManagementStateRepositoryTest {
         assertThat(local.targetMatrixDeviceIdHash).isEqualTo("b".repeat(64))
         assertThat(local.globalDestroyOperationId).isNull()
         val global = Fixture(temporaryFolder.newFolder()).let { f ->
-            f.repository.acceptCommand(f.mobileClear(now, matrixHash = null, reason = "GLOBAL_ACCOUNT_DESTROY",
-                generation = null, globalRoot = "original-global-root-00001"), now)
+            f.repository.acceptCommand(f.mobileClear(
+                now,
+                matrixHash = null,
+                reason = "GLOBAL_ACCOUNT_DESTROY",
+                generation = null,
+                globalRoot = "original-global-root-00001"
+            ), now)
         }
         assertThat(global.globalDestroyOperationId).isEqualTo("original-global-root-00001")
         assertThat(global.targetMatrixDeviceIdHash).isNull()

@@ -78,16 +78,22 @@ class HttpManagementControlServicePolicyReceiptTest {
                 val command = f.acceptReportCommand()
                 f.serveCommandReports()
                 val pending = io.element.android.security.dataprotection.api.ManagementCommandExecutionReport(
-                    command.commandId, command.type, io.element.android.security.dataprotection.api.ManagementCommandState.WAITING_RESTART, 70,
+                    command.commandId,
+                    command.type,
+                    io.element.android.security.dataprotection.api.ManagementCommandState.WAITING_RESTART,
+                    70,
                 )
                 suspend fun send(): Boolean = f.service.reportCommand(pending)
                 val accepted = if (ambientHeartbeat) {
                     withContext(LifecycleOperationContext("unrelated-heartbeat-0001", FullAppLifecycleId.LC_07)) { send() }
-                } else send()
+                } else {
+                    send()
+                }
                 assertThat(accepted).isTrue()
                 assertThat(f.repository.pendingCommands().single().commandId).isEqualTo(command.commandId)
                 assertThat(f.service.reportCommand(pending.copy(
-                    state = io.element.android.security.dataprotection.api.ManagementCommandState.COMPLETE, progress = 100,
+                    state = io.element.android.security.dataprotection.api.ManagementCommandState.COMPLETE,
+                    progress = 100,
                 ))).isTrue()
                 assertThat(f.repository.pendingCommands()).isEmpty()
                 assertThat(f.requests.map { it.path }).containsExactly("/v1/device/commands/report", "/v1/device/commands/report")
@@ -106,7 +112,10 @@ class HttpManagementControlServicePolicyReceiptTest {
             withFixture { f ->
                 val command = f.acceptReportCommand()
                 val report = io.element.android.security.dataprotection.api.ManagementCommandExecutionReport(
-                    command.commandId, command.type, io.element.android.security.dataprotection.api.ManagementCommandState.COMPLETE, 100,
+                    command.commandId,
+                    command.type,
+                    io.element.android.security.dataprotection.api.ManagementCommandState.COMPLETE,
+                    100,
                 )
                 f.serveCommandReports(failureStatus)
                 assertThat(f.service.reportCommand(report)).isFalse()
@@ -125,7 +134,10 @@ class HttpManagementControlServicePolicyReceiptTest {
         withFixture { f ->
             val command = f.acceptReportCommand(global = false)
             val report = io.element.android.security.dataprotection.api.ManagementCommandExecutionReport(
-                command.commandId, command.type, io.element.android.security.dataprotection.api.ManagementCommandState.WAITING_RESTART, 70,
+                command.commandId,
+                command.type,
+                io.element.android.security.dataprotection.api.ManagementCommandState.WAITING_RESTART,
+                70,
             )
             for (candidate in listOf(report, report.copy(commandId = "unknown-global-command"))) {
                 val failure = runCatching { f.service.reportCommand(candidate) }.exceptionOrNull()
@@ -151,7 +163,10 @@ class HttpManagementControlServicePolicyReceiptTest {
                 val command = f.acceptReportCommand(installation = if (fault == "installation") "foreign-installation-0001" else INSTALLATION_ID)
                 if (fault != "installation") f.tamperReportCommand(fault)
                 val report = io.element.android.security.dataprotection.api.ManagementCommandExecutionReport(
-                    command.commandId, command.type, io.element.android.security.dataprotection.api.ManagementCommandState.COMPLETE, 100,
+                    command.commandId,
+                    command.type,
+                    io.element.android.security.dataprotection.api.ManagementCommandState.COMPLETE,
+                    100,
                 )
                 assertThat(runCatching { f.service.reportCommand(report) }.exceptionOrNull()).isNotNull()
                 assertThat(f.requests).isEmpty()
@@ -1036,23 +1051,35 @@ class HttpManagementControlServicePolicyReceiptTest {
             io.element.android.security.dataprotection.api.VerifiedManagementCommand {
             val now = System.currentTimeMillis()
             val payload = JSON.encodeToJsonElement(CommandWire.serializer(), CommandWire(
-                commandId = "original-global-child-command-0001", installationId = installation,
-                commandType = "CLEAR_ACCOUNT", accountIdHash = "a".repeat(64), contentId = null,
-                version = 1, issuedAtEpochMillis = now, notBeforeEpochMillis = now,
-                expiresAtEpochMillis = now + 600_000, schemaVersion = 2,
+                commandId = "original-global-child-command-0001",
+                installationId = installation,
+                commandType = "CLEAR_ACCOUNT",
+                accountIdHash = "a".repeat(64),
+                contentId = null,
+                version = 1,
+                issuedAtEpochMillis = now,
+                notBeforeEpochMillis = now,
+                expiresAtEpochMillis = now + 600_000,
+                schemaVersion = 2,
                 reasonCode = if (global) "GLOBAL_ACCOUNT_DESTROY" else "ADMIN_LOCAL_ACCOUNT_CLEAR",
                 globalDestroyOperationId = if (global) "original-server-global-root-0001" else null,
-                targetMatrixDeviceIdHash = if (global) null else "b".repeat(64), mobileGeneration = if (global) null else 1,
+                targetMatrixDeviceIdHash = if (global) null else "b".repeat(64),
+                mobileGeneration = if (global) null else 1,
             )).jsonObject
-            return repository.acceptCommand(SignedJsonEnvelopeWire(command = payload, keyId = keyId,
-                signatureBase64 = authoritySignature(verifier.canonicalJson(payload))), now)
+            return repository.acceptCommand(SignedJsonEnvelopeWire(
+                command = payload,
+                keyId = keyId,
+                signatureBase64 = authoritySignature(verifier.canonicalJson(payload))
+            ), now)
         }
 
         fun tamperReportCommand(fault: String) {
             val file = File(context.noBackupFilesDir, "security/management/control-state-v1.json")
             val state = JSON.decodeFromString<PersistedManagementState>(file.readText())
             val old = state.commands.single()
-            val changed = if (fault == "signature") old.envelope.copy(signatureBase64 = "dGFtcGVyZWQ=") else {
+            val changed = if (fault == "signature") {
+                old.envelope.copy(signatureBase64 = "dGFtcGVyZWQ=")
+            } else {
                 old.envelope.copy(command = JsonObject(old.envelope.payload() + mapOf(
                     "global_destroy_operation_id" to kotlinx.serialization.json.JsonPrimitive("foreign-global-root-0001"),
                 )))
@@ -1187,7 +1214,9 @@ class HttpManagementControlServicePolicyReceiptTest {
 
         fun failNextStatePublish() = atomicFileHarness.failNextPublish()
 
-        fun beginStaleAccess() { trustSnapshot = trustSnapshot.copy(trustState = DeviceTrustState.STALE) }
+        fun beginStaleAccess() {
+            trustSnapshot = trustSnapshot.copy(trustState = DeviceTrustState.STALE)
+        }
         fun currentTrustState() = trustSnapshot.trustState
 
         fun serveSignedRestriction(trustState: String, reason: String) {
@@ -1204,7 +1233,9 @@ class HttpManagementControlServicePolicyReceiptTest {
                         "restriction_reason_code" to kotlinx.serialization.json.JsonPrimitive(reason),
                     ))
                     response["device_trust"] = JSON.encodeToJsonElement(SignedJsonEnvelopeWire.serializer(), SignedJsonEnvelopeWire(
-                        decision = decision, keyId = keyId, signatureBase64 = authoritySignature(verifier.canonicalJson(decision)),
+                        decision = decision,
+                        keyId = keyId,
+                        signatureBase64 = authoritySignature(verifier.canonicalJson(decision)),
                     ))
                     return jsonResponse(JsonObject(response).toString())
                 }
@@ -1222,12 +1253,23 @@ class HttpManagementControlServicePolicyReceiptTest {
                     if (requests.size == 2 && failConfirmation) return MockResponse().setResponseCode(503)
                     val response = JSON.parseToJsonElement(syncResponse(publication)).jsonObject.toMutableMap()
                     if (requests.size == 2) {
-                        val ticket = DeviceAccessTicketWire(1, "restored-access-ticket-original-01", INSTALLATION_ID,
-                            requireNotNull(trustSnapshot.attestationPublicKeySha256), trustSnapshot.attestationVersion, 1,
-                            NOW - 5, NOW + 120_000, 30_000, 60_000)
+                        val ticket = DeviceAccessTicketWire(
+                            1,
+                            "restored-access-ticket-original-01",
+                            INSTALLATION_ID,
+                            requireNotNull(trustSnapshot.attestationPublicKeySha256),
+                            trustSnapshot.attestationVersion,
+                            1,
+                            NOW - 5,
+                            NOW + 120_000,
+                            30_000,
+                            60_000
+                        )
                         val payload = JSON.encodeToJsonElement(DeviceAccessTicketWire.serializer(), ticket).jsonObject
                         response["access_ticket"] = JSON.encodeToJsonElement(SignedJsonEnvelopeWire.serializer(), SignedJsonEnvelopeWire(
-                            ticket = payload, keyId = keyId, signatureBase64 = authoritySignature(verifier.canonicalJson(payload)),
+                            ticket = payload,
+                            keyId = keyId,
+                            signatureBase64 = authoritySignature(verifier.canonicalJson(payload)),
                         ))
                     }
                     return jsonResponse(JsonObject(response).toString())

@@ -23,8 +23,10 @@ class AtomicRecoveryIntentJournalTest {
         assertThat(restored).isEqualTo(confidential)
         assertThat(restored.request().recoveryMode).isEqualTo(confidential.recoveryMode)
         org.junit.Assert.assertThrows(IllegalStateException::class.java) {
-            journal.compareAndSet(scope, 1, restored.copy(revision = 2,
-                recoveryMode = io.element.android.security.dataprotection.api.RecoveryHistoryMode.STANDARD))
+            journal.compareAndSet(scope, 1, restored.copy(
+                revision = 2,
+                recoveryMode = io.element.android.security.dataprotection.api.RecoveryHistoryMode.STANDARD
+            ))
         }
         assertThat(journal.read(scope)).isEqualTo(confidential)
         journal.clearAccount(scope.accountIdHash)

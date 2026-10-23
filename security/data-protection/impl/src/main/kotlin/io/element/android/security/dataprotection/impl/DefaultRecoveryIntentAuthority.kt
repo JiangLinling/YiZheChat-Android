@@ -44,9 +44,11 @@ class DefaultRecoveryIntentAuthority(
         }
         // The reset has changed the Matrix root. That must never authorize old content, but
         // does not invalidate a nonce-bound denial for this exact expired operation.
-        check(context.status == LifecycleOperationStatus.FAILED_FINAL && context.terminalReceiptId != null &&
-            context.terminalResultCode == "RECOVERY_OPERATION_EXPIRED" &&
-            context.deadlineEpochMillis <= context.serverTimeEpochMillis) { "RECOVERY_RESET_RETIREMENT_NOT_CONFIRMED" }
+        check(
+            context.status == LifecycleOperationStatus.FAILED_FINAL && context.terminalReceiptId != null &&
+                context.terminalResultCode == "RECOVERY_OPERATION_EXPIRED" &&
+                context.deadlineEpochMillis <= context.serverTimeEpochMillis
+        ) { "RECOVERY_RESET_RETIREMENT_NOT_CONFIRMED" }
         check(journal.compareAndSet(scope, record.revision, null))
     }
     override suspend fun restore(scope: RecoveryIntentScope): RecoveryIntentRecord? = mutation.withLock {
@@ -77,7 +79,10 @@ class DefaultRecoveryIntentAuthority(
     override suspend fun admit(scope: RecoveryIntentScope, mode: io.element.android.security.dataprotection.api.RecoveryHistoryMode): RecoveryIntentRecord =
         admitOwned(scope, mode)
 
-    private suspend fun admitOwned(scope: RecoveryIntentScope, mode: io.element.android.security.dataprotection.api.RecoveryHistoryMode?): RecoveryIntentRecord = mutation.withLock {
+    private suspend fun admitOwned(
+        scope: RecoveryIntentScope,
+        mode: io.element.android.security.dataprotection.api.RecoveryHistoryMode?
+    ): RecoveryIntentRecord = mutation.withLock {
         var record = journal.read(scope)
         if (record == null) {
             val request = lifecycleOperationRequest(
@@ -178,7 +183,8 @@ class DefaultRecoveryIntentAuthority(
         }
         val resolution = management.resolveRecoveryIntent(record)
         if (resolution.operationId != record.operationId || resolution.scope != record.scope ||
-            resolution.deadlineEpochMillis != record.deadlineEpochMillis || resolution.serverTimeEpochMillis <= 0 || resolution.recoveryMode != record.recoveryMode ||
+            resolution.deadlineEpochMillis != record.deadlineEpochMillis || resolution.serverTimeEpochMillis <= 0 ||
+            resolution.recoveryMode != record.recoveryMode ||
             resolution.idempotencyKeySha256 != java.security.MessageDigest.getInstance("SHA-256").digest(record.idempotencyKey.encodeToByteArray())
                 .joinToString("") { "%02x".format(it.toInt() and 255) }) {
             throw RecoveryIntentRejected("RECOVERY_RESOLUTION_SCOPE_REJECTED")
@@ -199,7 +205,8 @@ class DefaultRecoveryIntentAuthority(
         if (!context.scopeValid || !context.rootValid) throw RecoveryIntentRejected("RECOVERY_AUTHORITY_SCOPE_REJECTED")
     }
     private fun validateBinding(record: RecoveryIntentRecord, context: RecoveryOperationContext) {
-        if (context.operationId != record.operationId || context.scope != record.scope || context.trigger != "recovery_key_entered" || context.recoveryMode != record.recoveryMode ||
+        if (context.operationId != record.operationId || context.scope != record.scope || context.trigger != "recovery_key_entered" ||
+            context.recoveryMode != record.recoveryMode ||
             context.deadlineEpochMillis != record.deadlineEpochMillis ||
             context.idempotencyKeySha256 != java.security.MessageDigest.getInstance("SHA-256").digest(record.idempotencyKey.encodeToByteArray())
                 .joinToString("") { "%02x".format(it.toInt() and 255) } ||

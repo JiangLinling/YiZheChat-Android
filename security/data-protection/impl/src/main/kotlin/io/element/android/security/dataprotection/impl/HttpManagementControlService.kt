@@ -438,8 +438,11 @@ class HttpManagementControlService(
             boolean("current_root_valid"),
             optional("recovery_mode")?.let { io.element.android.security.dataprotection.api.RecoveryHistoryMode.valueOf(it) },
         ).also { context ->
-            check(context.operationId == record.operationId && context.scope == record.scope &&
-                context.trigger == "recovery_key_entered" && context.deadlineEpochMillis == record.deadlineEpochMillis && context.recoveryMode == record.recoveryMode)
+            check(
+                context.operationId == record.operationId && context.scope == record.scope &&
+                    context.trigger == "recovery_key_entered" && context.deadlineEpochMillis == record.deadlineEpochMillis &&
+                    context.recoveryMode == record.recoveryMode
+            )
             check(context.identityGeneration.matches(Regex("[a-f0-9]{64}")) && context.mobileGeneration > 0)
             check(context.currentIdentityGeneration.matches(Regex("[a-f0-9]{64}")) && context.currentMobileGeneration > 0)
             check(context.idempotencyKeySha256 == MessageDigest.getInstance("SHA-256").digest(record.idempotencyKey.encodeToByteArray())
@@ -1685,7 +1688,9 @@ class HttpManagementControlService(
                 it.type == ManagementCommandType.CLEAR_ACCOUNT && it.reasonCode == "GLOBAL_ACCOUNT_DESTROY" &&
                     it.globalDestroyOperationId != null
             }?.also { check(it.installationId == deviceTrustService.current().installationId) }
-        } else null
+        } else {
+            null
+        }
         val expectedLifecycleId = when (report.commandType) {
             ManagementCommandType.LOCK -> FullAppLifecycleId.LC_09
             ManagementCommandType.REVOKE -> FullAppLifecycleId.LC_07
@@ -2736,8 +2741,10 @@ class HttpManagementControlService(
         check(decision.schemaVersion in 1..3)
         check(decision.issuedAtEpochMillis <= serverTimeEpochMillis + MAX_CLOCK_SKEW_MILLIS)
         check(decision.expiresAtEpochMillis > serverTimeEpochMillis)
-        check(decision.restrictionReasonCode == null ||
-            decision.restrictionReasonCode == "DEVICE_ADMINISTRATIVELY_LOCKED" && decision.trustState == "STALE") {
+        check(
+            decision.restrictionReasonCode == null ||
+                decision.restrictionReasonCode == "DEVICE_ADMINISTRATIVELY_LOCKED" && decision.trustState == "STALE"
+        ) {
             "Signed device restriction contradicts the trust decision."
         }
         check(decision.accountHandoverRequiredAccountHashes.size <= 32)
