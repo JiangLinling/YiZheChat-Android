@@ -72,6 +72,8 @@ class ManagedDirectRoomClientTest {
         val result = ManagedDirectRoomClient(verifier, { "test-installation" }) { signed(it) }.execute("a".repeat(64), "b".repeat(64), "@peer:test", true)
         assertThat(result?.status).isEqualTo("INVITED")
         assertThat(result?.clientOperationIds).containsExactly("direct-" + "c".repeat(64), "dmroom-" + "c".repeat(64))
+        assertThat(result?.installationId).isEqualTo("test-installation")
+        assertThat(result!!.expiresAtEpochMillis - result.issuedAtEpochMillis).isEqualTo(11000L)
     }
     @Test fun `fresh signed absence is only allowed for read only lookup`() = runTest {
         val client = ManagedDirectRoomClient(verifier, { "test-installation" }) { signed(it, "null") }

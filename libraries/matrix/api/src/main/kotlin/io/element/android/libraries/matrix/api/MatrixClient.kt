@@ -57,7 +57,6 @@ interface MatrixClient {
         checkNotNull(getRoom(roomId)) { "Local SDK room is unavailable" }.use { it.info() }
     }
 
-
     val sessionId: SessionId
     val deviceId: DeviceId
     val userProfile: StateFlow<MatrixUser>
@@ -79,7 +78,16 @@ interface MatrixClient {
     suspend fun getJoinedRoom(roomId: RoomId): JoinedRoom?
     suspend fun getRoom(roomId: RoomId): BaseRoom?
     suspend fun findDM(userId: UserId): Result<RoomId?>
+
+    /** Resolve once and retain the original managed operation references through the UI transition. */
+    suspend fun resolveDM(userId: UserId, create: Boolean): Result<io.element.android.libraries.matrix.api.room.DirectRoomResolution?> =
+        if (create) {
+            createDM(userId).map { io.element.android.libraries.matrix.api.room.DirectRoomResolution(it) }
+        } else {
+            findDM(userId).map { room -> room?.let { io.element.android.libraries.matrix.api.room.DirectRoomResolution(it) } }
+        }
     suspend fun getJoinedRoomIds(): Result<Set<RoomId>>
+
     /** Returns the rooms the homeserver currently considers this account joined to. */
     suspend fun getRemoteJoinedRoomIds(): Result<Set<RoomId>>
     suspend fun ignoreUser(userId: UserId): Result<Unit>

@@ -81,8 +81,8 @@ import io.element.android.libraries.matrix.impl.room.preview.RoomPreviewInfoMapp
 import io.element.android.libraries.matrix.impl.roomdirectory.RustRoomDirectoryService
 import io.element.android.libraries.matrix.impl.roomdirectory.map
 import io.element.android.libraries.matrix.impl.roomlist.RoomListFactory
-import io.element.android.libraries.matrix.impl.roomlist.createPreviewIdentityTimeline
 import io.element.android.libraries.matrix.impl.roomlist.RustRoomListService
+import io.element.android.libraries.matrix.impl.roomlist.createPreviewIdentityTimeline
 import io.element.android.libraries.matrix.impl.roomlist.roomOrNull
 import io.element.android.libraries.matrix.impl.spaces.RustSpaceService
 import io.element.android.libraries.matrix.impl.sync.RustSyncService
@@ -100,37 +100,38 @@ import io.element.android.libraries.sessionstorage.api.SessionStore
 import io.element.android.libraries.workmanager.api.WorkManagerRequestType
 import io.element.android.libraries.workmanager.api.WorkManagerScheduler
 import io.element.android.security.contentprotection.api.MatrixContentProtectionRuntime
-import io.element.android.security.dataprotection.api.DataDeletionCoordinator
-import io.element.android.security.dataprotection.api.DataProtectionPolicyProvider
 import io.element.android.security.dataprotection.api.AccountReactivationScopeStore
 import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.DataDeletionCoordinator
+import io.element.android.security.dataprotection.api.DataProtectionPolicyProvider
 import io.element.android.security.dataprotection.api.DeletionOperationId
 import io.element.android.security.dataprotection.api.DeletionReason
 import io.element.android.security.dataprotection.api.DeletionRequest
 import io.element.android.security.dataprotection.api.DeletionScope
 import io.element.android.security.dataprotection.api.DeletionStep
-import io.element.android.security.dataprotection.api.PermanentAccountDeletionAwaitingMatrixException
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionAwaitingGlobalDestroyException
+import io.element.android.security.dataprotection.api.PermanentAccountDeletionAwaitingMatrixException
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionCoordinator
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionHandle
 import io.element.android.security.dataprotection.api.PermanentAccountDeletionPreparationExpiredException
+import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
+import io.element.android.security.securestorage.api.DeviceRootKeyService
 import io.element.android.security.securestorage.api.SecureMediaLeaseManager
 import io.element.android.security.securestorage.api.SensitiveFileStore
-import io.element.android.security.securestorage.api.DeviceRootKeyService
 import io.element.android.security.securestorage.api.deriveAccountVaultId
-import io.element.android.security.dataprotection.api.FullAppLifecycleId
-import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.toolbox.api.systemclock.SystemClock
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -141,9 +142,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.delay
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -152,6 +150,8 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.matrix.rustcomponents.sdk.AuthData
 import org.matrix.rustcomponents.sdk.AuthDataPasswordDetails
 import org.matrix.rustcomponents.sdk.BeaconInfoListener
@@ -315,14 +315,20 @@ class RustMatrixClient(
 
     private val membershipLifecycle = managementControlService?.let {
         io.element.android.libraries.matrix.impl.room.RoomMembershipLifecycle(
-            sessionId.value, deviceId.value, it, appOperationalStateCoordinator,
+            sessionId.value,
+            deviceId.value,
+            it,
+            appOperationalStateCoordinator,
             isProjected = { roomId, target, action ->
                 innerClient.getRoom(roomId)?.use { room ->
                     if (target == sessionId.value) {
                         room.membership() == if (action == "join") Membership.JOINED else Membership.LEFT
                     } else {
-                        val expected = if (action == "ban") org.matrix.rustcomponents.sdk.MembershipState.Ban
-                            else org.matrix.rustcomponents.sdk.MembershipState.Leave
+                        val expected = if (action == "ban") {
+                            org.matrix.rustcomponents.sdk.MembershipState.Ban
+                        } else {
+                            org.matrix.rustcomponents.sdk.MembershipState.Leave
+                        }
                         room.member(target).membership == expected
                     }
                 } == true
@@ -369,11 +375,16 @@ class RustMatrixClient(
             check(storedSession.isTokenValid) { "Matrix session token is unavailable." }
             // SessionStore holds Vault envelopes. Only the current SDK session has runtime credentials.
             val session = innerClient.session()
-            check(session.userId == sessionId.value && session.deviceId == deviceId.value &&
+            check(
+                session.userId == sessionId.value && session.deviceId == deviceId.value &&
                 session.homeserverUrl.trimEnd('/') == storedSession.homeserverUrl.trimEnd('/') &&
-                session.accessToken.isNotBlank()) { "Matrix runtime session does not match the active account." }
+                session.accessToken.isNotBlank()
+            ) { "Matrix runtime session does not match the active account." }
             io.element.android.libraries.matrix.impl.media.loadUncachedEncryptedMatrixContent(
-                source, session.homeserverUrl, session.accessToken, ephemeralMediaHttpClient,
+                source,
+                session.homeserverUrl,
+                session.accessToken,
+                ephemeralMediaHttpClient,
             )
         },
     )
@@ -401,8 +412,14 @@ class RustMatrixClient(
                 check(session.userId == sessionId.value && session.deviceId == deviceId.value &&
                     session.homeserverUrl.trimEnd('/') == stored.homeserverUrl.trimEnd('/') && session.accessToken.isNotBlank())
                 io.element.android.libraries.matrix.impl.media.openProgressiveProtectedVideo(
-                    source, wireLength, session.homeserverUrl, session.accessToken, ephemeralMediaHttpClient,
-                    matrixProtectedMediaService, accountVaultId, hashAccountId(sessionId.value),
+                    source,
+                    wireLength,
+                    session.homeserverUrl,
+                    session.accessToken,
+                    ephemeralMediaHttpClient,
+                    matrixProtectedMediaService,
+                    accountVaultId,
+                    hashAccountId(sessionId.value),
                     fullDownload = {
                         matrixMediaLoader.downloadMediaFile(source, "video/mp4", filename = null, useCache = false).getOrThrow()
                     },
@@ -494,9 +511,11 @@ class RustMatrixClient(
             val stored = sessionStore.getSession(sessionId.value)
                 ?: throw SecurityException("RECOVERY_MATRIX_SESSION_UNAVAILABLE")
             val runtime = innerClient.session()
-            check(stored.isTokenValid && stored.userId == sessionId.value && stored.deviceId == deviceId.value &&
+            check(
+                stored.isTokenValid && stored.userId == sessionId.value && stored.deviceId == deviceId.value &&
                 runtime.userId == stored.userId && runtime.deviceId == stored.deviceId &&
-                runtime.homeserverUrl.trimEnd('/') == stored.homeserverUrl.trimEnd('/')) {
+                runtime.homeserverUrl.trimEnd('/') == stored.homeserverUrl.trimEnd('/')
+            ) {
                 "RECOVERY_MATRIX_SESSION_UNAVAILABLE"
             }
             runtime.accessToken.also {
@@ -561,7 +580,20 @@ class RustMatrixClient(
         runCatchingExceptions {
             if (managementControlService?.supportsManagedRoomCreation == true) {
                 managedDirectRooms().execute(userId.value, false)?.let(::RoomId)
-            } else innerClient.getDmRoom(userId.value)?.use { RoomId(it.id()) }
+            } else {
+                innerClient.getDmRoom(userId.value)?.use { RoomId(it.id()) }
+            }
+        }
+    }
+
+    override suspend fun resolveDM(
+        userId: UserId,
+        create: Boolean,
+    ): Result<io.element.android.libraries.matrix.api.room.DirectRoomResolution?> {
+        return if (managementControlService?.supportsManagedRoomCreation == true) {
+            withContext(sessionDispatcher) { runCatchingExceptions { managedDirectRooms().resolve(userId.value, create) } }
+        } else {
+            super<MatrixClient>.resolveDM(userId, create)
         }
     }
 
@@ -657,10 +689,12 @@ class RustMatrixClient(
     }
 
     override suspend fun createDM(userId: UserId): Result<RoomId> {
-        if (managementControlService?.supportsManagedRoomCreation == true) return withContext(sessionDispatcher) {
+        if (managementControlService?.supportsManagedRoomCreation == true) {
+            return withContext(sessionDispatcher) {
             runCatchingExceptions {
                 RoomId(checkNotNull(managedDirectRooms().execute(userId.value, true)))
             }
+        }
         }
         val createRoomParams = CreateRoomParameters(
             name = null,
@@ -674,8 +708,12 @@ class RustMatrixClient(
         return createRoom(createRoomParams)
     }
 
-    private fun managedDirectRooms() = ManagedDirectRoomLifecycle(checkNotNull(managementControlService),
-        appOperationalStateCoordinator, hashAccountId(sessionId.value), hashAccountId(deviceId.value)) { roomId ->
+    private fun managedDirectRooms() = ManagedDirectRoomLifecycle(
+        checkNotNull(managementControlService),
+        appOperationalStateCoordinator,
+        hashAccountId(sessionId.value),
+        hashAccountId(deviceId.value)
+    ) { roomId ->
         withTimeout(30.seconds) {
             while (innerClient.getRoom(roomId)?.use { true } != true) delay(100)
         }

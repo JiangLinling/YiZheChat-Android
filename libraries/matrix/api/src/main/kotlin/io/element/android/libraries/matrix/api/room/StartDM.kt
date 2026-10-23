@@ -19,9 +19,10 @@ suspend fun MatrixClient.startDM(
     userId: UserId,
     createIfDmDoesNotExist: Boolean,
 ): StartDMResult {
-    return findDM(userId)
+    return resolveDM(userId, create = false)
         .fold(
-            onSuccess = { existingDM ->
+            onSuccess = { resolved ->
+                val existingDM = resolved?.roomId
                 val existingState = existingDM?.let { roomId -> getRoom(roomId)?.info()?.directRoomRelationState() }
                 val canReuseExistingRoom = existingDM != null && existingState !in setOf(
                     DirectRoomRelationState.STALE,
@@ -29,10 +30,16 @@ suspend fun MatrixClient.startDM(
                     DirectRoomRelationState.NOT_DIRECT,
                 )
                 if (canReuseExistingRoom) {
-                    StartDMResult.Success(requireNotNull(existingDM), isNew = false)
+                    StartDMResult.Success(requireNotNull(existingDM), isNew = false, managedEvidence = resolved?.managedEvidence)
                 } else if (createIfDmDoesNotExist) {
-                    createDM(userId).fold(
-                        { StartDMResult.Success(it, isNew = true) },
+                    resolveDM(userId, create = true).fold(
+                        { created ->
+                            if (created == null) {
+                                StartDMResult.Failure(IllegalStateException("Direct room creation returned no room"))
+                            } else {
+                                StartDMResult.Success(created.roomId, isNew = true, managedEvidence = created.managedEvidence)
+                            }
+                        },
                         { StartDMResult.Failure(it) }
                     )
                 } else {
@@ -46,7 +53,11 @@ suspend fun MatrixClient.startDM(
 }
 
 sealed interface StartDMResult {
-    data class Success(val roomId: RoomId, val isNew: Boolean) : StartDMResult
+    data class Success(
+        val roomId: RoomId,
+        val isNew: Boolean,
+        val managedEvidence: DirectRoomOperationEvidence? = null,
+    ) : StartDMResult
     data object DmDoesNotExist : StartDMResult
     data class Failure(val throwable: Throwable) : StartDMResult
 }

@@ -176,6 +176,10 @@ class FakeMatrixClient(
         return findDmResult
     }
 
+    var resolveDmResult: (suspend (UserId, Boolean) -> Result<io.element.android.libraries.matrix.api.room.DirectRoomResolution?>)? = null
+    override suspend fun resolveDM(userId: UserId, create: Boolean): Result<io.element.android.libraries.matrix.api.room.DirectRoomResolution?> =
+        resolveDmResult?.invoke(userId, create) ?: super<MatrixClient>.resolveDM(userId, create)
+
     override suspend fun getJoinedRoomIds(): Result<Set<RoomId>> {
         return getJoinedRoomIdsResult()
     }

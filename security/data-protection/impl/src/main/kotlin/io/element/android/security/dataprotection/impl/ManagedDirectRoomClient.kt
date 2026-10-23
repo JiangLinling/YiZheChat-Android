@@ -72,7 +72,7 @@ internal class ManagedDirectRoomClient(
         } else {
             check(operations.isEmpty() && status == "ACCEPTED")
         }
-        return ManagedDirectRoomResult(room, status, operations) to generation
+        return ManagedDirectRoomResult(room, status, operations, payload.text("installation_id"), issued, expires) to generation
     }
 
     private fun JsonObject.text(key: String) = getValue(key).jsonPrimitive.content

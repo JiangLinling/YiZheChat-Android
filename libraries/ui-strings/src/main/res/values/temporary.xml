@@ -21,4 +21,5 @@
     <string name="error_identity_reset_unconfirmed">The identity reset result could not be confirmed. Your recovery record has been kept. Check your connection and return to this page to retry; the app will check the previous attempt before continuing. Your account has not been deleted.</string>
     <string name="error_forward_result_unconfirmed">Some forwarding results could not be confirmed. Check the destination chat before sending again to avoid duplicates. Confirmed forwards will not be repeated.</string>
     <string name="error_forward_incomplete">Forwarding did not complete. Check your connection and whether you can send to the selected chat, then try again. Confirmed forwards will not be repeated.</string>
+    <string name="contact_request_expired_retry">Chat verification expired. Please try again.</string>
 </resources>

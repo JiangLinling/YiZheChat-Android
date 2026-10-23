@@ -21,4 +21,5 @@
     <string name="error_identity_reset_unconfirmed">暂时无法确认数字身份重置的结果，恢复记录已保留。请检查网络后回到此页重试，应用会先核对上一次操作再继续。你的账号没有被删除。</string>
     <string name="error_forward_result_unconfirmed">部分消息的转发结果暂时无法确认。请先查看目标聊天，避免重复发送。已确认成功的消息不会再次转发。</string>
     <string name="error_forward_incomplete">转发未完成。请检查网络连接，以及是否能向目标聊天发送消息后重试。已确认成功的消息不会再次转发。</string>
+    <string name="contact_request_expired_retry">会话验证已过期，请重试。</string>
 </resources>

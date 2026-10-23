@@ -28,6 +28,8 @@ import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.permalink.PermalinkBuilder
 import io.element.android.services.analytics.api.AnalyticsService
+import timber.log.Timber
+import java.util.concurrent.atomic.AtomicInteger
 
 @ContributesNode(SessionScope::class)
 @AssistedInject
@@ -65,7 +67,25 @@ class UserProfileNode(
         }
 
         fun onStartDM(roomId: RoomId) {
-            callback.navigateToRoom(roomId)
+            val sample = navigationTimingSamples.updateAndGet { (it + 1).coerceAtMost(17) }
+            if (sample > 16) {
+                callback.navigateToRoom(roomId)
+                return
+            }
+            val startedAt = System.nanoTime()
+            var outcome = "failed"
+            try {
+                callback.navigateToRoom(roomId)
+                outcome = "completed"
+            } finally {
+                // Callback duration, not first-frame time. Correlate with the existing timeline trace and video.
+                Timber.tag("YiZheTimelinePerf").d(
+                    "stage=direct_navigation_callback sample=%d outcome=%s duration_ms=%d",
+                    sample,
+                    outcome,
+                    (System.nanoTime() - startedAt) / 1_000_000L,
+                )
+            }
         }
 
         UserProfileView(
@@ -78,5 +98,9 @@ class UserProfileNode(
             openAvatarPreview = callback::navigateToAvatarPreview,
             onVerifyClick = callback::startVerifyUserFlow,
         )
+    }
+
+    private companion object {
+        val navigationTimingSamples = AtomicInteger()
     }
 }
