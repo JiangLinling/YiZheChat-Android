@@ -18,6 +18,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.isToggleable
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.v2.runAndroidComposeUiTest
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.element.android.features.securebackup.impl.setup.views.aFormattedRecoveryKey
@@ -35,6 +37,19 @@ import org.robolectric.annotation.Config
 
 @RunWith(AndroidJUnit4::class)
 class SecureBackupEnterRecoveryKeyViewTest {
+    @Test
+    @Config(qualifiers = "h1024dp")
+    fun `confidential waiting keeps selection immutable and offers same-request refresh`() = runAndroidComposeUiTest<ComponentActivity> {
+        val recorder = EventsRecorder<SecureBackupEnterRecoveryKeyEvents>()
+        setSecureBackupEnterRecoveryKeyView(aSecureBackupEnterRecoveryKeyState(recoveryKey = "", includeConfidential = true,
+            recoverySessionState = io.element.android.features.securebackup.api.RecoverySessionState.Waiting(
+                "original-operation", "original-request", Long.MAX_VALUE, true, true), eventSink = recorder))
+        onNode(isToggleable()).assertIsNotEnabled()
+        onNodeWithText(activity!!.getString(io.element.android.features.securebackup.impl.R.string.screen_recovery_wait_administrator)).assertExists()
+        onNodeWithText(activity!!.getString(CommonStrings.action_continue)).assertIsNotEnabled()
+        clickOn(io.element.android.features.securebackup.impl.R.string.screen_recovery_refresh)
+        recorder.assertSingle(SecureBackupEnterRecoveryKeyEvents.RefreshRecovery)
+    }
     @Test
     fun `back key pressed - calls onBackClick`() = runAndroidComposeUiTest {
         ensureCalledOnce { callback ->

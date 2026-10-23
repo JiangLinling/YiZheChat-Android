@@ -15,5 +15,7 @@ data class SecureBackupEnterRecoveryKeyState(
     val recoveryKeyViewState: RecoveryKeyViewState,
     val isSubmitEnabled: Boolean,
     val submitAction: AsyncAction<Unit>,
+    val includeConfidential: Boolean = false,
+    val recoverySessionState: io.element.android.features.securebackup.api.RecoverySessionState = io.element.android.features.securebackup.api.RecoverySessionState.None,
     val eventSink: (SecureBackupEnterRecoveryKeyEvents) -> Unit
 )

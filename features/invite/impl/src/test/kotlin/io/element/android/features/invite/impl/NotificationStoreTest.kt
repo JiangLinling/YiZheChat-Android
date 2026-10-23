@@ -66,7 +66,8 @@ class NotificationStoreTest {
         try {
             val foreign = DefaultSeenInvitesStore(context, session, foreignScope, Observer(), secure, "DEVICE_B")
             assertThat(foreign.notifications().first()).isEmpty()
-            assertThat(runCatching { foreign.observeNotifications(emptyList()) }.isFailure).isTrue()
+            foreign.observeNotifications(emptyList())
+            assertThat(foreign.notifications().first()).isEmpty()
         } finally { foreignScope.cancel() }
     }
     @Test fun `metadata persists and another account cannot see it`() = runBlocking {

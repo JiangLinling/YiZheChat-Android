@@ -168,6 +168,7 @@ private const val MAX_ROOM_NODE_COUNT = 5
 private const val YIZHE_INTERNAL_APPLICATION_ID = "com.yizhe.chat.internal"
 private const val LOGGED_IN_STARTUP_TIMEOUT_MILLIS = 15_000L
 private const val POST_LOGIN_STARTUP_FAILURE = "POST_LOGIN_STARTUP_FAILED"
+private const val POST_LOGIN_STARTUP_EXPIRED = "POST_LOGIN_STARTUP_EXPIRED"
 private const val CORE_READY_STARTUP_TIMEOUT = "CORE_READY_STARTUP_TIMEOUT"
 
 @ContributesNode(SessionScope::class)
@@ -253,7 +254,21 @@ class LoggedInFlowNode(
     private val sessionInitializationComplete = MutableStateFlow(false)
     // Local service readiness is distinct from the original LC-06 terminal receipts.
     private val retainedHomeReady = MutableStateFlow(false)
-    private val startupSessionInitialization = StartupSessionInitialization()
+    private val startupSessionInitialization = StartupSessionInitialization { context ->
+        val original = managementControlService.lifecycleOperation(context.operationId)
+        check(original.operationId == context.operationId && original.lifecycleId == FullAppLifecycleId.LC_06 &&
+            original.subjects.accountIdHash == matrixClient.sessionId.value.sha256Hex() &&
+            original.subjects.matrixDeviceIdHash == matrixClient.deviceId.value.sha256Hex()) {
+            "Startup activation scope does not match the current session"
+        }
+        if (original.status.isTerminal) {
+            throw StartupSessionEndedException(
+                deadlineExpired = original.status == io.element.android.security.dataprotection.api.LifecycleOperationStatus.FAILED_FINAL &&
+                    managementControlService.verifyStartupCoordinationExpiry(original, "post_login"),
+            )
+        }
+        original.deadlineEpochMillis > System.currentTimeMillis()
+    }
     private val accountCoreReady = MutableStateFlow(false)
     private val offlineCoreRestored = MutableStateFlow(false)
     private val startupFailureReasonCode = MutableStateFlow<String?>(null)
@@ -399,7 +414,9 @@ class LoggedInFlowNode(
                         startupSessionInitialization.fail(failure)
                         throw failure
                     } catch (failure: Exception) {
-                        startupFailureReasonCode.value = POST_LOGIN_STARTUP_FAILURE
+                        startupFailureReasonCode.value = if (failure is StartupSessionEndedException && failure.deadlineExpired) {
+                            POST_LOGIN_STARTUP_EXPIRED
+                        } else POST_LOGIN_STARTUP_FAILURE
                         startupSessionInitialization.fail(failure)
                         Timber.e(failure, "Post-login lifecycle setup failed; keeping the startup gate closed.")
                     }
@@ -536,6 +553,9 @@ class LoggedInFlowNode(
                                         matrixDeviceId = matrixClient.deviceId.value,
                                     )
                                     Timber.i("Account reactivation reached signed CORE_READY.")
+                                } catch (failure: StartupSessionEndedException) {
+                                    startupFailureReasonCode.value = if (failure.deadlineExpired) POST_LOGIN_STARTUP_EXPIRED else POST_LOGIN_STARTUP_FAILURE
+                                    return@collectLatest
                                 } catch (failure: kotlinx.coroutines.TimeoutCancellationException) {
                                     Timber.w("Account activation attempt timed out; recovery remains active.")
                                     startupFailureReasonCode.value = CORE_READY_STARTUP_TIMEOUT
@@ -544,7 +564,7 @@ class LoggedInFlowNode(
                                 } catch (failure: Exception) {
                                     Timber.w(failure, "Account reactivation has not converged yet.")
                                 }
-                                if (startupFailureReasonCode.value == POST_LOGIN_STARTUP_FAILURE) return@collectLatest
+                                if (startupFailureReasonCode.value in setOf(POST_LOGIN_STARTUP_FAILURE, POST_LOGIN_STARTUP_EXPIRED)) return@collectLatest
                                 if (!accountCoreReady.value) {
                                     delay(retryDelayMillis)
                                     retryDelayMillis = (retryDelayMillis * 2).coerceAtMost(15_000L)
@@ -1618,19 +1638,24 @@ internal fun StartupFailureView(
             textAlign = TextAlign.Center,
         )
         Text(
-            text = stringResource(R.string.screen_logged_in_startup_failed_description),
+            text = stringResource(
+                if (reasonCode == POST_LOGIN_STARTUP_EXPIRED) R.string.screen_logged_in_startup_expired_description
+                else R.string.screen_logged_in_startup_failed_description,
+            ),
             modifier = Modifier.padding(top = 12.dp),
             style = ElementTheme.typography.fontBodyMdRegular,
             color = ElementTheme.colors.textSecondary,
             textAlign = TextAlign.Center,
         )
-        Text(
-            text = reasonCode,
-            modifier = Modifier.padding(top = 8.dp),
-            style = ElementTheme.typography.fontBodySmRegular,
-            color = ElementTheme.colors.textSecondary,
-            textAlign = TextAlign.Center,
-        )
+        if (reasonCode != POST_LOGIN_STARTUP_EXPIRED) {
+            Text(
+                text = reasonCode,
+                modifier = Modifier.padding(top = 8.dp),
+                style = ElementTheme.typography.fontBodySmRegular,
+                color = ElementTheme.colors.textSecondary,
+                textAlign = TextAlign.Center,
+            )
+        }
         Button(
             text = stringResource(R.string.screen_logged_in_startup_retry),
             onClick = onRetry,

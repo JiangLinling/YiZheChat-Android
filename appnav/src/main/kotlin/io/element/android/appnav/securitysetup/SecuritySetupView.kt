@@ -157,6 +157,7 @@ data class SecuritySetupState(
     val errorCode: String? = null,
     val identityVerified: Boolean = false,
     val locationAccepted: Boolean = false,
+    val includeConfidential: Boolean = false,
     val eventSink: (SecuritySetupEvent) -> Unit,
 )
 
@@ -173,6 +174,7 @@ sealed interface SecuritySetupEvent {
     data class RecoveryKeyChanged(val recoveryKey: String) : SecuritySetupEvent
     data object ToggleRecoveryKeyVisibility : SecuritySetupEvent
     data object SubmitRecoveryKey : SecuritySetupEvent
+    data class IncludeConfidential(val enabled: Boolean) : SecuritySetupEvent
     data object RefreshRecovery : SecuritySetupEvent
     data object DismissRecoveryKeyError : SecuritySetupEvent
     data object ResetIdentity : SecuritySetupEvent
@@ -256,11 +258,23 @@ fun SecuritySetupRoute(
     // Android saved-state bundle. Process recreation requires the user to enter it again.
     var recoveryKey by remember { mutableStateOf("") }
     var displayRecoveryKey by remember { mutableStateOf(false) }
+    var includeConfidential by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val recoveryKeyAction: MutableState<AsyncAction<Unit>> = remember { mutableStateOf(AsyncAction.Uninitialized) }
     // SDK Verified alone does not complete the admitted LC-08 action. Editing an error
     // must not release READY before a successful retry has submitted its real receipts.
     var recoveryAwaitingCompletion by remember { mutableStateOf(false) }
     val recoverySessionState by recoveryKeySubmissionService.recoveryState.collectAsState()
+    LaunchedEffect(recoverySessionState) {
+        when (val value = recoverySessionState) {
+            is RecoverySessionState.Pending -> includeConfidential = value.includeConfidential
+            is RecoverySessionState.Waiting -> {
+                includeConfidential = value.includeConfidential
+                recoveryKey = ""
+                displayRecoveryKey = false
+            }
+            else -> Unit
+        }
+    }
     var unverifiedStatusSettled by remember { mutableStateOf(false) }
     LaunchedEffect(phase, sessionVerificationStatus, recoverySessionState) {
         unverifiedStatusSettled = false
@@ -341,6 +355,12 @@ fun SecuritySetupRoute(
         ) {
             // A verified candidate must commit ownership before the active recipient registry
             // can contain it. Full content initialization stays behind the ordinary gates.
+            if (recoveryKeySubmissionService.recoveryState.value.requiresGate) {
+                phase = if (recoveryKeySubmissionService.recoveryState.value is RecoverySessionState.Discovering) {
+                    SecuritySetupPhase.CHECKING
+                } else SecuritySetupPhase.RECOVERY_METHOD_REQUIRED
+                return@runSecuritySetupSynchronization
+            }
             diagnosticStage = "ACCOUNT_HANDOVER"
             completeAccountHandover()
             diagnosticStage = "POST_HANDOVER_SYNC"
@@ -790,7 +810,8 @@ fun SecuritySetupRoute(
             }
             SecuritySetupEvent.ToggleRecoveryKeyVisibility -> displayRecoveryKey = !displayRecoveryKey
             SecuritySetupEvent.SubmitRecoveryKey -> {
-                if (recoveryKey.isNotBlank() && recoveryKeyAction.value.isUninitialized()) {
+                if (recoveryKey.isNotBlank() && recoveryKeyAction.value.isUninitialized() &&
+                    recoverySessionState !is RecoverySessionState.Pending && recoverySessionState !is RecoverySessionState.Waiting) {
                     recoveryAwaitingCompletion = true
                     coroutineScope.launch {
                         suspend {
@@ -798,10 +819,14 @@ fun SecuritySetupRoute(
                             // reconciles that original admission before LC-08, using the
                             // same signed expiry/retirement path as a new app launch.
                             startRecoveryVerification()
-                            recoveryKeySubmissionService.recover(recoveryKey).getOrThrow()
+                            recoveryKeySubmissionService.recover(recoveryKey, includeConfidential).getOrThrow()
                         }.runCatchingUpdatingState(recoveryKeyAction)
                     }
                 }
+            }
+            is SecuritySetupEvent.IncludeConfidential -> {
+                if (!recoveryKeyAction.value.isLoading() && recoverySessionState !is RecoverySessionState.Pending &&
+                    recoverySessionState !is RecoverySessionState.Waiting) includeConfidential = event.enabled
             }
             SecuritySetupEvent.RefreshRecovery -> {
                 if (!recoveryKeyAction.value.isLoading()) coroutineScope.launch {
@@ -840,6 +865,7 @@ fun SecuritySetupRoute(
                 displayRecoveryKey = displayRecoveryKey,
                 recoveryKeyAction = recoveryKeyAction.value,
                 recoverySessionState = recoverySessionState,
+                includeConfidential = includeConfidential,
                 eventSink = eventSink,
             ),
             modifier = modifier.revealStartupSplashWhenLaidOut(),
@@ -869,7 +895,8 @@ fun SecuritySetupRoute(
                     recoveryKey = recoveryKey,
                     displayRecoveryKey = displayRecoveryKey,
                     recoveryKeyAction = recoveryKeyAction.value,
-                recoverySessionState = recoverySessionState,
+                    recoverySessionState = recoverySessionState,
+                    includeConfidential = includeConfidential,
                     eventSink = eventSink,
                 ),
                 modifier = modifier.revealStartupSplashWhenLaidOut(),
@@ -1131,7 +1158,8 @@ private fun IdentityConfirmationView(
                 Button(
                     modifier = Modifier.fillMaxWidth(),
                     text = stringResource(R.string.screen_security_identity_submit_recovery_key),
-                    enabled = state.recoveryKey.isNotBlank() && state.recoveryKeyAction.isUninitialized(),
+                    enabled = state.recoveryKey.isNotBlank() && state.recoveryKeyAction.isUninitialized() &&
+                        state.recoverySessionState !is RecoverySessionState.Pending && state.recoverySessionState !is RecoverySessionState.Waiting,
                     showProgress = submitting,
                     onClick = { state.eventSink(SecuritySetupEvent.SubmitRecoveryKey) },
                 )
@@ -1167,7 +1195,7 @@ private fun IdentityConfirmationView(
                 minLines = 2,
                 value = state.recoveryKey,
                 onValueChange = { state.eventSink(SecuritySetupEvent.RecoveryKeyChanged(it)) },
-                enabled = !submitting,
+                enabled = !submitting && state.recoverySessionState !is RecoverySessionState.Pending && state.recoverySessionState !is RecoverySessionState.Waiting,
                 visualTransformation = if (state.displayRecoveryKey) {
                     VisualTransformation.None
                 } else {
@@ -1199,10 +1227,28 @@ private fun IdentityConfirmationView(
                     )
                 },
             )
+            io.element.android.libraries.designsystem.components.LabelledCheckbox(
+                checked = state.includeConfidential,
+                text = stringResource(R.string.screen_recovery_include_confidential),
+                enabled = !submitting && state.recoverySessionState !is RecoverySessionState.Pending &&
+                    state.recoverySessionState !is RecoverySessionState.Waiting,
+                onCheckedChange = { state.eventSink(SecuritySetupEvent.IncludeConfidential(it)) },
+            )
+            Text(stringResource(if (state.includeConfidential) R.string.screen_recovery_confidential_requirement
+                else R.string.screen_recovery_standard_only))
             if (state.recoverySessionState is RecoverySessionState.Waiting || state.recoverySessionState is RecoverySessionState.Pending ||
                 state.recoverySessionState is RecoverySessionState.Rejected) {
                 if (state.recoverySessionState is RecoverySessionState.Waiting) {
-                    Text(stringResource(R.string.screen_security_recovery_waiting))
+                    val waiting = state.recoverySessionState
+                    Text(stringResource(when {
+                        !waiting.includeConfidential -> R.string.screen_security_recovery_waiting
+                        !waiting.oldDeviceConfirmed -> R.string.screen_recovery_wait_old_phone
+                        !waiting.administratorApproved -> R.string.screen_recovery_wait_administrator
+                        else -> R.string.screen_recovery_finishing
+                    }))
+                    Text(stringResource(R.string.screen_recovery_approval_deadline,
+                        java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+                            .format(java.util.Date(waiting.expiresAtEpochMillis))))
                 }
                 androidx.compose.material3.TextButton(onClick = { state.eventSink(SecuritySetupEvent.RefreshRecovery) },
                     enabled = !state.recoveryKeyAction.isLoading()) {
@@ -1424,6 +1470,14 @@ private class SecuritySetupStateProvider : PreviewParameterProvider<SecuritySetu
         SecuritySetupState(SecuritySetupPhase.LOCATION_REQUIRED) {},
         SecuritySetupState(SecuritySetupPhase.VALIDATION_PENDING) {},
         SecuritySetupState(SecuritySetupPhase.SERVICE_UNAVAILABLE) {},
+        SecuritySetupState(SecuritySetupPhase.RECOVERY_METHOD_REQUIRED, identityConfirmationRequired = true,
+            includeConfidential = true, eventSink = {}),
+        SecuritySetupState(SecuritySetupPhase.RECOVERY_METHOD_REQUIRED, identityConfirmationRequired = true,
+            includeConfidential = true, recoverySessionState = RecoverySessionState.Waiting(
+                "preview-original-operation", "preview-recovery-request", Long.MAX_VALUE, true), eventSink = {}),
+        SecuritySetupState(SecuritySetupPhase.RECOVERY_METHOD_REQUIRED, identityConfirmationRequired = true,
+            includeConfidential = true, recoverySessionState = RecoverySessionState.Waiting(
+                "preview-original-operation", "preview-recovery-request", Long.MAX_VALUE, true, true), eventSink = {}),
     )
 }
 

@@ -42,7 +42,7 @@ import org.junit.Test
 class LoginPasswordPresenterTest {
     @Test
     fun `definite credential rejection records only the original service failure intent`() = runTest {
-        listOf("M_FORBIDDEN", "M_USER_DEACTIVATED").forEach { code ->
+        listOf("M_FORBIDDEN", "M_USER_DEACTIVATED", "M_USER_LOCKED").forEach { code ->
             val coordinator = FakeAppOperationalStateCoordinator()
             val authentication = FakeMatrixAuthenticationService(setHomeserverResult = { Result.success(aMatrixHomeServerDetails()) })
             val rejection = AuthenticationException.Generic(code)

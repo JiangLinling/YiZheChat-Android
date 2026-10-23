@@ -9,6 +9,8 @@
 package io.element.android.features.securebackup.impl.enter
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -86,6 +88,21 @@ class SecureBackupEnterRecoveryKeyPresenter(
         var recoveryKey by remember {
             mutableStateOf("")
         }
+        var includeConfidential by rememberSaveable { mutableStateOf(false) }
+        val sessionRecovery by recoveryState.collectAsState()
+        val hasOwnedRecovery = sessionRecovery is io.element.android.features.securebackup.api.RecoverySessionState.Pending ||
+            sessionRecovery is io.element.android.features.securebackup.api.RecoverySessionState.Waiting
+        LaunchedEffect(sessionRecovery) {
+            when (val value = sessionRecovery) {
+                is io.element.android.features.securebackup.api.RecoverySessionState.Pending -> includeConfidential = value.includeConfidential
+                is io.element.android.features.securebackup.api.RecoverySessionState.Waiting -> {
+                    includeConfidential = value.includeConfidential
+                    recoveryKey = ""
+                    displayRecoveryKeyFieldContents = false
+                }
+                else -> Unit
+            }
+        }
         val submitAction: MutableState<AsyncAction<Unit>> = remember {
             mutableStateOf(AsyncAction.Uninitialized)
         }
@@ -107,7 +124,13 @@ class SecureBackupEnterRecoveryKeyPresenter(
                 }
                 SecureBackupEnterRecoveryKeyEvents.Submit -> {
                     // No need to remove the spaces, the SDK will do it.
-                    coroutineScope.submitRecoveryKey(recoveryKey, submitAction)
+                    if (!hasOwnedRecovery) coroutineScope.submitRecoveryKey(recoveryKey, includeConfidential, submitAction)
+                }
+                is SecureBackupEnterRecoveryKeyEvents.IncludeConfidential -> if (!hasOwnedRecovery && !submitAction.value.isLoading()) {
+                    includeConfidential = event.enabled
+                }
+                SecureBackupEnterRecoveryKeyEvents.RefreshRecovery -> coroutineScope.launch {
+                    suspend { refreshPendingRecovery().getOrThrow() }.runCatchingUpdatingState(submitAction)
                 }
                 is SecureBackupEnterRecoveryKeyEvents.ChangeRecoveryKeyFieldContentsVisibility -> {
                     displayRecoveryKeyFieldContents = event.visible
@@ -122,18 +145,21 @@ class SecureBackupEnterRecoveryKeyPresenter(
                 displayTextFieldContents = displayRecoveryKeyFieldContents,
                 inProgress = submitAction.value.isLoading(),
             ),
-            isSubmitEnabled = recoveryKey.isNotEmpty() && submitAction.value.isUninitialized(),
+            isSubmitEnabled = recoveryKey.isNotEmpty() && submitAction.value.isUninitialized() && !hasOwnedRecovery,
             submitAction = submitAction.value,
+            includeConfidential = includeConfidential,
+            recoverySessionState = sessionRecovery,
             eventSink = ::handleEvent,
         )
     }
 
     private fun CoroutineScope.submitRecoveryKey(
         recoveryKey: String,
+        includeConfidential: Boolean,
         action: MutableState<AsyncAction<Unit>>
     ) = launch {
         suspend {
-            recover(recoveryKey).getOrThrow()
+            recover(recoveryKey, includeConfidential).getOrThrow()
         }.runCatchingUpdatingState(action)
     }
 
@@ -164,10 +190,14 @@ class SecureBackupEnterRecoveryKeyPresenter(
         }
     }.await()
 
-    override suspend fun recover(recoveryKey: String): Result<Unit> = sessionCoroutineScope.async {
+    override suspend fun recover(recoveryKey: String): Result<Unit> = recover(recoveryKey, false)
+
+    override suspend fun recover(recoveryKey: String, includeConfidential: Boolean): Result<Unit> = sessionCoroutineScope.async {
         recoveryMutex.withLock {
             runRecoveryAction {
-                val owned = recoveryIntentAuthority.admit(currentRecoveryScope())
+                val mode = if (includeConfidential) io.element.android.security.dataprotection.api.RecoveryHistoryMode.CONFIDENTIAL
+                    else io.element.android.security.dataprotection.api.RecoveryHistoryMode.STANDARD
+                val owned = recoveryIntentAuthority.admit(currentRecoveryScope(), mode)
                 recoveryState.value = owned.toRecoveryState()
                 continueOwnedRecovery(owned, recoveryKey)
             }
@@ -188,8 +218,10 @@ class SecureBackupEnterRecoveryKeyPresenter(
 
     private fun io.element.android.security.dataprotection.api.RecoveryIntentRecord.toRecoveryState():
         io.element.android.features.securebackup.api.RecoverySessionState = if (recoveryId != null && recoveryExpiresAtEpochMillis != null)
-            io.element.android.features.securebackup.api.RecoverySessionState.Waiting(operationId, checkNotNull(recoveryId), checkNotNull(recoveryExpiresAtEpochMillis))
-        else io.element.android.features.securebackup.api.RecoverySessionState.Pending(operationId)
+            io.element.android.features.securebackup.api.RecoverySessionState.Waiting(operationId, checkNotNull(recoveryId), checkNotNull(recoveryExpiresAtEpochMillis),
+                includeConfidential = recoveryMode == io.element.android.security.dataprotection.api.RecoveryHistoryMode.CONFIDENTIAL)
+        else io.element.android.features.securebackup.api.RecoverySessionState.Pending(operationId,
+            includeConfidential = recoveryMode == io.element.android.security.dataprotection.api.RecoveryHistoryMode.CONFIDENTIAL)
 
     private suspend fun continueOwnedRecovery(initial: io.element.android.security.dataprotection.api.RecoveryIntentRecord, key: String?) {
         var owned = initial
@@ -217,11 +249,26 @@ class SecureBackupEnterRecoveryKeyPresenter(
                     management.deviceSecurityState == ManagedDeviceSecurityState.READY) { "RECOVERY_MATRIX_AUTHORITY_PENDING" }
                 // SDK/management callbacks cannot release a different generation while this action runs.
                 recoveryIntentAuthority.verify(owned)
+                val confidential = owned.recoveryMode == io.element.android.security.dataprotection.api.RecoveryHistoryMode.CONFIDENTIAL
+                if (confidential && owned.recoveryId == null) {
+                    val status = kmsShareClient.startDeviceRecovery(StartDeviceRecoveryRequest(owned.scope.accountIdHash, owned.scope.installationId))
+                    check(status.accountIdHash == owned.scope.accountIdHash && status.newInstallationId == owned.scope.installationId)
+                    owned = recoveryIntentAuthority.waiting(owned, status.recoveryId, status.requestExpiresAtEpochMillis)
+                    recoveryState.value = owned.toRecoveryState()
+                }
                 if (owned.recoveryId != null) {
                     val status = kmsShareClient.deviceRecoveryStatus(checkNotNull(owned.recoveryId))
                     check(status.accountIdHash == owned.scope.accountIdHash && status.newInstallationId == owned.scope.installationId)
+                    check(status.recoveryId == owned.recoveryId)
+                    recoveryState.value = io.element.android.features.securebackup.api.RecoverySessionState.Waiting(
+                        owned.operationId, status.recoveryId, status.requestExpiresAtEpochMillis, confidential,
+                        status.oldDeviceConfirmed, status.administratorApproved)
                     if (status.state == DeviceRecoveryState.EXPIRED) throw ContentProtectionException.Expired()
-                    if (!status.standardAuthorized) throw ContentProtectionException.DeviceRecoveryWaiting(status.recoveryId, status.requestExpiresAtEpochMillis)
+                    if (!status.standardAuthorized || confidential &&
+                        (!status.oldDeviceConfirmed || !status.administratorApproved || !status.confidentialAuthorized ||
+                            status.state != DeviceRecoveryState.CONFIDENTIAL_AUTHORIZED)) {
+                        throw ContentProtectionException.DeviceRecoveryWaiting(status.recoveryId, status.requestExpiresAtEpochMillis)
+                    }
                 }
                 var authorityRetryUsed = false
                 suspend fun releaseWithFreshAuthority(): io.element.android.security.contentprotection.api.AccountPrivateProfileKey {

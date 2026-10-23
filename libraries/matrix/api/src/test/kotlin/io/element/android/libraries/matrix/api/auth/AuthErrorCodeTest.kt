@@ -13,6 +13,12 @@ import org.junit.Test
 
 class AuthErrorCodeTest {
     @Test
+    fun `locked account is distinct from invalid credentials`() {
+        val error = AuthenticationException.Generic("HTTP 401 M_USER_LOCKED")
+        assertThat(error.errorCode).isEqualTo(AuthErrorCode.USER_LOCKED)
+    }
+
+    @Test
     fun `errorCode finds UNKNOWN code`() {
         val error = AuthenticationException.Generic("M_UNKNOWN")
         assertThat(error.errorCode).isEqualTo(AuthErrorCode.UNKNOWN)

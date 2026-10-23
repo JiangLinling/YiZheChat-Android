@@ -15,6 +15,12 @@ import io.element.android.libraries.ui.strings.CommonStrings
 import org.junit.Test
 
 class ErrorFormatterTest {
+    @Test
+    fun `loginError - locked account has a dedicated message`() {
+        val error = AuthenticationException.Generic("HTTP 401 M_USER_LOCKED")
+        assertThat(loginError(error)).isEqualTo(R.string.screen_login_error_locked_account)
+    }
+
     // region loginError
     @Test
     fun `loginError - invalid unknown error returns unknown error message`() {

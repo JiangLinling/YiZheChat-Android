@@ -17,8 +17,15 @@ package io.element.android.features.securebackup.api
 sealed interface RecoverySessionState {
     data object Discovering : RecoverySessionState
     data object None : RecoverySessionState
-    data class Pending(val operationId: String) : RecoverySessionState
-    data class Waiting(val operationId: String, val recoveryId: String, val expiresAtEpochMillis: Long) : RecoverySessionState
+    data class Pending(val operationId: String, val includeConfidential: Boolean = false) : RecoverySessionState
+    data class Waiting(
+        val operationId: String,
+        val recoveryId: String,
+        val expiresAtEpochMillis: Long,
+        val includeConfidential: Boolean = false,
+        val oldDeviceConfirmed: Boolean = false,
+        val administratorApproved: Boolean = false,
+    ) : RecoverySessionState
     data class Rejected(val reasonCode: String) : RecoverySessionState
 }
 
@@ -31,4 +38,6 @@ fun interface RecoveryKeySubmissionService {
     suspend fun restorePendingRecovery(): Result<Unit> = Result.success(Unit)
     suspend fun refreshPendingRecovery(): Result<Unit> = Result.failure(IllegalStateException("RECOVERY_REFRESH_UNSUPPORTED"))
     suspend fun recover(recoveryKey: String): Result<Unit>
+    suspend fun recover(recoveryKey: String, includeConfidential: Boolean): Result<Unit> =
+        if (includeConfidential) Result.failure(IllegalStateException("CONFIDENTIAL_RECOVERY_UNSUPPORTED")) else recover(recoveryKey)
 }

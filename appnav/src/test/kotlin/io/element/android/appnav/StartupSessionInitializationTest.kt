@@ -22,7 +22,7 @@ class StartupSessionInitializationTest {
 
     @Test
     fun `activation waits for actual local session setup and Home waits for receipts`() = runTest {
-        val startup = StartupSessionInitialization()
+        val startup = StartupSessionInitialization { true }
         val localFinished = CompletableDeferred<Unit>()
         val transportFinished = CompletableDeferred<Unit>()
         var activated = false
@@ -55,7 +55,7 @@ class StartupSessionInitializationTest {
 
     @Test
     fun `failed activation retries within the original operation without premature receipts`() = runTest {
-        val startup = StartupSessionInitialization()
+        val startup = StartupSessionInitialization { true }
         var receiptBatches = 0
         val initialization = backgroundScope.async {
             startup.initialize(context) {}
@@ -79,7 +79,7 @@ class StartupSessionInitializationTest {
 
     @Test
     fun `initialization failure releases activation waiter without running protected action`() = runTest {
-        val startup = StartupSessionInitialization()
+        val startup = StartupSessionInitialization { true }
         var activated = false
         val waiting = backgroundScope.async {
             runCatching { startup.activate({ activated = true }, { activated = true }) }
@@ -96,7 +96,7 @@ class StartupSessionInitializationTest {
 
     @Test
     fun `receipt failure cannot report startup completion even after CORE committed`() = runTest {
-        val startup = StartupSessionInitialization()
+        val startup = StartupSessionInitialization { true }
         val transportFinished = CompletableDeferred<Unit>()
         val failure = IllegalStateException("Receipt not acknowledged")
         val initialization = backgroundScope.async {
@@ -120,7 +120,7 @@ class StartupSessionInitializationTest {
 
     @Test
     fun `cancelled prerequisites preserve original operation for a later valid retry`() = runTest {
-        val startup = StartupSessionInitialization()
+        val startup = StartupSessionInitialization { true }
         var receiptBatches = 0
         val initialization = backgroundScope.async {
             startup.initialize(context) {}
@@ -148,7 +148,7 @@ class StartupSessionInitializationTest {
 
     @Test
     fun `authenticated offline restore initializes locally and retains fresh online admission`() = runTest {
-        val startup = StartupSessionInitialization()
+        val startup = StartupSessionInitialization { true }
         startup.initialize(null) {}
         startup.complete()
         var freshAdmission = 0
@@ -158,7 +158,7 @@ class StartupSessionInitializationTest {
 
     @Test
     fun `later policy change obtains fresh admission instead of reusing completed startup`() = runTest {
-        val startup = StartupSessionInitialization()
+        val startup = StartupSessionInitialization { true }
         val initialization = backgroundScope.async {
             startup.initialize(context) {}
             startup.complete()
@@ -171,5 +171,61 @@ class StartupSessionInitializationTest {
         var freshAdmission = 0
         startup.activate({ error("Completed context must not be reused") }, { freshAdmission++ })
         assertThat(freshAdmission).isEqualTo(1)
+    }
+
+    @Test
+    fun `verified expired startup releases the original initializer without activation or replacement admission`() = runTest {
+        val startup = StartupSessionInitialization {
+            assertThat(it.operationId).isEqualTo(context.operationId)
+            false
+        }
+        var protectedActions = 0
+        var replacementAdmissions = 0
+        var receiptBatches = 0
+        val initialization = backgroundScope.async {
+            runCatching {
+                startup.initialize(context) {}
+                receiptBatches++
+                startup.complete()
+            }
+        }
+        runCurrent()
+        val activation = runCatching { startup.activate({ protectedActions++ }, { replacementAdmissions++ }) }
+        runCurrent()
+        assertThat(activation.exceptionOrNull()).isInstanceOf(StartupSessionEndedException::class.java)
+        assertThat(initialization.await().exceptionOrNull()).isInstanceOf(StartupSessionEndedException::class.java)
+        assertThat(protectedActions).isEqualTo(0)
+        assertThat(replacementAdmissions).isEqualTo(0)
+        assertThat(receiptBatches).isEqualTo(0)
+    }
+
+    @Test
+    fun `unknown original authority retries the same startup and never releases the waiters as complete`() = runTest {
+        var authorityAvailable = false
+        val startup = StartupSessionInitialization {
+            assertThat(it.operationId).isEqualTo(context.operationId)
+            if (!authorityAvailable) throw java.io.IOException("Authority temporarily unavailable")
+            true
+        }
+        var activated = false
+        var receiptBatches = 0
+        val initialization = backgroundScope.async {
+            startup.initialize(context) {}
+            receiptBatches++
+            startup.complete()
+        }
+        runCurrent()
+        val unavailable = runCatching { startup.activate({ activated = true }, { error("Replacement admission") }) }
+        assertThat(unavailable.exceptionOrNull()).isInstanceOf(java.io.IOException::class.java)
+        assertThat(activated).isFalse()
+        assertThat(initialization.isCompleted).isFalse()
+        assertThat(receiptBatches).isEqualTo(0)
+        authorityAvailable = true
+        val retry = backgroundScope.async { startup.activate({ activated = true }, { error("Replacement admission") }) }
+        runCurrent()
+        initialization.await()
+        retry.await()
+        assertThat(activated).isTrue()
+        assertThat(receiptBatches).isEqualTo(1)
     }
 }

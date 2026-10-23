@@ -18,6 +18,92 @@ import org.junit.Test
 import java.security.MessageDigest
 
 class DefaultRecoveryIntentAuthorityTest {
+    @Test fun `reset retires original expired intent only after signed denial despite changed root`() = runTest {
+        val journal = MemoryJournal().apply { entries[scope] = original }
+        val (authority, coordinator, management) = services(journal)
+        val expired = context(now = 100_001).copy(scopeValid = false, rootValid = false, currentRootValid = false)
+        coEvery { management.recoveryOperationContext(original) } returnsMany listOf(expired,
+            expired.copy(status = LifecycleOperationStatus.FAILED_FINAL, terminalReceiptId = "original-expiry-receipt",
+                terminalResultCode = "RECOVERY_OPERATION_EXPIRED"))
+        coEvery { management.expireRecoveryOperation(original) } returns Unit
+        authority.retireExpiredForIdentityReset(scope)
+        assertThat(journal.read(scope)).isNull()
+        coVerify(exactly = 1) { management.expireRecoveryOperation(original) }
+        coVerify(exactly = 0) { coordinator.start(any()) }
+    }
+
+    @Test fun `reset cannot abandon an unexpired waiting approval`() = runTest {
+        val journal = MemoryJournal().apply { entries[scope] = original }
+        val (authority, _, management) = services(journal)
+        assertThat(runCatching { authority.retireExpiredForIdentityReset(scope) }.isFailure).isTrue()
+        assertThat(journal.read(scope)).isEqualTo(original)
+        coVerify(exactly = 0) { management.expireRecoveryOperation(any()) }
+    }
+
+    @Test fun `reset cannot clear owner when expiry reply lacks the exact signed terminal`() = runTest {
+        for (reply in listOf(context(now = 100_001),
+            context(status = LifecycleOperationStatus.FAILED_FINAL, now = 100_001, code = "RECOVERY_OPERATION_EXPIRED").copy(
+                terminalReceiptId = null),
+            context(status = LifecycleOperationStatus.FAILED_FINAL, now = 100_001, code = "OTHER_FAILURE"),
+            context(status = LifecycleOperationStatus.FAILED_FINAL, now = 100_001, code = "RECOVERY_OPERATION_EXPIRED").copy(
+                operationId = "another-original-operation"))) {
+            val journal = MemoryJournal().apply { entries[scope] = original }
+            val (authority, _, management) = services(journal)
+            coEvery { management.recoveryOperationContext(original) } returnsMany listOf(context(now = 100_001), reply)
+            coEvery { management.expireRecoveryOperation(original) } returns Unit
+            assertThat(runCatching { authority.retireExpiredForIdentityReset(scope) }.isFailure).isTrue()
+            assertThat(journal.read(scope)).isEqualTo(original)
+        }
+    }
+
+    @Test fun `reset retry consumes existing signed expiry without replaying side effect`() = runTest {
+        val journal = MemoryJournal().apply { entries[scope] = original }
+        val (authority, _, management) = services(journal)
+        coEvery { management.recoveryOperationContext(original) } returns context(
+            status = LifecycleOperationStatus.FAILED_FINAL, now = 100_001, code = "RECOVERY_OPERATION_EXPIRED")
+        authority.retireExpiredForIdentityReset(scope)
+        authority.retireExpiredForIdentityReset(scope)
+        assertThat(journal.read(scope)).isNull()
+        coVerify(exactly = 0) { management.expireRecoveryOperation(any()) }
+    }
+
+    @Test fun `reset neither admits a draft nor consumes a changed recovery mode`() = runTest {
+        for (draft in listOf(original.copy(identityGeneration = null, mobileGeneration = null), original)) {
+            val journal = MemoryJournal().apply { entries[scope] = draft }
+            val (authority, coordinator, management) = services(journal)
+            coEvery { management.recoveryOperationContext(any()) } returns context(now = 100_001).copy(
+                recoveryMode = io.element.android.security.dataprotection.api.RecoveryHistoryMode.CONFIDENTIAL)
+            assertThat(runCatching { authority.retireExpiredForIdentityReset(scope) }.isFailure).isTrue()
+            assertThat(journal.read(scope)).isEqualTo(draft)
+            coVerify(exactly = 0) { coordinator.start(any()) }
+            coVerify(exactly = 0) { management.expireRecoveryOperation(any()) }
+        }
+    }
+
+    @Test fun `restored confidential intent keeps choice and rejects silent ordinary switch`() = runTest {
+        val confidential = original.copy(recoveryMode = io.element.android.security.dataprotection.api.RecoveryHistoryMode.CONFIDENTIAL)
+        val journal = MemoryJournal().apply { entries[scope] = confidential }
+        val (authority, coordinator, management) = services(journal)
+        val recreated = DefaultRecoveryIntentAuthority(journal, coordinator, management)
+        assertThat(recreated.restore(scope)).isEqualTo(confidential)
+        assertThat(runCatching { authority.verify(confidential.copy(
+            recoveryMode = io.element.android.security.dataprotection.api.RecoveryHistoryMode.STANDARD)) }.exceptionOrNull()).isNotNull()
+        val failure = runCatching { authority.admit(scope, io.element.android.security.dataprotection.api.RecoveryHistoryMode.STANDARD) }.exceptionOrNull()
+        assertThat(failure).isInstanceOf(RecoveryIntentRejected::class.java)
+        assertThat((failure as RecoveryIntentRejected).reasonCode).isEqualTo("RECOVERY_METHOD_CHANGE_REQUIRES_TERMINAL")
+        assertThat(journal.read(scope)).isEqualTo(confidential)
+        coVerify(exactly = 0) { coordinator.start(any()) }
+    }
+
+    @Test fun `signed choice mismatch cannot approve locally retained confidential intent`() = runTest {
+        val confidential = original.copy(recoveryMode = io.element.android.security.dataprotection.api.RecoveryHistoryMode.CONFIDENTIAL)
+        val journal = MemoryJournal().apply { entries[scope] = confidential }
+        val (authority, _, management) = services(journal)
+        coEvery { management.recoveryOperationContext(any()) } returns context(confidential).copy(
+            recoveryMode = io.element.android.security.dataprotection.api.RecoveryHistoryMode.STANDARD)
+        assertThat(runCatching { authority.verify(confidential) }.exceptionOrNull()).isInstanceOf(RecoveryIntentRejected::class.java)
+        assertThat(journal.read(scope)).isEqualTo(confidential)
+    }
     private val scope = RecoveryIntentScope("a".repeat(64), "installation-owned-original", "b".repeat(64))
     private val original = RecoveryIntentRecord(scope, "owned-original-operation-001", "owned-original-idempotency-001", 100_000, 1, "c".repeat(64), 1)
     private class MemoryJournal : RecoveryIntentJournal {
@@ -54,7 +140,8 @@ class DefaultRecoveryIntentAuthorityTest {
             recoveryExpiresAtEpochMillis = record.recoveryExpiresAtEpochMillis,
         terminalResultCode = code,
         idempotencyKeySha256 = MessageDigest.getInstance("SHA-256").digest(record.idempotencyKey.encodeToByteArray())
-            .joinToString("") { "%02x".format(it.toInt() and 255) }
+            .joinToString("") { "%02x".format(it.toInt() and 255) },
+        recoveryMode = record.recoveryMode,
         )
     private fun resolution(record: RecoveryIntentRecord, admitted: Boolean = false, now: Long = 10_000) =
         RecoveryIntentResolution(
@@ -63,7 +150,8 @@ class DefaultRecoveryIntentAuthorityTest {
             context(record).idempotencyKeySha256,
             record.deadlineEpochMillis,
             now,
-            admitted
+            admitted,
+            record.recoveryMode,
         )
     private fun services(journal: MemoryJournal): Triple<DefaultRecoveryIntentAuthority, AppOperationalStateCoordinator, ManagementControlService> {
         val coordinator = mockk<AppOperationalStateCoordinator>()

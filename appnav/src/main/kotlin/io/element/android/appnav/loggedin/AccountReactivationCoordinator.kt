@@ -58,6 +58,8 @@ class AccountReactivationCoordinator(
     private val matrixContentProtectionBinding: MatrixContentProtectionBinding,
     private val dataProtectionPolicyProvider: DataProtectionPolicyProvider,
     private val accountReactivationScopeStore: AccountReactivationScopeStore,
+    private val recoveryIntentJournal: io.element.android.security.dataprotection.api.RecoveryIntentJournal,
+    private val recoveryIntentAuthority: io.element.android.security.dataprotection.api.RecoveryIntentAuthority,
 ) {
     private val activationMutex = Mutex()
 
@@ -224,6 +226,12 @@ class AccountReactivationCoordinator(
         )
         val explicitIdentityResetPending = existing?.pendingExplicitIdentityReset == true
         requireEntryPrerequisite(existing?.identityResetPreviousKeyHash == null, "ACTIVATION_IDENTITY_RESET_PENDING")
+        val recoveryScope = io.element.android.security.dataprotection.api.RecoveryIntentScope(
+            accountHash, trust.installationId, matrixDeviceIdHash)
+        if (explicitIdentityResetPending && recoveryIntentJournal.read(recoveryScope) != null) {
+            recoveryIntentAuthority.retireExpiredForIdentityReset(recoveryScope)
+        }
+        requireEntryPrerequisite(recoveryIntentJournal.read(recoveryScope) == null, "RECOVERY_APPROVAL_PENDING")
 
         // Normal reactivation proves the existing KMS/Matrix boundary before CORE_READY. An
         // explicit identity reset is the one legal exception to that ordering: the old boundary

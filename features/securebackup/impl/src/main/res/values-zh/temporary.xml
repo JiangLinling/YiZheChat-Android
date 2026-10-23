@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_recovery_include_confidential">同时恢复保密聊天</string>
+    <string name="screen_recovery_confidential_requirement">需要旧手机确认和管理员批准。完成前，旧手机仍可使用。</string>
+    <string name="screen_recovery_standard_only">未选中时，只恢复普通聊天。</string>
+    <string name="screen_recovery_wait_old_phone">请在旧手机确认本次换机</string>
+    <string name="screen_recovery_wait_administrator">旧手机已确认，等待管理员批准</string>
+    <string name="screen_recovery_finishing">正在完成保密聊天恢复</string>
+    <string name="screen_recovery_approval_deadline">请在 %1$s 前完成确认和批准</string>
+    <string name="screen_recovery_refresh">刷新恢复状态</string>
+</resources>

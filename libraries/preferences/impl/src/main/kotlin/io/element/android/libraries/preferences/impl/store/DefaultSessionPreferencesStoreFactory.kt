@@ -13,36 +13,66 @@ import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.SingleIn
 import io.element.android.libraries.di.annotations.ApplicationContext
+import io.element.android.libraries.di.annotations.AppCoroutineScope
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.preferences.api.store.SessionPreferencesStore
 import io.element.android.libraries.preferences.api.store.SessionPreferencesStoreFactory
 import io.element.android.libraries.sessionstorage.api.observer.SessionListener
 import io.element.android.libraries.sessionstorage.api.observer.SessionObserver
 import kotlinx.coroutines.CoroutineScope
-import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
 class DefaultSessionPreferencesStoreFactory(
     @ApplicationContext private val context: Context,
     sessionObserver: SessionObserver,
+    @AppCoroutineScope private val appCoroutineScope: CoroutineScope,
 ) : SessionPreferencesStoreFactory {
-    private val cache = ConcurrentHashMap<SessionId, DefaultSessionPreferencesStore>()
+    private val lock = Any()
+    private val cache = mutableMapOf<SessionId, DefaultSessionPreferencesStore>()
+    private val closing = mutableMapOf<SessionId, Deferred<Unit>>()
 
     init {
         sessionObserver.addListener(object : SessionListener {
             override suspend fun onSessionDeleted(userId: String, wasLastSession: Boolean) {
-                val sessionPreferences = cache.remove(SessionId(userId))
-                sessionPreferences?.clear()
+                retire(SessionId(userId), delete = true)?.await()
             }
         })
     }
 
-    override fun get(sessionId: SessionId, sessionCoroutineScope: CoroutineScope): SessionPreferencesStore = cache.getOrPut(sessionId) {
-        DefaultSessionPreferencesStore(context, sessionId, sessionCoroutineScope)
+    override fun get(sessionId: SessionId, sessionCoroutineScope: CoroutineScope): SessionPreferencesStore = synchronized(lock) {
+        cache.getOrPut(sessionId) {
+            DefaultSessionPreferencesStore(context, sessionId, sessionCoroutineScope, closing[sessionId])
+        }
     }
 
     override fun remove(sessionId: SessionId) {
-        cache.remove(sessionId)
+        retire(sessionId, delete = false)
+    }
+
+    private fun retire(sessionId: SessionId, delete: Boolean): Deferred<Unit>? = synchronized(lock) {
+        val retired = cache.remove(sessionId)
+        val previous = closing[sessionId]
+        if (retired == null && !delete) return@synchronized previous
+        retired?.stop()
+        appCoroutineScope.async(start = CoroutineStart.LAZY) {
+            previous?.await()
+            retired?.awaitStopped()
+            if (delete) {
+                if (retired != null) {
+                    retired.clear()
+                } else {
+                    val file = DefaultSessionPreferencesStore.storeFile(context, sessionId)
+                    check(!file.exists() || file.delete()) { "Session preferences deletion failed" }
+                }
+            }
+            Unit
+        }.also { task ->
+            closing[sessionId] = task
+            task.start()
+        }
     }
 }

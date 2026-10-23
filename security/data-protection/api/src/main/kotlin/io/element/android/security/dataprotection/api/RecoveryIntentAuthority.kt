@@ -1,5 +1,7 @@
 package io.element.android.security.dataprotection.api
 
+enum class RecoveryHistoryMode { STANDARD, CONFIDENTIAL }
+
 data class RecoveryIntentScope(val accountIdHash: String, val installationId: String, val matrixDeviceIdHash: String) {
     init {
         require(accountIdHash.matches(Regex("[a-f0-9]{64}")) && matrixDeviceIdHash.matches(Regex("[a-f0-9]{64}")))
@@ -17,6 +19,7 @@ data class RecoveryIntentRecord(
     val mobileGeneration: Long? = null,
     val recoveryId: String? = null,
     val recoveryExpiresAtEpochMillis: Long? = null,
+    val recoveryMode: RecoveryHistoryMode? = null,
 ) {
     init {
         require(operationId.matches(Regex("[A-Za-z0-9_.:-]{16,256}")) && idempotencyKey.matches(Regex("[A-Za-z0-9_.:-]{16,256}")) && revision > 0 && deadlineEpochMillis > 0)
@@ -28,7 +31,7 @@ data class RecoveryIntentRecord(
         require(recoveryExpiresAtEpochMillis == null || recoveryExpiresAtEpochMillis > 0)
     }
     fun request() = LifecycleOperationRequest(operationId, FullAppLifecycleId.LC_08, "recovery_key_entered",
-        idempotencyKey, scope.accountIdHash, scope.matrixDeviceIdHash, deadlineEpochMillis = deadlineEpochMillis)
+        idempotencyKey, scope.accountIdHash, scope.matrixDeviceIdHash, deadlineEpochMillis = deadlineEpochMillis, recoveryMode = recoveryMode)
 }
 
 /** These are nonce-bound, signature-verified server observations, never local authorization. */
@@ -43,12 +46,14 @@ data class RecoveryOperationContext(
     val terminalResultCode: String? = null,
     val idempotencyKeySha256: String,
     val currentRootValid: Boolean,
+    val recoveryMode: RecoveryHistoryMode? = null,
 )
 
 /** A fresh signed observation of this exact draft. Absence never manufactures a terminal server operation. */
 data class RecoveryIntentResolution(
     val operationId: String, val scope: RecoveryIntentScope, val idempotencyKeySha256: String,
     val deadlineEpochMillis: Long, val serverTimeEpochMillis: Long, val admitted: Boolean,
+    val recoveryMode: RecoveryHistoryMode? = null,
 )
 
 interface RecoveryIntentJournal {
@@ -59,8 +64,16 @@ interface RecoveryIntentJournal {
 }
 
 interface RecoveryIntentAuthority {
+    /** Retire only the exact signed expired attempt before converging an already completed identity reset. */
+    suspend fun retireExpiredForIdentityReset(scope: RecoveryIntentScope) {
+        throw RecoveryIntentRejected("RECOVERY_RESET_RETIREMENT_UNSUPPORTED")
+    }
     suspend fun restore(scope: RecoveryIntentScope): RecoveryIntentRecord?
     suspend fun admit(scope: RecoveryIntentScope): RecoveryIntentRecord
+    suspend fun admit(scope: RecoveryIntentScope, mode: RecoveryHistoryMode): RecoveryIntentRecord {
+        check(mode == RecoveryHistoryMode.STANDARD) { "CONFIDENTIAL_RECOVERY_UNSUPPORTED" }
+        return admit(scope)
+    }
     suspend fun verify(record: RecoveryIntentRecord): RecoveryOperationContext
     suspend fun waiting(record: RecoveryIntentRecord, recoveryId: String, expiresAtEpochMillis: Long): RecoveryIntentRecord
     suspend fun completed(record: RecoveryIntentRecord)

@@ -71,7 +71,8 @@ class AtomicRecoveryIntentJournal(@ApplicationContext context: Context) : Recove
             if (data.has("identityGeneration")) data.getString("identityGeneration") else null,
             if (data.has("mobileGeneration")) data.getLong("mobileGeneration") else null,
             if (data.has("recovery")) data.getString("recovery") else null,
-            if (data.has("recoveryExpiry")) data.getLong("recoveryExpiry") else null
+            if (data.has("recoveryExpiry")) data.getLong("recoveryExpiry") else null,
+            if (data.has("recoveryMode")) io.element.android.security.dataprotection.api.RecoveryHistoryMode.valueOf(data.getString("recoveryMode")) else null,
         )
     }
     override fun compareAndSet(scope: RecoveryIntentScope, expectedRevision: Long?, next: RecoveryIntentRecord?): Boolean = synchronized(mutationLock) {
@@ -85,6 +86,9 @@ class AtomicRecoveryIntentJournal(@ApplicationContext context: Context) : Recove
             return@synchronized true
         }
         check(next.scope == scope && next.revision == (expectedRevision ?: 0L) + 1L)
+        check(current == null || current.operationId != next.operationId || current.recoveryMode == next.recoveryMode) {
+            "RECOVERY_MODE_IS_IMMUTABLE"
+        }
         check(directory.exists() || directory.mkdirs())
         val data = JSONObject().put("schema", 1).put("account", scope.accountIdHash)
             .put("installation", scope.installationId).put("device", scope.matrixDeviceIdHash)
@@ -94,6 +98,7 @@ class AtomicRecoveryIntentJournal(@ApplicationContext context: Context) : Recove
         next.mobileGeneration?.let { data.put("mobileGeneration", it) }
         next.recoveryId?.let { data.put("recovery", it) }
         next.recoveryExpiresAtEpochMillis?.let { data.put("recoveryExpiry", it) }
+        next.recoveryMode?.let { data.put("recoveryMode", it.name) }
         val stream = atomic.startWrite()
         try {
             stream.write(data.toString().encodeToByteArray())

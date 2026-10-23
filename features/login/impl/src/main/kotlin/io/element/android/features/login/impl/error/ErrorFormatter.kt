@@ -23,6 +23,7 @@ fun loginError(
     return when (authException.errorCode) {
         AuthErrorCode.FORBIDDEN -> R.string.screen_login_error_invalid_credentials
         AuthErrorCode.USER_DEACTIVATED -> R.string.screen_login_error_deactivated_account
+        AuthErrorCode.USER_LOCKED -> R.string.screen_login_error_locked_account
         AuthErrorCode.UNKNOWN -> CommonStrings.error_unknown
     }
 }

@@ -12,6 +12,7 @@
     <string name="screen_startup_verifying_device_and_policy">Verifying this device and its security policy</string>
     <string name="screen_logged_in_startup_failed_title">Unable to enter YiZheChat</string>
     <string name="screen_logged_in_startup_failed_description">Account and device security did not become ready in time. Retry to resume the same protected startup operation.</string>
+    <string name="screen_logged_in_startup_expired_description">Login preparation timed out. Retry to continue.</string>
     <string name="screen_logged_in_startup_retry">Retry</string>
     <string name="screen_security_setup_title">Device security validation</string>
     <string name="screen_security_setup_subtitle">Messages and calls will be enabled after validation and secure initialization.</string>
@@ -123,4 +124,12 @@
     <string name="screen_group_invite_open">Open invitation</string>
     <string name="screen_group_invite_error">Invitation unavailable or expired. Check your connection or ask for a new invitation.</string>
     <string name="screen_security_setup_diagnostic">View diagnostic code</string>
+    <string name="screen_recovery_include_confidential">Also recover confidential chats</string>
+    <string name="screen_recovery_confidential_requirement">Requires confirmation on the old phone and administrator approval. The old phone stays usable until completion.</string>
+    <string name="screen_recovery_standard_only">When unchecked, only ordinary chats are recovered.</string>
+    <string name="screen_recovery_wait_old_phone">Confirm this move on the old phone.</string>
+    <string name="screen_recovery_wait_administrator">Old phone confirmed. Waiting for administrator approval.</string>
+    <string name="screen_recovery_finishing">Completing confidential chat recovery…</string>
+    <string name="screen_recovery_approval_deadline">Complete confirmation and approval before %1$s.</string>
+    <string name="screen_recovery_refresh">Refresh recovery</string>
 </resources>

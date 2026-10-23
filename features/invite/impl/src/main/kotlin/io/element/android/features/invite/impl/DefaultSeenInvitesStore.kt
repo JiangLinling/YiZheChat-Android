@@ -16,6 +16,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.preferencesDataStoreFile
+import androidx.datastore.core.DataStore
 import io.element.android.features.invite.api.InviteNotification
 import io.element.android.features.invite.api.SeenInvitesStore
 import io.element.android.libraries.androidutils.file.safeDelete
@@ -57,6 +58,7 @@ class DefaultSeenInvitesStore(
     sessionObserver: SessionObserver,
     private val sensitiveFileStore: SensitiveFileStore,
     deviceId: String,
+    preferencesOverride: DataStore<Preferences>? = null,
 ) : SeenInvitesStore {
     private val mutex = Mutex()
     private val vaultId = deriveAccountVaultId(sessionId.value, deviceId)
@@ -77,7 +79,7 @@ class DefaultSeenInvitesStore(
         context.preferencesDataStoreFile("session_${hashedUserId}_seen-invites")
     }
 
-    private val store = PreferenceDataStoreFactory.create(
+    private val store = preferencesOverride ?: PreferenceDataStoreFactory.create(
         scope = sessionCoroutineScope,
         migrations = emptyList(),
     ) {
@@ -186,8 +188,11 @@ class DefaultSeenInvitesStore(
     }
 
     private suspend fun readRecords(prefs: Preferences): List<InviteNotification> {
-        val reference = prefs[historyReferenceKey]?.let(::decodeReference)
+        val encoded = prefs[historyReferenceKey]
             ?: return prefs[notificationHistoryKey].orEmpty().mapNotNull(InviteNotificationCodec::decode)
+        // Account preferences can outlive a Matrix login. A foreign/stale pointer never grants
+        // access to that old vault and must not crash the current session's notification writer.
+        val reference = decodeCurrentReferenceOrNull(encoded) ?: return emptyList()
         require(reference.vaultId == vaultId && reference.objectId == objectId && reference.purpose == purpose)
         return sensitiveFileStore.read(reference) { input ->
             val bytes = input.readBytes()
@@ -201,18 +206,23 @@ class DefaultSeenInvitesStore(
         val reference = try {
             sensitiveFileStore.write(SecureObjectWriteRequest(objectId, vaultId, purpose, associatedData, bytes.size.toLong())) { it.write(bytes) }
         } finally { bytes.fill(0) }
-        prefs[historyReferenceKey]?.let { previous -> prefs[retiredReferencesKey] = prefs[retiredReferencesKey].orEmpty() + previous }
+        prefs[historyReferenceKey]?.takeIf { decodeCurrentReferenceOrNull(it) != null }?.let { previous ->
+            prefs[retiredReferencesKey] = prefs[retiredReferencesKey].orEmpty() + previous
+        }
         prefs[historyReferenceKey] = encodeReference(reference)
         prefs.remove(notificationHistoryKey)
     }
 
     private suspend fun retireOldReferences() {
         val retired = store.data.first()[retiredReferencesKey].orEmpty()
-        val deleted = retired.filter { value ->
-            try { sensitiveFileStore.delete(decodeReference(value)) }
+        val retiredMetadata = retired.filter { value ->
+            // Forget invalid metadata only. The old vault's lifecycle owns its ciphertext;
+            // an untrusted pointer must never authorize cross-vault deletion.
+            val reference = decodeCurrentReferenceOrNull(value) ?: return@filter true
+            try { sensitiveFileStore.delete(reference) }
             catch (failure: Exception) { if (failure is CancellationException) throw failure else false }
         }.toSet()
-        if (deleted.isNotEmpty()) store.edit { it[retiredReferencesKey] = it[retiredReferencesKey].orEmpty() - deleted }
+        if (retiredMetadata.isNotEmpty()) store.edit { it[retiredReferencesKey] = it[retiredReferencesKey].orEmpty() - retiredMetadata }
     }
 
     private fun encodeReference(reference: SecureObjectReference): String = JSONObject().apply {
@@ -229,5 +239,13 @@ class DefaultSeenInvitesStore(
         require(it.vaultId == vaultId && it.objectId == objectId && it.purpose == purpose)
         val expectedAad = MessageDigest.getInstance("SHA-256").digest(associatedData).joinToString("") { byte -> "%02x".format(byte) }
         require(it.associatedDataSha256 == expectedAad)
+    }
+
+    private fun decodeCurrentReferenceOrNull(value: String): SecureObjectReference? = try {
+        decodeReference(value)
+    } catch (_: IllegalArgumentException) {
+        null
+    } catch (_: org.json.JSONException) {
+        null
     }
 }

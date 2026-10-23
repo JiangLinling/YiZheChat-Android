@@ -56,6 +56,48 @@ import java.security.MessageDigest
 
 class AccountReactivationCoordinatorTest {
     @Test
+    fun `completed reset still cannot activate when original recovery retirement fails`() = runTest {
+        val management = mockk<ManagementControlService>()
+        coEvery { management.synchronize() } returns ManagementSyncReport(ManagementSyncStatus.SYNCHRONIZED,
+            acceptedPolicyVersion = POLICY_VERSION)
+        val store = mockk<AccountReactivationScopeStore>()
+        coEvery { store.current(any(), any(), any()) } returns AccountReactivationCheckpoint(
+            attempt(), AccountReactivationCheckpointState.ALLOCATED, pendingExplicitIdentityReset = true)
+        val journal = mockk<io.element.android.security.dataprotection.api.RecoveryIntentJournal>()
+        every { journal.read(any()) } answers {
+            io.element.android.security.dataprotection.api.RecoveryIntentRecord(
+                firstArg(), "original-pending-reset-operation", "original-pending-reset-idempotency", 1, 1)
+        }
+        val authority = mockk<io.element.android.security.dataprotection.api.RecoveryIntentAuthority>()
+        coEvery { authority.retireExpiredForIdentityReset(any()) } throws IllegalStateException("expiry unavailable")
+        val fixture = fixture(management, store, recoveryJournal = journal, recoveryAuthority = authority)
+        assertThat(fixture.coordinator.activate(fixture.matrixClient).isFailure).isTrue()
+        coVerify(exactly = 0) { management.prepareAccountReactivation(any()) }
+        coVerify(exactly = 0) { management.commitAccountReactivation(any(), any()) }
+    }
+
+    @Test
+    fun `all activation callers obey the original durable recovery gate`() = runTest {
+        val management = mockk<ManagementControlService>()
+        coEvery { management.synchronize() } returns ManagementSyncReport(ManagementSyncStatus.SYNCHRONIZED, acceptedPolicyVersion = POLICY_VERSION)
+        val journal = mockk<io.element.android.security.dataprotection.api.RecoveryIntentJournal>()
+        every { journal.read(any()) } answers {
+            val scope = firstArg<io.element.android.security.dataprotection.api.RecoveryIntentScope>()
+            io.element.android.security.dataprotection.api.RecoveryIntentRecord(scope, "pending-original-recovery", "pending-original-idempotency",
+                Long.MAX_VALUE, 1, recoveryMode = io.element.android.security.dataprotection.api.RecoveryHistoryMode.CONFIDENTIAL)
+        }
+        val store = mockk<AccountReactivationScopeStore>()
+        coEvery { store.current(any(), any(), any()) } returns null
+        val authority = mockk<io.element.android.security.dataprotection.api.RecoveryIntentAuthority>()
+        val fixture = fixture(management, store, recoveryJournal = journal, recoveryAuthority = authority)
+        val failure = fixture.coordinator.activate(fixture.matrixClient).exceptionOrNull()
+        assertThat(failure).isInstanceOf(AccountEntryPrerequisiteFailure::class.java)
+        assertThat((failure as AccountEntryPrerequisiteFailure).reasonCode).isEqualTo("RECOVERY_APPROVAL_PENDING")
+        coVerify(exactly = 0) { management.prepareAccountReactivation(any()) }
+        coVerify(exactly = 0) { management.commitAccountReactivation(any(), any()) }
+        coVerify(exactly = 0) { authority.retireExpiredForIdentityReset(any()) }
+    }
+    @Test
     fun `signed handover candidate can commit before appearing in the active recipient registry`() = runTest {
         val attempt = attempt()
         val prepared = PreparedAccountReactivation(ACTIVATION_ID, 1L)
@@ -496,15 +538,26 @@ class AccountReactivationCoordinatorTest {
         coEvery { management.prepareAccountReactivation(capture(requestSlot)) } returns
             PreparedAccountReactivation(ACTIVATION_ID, Long.MAX_VALUE)
         coEvery { management.commitAccountReactivation(any(), any()) } returns resetReceipt
+        var owned = true
+        val journal = mockk<io.element.android.security.dataprotection.api.RecoveryIntentJournal>()
+        every { journal.read(any()) } answers {
+            if (owned) io.element.android.security.dataprotection.api.RecoveryIntentRecord(
+                firstArg(), "expired-reset-recovery-op", "expired-reset-recovery-idem", 1, 1) else null
+        }
+        val authority = mockk<io.element.android.security.dataprotection.api.RecoveryIntentAuthority>()
+        coEvery { authority.retireExpiredForIdentityReset(any()) } answers { owned = false }
         val fixture = fixture(
             management = management,
             scopeStore = scopeStore,
             kmsAvailable = false,
             recipientRegistryAvailable = false,
+            recoveryJournal = journal,
+            recoveryAuthority = authority,
         )
 
         assertThat(fixture.coordinator.activate(fixture.matrixClient).getOrThrow()).isEqualTo(resetReceipt)
         assertThat(requestSlot.captured.explicitIdentityResetConfirmed).isTrue()
+        coVerify(exactly = 1) { authority.retireExpiredForIdentityReset(any()) }
         coVerify(exactly = 0) { fixture.recipientRegistry.approvedRecipients(any<String>()) }
         coVerify(exactly = 1) { management.prepareAccountReactivation(any()) }
         coVerify(exactly = 1) { management.commitAccountReactivation(any(), any()) }
@@ -515,6 +568,11 @@ class AccountReactivationCoordinatorTest {
         scopeStore: AccountReactivationScopeStore,
         kmsAvailable: Boolean = true,
         recipientRegistryAvailable: Boolean = true,
+        recoveryJournal: io.element.android.security.dataprotection.api.RecoveryIntentJournal =
+            mockk<io.element.android.security.dataprotection.api.RecoveryIntentJournal>().apply {
+                every { read(any()) } returns null
+            },
+        recoveryAuthority: io.element.android.security.dataprotection.api.RecoveryIntentAuthority = mockk(),
     ): Fixture {
         val trust = mockk<DeviceTrustService>()
         coEvery { trust.current() } returns DeviceTrustSnapshot(
@@ -558,6 +616,8 @@ class AccountReactivationCoordinatorTest {
                 matrixContentProtectionBinding = binding,
                 dataProtectionPolicyProvider = policyProvider,
                 accountReactivationScopeStore = scopeStore,
+                recoveryIntentJournal = recoveryJournal,
+                recoveryIntentAuthority = recoveryAuthority,
             ),
             matrixClient = matrixClient,
             recipientRegistry = recipientRegistry,

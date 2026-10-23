@@ -22,6 +22,13 @@ open class SecureBackupEnterRecoveryKeyStateProvider : PreviewParameterProvider<
             aSecureBackupEnterRecoveryKeyState(submitAction = AsyncAction.Loading),
             aSecureBackupEnterRecoveryKeyState(submitAction = AsyncAction.Failure(Exception("A Failure"))),
             aSecureBackupEnterRecoveryKeyState(displayTextFieldContents = false),
+            aSecureBackupEnterRecoveryKeyState(includeConfidential = true),
+            aSecureBackupEnterRecoveryKeyState(recoveryKey = "", includeConfidential = true,
+                recoverySessionState = io.element.android.features.securebackup.api.RecoverySessionState.Waiting(
+                    "preview-original-operation", "preview-recovery-request", Long.MAX_VALUE, true)),
+            aSecureBackupEnterRecoveryKeyState(recoveryKey = "", includeConfidential = true,
+                recoverySessionState = io.element.android.features.securebackup.api.RecoverySessionState.Waiting(
+                    "preview-original-operation", "preview-recovery-request", Long.MAX_VALUE, true, true)),
         )
 }
 
@@ -30,6 +37,8 @@ fun aSecureBackupEnterRecoveryKeyState(
     isSubmitEnabled: Boolean = recoveryKey.isNotEmpty(),
     displayTextFieldContents: Boolean = true,
     submitAction: AsyncAction<Unit> = AsyncAction.Uninitialized,
+    includeConfidential: Boolean = false,
+    recoverySessionState: io.element.android.features.securebackup.api.RecoverySessionState = io.element.android.features.securebackup.api.RecoverySessionState.None,
     eventSink: (SecureBackupEnterRecoveryKeyEvents) -> Unit = {},
 ) = SecureBackupEnterRecoveryKeyState(
     recoveryKeyViewState = RecoveryKeyViewState(
@@ -40,5 +49,7 @@ fun aSecureBackupEnterRecoveryKeyState(
     ),
     isSubmitEnabled = isSubmitEnabled,
     submitAction = submitAction,
+    includeConfidential = includeConfidential,
+    recoverySessionState = recoverySessionState,
     eventSink = eventSink,
 )

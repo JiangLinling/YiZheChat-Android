@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="screen_login_error_locked_account">账号已锁定，请联系管理员</string>
     <string name="screen_login_brand_title">乙者</string>
     <string name="screen_login_account_label">账号</string>
     <string name="screen_login_account_placeholder">请输入账号</string>

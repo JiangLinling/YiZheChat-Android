@@ -50,7 +50,9 @@ fun SecureBackupEnterRecoveryKeyView(
     modifier: Modifier = Modifier,
 ) {
     AsyncActionView(
-        async = state.submitAction,
+        async = state.submitAction.takeUnless { it is io.element.android.libraries.architecture.AsyncAction.Failure &&
+            it.error is io.element.android.security.contentprotection.api.ContentProtectionException.DeviceRecoveryWaiting }
+            ?: io.element.android.libraries.architecture.AsyncAction.Uninitialized,
         onSuccess = { onSuccess() },
         progressDialog = { },
         errorTitle = { stringResource(id = R.string.screen_recovery_key_confirm_error_title) },
@@ -107,12 +109,39 @@ private fun Content(
             state.eventSink(SecureBackupEnterRecoveryKeyEvents.ChangeRecoveryKeyFieldContentsVisibility(it))
         }
     )
+    val owned = state.recoverySessionState is io.element.android.features.securebackup.api.RecoverySessionState.Pending ||
+        state.recoverySessionState is io.element.android.features.securebackup.api.RecoverySessionState.Waiting
+    io.element.android.libraries.designsystem.components.LabelledCheckbox(
+        checked = state.includeConfidential,
+        text = stringResource(R.string.screen_recovery_include_confidential),
+        enabled = !owned && !state.submitAction.isLoading(),
+        onCheckedChange = { state.eventSink(SecureBackupEnterRecoveryKeyEvents.IncludeConfidential(it)) },
+    )
+    io.element.android.libraries.designsystem.theme.components.Text(stringResource(if (state.includeConfidential)
+        R.string.screen_recovery_confidential_requirement else R.string.screen_recovery_standard_only))
+    val waiting = state.recoverySessionState as? io.element.android.features.securebackup.api.RecoverySessionState.Waiting
+    if (waiting != null) {
+        io.element.android.libraries.designsystem.theme.components.Text(stringResource(when {
+            !waiting.includeConfidential -> R.string.screen_recovery_wait_old_phone
+            !waiting.oldDeviceConfirmed -> R.string.screen_recovery_wait_old_phone
+            !waiting.administratorApproved -> R.string.screen_recovery_wait_administrator
+            else -> R.string.screen_recovery_finishing
+        }))
+        io.element.android.libraries.designsystem.theme.components.Text(stringResource(R.string.screen_recovery_approval_deadline,
+            java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+                .format(java.util.Date(waiting.expiresAtEpochMillis))))
+    }
 }
 
 @Composable
 private fun ColumnScope.Buttons(
     state: SecureBackupEnterRecoveryKeyState,
 ) {
+    if (state.recoverySessionState is io.element.android.features.securebackup.api.RecoverySessionState.Waiting ||
+        state.recoverySessionState is io.element.android.features.securebackup.api.RecoverySessionState.Pending) {
+        Button(text = stringResource(R.string.screen_recovery_refresh), enabled = !state.submitAction.isLoading(),
+            modifier = Modifier.fillMaxWidth(), onClick = { state.eventSink(SecureBackupEnterRecoveryKeyEvents.RefreshRecovery) })
+    }
     Button(
         text = stringResource(id = CommonStrings.action_continue),
         enabled = state.isSubmitEnabled,

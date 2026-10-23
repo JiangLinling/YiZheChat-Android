@@ -11,6 +11,7 @@ package io.element.android.features.securebackup.impl.enter
 import app.cash.molecule.RecompositionMode
 import app.cash.molecule.moleculeFlow
 import app.cash.turbine.test
+import app.cash.turbine.ReceiveTurbine
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.securebackup.api.requiresGate
 import io.element.android.features.securebackup.impl.setup.views.RecoveryKeyUserStory
@@ -57,6 +58,62 @@ import org.junit.Rule
 import org.junit.Test
 
 class SecureBackupEnterRecoveryKeyPresenterTest {
+    private suspend fun ReceiveTurbine<SecureBackupEnterRecoveryKeyState>.awaitSubmissionResult(): SecureBackupEnterRecoveryKeyState {
+        var state = awaitItem()
+        while (state.submitAction is AsyncAction.Loading) {
+            // Durable recovery/waiting updates may recompose while the same submission is running.
+            assertThat(state.isSubmitEnabled).isFalse()
+            state = awaitItem()
+        }
+        return state
+    }
+
+    @Test
+    fun `confidential choice precedes Matrix recovery and waits for both approvals on same request`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val authority = RecordingRecoveryIntentAuthority(coordinator)
+        val encryption = mockk<EncryptionService>()
+        coEvery { encryption.recover(any()) } coAnswers {
+            assertThat(coordinator.startedRequests.single().recoveryMode).isEqualTo(RecoveryHistoryMode.CONFIDENTIAL)
+            Result.success(Unit)
+        }
+        val kms = mockk<KmsShareClient>()
+        var status: DeviceRecoveryStatus? = null
+        coEvery { kms.startDeviceRecovery(any()) } answers {
+            val request = firstArg<io.element.android.security.contentprotection.api.StartDeviceRecoveryRequest>()
+            DeviceRecoveryStatus("confidential-original-request", request.accountIdHash, request.newInstallationId,
+                DeviceRecoveryState.STANDARD_AUTHORIZED, true, false, false, false, Long.MAX_VALUE).also { status = it }
+        }
+        coEvery { kms.deviceRecoveryStatus(any()) } answers { checkNotNull(status) }
+        coEvery { kms.releasePrivateProfileKey(any()) } returns AccountPrivateProfileKey(1, ByteArray(32))
+        val runtime = RecordingMatrixContentProtectionRuntime()
+        val presenter = createPresenter(encryptionService = encryption, coordinator = coordinator, kmsShareClient = kms,
+            matrixContentProtectionRuntime = runtime, intentAuthority = authority,
+            matrixClient = FakeMatrixClient(encryptionService = encryption,
+                sessionVerificationService = io.element.android.libraries.matrix.test.verification.FakeSessionVerificationService(
+                    io.element.android.libraries.matrix.api.verification.SessionVerifiedStatus.Verified)))
+        assertThat(presenter.recover("1234", true).exceptionOrNull()).isInstanceOf(ContentProtectionException.DeviceRecoveryWaiting::class.java)
+        val original = presenter.recoveryState.value as io.element.android.features.securebackup.api.RecoverySessionState.Waiting
+        assertThat(original.includeConfidential).isTrue()
+        coVerify(exactly = 0) { kms.releasePrivateProfileKey(any()) }
+        status = checkNotNull(status).copy(oldDeviceConfirmed = true, state = DeviceRecoveryState.AWAITING_ADMIN_APPROVAL)
+        assertThat(presenter.refreshPendingRecovery().exceptionOrNull()).isInstanceOf(ContentProtectionException.DeviceRecoveryWaiting::class.java)
+        val awaitingAdmin = presenter.recoveryState.value as io.element.android.features.securebackup.api.RecoverySessionState.Waiting
+        assertThat(awaitingAdmin.recoveryId).isEqualTo(original.recoveryId)
+        assertThat(awaitingAdmin.operationId).isEqualTo(original.operationId)
+        assertThat(awaitingAdmin.oldDeviceConfirmed).isTrue()
+        coVerify(exactly = 0) { kms.releasePrivateProfileKey(any()) }
+        status = checkNotNull(status).copy(administratorApproved = true, confidentialAuthorized = true,
+            state = DeviceRecoveryState.CONFIDENTIAL_AUTHORIZED)
+        assertThat(presenter.refreshPendingRecovery().isSuccess).isTrue()
+        assertThat(presenter.recoveryState.value.requiresGate).isFalse()
+        coVerify(exactly = 1) { encryption.recover(any()) }
+        coVerify(exactly = 1) { kms.startDeviceRecovery(any()) }
+        coVerify(exactly = 1) { kms.releasePrivateProfileKey(any()) }
+        assertThat(coordinator.startedRequests.map { it.operationId }.distinct()).containsExactly(original.operationId)
+        assertThat(runtime.refreshModes).containsExactly(MatrixAuthorizationRefreshMode.SELECTIVE_CACHE_EXPIRY)
+    }
+
     @get:Rule
     val warmUpRule = WarmUpRule()
 
@@ -107,7 +164,7 @@ class SecureBackupEnterRecoveryKeyPresenterTest {
             val loadingState = awaitItem()
             assertThat(loadingState.submitAction).isEqualTo(AsyncAction.Loading)
             assertThat(loadingState.isSubmitEnabled).isFalse()
-            val errorState = awaitItem()
+            val errorState = awaitSubmissionResult()
             val recoveryFailure = errorState.submitAction as AsyncAction.Failure
             assertThat(recoveryFailure.error).isInstanceOf(AN_EXCEPTION.javaClass)
             assertThat(recoveryFailure.error).hasMessageThat().isEqualTo(AN_EXCEPTION.message)
@@ -122,7 +179,7 @@ class SecureBackupEnterRecoveryKeyPresenterTest {
             val loadingState2 = awaitItem()
             assertThat(loadingState2.submitAction).isEqualTo(AsyncAction.Loading)
             assertThat(loadingState2.isSubmitEnabled).isFalse()
-            val finalState = awaitItem()
+            val finalState = awaitSubmissionResult()
             assertThat(finalState.submitAction).isEqualTo(AsyncAction.Success(Unit))
             assertThat(finalState.isSubmitEnabled).isFalse()
             assertThat(coordinator.startedRequests).hasSize(1)
@@ -154,7 +211,7 @@ class SecureBackupEnterRecoveryKeyPresenterTest {
             awaitItem().eventSink(SecureBackupEnterRecoveryKeyEvents.OnRecoveryKeyChange("1234"))
             awaitItem().eventSink(SecureBackupEnterRecoveryKeyEvents.Submit)
             assertThat(awaitItem().submitAction).isEqualTo(AsyncAction.Loading)
-            assertThat(awaitItem().submitAction).isInstanceOf(AsyncAction.Failure::class.java)
+            assertThat(awaitSubmissionResult().submitAction).isInstanceOf(AsyncAction.Failure::class.java)
             assertThat(coordinator.startedRequests).hasSize(1)
             assertThat(coordinator.clientReceipts).isEmpty()
             coVerify(exactly = 0) { kmsShareClient.startDeviceRecovery(any()) }
@@ -175,7 +232,7 @@ class SecureBackupEnterRecoveryKeyPresenterTest {
             awaitItem().eventSink(SecureBackupEnterRecoveryKeyEvents.OnRecoveryKeyChange("1234"))
             awaitItem().eventSink(SecureBackupEnterRecoveryKeyEvents.Submit)
             assertThat(awaitItem().submitAction).isEqualTo(AsyncAction.Loading)
-            assertThat(awaitItem().submitAction).isInstanceOf(AsyncAction.Failure::class.java)
+            assertThat(awaitSubmissionResult().submitAction).isInstanceOf(AsyncAction.Failure::class.java)
             assertThat(coordinator.startedRequests).hasSize(1)
             assertThat(coordinator.clientReceipts).isEmpty()
             coVerify(exactly = 1) { kmsShareClient.startDeviceRecovery(any()) }
@@ -244,10 +301,11 @@ class SecureBackupEnterRecoveryKeyPresenterTest {
                 deviceSecurityState = ManagedDeviceSecurityState.READY,
             )
         ),
+        matrixClient: FakeMatrixClient = FakeMatrixClient(encryptionService = encryptionService),
     ) = SecureBackupEnterRecoveryKeyPresenter(
         encryptionService = encryptionService,
         recoveryKeyTools = RecoveryKeyTools(),
-        matrixClient = FakeMatrixClient(encryptionService = encryptionService),
+        matrixClient = matrixClient,
         appOperationalStateCoordinator = coordinator,
         recoveryIntentAuthority = intentAuthority,
         managementSecurityRefreshService = managementSecurityRefreshService,
@@ -269,13 +327,15 @@ class SecureBackupEnterRecoveryKeyPresenterTest {
     private class RecordingRecoveryIntentAuthority(private val coordinator: AppOperationalStateCoordinator) : RecoveryIntentAuthority {
         private var current: RecoveryIntentRecord? = null
         override suspend fun restore(scope: RecoveryIntentScope) = current?.takeIf { it.scope == scope }
-        override suspend fun admit(scope: RecoveryIntentScope): RecoveryIntentRecord {
+        override suspend fun admit(scope: RecoveryIntentScope): RecoveryIntentRecord = admitWithMode(scope, null)
+        override suspend fun admit(scope: RecoveryIntentScope, mode: RecoveryHistoryMode): RecoveryIntentRecord = admitWithMode(scope, mode)
+        private suspend fun admitWithMode(scope: RecoveryIntentScope, mode: RecoveryHistoryMode?): RecoveryIntentRecord {
             current?.let { return it }
             val request = lifecycleOperationRequest(FullAppLifecycleId.LC_08, "recovery_key_entered",
-                accountIdHash = scope.accountIdHash, matrixDeviceIdHash = scope.matrixDeviceIdHash)
+                accountIdHash = scope.accountIdHash, matrixDeviceIdHash = scope.matrixDeviceIdHash).copy(recoveryMode = mode)
             coordinator.start(request)
             return RecoveryIntentRecord(scope, request.operationId, request.idempotencyKey, request.deadlineEpochMillis, 1,
-                identityGeneration = "d".repeat(64), mobileGeneration = 1).also { current = it }
+                identityGeneration = "d".repeat(64), mobileGeneration = 1, recoveryMode = mode).also { current = it }
         }
         override suspend fun verify(record: RecoveryIntentRecord) = RecoveryOperationContext(
             operationId = record.operationId, scope = record.scope, trigger = "recovery_key_entered",
@@ -284,7 +344,7 @@ class SecureBackupEnterRecoveryKeyPresenterTest {
             scopeValid = true, rootValid = true, currentRootValid = true, status = LifecycleOperationStatus.RUNNING,
             terminalReceiptId = null, deadlineEpochMillis = record.deadlineEpochMillis, serverTimeEpochMillis = System.currentTimeMillis(),
             matrixComplete = true, recoveryId = record.recoveryId, recoveryExpiresAtEpochMillis = record.recoveryExpiresAtEpochMillis,
-            idempotencyKeySha256 = "a".repeat(64))
+            idempotencyKeySha256 = "a".repeat(64), recoveryMode = record.recoveryMode)
         override suspend fun waiting(record: RecoveryIntentRecord, recoveryId: String, expiresAtEpochMillis: Long) =
             record.copy(revision = record.revision + 1, recoveryId = recoveryId, recoveryExpiresAtEpochMillis = expiresAtEpochMillis).also { current = it }
         override suspend fun completed(record: RecoveryIntentRecord) { current = null }
@@ -296,6 +356,7 @@ class SecureBackupEnterRecoveryKeyPresenterTest {
         val kms = authorizedKmsShareClient()
         val authority = mockk<RecoveryIntentAuthority>()
         coEvery { authority.admit(any()) } throws RecoveryIntentRejected("RECOVERY_OPERATION_EXPIRED")
+        coEvery { authority.admit(any(), any()) } throws RecoveryIntentRejected("RECOVERY_OPERATION_EXPIRED")
         val presenter = createPresenter(encryptionService = encryption, kmsShareClient = kms, intentAuthority = authority)
         assertThat(presenter.recover("1234").isFailure).isTrue()
         assertThat(presenter.recoveryState.value.requiresGate).isTrue()

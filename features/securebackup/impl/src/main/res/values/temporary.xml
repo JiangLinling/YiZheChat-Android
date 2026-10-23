@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="screen_recovery_include_confidential">Also recover confidential chats</string>
+    <string name="screen_recovery_confidential_requirement">Requires confirmation on the old phone and administrator approval. The old phone stays usable until completion.</string>
+    <string name="screen_recovery_standard_only">When unchecked, only ordinary chats are recovered.</string>
+    <string name="screen_recovery_wait_old_phone">Confirm this move on the old phone.</string>
+    <string name="screen_recovery_wait_administrator">Old phone confirmed. Waiting for administrator approval.</string>
+    <string name="screen_recovery_finishing">Completing confidential chat recovery…</string>
+    <string name="screen_recovery_approval_deadline">Complete confirmation and approval before %1$s.</string>
+    <string name="screen_recovery_refresh">Refresh recovery</string>
+</resources>

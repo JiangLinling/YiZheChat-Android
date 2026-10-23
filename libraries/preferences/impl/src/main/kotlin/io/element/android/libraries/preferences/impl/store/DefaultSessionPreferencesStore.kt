@@ -9,6 +9,7 @@
 package io.element.android.libraries.preferences.impl.store
 
 import android.content.Context
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -16,7 +17,6 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
-import io.element.android.libraries.androidutils.file.safeDelete
 import io.element.android.libraries.androidutils.hash.hash
 import io.element.android.libraries.core.data.tryOrNull
 import io.element.android.libraries.di.annotations.SessionCoroutineScope
@@ -25,7 +25,12 @@ import io.element.android.libraries.preferences.api.store.SessionPreferencesStor
 import io.element.android.libraries.preferences.api.store.RecentImageAcknowledgements
 import io.element.android.libraries.preferences.api.store.VideoCompressionPreset
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import java.io.File
 
@@ -33,6 +38,7 @@ class DefaultSessionPreferencesStore(
     context: Context,
     sessionId: SessionId,
     @SessionCoroutineScope sessionCoroutineScope: CoroutineScope,
+    previousStoreClosed: Deferred<Unit>? = null,
 ) : SessionPreferencesStore {
     companion object {
         fun storeFile(context: Context, sessionId: SessionId): File {
@@ -54,8 +60,9 @@ class DefaultSessionPreferencesStore(
     private val recentImageAcknowledgements = stringSetPreferencesKey("recentImageAcknowledgementsV1")
 
     private val dataStoreFile = storeFile(context, sessionId)
-    private val store = PreferenceDataStoreFactory.create(
-        scope = sessionCoroutineScope,
+    private val storeJob = Job(sessionCoroutineScope.coroutineContext[Job])
+    private val delegate = PreferenceDataStoreFactory.create(
+        scope = CoroutineScope(sessionCoroutineScope.coroutineContext + storeJob),
         migrations = listOf(
             SessionPreferencesStoreMigration(
                 sharePresenceKey,
@@ -63,6 +70,24 @@ class DefaultSessionPreferencesStore(
             )
         ),
     ) { dataStoreFile }
+
+    // A same-account login may start while the old Matrix session is still alive. Do not open
+    // its preference file until the retired DataStore has released it and any deletion finished.
+    private val store = object : DataStore<Preferences> {
+        override val data = flow {
+            previousStoreClosed?.await()
+            emitAll(delegate.data)
+        }
+
+        override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences {
+            previousStoreClosed?.await()
+            return delegate.updateData(transform)
+        }
+    }
+
+    internal fun stop() = storeJob.cancel()
+
+    internal suspend fun awaitStopped() = storeJob.join()
 
     override suspend fun setSharePresence(enabled: Boolean) {
         update(sharePresenceKey, enabled)
@@ -145,7 +170,8 @@ class DefaultSessionPreferencesStore(
     }
 
     override suspend fun clear() {
-        dataStoreFile.safeDelete()
+        storeJob.cancelAndJoin()
+        check(!dataStoreFile.exists() || dataStoreFile.delete()) { "Session preferences deletion failed" }
     }
 
     private suspend fun <T> update(key: Preferences.Key<T>, value: T) {

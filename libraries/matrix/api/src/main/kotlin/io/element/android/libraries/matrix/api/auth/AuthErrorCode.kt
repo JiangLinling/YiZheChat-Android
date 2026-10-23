@@ -11,6 +11,7 @@ package io.element.android.libraries.matrix.api.auth
 enum class AuthErrorCode(val value: String) {
     UNKNOWN("M_UNKNOWN"),
     USER_DEACTIVATED("M_USER_DEACTIVATED"),
+    USER_LOCKED("M_USER_LOCKED"),
     FORBIDDEN("M_FORBIDDEN")
 }
 

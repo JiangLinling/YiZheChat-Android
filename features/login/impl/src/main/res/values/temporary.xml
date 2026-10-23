@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="screen_login_error_locked_account">Account locked. Contact your administrator.</string>
     <string name="screen_login_brand_title">YiZheChat</string>
     <string name="screen_login_account_label">Account</string>
     <string name="screen_login_account_placeholder">Enter your account</string>

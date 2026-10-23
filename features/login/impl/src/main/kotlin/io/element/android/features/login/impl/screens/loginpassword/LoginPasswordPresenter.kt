@@ -309,7 +309,7 @@ class LoginPasswordPresenter(
 
     internal suspend fun recordDefiniteAuthenticationRejection(operationId: String, failure: Throwable) {
         val code = (failure as? AuthenticationException)?.errorCode
-        if (code !in setOf(AuthErrorCode.FORBIDDEN, AuthErrorCode.USER_DEACTIVATED)) return
+        if (code !in setOf(AuthErrorCode.FORBIDDEN, AuthErrorCode.USER_DEACTIVATED, AuthErrorCode.USER_LOCKED)) return
         // Persist only the original operation and a bounded rejection code. A transport
         // error or cancellation is not evidence that Matrix rejected the credentials.
         // Queue failure separately from APPLIED receipts so old authorities fail closed.
