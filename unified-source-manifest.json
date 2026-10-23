@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-source-20261023-direct-room-performance-r64",
-  "frozen_utc": "2026-10-23T15:37:07.440902+00:00",
+  "revision": "unified-source-20261024-history-recovery-performance-r65",
+  "frozen_utc": "2026-10-23T17:56:24.067297+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -435,7 +435,7 @@
     "appnav/src/main/kotlin/io/element/android/appnav/loggedin/LoggedInView.kt": "459b6539e313abf6d0429e19f8c182eebb163e0b72602acb679f63301c8ce904",
     "appnav/src/main/kotlin/io/element/android/appnav/loggedin/MediaPreviewConfigMigration.kt": "81004d3b371147323e4c6be59c6d40da08723b64d9bea90568aa8ac5366a5573",
     "appnav/src/main/kotlin/io/element/android/appnav/loggedin/SendQueues.kt": "71ca71e19f4576d238f4b0489bc7dac75189537de01b82421014228525230a2a",
-    "appnav/src/main/kotlin/io/element/android/appnav/loggedin/StandardHistoryRecoveryCoordinator.kt": "937216231c40d45cd6518c67683eea0c541c20f6bfb14b61809b9ec29aab45fd",
+    "appnav/src/main/kotlin/io/element/android/appnav/loggedin/StandardHistoryRecoveryCoordinator.kt": "aa43154c1cefd116c7305dac6a4069ef47ebc3da6be56e746236131065e58686",
     "appnav/src/main/kotlin/io/element/android/appnav/loggedin/SyncStateView.kt": "df76748409f24baf60f78b57d59421f2e4fdb1fa62954061ee3a241bc21d9443",
     "appnav/src/main/kotlin/io/element/android/appnav/room/RoomFlowNode.kt": "5ec2be93fdd51f40f4066e2e9f6bf69650bca189ec283d55e618cf37b5b54418",
     "appnav/src/main/kotlin/io/element/android/appnav/room/RoomNavigationTarget.kt": "de1b4fdeb75d00678053ce5e507259b958af79b4679441d701866c239ecb879a",
@@ -511,7 +511,7 @@
     "appnav/src/test/kotlin/io/element/android/appnav/loggedin/LoggedInPresenterTest.kt": "f9b7ce3c2be82f163ca11dd8cc6b230b157d3ba3c64fec61aecd8a7495819a01",
     "appnav/src/test/kotlin/io/element/android/appnav/loggedin/MediaPreviewConfigMigrationTest.kt": "872b0d4f47db8f9d70b6dc86c919b5e749f574ce429149994bd970d6b029923d",
     "appnav/src/test/kotlin/io/element/android/appnav/loggedin/SendQueuesTest.kt": "4dd1b1c7050c2bd9c283fd1ee56d4058535fd0eb06ca8ec7531bc69d287c5daf",
-    "appnav/src/test/kotlin/io/element/android/appnav/loggedin/StandardHistoryRecoveryCoordinatorTest.kt": "d7d650a6e62d449c93d8f76ebd21cbcdf0f975a3f02b18ffce1c97ce602847e4",
+    "appnav/src/test/kotlin/io/element/android/appnav/loggedin/StandardHistoryRecoveryCoordinatorTest.kt": "732ab63f3aa68c6cb1215d7e96511fb435d149aff449b19e7c46f73e03fb0823",
     "appnav/src/test/kotlin/io/element/android/appnav/room/LoadingBaseRoomStateFlowFactoryTest.kt": "c63e2d07effb203d23a5f5be526a23e25cd2e413e3d911b79431ca2f072af476",
     "appnav/src/test/kotlin/io/element/android/appnav/room/joined/FakeJoinedRoomLoadedFlowNodeCallback.kt": "8aa6f73a4445134d234b03ffea8da96a605bd3f505748d86b3a0af45dbf25d0c",
     "appnav/src/test/kotlin/io/element/android/appnav/securitysetup/DeviceCapabilityRequirementTest.kt": "0695f7cce8dfe3d6764a8d99d422e84602836066398a9c8d8f568ade89863cc5",
