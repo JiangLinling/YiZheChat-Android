@@ -62,11 +62,19 @@ import io.element.android.libraries.push.impl.notifications.model.SimpleNotifiab
 import io.element.android.libraries.ui.strings.CommonStrings
 import io.element.android.security.contentprotection.api.ContentProtectionService
 import io.element.android.security.contentprotection.api.RoomLifecycleProfileKind
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.LifecycleOperationContext
+import io.element.android.security.dataprotection.api.LifecycleOperationStatus
 import io.element.android.security.dataprotection.api.ProtectedPreviewAuthorizationGate
+import io.element.android.security.dataprotection.api.lifecycleOperationRequest
+import io.element.android.security.dataprotection.api.messageReceiveOperationId
 import io.element.android.services.toolbox.api.strings.StringProvider
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
+import java.security.MessageDigest
 
 private val loggerTag = LoggerTag("DefaultNotifiableEventResolver", LoggerTag.NotificationLoggerTag)
 
@@ -105,6 +113,7 @@ class DefaultNotifiableEventResolver(
     private val notificationPrivacySanitizer: NotificationPrivacySanitizer,
     private val protectedPreviewAuthorizationGate: ProtectedPreviewAuthorizationGate,
     private val contentProtectionService: ContentProtectionService,
+    private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
 ) : NotifiableEventResolver {
     override suspend fun resolveEvents(
         sessionId: SessionId,
@@ -163,9 +172,9 @@ class DefaultNotifiableEventResolver(
             is NotificationContent.MessageLike.RoomMessage -> {
                 val requiresAuthorization = notificationPrivacySanitizer.requiresContentAuthorization()
                 val canAttemptPreview = !requiresAuthorization || protectedPreviewAuthorizationGate.canAttemptPreview()
-                val roomProfileKind = if (requiresAuthorization && canAttemptPreview) {
+                val roomProfileKind = if (requiresAuthorization && canAttemptPreview && notificationPrivacySanitizer.allowsSender()) {
                     try {
-                        contentProtectionService.resolveRoomLifecycle(roomId.value).profileKind
+                        resolveSignedRoomProfile(client)
                     } catch (failure: CancellationException) {
                         throw failure
                     } catch (failure: Exception) {
@@ -422,6 +431,34 @@ class DefaultNotifiableEventResolver(
         }
     }
 
+    private suspend fun NotificationData.resolveSignedRoomProfile(client: MatrixClient): RoomLifecycleProfileKind {
+        require(sessionId == client.sessionId)
+        val accountHash = sessionId.value.sha256Hex()
+        val deviceHash = client.deviceId.value.sha256Hex()
+        val roomHash = roomId.value.sha256Hex()
+        val eventHash = eventId.value.sha256Hex()
+        val request = lifecycleOperationRequest(
+            lifecycleId = FullAppLifecycleId.LC_13,
+            trigger = "receive",
+            accountIdHash = accountHash,
+            matrixDeviceIdHash = deviceHash,
+            roomIdHash = roomHash,
+            eventIdHash = eventHash,
+            operationId = messageReceiveOperationId(accountHash, deviceHash, roomHash, eventHash),
+        )
+        // WorkManager does not inherit the ntfy coroutine. Re-admit the original event's
+        // receive operation; an arbitrary inherited LC13 context cannot authorize this lookup.
+        val original = appOperationalStateCoordinator.start(request)
+        require(original.operationId == request.operationId && original.lifecycleId == request.lifecycleId)
+        require(original.subjects.accountIdHash == accountHash && original.subjects.matrixDeviceIdHash == deviceHash &&
+            original.subjects.roomIdHash == roomHash && original.subjects.eventIdHash == eventHash)
+        require(original.deadlineEpochMillis > System.currentTimeMillis() &&
+            (!original.status.isTerminal || original.status == LifecycleOperationStatus.SUCCEEDED))
+        return withContext(LifecycleOperationContext(original.operationId, original.lifecycleId)) {
+            contentProtectionService.resolveRoomLifecycle(roomId.value).profileKind
+        }
+    }
+
     private fun descriptionFromRoomMembershipInvite(
         senderDisambiguatedDisplayName: String,
         isDirectRoom: Boolean,
@@ -504,6 +541,9 @@ private fun MessageType.isProtectedTransportCarrier(): Boolean = when (this) {
     is MessageTypeWithAttachment -> filename.startsWith(PROTECTED_MEDIA_PREFIX) && filename.endsWith(PROTECTED_MEDIA_SUFFIX)
     else -> false
 }
+
+private fun String.sha256Hex(): String = MessageDigest.getInstance("SHA-256")
+    .digest(encodeToByteArray()).joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
 private const val PROTECTED_TEXT_CARRIER_PREFIX = "yizhe-secure-v1:"
 private const val PROTECTED_MESSAGE_TYPE = "io.yizhe.secure.v1"

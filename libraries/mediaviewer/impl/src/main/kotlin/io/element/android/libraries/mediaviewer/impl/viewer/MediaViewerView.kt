@@ -138,6 +138,7 @@ fun MediaViewerView(
     officePreviewService: OfficePreviewService? = null,
     officePreviewAccountId: String? = null,
     officePreviewDeviceId: String? = null,
+    protectedSurface: @Composable (LocalMedia?, @Composable () -> Unit) -> Unit = { _, content -> content() },
 ) {
     val snackbarHostState = rememberSnackbarHostState(snackbarMessage = state.snackbarMessage)
     var showOverlay by remember { mutableStateOf(true) }
@@ -270,51 +271,56 @@ fun MediaViewerView(
                             }
                         }
                     }
-                    Box(
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        val navigationBarPadding = WindowInsets.navigationBars.getBottom(LocalDensity.current)
-                        MediaViewerPage(
-                            isDisplayed = isDisplayed,
-                            showOverlay = showOverlay,
-                            bottomPaddingInPixels = (bottomPaddingInPixels - navigationBarPadding).coerceAtLeast(0),
-                            data = dataForPage,
-                            textFileViewer = textFileViewer,
-                            onDismiss = onBackClick,
-                            onRetry = {
-                                state.eventSink(MediaViewerEvent.LoadMedia(dataForPage))
-                            },
-                            onOpenWith = {
-                                state.eventSink(MediaViewerEvent.OpenWith(dataForPage))
-                            }.takeUnless { isOneTimeView },
-                            onDismissError = {
-                                state.eventSink(MediaViewerEvent.ClearLoadingError(dataForPage))
-                            },
-                            onShowOverlayChange = {
-                                showOverlay = it
-                            },
-                            audioFocus = audioFocus,
-                            onPlaybackEnded = onPlaybackEnded,
-                            isUserSelected = (state.listData[page] as? MediaViewerPageData.MediaViewerData)?.eventId == state.initiallySelectedEventId,
-                            officePreviewService = officePreviewService,
-                            officePreviewAccountId = officePreviewAccountId,
-                            officePreviewDeviceId = officePreviewDeviceId,
-                            isOneTimeView = isOneTimeView,
-                        )
-                        // Bottom bar
-                        if (!dataForPage.mediaInfo.isOfficeDocument()) {
-                            AnimatedVisibility(
-                                visible = showOverlay,
-                                enter = fadeIn(),
-                                exit = fadeOut(),
-                                modifier = Modifier.align(Alignment.BottomCenter),
-                            ) {
-                                MediaViewerBottomBar(
-                                    showDivider = dataForPage.mediaInfo.mimeType.isMimeTypeVideo(),
-                                    caption = dataForPage.mediaInfo.caption,
-                                    formattedCaption = dataForPage.mediaInfo.formattedCaption,
-                                    onHeightChange = { bottomPaddingInPixels = it },
-                                )
+                    // The page renderer (including its decoded thumbnail and
+                    // caption) follows its own lease. The download owner above
+                    // survives the initial authorization check for a new URI.
+                    protectedSurface(dataForPage.downloadedMedia.value.dataOrNull()) {
+                        Box(
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            val navigationBarPadding = WindowInsets.navigationBars.getBottom(LocalDensity.current)
+                            MediaViewerPage(
+                                isDisplayed = isDisplayed,
+                                showOverlay = showOverlay,
+                                bottomPaddingInPixels = (bottomPaddingInPixels - navigationBarPadding).coerceAtLeast(0),
+                                data = dataForPage,
+                                textFileViewer = textFileViewer,
+                                onDismiss = onBackClick,
+                                onRetry = {
+                                    state.eventSink(MediaViewerEvent.LoadMedia(dataForPage))
+                                },
+                                onOpenWith = {
+                                    state.eventSink(MediaViewerEvent.OpenWith(dataForPage))
+                                }.takeUnless { isOneTimeView },
+                                onDismissError = {
+                                    state.eventSink(MediaViewerEvent.ClearLoadingError(dataForPage))
+                                },
+                                onShowOverlayChange = {
+                                    showOverlay = it
+                                },
+                                audioFocus = audioFocus,
+                                onPlaybackEnded = onPlaybackEnded,
+                                isUserSelected = (state.listData[page] as? MediaViewerPageData.MediaViewerData)?.eventId == state.initiallySelectedEventId,
+                                officePreviewService = officePreviewService,
+                                officePreviewAccountId = officePreviewAccountId,
+                                officePreviewDeviceId = officePreviewDeviceId,
+                                isOneTimeView = isOneTimeView,
+                            )
+                            // Bottom bar
+                            if (!dataForPage.mediaInfo.isOfficeDocument()) {
+                                AnimatedVisibility(
+                                    visible = showOverlay,
+                                    enter = fadeIn(),
+                                    exit = fadeOut(),
+                                    modifier = Modifier.align(Alignment.BottomCenter),
+                                ) {
+                                    MediaViewerBottomBar(
+                                        showDivider = dataForPage.mediaInfo.mimeType.isMimeTypeVideo(),
+                                        caption = dataForPage.mediaInfo.caption,
+                                        formattedCaption = dataForPage.mediaInfo.formattedCaption,
+                                        onHeightChange = { bottomPaddingInPixels = it },
+                                    )
+                                }
                             }
                         }
                     }
@@ -475,12 +481,10 @@ private fun MediaViewerPage(
                     )
                 }
                 if (showError) {
+                    val terminalError = (downloadedMedia as? AsyncData.Failure)?.error?.terminalMediaReadError()
                     ErrorView(
-                        errorMessage = stringResource(id = if ((downloadedMedia as? AsyncData.Failure)?.error is
-                            io.element.android.security.contentprotection.api.ContentProtectionException.RoomEpochMaterialUnavailable
-                        ) R.string.error_historical_media_key_unavailable else CommonStrings.error_unknown),
-                        onRetry = onRetry.takeUnless { (downloadedMedia as? AsyncData.Failure)?.error is
-                            io.element.android.security.contentprotection.api.ContentProtectionException.RoomEpochMaterialUnavailable },
+                        errorMessage = stringResource(id = terminalError ?: CommonStrings.error_unknown),
+                        onRetry = onRetry.takeIf { terminalError == null },
                         onDismiss = onDismissError
                     )
                 }
@@ -494,6 +498,21 @@ private fun MediaViewerPage(
             }
         }
     }
+}
+
+// Only authoritative, typed terminal failures suppress retry. In particular, a network or policy
+// availability failure must not be described as expiry, nor may a failed cleanup wrapper be hidden.
+private fun Throwable.terminalMediaReadError(): Int? = when (this) {
+    is io.element.android.security.contentprotection.api.ContentProtectionException.Expired -> R.string.error_media_expired
+    is io.element.android.security.contentprotection.api.StageThreeGateDenied -> {
+        if (reason == io.element.android.security.contentprotection.api.StageThreeDenialReason.RETENTION_EXCEEDED) {
+            R.string.error_media_expired
+        } else null
+    }
+    is io.element.android.security.contentprotection.api.ContentProtectionException.Revoked -> R.string.error_media_revoked
+    is io.element.android.security.contentprotection.api.ContentProtectionException.RoomEpochMaterialUnavailable ->
+        R.string.error_historical_media_key_unavailable
+    else -> null
 }
 
 @Composable

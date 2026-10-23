@@ -31,6 +31,7 @@ import io.element.android.libraries.mediaviewer.impl.viewer.createMediaViewerPre
 import io.element.android.libraries.mediaviewer.test.FakeLocalMediaFactory
 import io.element.android.services.toolbox.test.systemclock.FakeSystemClock
 import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
+import io.element.android.security.dataprotection.test.FakeProtectedPreviewAuthorizationGate
 import io.element.android.tests.testutils.lambda.lambdaError
 import io.element.android.tests.testutils.node.TestParentNode
 import io.element.android.tests.testutils.testCoroutineDispatchers
@@ -80,6 +81,8 @@ class DefaultMediaViewerEntryPointTest {
                 officePreviewService = mockk(relaxed = true),
                 appOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
                 segmentedVideoPlaybackOwnerFactory = mockk(relaxed = true),
+                previewAuthorizationGate = FakeProtectedPreviewAuthorizationGate(),
+                secureMediaLeaseManager = mockk(relaxed = true),
             )
         }
         val callback = object : MediaViewerEntryPoint.Callback {
@@ -132,6 +135,8 @@ class DefaultMediaViewerEntryPointTest {
                 officePreviewService = mockk(relaxed = true),
                 appOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
                 segmentedVideoPlaybackOwnerFactory = mockk(relaxed = true),
+                previewAuthorizationGate = FakeProtectedPreviewAuthorizationGate(),
+                secureMediaLeaseManager = mockk(relaxed = true),
             )
         }
         val callback = object : MediaViewerEntryPoint.Callback {

@@ -26,6 +26,8 @@ class NotificationPrivacySanitizer(
 ) {
     fun allowsContent(): Boolean = currentExposure() == NotificationExposure.CONTENT_ALLOWED
 
+    fun allowsSender(): Boolean = currentExposure() != NotificationExposure.HIDDEN
+
     /** Raw push events have not passed the YiZhe KMS/content gate and cannot expose message metadata. */
     fun requiresContentAuthorization(): Boolean = policyProvider.current().policy.requireContentEnvelope
 

@@ -58,13 +58,21 @@ import io.element.android.libraries.push.impl.notifications.model.NotifiableMess
 import io.element.android.libraries.push.impl.notifications.model.ResolvedPushEvent
 import io.element.android.libraries.push.impl.notifications.model.SimpleNotifiableEvent
 import io.element.android.security.contentprotection.api.RoomLifecycleProfileKind
+import io.element.android.security.contentprotection.api.ContentProtectionService
+import io.element.android.security.contentprotection.api.ResolvedRoomLifecycle
 import io.element.android.security.contentprotection.test.FakeContentProtectionService
+import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.FullAppLifecycleId
+import io.element.android.security.dataprotection.api.LifecycleOperationContext
+import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
+import io.element.android.security.dataprotection.test.FakeAppOperationalStateCoordinator
 import io.element.android.security.dataprotection.api.NotificationExposure
 import io.element.android.security.dataprotection.test.FakeDataProtectionPolicyProvider
 import io.element.android.security.dataprotection.test.FakeProtectedPreviewAuthorizationGate
 import io.element.android.services.toolbox.impl.strings.AndroidStringProvider
 import io.element.android.services.toolbox.test.systemclock.FakeSystemClock
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -74,6 +82,141 @@ import org.robolectric.annotation.Config
 @Suppress("LargeClass")
 @RunWith(RobolectricTestRunner::class)
 class DefaultNotifiableEventResolverTest {
+    @Test
+    fun `signed room notification lookup carries the original receive operation`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator()
+        val seen = mutableListOf<LifecycleOperationContext>()
+        val delegate = FakeContentProtectionService()
+        val protection = object : ContentProtectionService by delegate {
+            override suspend fun resolveRoomLifecycle(roomId: String): ResolvedRoomLifecycle {
+                seen += checkNotNull(currentLifecycleOperationContext())
+                return delegate.resolveRoomLifecycle(roomId)
+            }
+        }
+        val sut = createDefaultNotifiableEventResolver(
+            notificationResult = Result.success(mapOf(AN_EVENT_ID to Result.success(aNotificationData(
+                content = NotificationContent.MessageLike.RoomMessage(
+                    senderId = A_USER_ID_2,
+                    messageType = TextMessageType("authorized notification", formatted = null),
+                    isContentProtectionAuthorized = true,
+                ),
+            )))),
+            requireContentEnvelope = true,
+            lifecycleCoordinator = coordinator,
+            contentProtectionService = protection,
+        )
+        val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, "UnifiedPush - built-in ntfy")
+        repeat(2) { index ->
+            val result = if (index == 0) sut.resolveEvents(A_SESSION_ID, listOf(request)) else {
+                withContext(LifecycleOperationContext("unrelated-event-receive", FullAppLifecycleId.LC_13)) {
+                    sut.resolveEvents(A_SESSION_ID, listOf(request))
+                }
+            }
+            val event = result.getEvent(request)!!.getOrThrow() as ResolvedPushEvent.Event
+            assertThat((event.notifiableEvent as NotifiableMessageEvent).body).contains("authorized notification")
+        }
+        assertThat(seen).hasSize(2)
+        assertThat(seen.map { it.operationId }.distinct()).hasSize(1)
+        assertThat(seen.none { it.operationId == "unrelated-event-receive" }).isTrue()
+        assertThat(seen.all { it.lifecycleId == FullAppLifecycleId.LC_13 }).isTrue()
+        assertThat(coordinator.startedRequests.map { it.trigger }.distinct()).containsExactly("receive")
+        assertThat(coordinator.startedRequests.all { it.accountIdHash != null && it.matrixDeviceIdHash != null &&
+            it.roomIdHash != null && it.eventIdHash != null }).isTrue()
+        assertThat(coordinator.clientReceipts).isEmpty()
+        assertThat(currentLifecycleOperationContext()).isNull()
+    }
+
+    @Test
+    fun `notification admission failure never queries room rules or exposes authorized text`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator(startFailure = { IllegalStateException("Admission rejected") })
+        var lookedUp = false
+        val delegate = FakeContentProtectionService()
+        val protection = object : ContentProtectionService by delegate {
+            override suspend fun resolveRoomLifecycle(roomId: String): ResolvedRoomLifecycle {
+                lookedUp = true
+                return delegate.resolveRoomLifecycle(roomId)
+            }
+        }
+        val sut = createDefaultNotifiableEventResolver(
+            notificationResult = Result.success(mapOf(AN_EVENT_ID to Result.success(aNotificationData(
+                content = NotificationContent.MessageLike.RoomMessage(
+                    senderId = A_USER_ID_2,
+                    messageType = TextMessageType("authorized notification", formatted = null),
+                    isContentProtectionAuthorized = true,
+                ),
+            )))),
+            requireContentEnvelope = true,
+            lifecycleCoordinator = coordinator,
+            contentProtectionService = protection,
+        )
+        val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, "firebase")
+        val event = sut.resolveEvents(A_SESSION_ID, listOf(request)).getEvent(request)!!.getOrThrow() as ResolvedPushEvent.Event
+        assertThat((event.notifiableEvent as NotifiableMessageEvent).body).doesNotContain("authorized notification")
+        assertThat(lookedUp).isFalse()
+        assertThat(coordinator.clientReceipts).isEmpty()
+    }
+
+    @Test
+    fun `mismatched admitted event never authorizes notification room lookup`() = runTest {
+        val delegate = FakeAppOperationalStateCoordinator()
+        val coordinator = object : AppOperationalStateCoordinator by delegate {
+            override suspend fun start(request: io.element.android.security.dataprotection.api.LifecycleOperationRequest):
+                io.element.android.security.dataprotection.api.LifecycleOperation {
+                val operation = delegate.start(request)
+                return operation.copy(subjects = operation.subjects.copy(eventIdHash = "f".repeat(64)))
+            }
+        }
+        var lookedUp = false
+        val protectionDelegate = FakeContentProtectionService()
+        val protection = object : ContentProtectionService by protectionDelegate {
+            override suspend fun resolveRoomLifecycle(roomId: String): ResolvedRoomLifecycle {
+                lookedUp = true
+                return protectionDelegate.resolveRoomLifecycle(roomId)
+            }
+        }
+        val sut = createDefaultNotifiableEventResolver(
+            notificationResult = Result.success(mapOf(AN_EVENT_ID to Result.success(aNotificationData(
+                content = NotificationContent.MessageLike.RoomMessage(
+                    senderId = A_USER_ID_2,
+                    messageType = TextMessageType("authorized notification", formatted = null),
+                    isContentProtectionAuthorized = true,
+                ),
+            )))),
+            requireContentEnvelope = true,
+            lifecycleCoordinator = coordinator,
+            contentProtectionService = protection,
+        )
+        val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, "firebase")
+        val event = sut.resolveEvents(A_SESSION_ID, listOf(request)).getEvent(request)!!.getOrThrow() as ResolvedPushEvent.Event
+        assertThat((event.notifiableEvent as NotifiableMessageEvent).body).doesNotContain("authorized notification")
+        assertThat(lookedUp).isFalse()
+        assertThat(delegate.clientReceipts).isEmpty()
+    }
+
+    @Test
+    fun `hidden notification skips additional room authorization and never exposes text`() = runTest {
+        val coordinator = FakeAppOperationalStateCoordinator(startFailure = { error("Hidden notification must not admit another lookup") })
+        val sut = createDefaultNotifiableEventResolver(
+            notificationResult = Result.success(mapOf(AN_EVENT_ID to Result.success(aNotificationData(
+                content = NotificationContent.MessageLike.RoomMessage(
+                    senderId = A_USER_ID_2,
+                    messageType = TextMessageType("authorized notification", formatted = null),
+                    isContentProtectionAuthorized = true,
+                ),
+            )))),
+            requireContentEnvelope = true,
+            lifecycleCoordinator = coordinator,
+            notificationExposure = NotificationExposure.HIDDEN,
+        )
+        val request = aPushRequest(A_SESSION_ID, A_ROOM_ID, AN_EVENT_ID, "firebase")
+        val event = sut.resolveEvents(A_SESSION_ID, listOf(request)).getEvent(request)!!.getOrThrow() as ResolvedPushEvent.Event
+        val notification = event.notifiableEvent as NotifiableMessageEvent
+        assertThat(notification.body).doesNotContain("authorized notification")
+        assertThat(notification.senderDisambiguatedDisplayName).isNull()
+        assertThat(coordinator.startedRequests).isEmpty()
+        assertThat(coordinator.clientReceipts).isEmpty()
+    }
+
     @Test
     fun `only UnifiedPush deliveries receive foreground ntfy marker`() = runTest {
         val sut = createDefaultNotifiableEventResolver(
@@ -1101,6 +1244,9 @@ class DefaultNotifiableEventResolverTest {
         requireContentEnvelope: Boolean = false,
         protectedPreviewAllowed: Boolean = true,
         roomLifecycleProfileKind: RoomLifecycleProfileKind = RoomLifecycleProfileKind.STANDARD,
+        lifecycleCoordinator: AppOperationalStateCoordinator = FakeAppOperationalStateCoordinator(),
+        contentProtectionService: ContentProtectionService = FakeContentProtectionService(roomLifecycleProfileKind),
+        notificationExposure: NotificationExposure = NotificationExposure.CONTENT_ALLOWED,
     ): DefaultNotifiableEventResolver {
         val context = RuntimeEnvironment.getApplication() as Context
         notificationService?.givenGetNotificationsResult(notificationResult)
@@ -1127,13 +1273,14 @@ class DefaultNotifiableEventResolverTest {
             featureFlagService = FakeFeatureFlagService(),
             notificationPrivacySanitizer = NotificationPrivacySanitizer(
                 policyProvider = FakeDataProtectionPolicyProvider(
-                    notificationExposure = NotificationExposure.CONTENT_ALLOWED,
+                    notificationExposure = notificationExposure,
                     requireContentEnvelope = requireContentEnvelope,
                 ),
                 stringProvider = AndroidStringProvider(context.resources),
             ),
             protectedPreviewAuthorizationGate = FakeProtectedPreviewAuthorizationGate(protectedPreviewAllowed),
-            contentProtectionService = FakeContentProtectionService(roomLifecycleProfileKind),
+            contentProtectionService = contentProtectionService,
+            appOperationalStateCoordinator = lifecycleCoordinator,
         )
     }
 }

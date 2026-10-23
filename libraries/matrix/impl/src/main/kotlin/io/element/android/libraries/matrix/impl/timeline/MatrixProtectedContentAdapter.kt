@@ -4217,15 +4217,9 @@ internal fun receiveLifecycleOperationId(
     roomIdHash: String,
     eventIdHash: String,
 ): String {
-    val identity = listOf(
-        FullAppLifecycleId.LC_13.wireValue,
-        "receive",
-        accountIdHash,
-        matrixDeviceIdHash,
-        roomIdHash,
-        eventIdHash,
-    ).joinToString("\u0000").encodeToByteArray()
-    return "lc13-receive-${MessageDigest.getInstance("SHA-256").digest(identity).toHex()}"
+    return io.element.android.security.dataprotection.api.messageReceiveOperationId(
+        accountIdHash, matrixDeviceIdHash, roomIdHash, eventIdHash,
+    )
 }
 
 internal fun pendingBurnConsumptionForOpen(

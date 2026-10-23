@@ -22,6 +22,7 @@ import androidx.compose.ui.test.AndroidComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
@@ -38,6 +39,9 @@ import io.element.android.libraries.mediaviewer.impl.R
 import io.element.android.libraries.mediaviewer.impl.details.aMediaBottomSheetStateDetails
 import io.element.android.libraries.mediaviewer.test.viewer.aLocalMedia
 import io.element.android.libraries.ui.strings.CommonStrings
+import io.element.android.security.contentprotection.api.ContentProtectionException
+import io.element.android.security.contentprotection.api.StageThreeDenialReason
+import io.element.android.security.contentprotection.api.StageThreeGateDenied
 import io.element.android.tests.testutils.EnsureNeverCalled
 import io.element.android.tests.testutils.EventsRecorder
 import io.element.android.tests.testutils.clickOn
@@ -251,6 +255,50 @@ class MediaViewerViewTest {
                 MediaViewerEvent.LoadMedia(state.listData.first() as MediaViewerPageData.MediaViewerData),
             )
         )
+    }
+
+    @Test
+    fun `retention gate expiry shows expiry without retry`() = assertTerminalReadFailure(
+        StageThreeGateDenied(StageThreeDenialReason.RETENTION_EXCEEDED), R.string.error_media_expired,
+    )
+
+    @Test
+    fun `KMS expiry shows expiry without retry`() = assertTerminalReadFailure(
+        ContentProtectionException.Expired(), R.string.error_media_expired,
+    )
+
+    @Test
+    fun `revocation shows revoked access without retry`() = assertTerminalReadFailure(
+        ContentProtectionException.Revoked(), R.string.error_media_revoked,
+    )
+
+    @Test
+    fun `unavailable historical key does not claim expiry`() = assertTerminalReadFailure(
+        ContentProtectionException.RoomEpochMaterialUnavailable(), R.string.error_historical_media_key_unavailable,
+    )
+
+    private fun assertTerminalReadFailure(error: Throwable, @StringRes message: Int) = runAndroidComposeUiTest<ComponentActivity> {
+        val events = EventsRecorder<MediaViewerEvent>()
+        val page = aMediaViewerPageData(downloadedMedia = AsyncData.Failure(error))
+        setMediaViewerView(aMediaViewerState(listData = listOf(page), eventSink = events))
+        mainClock.advanceTimeBy(200)
+        onNodeWithText(activity!!.getString(message)).assertExists()
+        onNodeWithText(activity!!.getString(CommonStrings.action_retry)).assertDoesNotExist()
+        clickOn(CommonStrings.action_ok)
+        events.assertList(listOf(MediaViewerEvent.LoadMedia(page), MediaViewerEvent.ClearLoadingError(page)))
+    }
+
+    @Test
+    fun `unavailable remote policy keeps retry and does not claim expiry`() = runAndroidComposeUiTest {
+        val events = EventsRecorder<MediaViewerEvent>()
+        val page = aMediaViewerPageData(
+            downloadedMedia = AsyncData.Failure(StageThreeGateDenied(StageThreeDenialReason.REMOTE_POLICY_UNAVAILABLE)),
+        )
+        setMediaViewerView(aMediaViewerState(listData = listOf(page), eventSink = events))
+        mainClock.advanceTimeBy(200)
+        onNodeWithText(activity!!.getString(R.string.error_media_expired)).assertDoesNotExist()
+        clickOn(CommonStrings.action_retry)
+        events.assertList(listOf(MediaViewerEvent.LoadMedia(page), MediaViewerEvent.LoadMedia(page)))
     }
 
     @Test

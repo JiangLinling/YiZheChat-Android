@@ -310,7 +310,9 @@ class MediaViewerDataSource(
                         mediaFile = mediaFile,
                         mediaInfo = data.mediaInfo,
                     ).copy(lifecycleOperationId = operationId)
-                    if (data.mediaInfo.requiresFilePreviewLease()) {
+                    val sourceUri = mediaFile.uriString()
+                    val protectedSource = sourceUri.startsWith("content://") && sourceUri.substringAfter("content://").substringBefore('/').endsWith(".securemedia")
+                    if (data.mediaInfo.requiresFilePreviewLease() || protectedSource) {
                         val filePreviewLeaseToken = FilePreviewLeaseRegistry.register(
                             localMedia.filePreviewLeaseBinding(),
                             mediaFile,

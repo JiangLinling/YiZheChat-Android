@@ -946,6 +946,46 @@ class TimelinePresenterTest {
     }
 
     @Test
+    fun `group policy close before visible read uses current policy without another composition`() = runTest {
+        val markAsReadResult = lambdaRecorder<ReceiptType, Result<Unit>> { Result.success(Unit) }
+        val timeline = FakeTimeline(
+            timelineItems = flowOf(listOf(MatrixTimelineItem.Event(A_UNIQUE_ID, anEventTimelineItem()))),
+            markAsReadResult = markAsReadResult,
+        )
+        val policy = FakeDataProtectionPolicyProvider(allowGroupReadReceipts = true)
+        val presenter = createTimelinePresenter(timeline = timeline, dataProtectionPolicyProvider = policy)
+        presenter.test {
+            val state = consumeItemsUntilPredicate { it.timelineItems.any { row -> row is TimelineItem.Event } }.last()
+            assertThat(state.renderReadReceipts).isTrue()
+            policy.allowGroupReadReceipts = false
+            state.eventSink(TimelineEvent.OnScrollFinished(0, isUserVisible = true))
+            advanceUntilIdle()
+            assert(markAsReadResult).isCalledOnce().with(value(ReceiptType.READ_PRIVATE))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `group policy open before visible read uses current policy without another composition`() = runTest {
+        val markAsReadResult = lambdaRecorder<ReceiptType, Result<Unit>> { Result.success(Unit) }
+        val timeline = FakeTimeline(
+            timelineItems = flowOf(listOf(MatrixTimelineItem.Event(A_UNIQUE_ID, anEventTimelineItem()))),
+            markAsReadResult = markAsReadResult,
+        )
+        val policy = FakeDataProtectionPolicyProvider(allowGroupReadReceipts = false)
+        val presenter = createTimelinePresenter(timeline = timeline, dataProtectionPolicyProvider = policy)
+        presenter.test {
+            val state = consumeItemsUntilPredicate { it.timelineItems.any { row -> row is TimelineItem.Event } }.last()
+            assertThat(state.renderReadReceipts).isFalse()
+            policy.allowGroupReadReceipts = true
+            state.eventSink(TimelineEvent.OnScrollFinished(0, isUserVisible = true))
+            advanceUntilIdle()
+            assert(markAsReadResult).isCalledOnce().with(value(ReceiptType.READ))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `unread regression - viewed group clears private unread while public receipts stay disabled`() = runTest {
         val markAsReadResult = lambdaRecorder<ReceiptType, Result<Unit>> { Result.success(Unit) }
         val timeline = FakeTimeline(

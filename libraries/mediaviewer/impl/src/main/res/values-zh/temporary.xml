@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="error_preview_access_locked">内容已锁定，请解锁后重新打开。</string>
     <string name="local_pdf_jump_to_page">跳转到页</string>
     <string name="local_pdf_page_number">页码（1–%1$d）</string>
     <string name="local_pdf_jump">跳转</string>
     <string name="local_pdf_cancel">取消</string>
-    <string name="error_content_export_disabled_by_policy">管理端签名策略已禁止保存或使用其他应用打开此附件</string>
-    <string name="error_external_share_disabled_by_policy">管理端签名策略已禁止将此附件分享到 YiZheChat 外部</string>
-    <string name="error_protected_media_read_unavailable">附件读取授权不可用，请重新打开附件后重试</string>
+    <string name="error_content_export_disabled_by_policy">管理员已禁止保存或对外打开附件。</string>
+    <string name="error_external_share_disabled_by_policy">管理员已禁止对外分享。</string>
+    <string name="error_protected_media_read_unavailable">附件授权已失效，请重新打开。</string>
     <string name="screen_media_file_preview_unsupported">暂不支持应用内预览此文件格式，请使用其他应用打开。</string>
     <string name="screen_media_office_loading">正在加载文档…</string>
     <string name="screen_media_office_more_actions">更多文档操作</string>
@@ -22,4 +23,6 @@
     <string name="local_pdf_source_unavailable">预览已结束或文件不可用，请返回列表重新打开。</string>
     <string name="local_pdf_render_failed">无法读取这个PDF，它可能已损坏、设有密码或格式不受支持。</string>
     <string name="error_historical_media_key_unavailable">历史文件密钥已不可用，无法打开此文件。</string>
+    <string name="error_media_expired">附件已到期，无法打开。</string>
+    <string name="error_media_revoked">附件访问已撤销，无法打开。</string>
 </resources>

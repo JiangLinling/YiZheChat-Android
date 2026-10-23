@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="error_preview_access_locked">内容已锁定，请解锁后重新打开。</string>
     <string name="local_pdf_jump_to_page">Go to page</string>
     <string name="local_pdf_page_number">Page (1–%1$d)</string>
     <string name="local_pdf_jump">Go</string>
@@ -23,4 +24,6 @@
     <string name="local_pdf_source_unavailable">This viewing session has ended or the file is unavailable. Return to the list and open it again.</string>
     <string name="local_pdf_render_failed">This PDF could not be read. It may be damaged, password protected or unsupported.</string>
     <string name="error_historical_media_key_unavailable">The historical file key is no longer available. This file can’t be opened.</string>
+    <string name="error_media_expired">This attachment has expired and can’t be opened.</string>
+    <string name="error_media_revoked">Access to this attachment has been revoked. It can’t be opened.</string>
 </resources>

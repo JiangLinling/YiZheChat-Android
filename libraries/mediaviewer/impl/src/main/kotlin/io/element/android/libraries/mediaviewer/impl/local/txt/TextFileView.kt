@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -29,9 +30,11 @@ import io.element.android.libraries.designsystem.theme.components.CircularProgre
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.mediaviewer.api.local.LocalMedia
 import io.element.android.libraries.mediaviewer.impl.viewer.topAppBarHeight
-import io.element.android.libraries.ui.strings.CommonStrings
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import io.element.android.libraries.mediaviewer.impl.R
 
 @Composable
 fun TextFileView(
@@ -41,15 +44,18 @@ fun TextFileView(
 ) {
     val data = remember { mutableStateOf<AsyncData<ImmutableList<String>>>(AsyncData.Uninitialized) }
     val context = LocalContext.current
+    DisposableEffect(localMedia?.uri) {
+        onDispose { data.value = AsyncData.Uninitialized }
+    }
     LaunchedEffect(localMedia?.uri) {
         data.value = AsyncData.Loading()
         if (localMedia?.uri != null) {
             // Load the file content
-            val result = runCatchingExceptions {
+            val result = runCatchingExceptions { withContext(Dispatchers.IO) {
                 context.contentResolver.openInputStream(localMedia.uri).use {
                     it?.bufferedReader()?.readLines()?.toList().orEmpty()
                 }
-            }
+            } }
             data.value = if (result.isSuccess) {
                 AsyncData.Success(result.getOrNull().orEmpty().toImmutableList())
             } else {
@@ -82,7 +88,7 @@ private fun TextFileContentView(
             modifier = modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            Text(text = data.error.message ?: stringResource(id = CommonStrings.error_unknown))
+            Text(text = stringResource(id = R.string.error_protected_media_read_unavailable))
         }
         is AsyncData.Success -> {
             textFileViewer.Render(

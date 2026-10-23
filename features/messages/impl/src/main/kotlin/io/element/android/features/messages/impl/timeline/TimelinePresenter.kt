@@ -264,17 +264,16 @@ class TimelinePresenter(
             sessionPreferencesStore.isRenderReadReceiptsEnabled()
         }.collectAsState(initial = true)
         val policyRevision by dataProtectionPolicyRevisionProvider.policyRevision.collectAsState()
-        val managedReadReceiptsEnabled = remember(roomInfo.isDm, policyRevision) {
-            roomInfo.isDm || dataProtectionPolicyProvider.current().policy.allowGroupReadReceipts
+        val currentGroupReadPolicy = dataProtectionPolicyProvider.current().policy.allowGroupReadReceipts
+        val managedReadReceiptsEnabled = remember(roomInfo.isDm, policyRevision, currentGroupReadPolicy) {
+            roomInfo.isDm || currentGroupReadPolicy
         }
         val renderReadReceipts = prefersReadReceipts && managedReadReceiptsEnabled
         LaunchedEffect(entryNavigationCaptured, pendingReadIndex, readViewportActive) {
             val index = pendingReadIndex ?: return@LaunchedEffect
             if (!entryNavigationCaptured || !readViewportActive) return@LaunchedEffect
             pendingReadIndex = null
-            val sendPublicReadReceipts = sessionPreferencesStore.isSendPublicReadReceiptsEnabled().first()
             sendReadReceiptIfNeeded(index, timelineItems, lastReadReceiptId,
-                roomReadReceiptType(roomInfo.isDm, managedReadReceiptsEnabled, sendPublicReadReceipts),
                 canRead = { readViewportActive })
         }
         val isLive by remember {
@@ -325,9 +324,7 @@ class TimelinePresenter(
                                     pendingReadIndex = event.firstIndex
                                     return@launch
                                 }
-                                val sendPublicReadReceipts = sessionPreferencesStore.isSendPublicReadReceiptsEnabled().first()
                                 sendReadReceiptIfNeeded(event.firstIndex, items, lastReadReceiptId,
-                                    roomReadReceiptType(roomInfo.isDm, managedReadReceiptsEnabled, sendPublicReadReceipts),
                                     canRead = { readViewportActive })
                             }
                         }
@@ -351,9 +348,8 @@ class TimelinePresenter(
                         val firstVisible = items.indexOfFirst { row -> row.events().any { it.id in visibleIds } }
                         if (firstVisible >= 0) localScope.launch {
                             if (captureEntryNavigation(items)) {
-                                val public = sessionPreferencesStore.isSendPublicReadReceiptsEnabled().first()
                                 sendReadReceiptIfNeeded(if (latest?.id in visibleIds) 0 else firstVisible,
-                                    items, lastReadReceiptId, roomReadReceiptType(roomInfo.isDm, managedReadReceiptsEnabled, public),
+                                    items, lastReadReceiptId,
                                     canRead = { readViewportActive })
                             }
                         }
@@ -1053,7 +1049,6 @@ class TimelinePresenter(
         firstVisibleIndex: Int,
         timelineItems: ImmutableList<TimelineItem>,
         lastReadReceiptId: MutableState<EventId?>,
-        readReceiptType: ReceiptType,
         canRead: () -> Boolean,
     ) = launch(dispatchers.computation) {
         if (!canRead()) return@launch
@@ -1062,6 +1057,8 @@ class TimelinePresenter(
             timelineController.invokeOnCurrentTimeline {
                 val latestId = timelineItems.flatMap { it.events() }.firstOrNull { it.eventId != null }?.eventId
                 if (latestId != null && latestId == lastReadReceiptId.value) return@invokeOnCurrentTimeline
+                val readReceiptType = currentReadReceiptType()
+                if (!canRead()) return@invokeOnCurrentTimeline
                 val result = markAsRead(receiptType = readReceiptType)
                 Timber.tag("YiZheReadViewport").d("mark_read success=%s private=%s", result.isSuccess, readReceiptType == ReceiptType.READ_PRIVATE)
                 result.onSuccess {
@@ -1075,10 +1072,19 @@ class TimelinePresenter(
             if (eventId != null && eventId != lastReadReceiptId.value) {
                 lastReadReceiptId.value = eventId
                 timelineController.invokeOnCurrentTimeline {
+                    val readReceiptType = currentReadReceiptType()
+                    if (!canRead()) return@invokeOnCurrentTimeline
                     sendReadReceipt(eventId = eventId, receiptType = readReceiptType)
                 }
             }
         }
+    }
+
+    private suspend fun currentReadReceiptType(): ReceiptType {
+        val sendPublic = sessionPreferencesStore.isSendPublicReadReceiptsEnabled().first()
+        // Read policy at the actual SDK mutation, after queued work and preference suspension.
+        // A coroutine captured before a management update must never reuse the old disclosure rule.
+        return roomReadReceiptType(room.roomInfoFlow.value.isDm, dataProtectionPolicyProvider.current().policy.allowGroupReadReceipts, sendPublic)
     }
 
     private fun getLastEventIdBeforeOrAt(index: Int, items: ImmutableList<TimelineItem>): EventId? {

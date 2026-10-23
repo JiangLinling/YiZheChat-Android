@@ -19,6 +19,8 @@ import io.element.android.libraries.mediaviewer.api.local.LocalMedia
 import io.element.android.libraries.mediaviewer.api.local.LocalMediaRenderMode
 import io.element.android.libraries.mediaviewer.api.local.LocalMediaRenderer
 import io.element.android.libraries.mediaviewer.impl.local.office.OfficePreviewService
+import io.element.android.security.dataprotection.api.ProtectedPreviewAuthorizationGate
+import io.element.android.security.securestorage.api.SecureMediaLeaseManager
 import me.saket.telephoto.zoomable.OverzoomEffect
 import me.saket.telephoto.zoomable.ZoomSpec
 import me.saket.telephoto.zoomable.rememberZoomableState
@@ -28,6 +30,8 @@ class DefaultLocalMediaRenderer(
     private val textFileViewer: TextFileViewer,
     private val audioFocus: AudioFocus,
     private val officePreviewService: OfficePreviewService,
+    private val previewAuthorizationGate: ProtectedPreviewAuthorizationGate,
+    private val secureMediaLeaseManager: SecureMediaLeaseManager,
 ) : LocalMediaRenderer {
     @Composable
     override fun Render(
@@ -41,6 +45,7 @@ class DefaultLocalMediaRenderer(
                 zoomSpec = ZoomSpec(maxZoomFactor = 4f, overzoomEffect = OverzoomEffect.NoLimits)
             )
         )
+        ProtectedMediaSurface(previewAuthorizationGate, secureMediaLeaseManager, localMedia) {
         LocalMediaView(
             modifier = Modifier.fillMaxSize(),
             bottomPaddingInPixels = 0,
@@ -55,5 +60,6 @@ class DefaultLocalMediaRenderer(
             officePreviewDeviceId = deviceId,
             localMediaRenderMode = renderMode,
         )
+        }
     }
 }

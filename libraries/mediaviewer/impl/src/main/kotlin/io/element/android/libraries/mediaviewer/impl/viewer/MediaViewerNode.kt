@@ -46,6 +46,9 @@ import io.element.android.libraries.mediaviewer.impl.model.hasEvent
 import io.element.android.libraries.mediaviewer.impl.segmented.product.SegmentedVideoPlaybackOwnerFactory
 import io.element.android.services.toolbox.api.systemclock.SystemClock
 import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
+import io.element.android.security.dataprotection.api.ProtectedPreviewAuthorizationGate
+import io.element.android.libraries.mediaviewer.impl.local.ProtectedMediaSurface
+import io.element.android.security.securestorage.api.SecureMediaLeaseManager
 import java.security.MessageDigest
 
 @ContributesNode(RoomScope::class)
@@ -70,6 +73,8 @@ class MediaViewerNode(
     private val enterpriseService: EnterpriseService,
     private val officePreviewService: OfficePreviewService,
     private val appOperationalStateCoordinator: AppOperationalStateCoordinator,
+    private val previewAuthorizationGate: ProtectedPreviewAuthorizationGate,
+    private val secureMediaLeaseManager: SecureMediaLeaseManager,
 ) : Node(buildContext, plugins = plugins),
     MediaViewerNavigator {
     private val callback: MediaViewerEntryPoint.Callback = callback()
@@ -165,6 +170,9 @@ class MediaViewerNode(
                 colors = colors,
                 lightStatusBar = isOfficeDocument,
             ) {
+                // Keep the loader owner stable while its source changes from
+                // absent to downloaded. Device lock still disposes the whole viewer.
+                ProtectedMediaSurface(previewAuthorizationGate, secureMediaLeaseManager, localMedia = null) {
                 MediaViewerView(
                     state = state,
                     textFileViewer = textFileViewer,
@@ -180,7 +188,11 @@ class MediaViewerNode(
                     officePreviewService = officePreviewService,
                     officePreviewAccountId = sessionId.value,
                     officePreviewDeviceId = matrixClient.deviceId.value,
+                    protectedSurface = { media, content ->
+                        ProtectedMediaSurface(previewAuthorizationGate, secureMediaLeaseManager, media, content)
+                    },
                 )
+                }
             }
         }
     }
