@@ -7,7 +7,8 @@
     <string name="local_pdf_cancel">取消</string>
     <string name="error_content_export_disabled_by_policy">管理员已禁止保存或对外打开附件。</string>
     <string name="error_external_share_disabled_by_policy">管理员已禁止对外分享。</string>
-    <string name="error_protected_media_read_unavailable">附件授权已失效，请重新打开。</string>
+    <string name="error_protected_media_read_unavailable">暂时无法读取附件，请重新打开。</string>
+    <string name="screen_media_protected_read_checking">正在安全验证附件…</string>
     <string name="screen_media_file_preview_unsupported">暂不支持应用内预览此文件格式，请使用其他应用打开。</string>
     <string name="screen_media_office_loading">正在加载文档…</string>
     <string name="screen_media_office_more_actions">更多文档操作</string>

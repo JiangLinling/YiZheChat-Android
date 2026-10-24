@@ -8,6 +8,7 @@
     <string name="error_content_export_disabled_by_policy">Saving and opening outside YiZheChat is disabled by your organization’s signed policy.</string>
     <string name="error_external_share_disabled_by_policy">Sharing outside YiZheChat is disabled by your organization’s signed policy.</string>
     <string name="error_protected_media_read_unavailable">Attachment access is unavailable. Reopen the attachment and try again.</string>
+    <string name="screen_media_protected_read_checking">Verifying attachment…</string>
     <string name="screen_media_segmented_playback_failed_closed">Secure video playback stopped because the next fragment could not be authorized or verified. Close this media to continue.</string>
     <string name="screen_media_file_preview_unsupported">This file format can’t be previewed here. Use another app to open it.</string>
     <string name="screen_media_office_loading">Loading document…</string>

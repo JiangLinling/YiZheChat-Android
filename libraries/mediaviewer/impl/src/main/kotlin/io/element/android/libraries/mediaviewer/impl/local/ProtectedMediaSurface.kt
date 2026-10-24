@@ -48,14 +48,17 @@ internal fun ProtectedMediaSurface(
     val uri = localMedia?.uri
     val protected = uri?.scheme == "content" && uri.authority?.endsWith(".securemedia") == true
     val hostLease = localMedia?.let { rememberBoundFilePreviewLease(it, "${context.packageName}.securemedia") }
-    var sourceAuthorized by remember(uri, revision) { mutableStateOf(!protected) }
-    LaunchedEffect(uri, revision, access.allowsPreviewAttempt, hostLease) {
+    // LocalMedia includes the exact URI, operation, room, resource metadata and host token.
+    var sourceState by remember(localMedia, revision, access.allowsPreviewAttempt) {
+        mutableStateOf(if (protected) ProtectedMediaSourceState.CHECKING else ProtectedMediaSourceState.AUTHORIZED)
+    }
+    LaunchedEffect(localMedia, revision, access.allowsPreviewAttempt, hostLease) {
         if (!access.allowsPreviewAttempt) {
-            sourceAuthorized = false
+            sourceState = ProtectedMediaSourceState.UNAVAILABLE
             return@LaunchedEffect
         }
         if (!protected || uri == null) {
-            sourceAuthorized = true
+            sourceState = ProtectedMediaSourceState.AUTHORIZED
             return@LaunchedEffect
         }
         var checks = 0
@@ -71,7 +74,7 @@ internal fun ProtectedMediaSurface(
             } catch (_: Exception) {
                 false
             }
-            sourceAuthorized = valid
+            sourceState = if (valid) ProtectedMediaSourceState.AUTHORIZED else ProtectedMediaSourceState.UNAVAILABLE
             if (!valid) {
                 hostLease?.release(FilePreviewLeaseReleaseReason.UNDERLYING_UNAVAILABLE)
                 break // A revoked capability cannot be revived by a later successful poll.
@@ -80,18 +83,26 @@ internal fun ProtectedMediaSurface(
             delay(500L)
         }
     }
-    if (access.allowsPreviewAttempt && sourceAuthorized) {
+    if (access.allowsPreviewAttempt && sourceState == ProtectedMediaSourceState.AUTHORIZED) {
         // Disposal releases players, renderers and text state before a new authorization generation reads again.
-        key(revision) { content() }
+        key(revision, localMedia) { content() }
     } else {
         Box(
             Modifier.fillMaxSize().background(ElementTheme.colors.bgCanvasDefault).padding(24.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                stringResource(if (access.allowsPreviewAttempt) R.string.error_protected_media_read_unavailable else R.string.error_preview_access_locked),
+                stringResource(
+                    when {
+                        !access.allowsPreviewAttempt -> R.string.error_preview_access_locked
+                        sourceState == ProtectedMediaSourceState.CHECKING -> R.string.screen_media_protected_read_checking
+                        else -> R.string.error_protected_media_read_unavailable
+                    }
+                ),
                 color = ElementTheme.colors.textPrimary,
             )
         }
     }
 }
+
+private enum class ProtectedMediaSourceState { CHECKING, AUTHORIZED, UNAVAILABLE }
