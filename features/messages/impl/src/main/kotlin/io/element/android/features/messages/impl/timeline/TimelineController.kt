@@ -1225,12 +1225,12 @@ class TimelineController(
             }
     }
 
-    fun updateViewport(visibleItemIds: List<UniqueId>) {
+    fun updateViewport(visibleItemIds: List<UniqueId>, allowInitialRender: Boolean = false) {
         // The combined presentation flow can lag one dispatcher turn after focusOnEvent returns.
         // Capture the authoritative detached/live state directly at the UI call boundary. Rust
         // binds the update again to its current commit scope, so a delayed update cannot cross a
         // subscription boundary either.
-        detachedTimelineFlow.value.orElse(liveTimeline).updateViewport(visibleItemIds)
+        detachedTimelineFlow.value.orElse(liveTimeline).updateViewport(visibleItemIds, allowInitialRender)
     }
 
     private val currentTimelineFlow = combine(liveTimelineFlow, detachedTimelineFlow) { live, detached ->

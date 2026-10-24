@@ -283,7 +283,10 @@ interface MatrixProtectedContentAdapter {
     ): MatrixTimelineItem = decryptItem(item)
 
     fun cancelTimelineReleaseRequests(scopeId: String, requestIds: Set<String>) = Unit
-    fun updateTimelineReleaseViewport(scopeId: String, generation: Long, visibleRequestIds: List<String>) = Unit
+    fun updateTimelineReleaseViewport(
+        scopeId: String, generation: Long, visibleRequestIds: List<String>,
+        bootstrapRequestIds: List<String> = emptyList(),
+    ) = Unit
     /** Eviction preference only. This never grants permission or extends a projection's lifetime. */
     fun protectRecentTimelineCache(items: List<MatrixTimelineItem>) = Unit
     fun openTimelineReleaseScope(scopeId: String): String = scopeId
@@ -305,6 +308,9 @@ interface MatrixProtectedContentAdapter {
         item: MatrixTimelineItem,
         reason: BurnAfterReadEndReason = BurnAfterReadEndReason.VIEW_CLOSED,
     ): Boolean = false
+    /** Metadata qualification only. No key release, cache access or read receipt. */
+    fun isInitialRenderText(item: MatrixTimelineItem): Boolean = false
+
     suspend fun isBurnAfterRead(item: MatrixTimelineItem): Boolean = false
 
     /**
@@ -2100,13 +2106,17 @@ private class DefaultMatrixProtectedContentAdapter(
         )
     }
 
-    override fun updateTimelineReleaseViewport(scopeId: String, generation: Long, visibleRequestIds: List<String>) {
+    override fun updateTimelineReleaseViewport(
+        scopeId: String, generation: Long, visibleRequestIds: List<String>,
+        bootstrapRequestIds: List<String>,
+    ) {
         val registration = timelineReleaseScopeOwners.resolve(scopeId) ?: return
         contentProtectionService.updateTimelineReleaseViewport(
             scopeId = registration.qualifiedScopeId,
             generation = generation,
             visibleRequestIds = visibleRequestIds,
             ownerToken = registration.ownerToken,
+            bootstrapRequestIds = bootstrapRequestIds,
         )
     }
 
@@ -2319,6 +2329,16 @@ private class DefaultMatrixProtectedContentAdapter(
         if (pending.isNotEmpty()) decryptionCache.clear()
         firstFailure?.let { throw it }
         return sessions.isNotEmpty() || pending.isNotEmpty()
+    }
+
+    override fun isInitialRenderText(item: MatrixTimelineItem): Boolean {
+        val event = item as? MatrixTimelineItem.Event ?: return false
+        if (!isCanonicalProtectedEventIdentity(event.eventId?.value.orEmpty()) || !event.event.isRemote) return false
+        val message = event.event.content as? MessageContent ?: return false
+        if (message.isBurnAfterRead || message.type !is TextMessageType) return false
+        return runCatching { protectedHeader(message)?.let {
+            it.kind == ContentKind.TEXT && it.lifecycle.mode == MessageLifecycleMode.FOLLOW_ROOM
+        } == true }.getOrDefault(false)
     }
 
     override suspend fun isBurnAfterRead(item: MatrixTimelineItem): Boolean {

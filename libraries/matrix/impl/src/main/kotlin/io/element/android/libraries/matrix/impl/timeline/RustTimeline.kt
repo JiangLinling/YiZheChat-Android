@@ -258,8 +258,8 @@ class RustTimeline(
         .onStart { timelineItemsSubscriber.subscribeIfNeeded() }
         .onCompletion { timelineItemsSubscriber.unsubscribeIfNeeded() }
 
-    override fun updateViewport(visibleItemIds: List<UniqueId>) {
-        timelineItemsSubscriber.updateViewport(visibleItemIds)
+    override fun updateViewport(visibleItemIds: List<UniqueId>, allowInitialRender: Boolean) {
+        timelineItemsSubscriber.updateViewport(visibleItemIds, allowInitialRender)
     }
 
     override suspend fun sendReadReceipt(eventId: EventId, receiptType: ReceiptType): Result<Unit> = withContext(dispatcher) {

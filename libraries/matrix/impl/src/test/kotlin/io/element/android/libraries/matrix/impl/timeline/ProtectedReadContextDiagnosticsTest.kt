@@ -26,6 +26,7 @@ class ProtectedReadContextDiagnosticsTest {
             identity.copy(authorizationRevision = 8) to 16,
             identity.copy(previewRevision = 9) to 32,
             identity.copy(releaseClass = TimelineContentReleaseClass.HISTORY_PREFETCH) to 64,
+            identity.copy(releaseClass = TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP) to 64,
             identity.copy(encryptedMessage = identity.encryptedMessage.copy(isEdited = true)) to 128,
             identity.copy(readPurpose = TimelineContentReadPurpose.ROOM_PREVIEW) to 256,
         )

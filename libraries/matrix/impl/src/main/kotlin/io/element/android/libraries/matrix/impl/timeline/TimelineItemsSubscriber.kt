@@ -95,11 +95,11 @@ internal class TimelineItemsSubscriber(
      * update from an unsubscribed viewport therefore still carries the old scope and is rejected by
      * the processor after a resubscribe.
      */
-    fun updateViewport(visibleItemIds: List<UniqueId>) {
+    fun updateViewport(visibleItemIds: List<UniqueId>, allowInitialRender: Boolean = false) {
         val commitScope = activeCommitScope ?: return
         val generation = viewportGeneration.incrementAndGet()
         coroutineScope.launch {
-            timelineDiffProcessor.updateViewport(commitScope, generation, visibleItemIds)
+            timelineDiffProcessor.updateViewport(commitScope, generation, visibleItemIds, allowInitialRender)
         }
     }
 

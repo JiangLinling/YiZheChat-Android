@@ -473,21 +473,22 @@ class ProtectedTimelineSharedReadTest {
     }
 
     @Test
-    fun `history capacity reserves slots for new messages`() = runTest {
-        val fixture = Fixture(backgroundScope)
-        val history = List(33) { index -> fixture.read(this, fixture.identity.copy(
-            projection = fixture.identity.projection.copy(eventId = "history-$index"),
-            releaseClass = TimelineContentReleaseClass.HISTORY_PREFETCH,
-        )) }
-        runCurrent()
-        assertThat(fixture.decrypts).isEqualTo(32)
-        assertThat(history.last().await().exceptionOrNull()).isInstanceOf(ContentProtectionException.KmsUnavailable::class.java)
-        val fresh = fixture.read(this)
-        runCurrent()
-        assertThat(fixture.decrypts).isEqualTo(33)
-        fixture.release.complete(Unit)
-        history.dropLast(1).awaitAll().forEach { it.getOrThrow() }
-        fresh.await().getOrThrow()
+    fun `history and bootstrap registry capacity reserve slots for actual new messages`() = runTest {
+        for (releaseClass in listOf(TimelineContentReleaseClass.HISTORY_PREFETCH, TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP)) {
+            val fixture = Fixture(backgroundScope)
+            val history = List(33) { index -> fixture.read(this, fixture.identity.copy(
+                projection = fixture.identity.projection.copy(eventId = "history-$index"), releaseClass = releaseClass,
+            )) }
+            runCurrent()
+            assertThat(fixture.decrypts).isEqualTo(32)
+            assertThat(history.last().await().exceptionOrNull()).isInstanceOf(ContentProtectionException.KmsUnavailable::class.java)
+            val fresh = fixture.read(this)
+            runCurrent()
+            assertThat(fixture.decrypts).isEqualTo(33)
+            fixture.release.complete(Unit)
+            history.dropLast(1).awaitAll().forEach { it.getOrThrow() }
+            fresh.await().getOrThrow()
+        }
     }
 
     @Test

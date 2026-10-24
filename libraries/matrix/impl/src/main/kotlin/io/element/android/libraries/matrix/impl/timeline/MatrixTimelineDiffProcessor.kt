@@ -95,7 +95,8 @@ internal class MatrixTimelineDiffProcessor(
         maximumSize = MAX_PENDING_DECRYPTS,
         historyFairnessVisibleBurst = HISTORY_FAIRNESS_VISIBLE_BURST,
     )
-    private val visibleDecryptSignals = Channel<Unit>(capacity = VISIBLE_ONLY_DECRYPT_WORKER_COUNT)
+    private val visibleDecryptSignals = Channel<Unit>(capacity = VISIBLE_ONLY_DECRYPT_WORKER_COUNT - 1)
+    private val reservedVisibleDecryptSignals = Channel<Unit>(capacity = 1)
     private val historyDecryptSignals = Channel<Unit>(capacity = HISTORY_DECRYPT_WORKER_COUNT)
     private val decryptedItems = Channel<DecryptedItem>(
         capacity = DECRYPT_QUEUE_CAPACITY,
@@ -111,6 +112,9 @@ internal class MatrixTimelineDiffProcessor(
     private var latestHardInvalidationRevision = 0L
     private var latestHistoryRecoveryGeneration = 0L
     private var latestContentInvalidationSequence = 0L
+    private var initialRenderCandidates: Map<String, MatrixTimelineItem>? = null
+    private var initialRenderActivated = false
+    private var initialRenderRetired = false
     private var latestViewportGeneration = 0L
     private var hasMeasuredViewport = false
     private var visibleViewportItemKeys = emptyList<String>()
@@ -157,10 +161,12 @@ internal class MatrixTimelineDiffProcessor(
                 }
                 activeCommitScope = null
             }
-            repeat(VISIBLE_ONLY_DECRYPT_WORKER_COUNT) {
+            repeat(VISIBLE_ONLY_DECRYPT_WORKER_COUNT) { worker ->
                 coroutineScope.launch(decryptDispatcher) {
-                    for (ignored in visibleDecryptSignals) {
-                        pendingDecrypts.pollVisible()?.let { work -> decryptPendingWork(work) }
+                    val signals = if (worker == 0) reservedVisibleDecryptSignals else visibleDecryptSignals
+                    for (ignored in signals) {
+                        val work = if (worker == 0) pendingDecrypts.pollReservedVisible() else pendingDecrypts.pollForeground()
+                        work?.let { decryptPendingWork(it) }
                     }
                 }
             }
@@ -196,6 +202,9 @@ internal class MatrixTimelineDiffProcessor(
         val releaseScopeId = if (previous?.scope != scope) {
             initialStructuralProjectionBarrier = null
             latestViewportGeneration = 0L
+            initialRenderCandidates = null
+            initialRenderActivated = false
+            initialRenderRetired = false
             hasMeasuredViewport = false
             visibleViewportItemKeys = emptyList()
             decryptAdapter?.openTimelineReleaseScope(scope.value.toString()) ?: scope.value.toString()
@@ -210,6 +219,8 @@ internal class MatrixTimelineDiffProcessor(
     suspend fun invalidateCommitScope(scope: TimelineCommitScope) = mutex.withLock {
         activeCommitScope?.takeIf { it.scope == scope }?.let { activeScope ->
             pendingOriginalSendSources.clear()
+            initialRenderCandidates = null
+            initialRenderRetired = true
             activeCommitScope = null
             initialStructuralProjectionBarrier = null
             hasMeasuredViewport = false
@@ -228,10 +239,12 @@ internal class MatrixTimelineDiffProcessor(
         scope: TimelineCommitScope,
         generation: Long,
         visibleItemIds: List<UniqueId>,
+        allowInitialRender: Boolean = false,
     ): Boolean {
         var updated = false
         var updatedScopeId: String? = null
         var updatedVisibleKeys = emptyList<String>()
+        var updatedBootstrapKeys = emptyList<String>()
         mutex.withLock {
             val activeScope = activeCommitScope ?: return@withLock
             if (activeScope.scope != scope || generation <= latestViewportGeneration) return@withLock
@@ -275,6 +288,32 @@ internal class MatrixTimelineDiffProcessor(
             } else {
                 emptyList()
             }
+            // Capture one finite raw-identity set after a real foreground measurement.
+            // An initial hidden/unmeasured page is unarmed, not a retired foreground entry.
+            val anchor = rawItems.indexOfLast { it is MatrixTimelineItem.Event && itemKey(it) in visibleKeys }
+            val anchorIsDisplayable = anchor >= 0 && displayItems.size == rawItems.size &&
+                (displayItems[anchor] as? MatrixTimelineItem.Event)?.event?.content?.isAuthorizedForUserDisplay(true) == true
+            if (!initialRenderRetired && allowInitialRender && anchorIsDisplayable && initialRenderCandidates == null) {
+                initialRenderCandidates = rawItems.takeLast(VISIBLE_FIRST_ITEM_COUNT).mapNotNull { item ->
+                    val key = itemKey(item) ?: return@mapNotNull null
+                    item.takeIf { isEmptyOrdinaryPendingShell(safeShellItemsByKey[key]) &&
+                        decryptAdapter?.isInitialRenderText(it) == true }?.let { key to it }
+                }.toMap()
+            }
+            val candidates = initialRenderCandidates.orEmpty()
+            val renderedTailOnScreen = anchorIsDisplayable && rawItems.drop(anchor + 1).all { item ->
+                item is MatrixTimelineItem.Virtual || candidates[itemKey(item)] === item &&
+                    isEmptyOrdinaryPendingShell(displayItems[rawItemSlotsByKey[itemKey(item)]?.index ?: return@all false])
+            }
+            val eligible = allowInitialRender && renderedTailOnScreen && !initialRenderRetired
+            if (initialRenderActivated && !eligible) initialRenderRetired = true
+            val bootstrapKeys = if (!eligible || initialRenderRetired) emptyList() else shellCandidates.mapNotNull { item ->
+                val key = itemKey(item) ?: return@mapNotNull null
+                key.takeIf { it !in visibleKeys && candidates[it] === item && isEmptyOrdinaryPendingShell(safeShellItemsByKey[it]) }
+            }.take(VISIBLE_FIRST_ITEM_COUNT)
+            if (bootstrapKeys.isNotEmpty()) initialRenderActivated = true
+            else if (initialRenderActivated) initialRenderRetired = true
+            updatedBootstrapKeys = bootstrapKeys
             pendingDecrypts.reprioritize(
                 visibleKeys = visibleKeys,
                 shellCandidates = shellCandidates.filter { itemKey(it) in visibleKeys },
@@ -282,6 +321,7 @@ internal class MatrixTimelineDiffProcessor(
                 timelineScopeId = activeScope.releaseScopeId,
                 releaseGeneration = generation,
                 preferredHistoryKeys = preferredHiddenHistory.mapNotNull(::itemKey),
+                bootstrapHistoryKeys = bootstrapKeys,
             )
             pendingDecrypts.offer(
                 visible = emptyList(),
@@ -299,6 +339,7 @@ internal class MatrixTimelineDiffProcessor(
                 scopeId = checkNotNull(updatedScopeId),
                 generation = generation,
                 visibleRequestIds = updatedVisibleKeys,
+                bootstrapRequestIds = updatedBootstrapKeys,
             )
             signalPendingDecrypts()
         }
@@ -362,8 +403,10 @@ internal class MatrixTimelineDiffProcessor(
                         eventId = eventId,
                         generation = work.releaseGeneration,
                         releaseClass = when (work.priority) {
-                            DecryptPriority.VISIBLE -> TimelineContentReleaseClass.FOREGROUND_VISIBLE
-                            DecryptPriority.HISTORY -> TimelineContentReleaseClass.HISTORY_PREFETCH
+                            DecryptPriority.VISIBLE -> if (work.releaseGeneration == 0L) TimelineContentReleaseClass.HISTORY_PREFETCH
+                                else TimelineContentReleaseClass.FOREGROUND_VISIBLE
+                            DecryptPriority.HISTORY -> if (work.bootstrapHistory) TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP
+                                else TimelineContentReleaseClass.HISTORY_PREFETCH
                         },
                     )
                 )
@@ -434,8 +477,9 @@ internal class MatrixTimelineDiffProcessor(
     }
 
     private fun signalPendingDecrypts() {
-        if (pendingDecrypts.hasVisibleWork()) {
-            repeat(VISIBLE_ONLY_DECRYPT_WORKER_COUNT) { visibleDecryptSignals.trySend(Unit) }
+        if (pendingDecrypts.hasReservedVisibleWork()) reservedVisibleDecryptSignals.trySend(Unit)
+        if (pendingDecrypts.hasForegroundWork()) {
+            repeat(VISIBLE_ONLY_DECRYPT_WORKER_COUNT - 1) { visibleDecryptSignals.trySend(Unit) }
         }
         if (pendingDecrypts.hasQueuedWork()) {
             repeat(HISTORY_DECRYPT_WORKER_COUNT) { historyDecryptSignals.trySend(Unit) }
@@ -1920,6 +1964,13 @@ internal enum class DecryptPriority {
     HISTORY,
 }
 
+private fun isEmptyOrdinaryPendingShell(item: MatrixTimelineItem?): Boolean {
+    val message = ((item as? MatrixTimelineItem.Event)?.event?.content as? MessageContent) ?: return false
+    val text = message.type as? TextMessageType ?: return false
+    return message.protectedMessageStatus == ProtectedMessageStatus.DECRYPTING && !message.isBurnAfterRead &&
+        message.body.isEmpty() && text.body.isEmpty() && text.formatted == null
+}
+
 /** A scheduling window only: raw history remains intact and scrolling schedules deferred items. */
 internal fun timelineDecryptWindow(items: List<MatrixTimelineItem>, visibleKeys: List<String>?): List<MatrixTimelineItem> {
     if (visibleKeys.isNullOrEmpty()) {
@@ -2085,6 +2136,7 @@ internal class PendingDecryptQueue(
     private var historyWindowKeys: Set<String>? = null
     // A current-viewport scheduling hint only. Entries remain in their original history FIFO;
     // actual incremental recent arrivals retain their separate existing queue and semantics.
+    private var bootstrapHistoryKeys = emptyList<String>()
     private var preferredHistoryKeys = emptyList<String>()
     private var preferredHistoryScopeId: String? = null
     private var preferredHistoryGeneration = -1L
@@ -2093,6 +2145,7 @@ internal class PendingDecryptQueue(
         historyWindowKeys = keys
         history.keys.removeAll { it !in keys }
         preferredHistoryKeys = preferredHistoryKeys.filter { it in keys }
+        bootstrapHistoryKeys = bootstrapHistoryKeys.filter { it in keys }
     }
 
     fun offer(
@@ -2144,6 +2197,7 @@ internal class PendingDecryptQueue(
         timelineScopeId: String,
         releaseGeneration: Long,
         preferredHistoryKeys: List<String> = emptyList(),
+        bootstrapHistoryKeys: List<String> = emptyList(),
     ) = synchronized(this) {
         val visibleKeySet = visibleKeys.toSet()
         val visibleIterator = visible.entries.iterator()
@@ -2177,6 +2231,7 @@ internal class PendingDecryptQueue(
             )
         }
         if (preferredHistoryScopeId != timelineScopeId || releaseGeneration >= preferredHistoryGeneration) {
+            this.bootstrapHistoryKeys = bootstrapHistoryKeys.distinct().take(MatrixTimelineDiffProcessor.VISIBLE_FIRST_ITEM_COUNT)
             this.preferredHistoryKeys = preferredHistoryKeys.distinct().take(MatrixTimelineDiffProcessor.VISIBLE_FIRST_ITEM_COUNT)
             preferredHistoryScopeId = timelineScopeId
             preferredHistoryGeneration = releaseGeneration
@@ -2201,6 +2256,7 @@ internal class PendingDecryptQueue(
             retiredPreferredKeys += key
         }
         preferredHistoryKeys = preferredHistoryKeys.filterNot { it in retiredPreferredKeys }
+        bootstrapHistoryKeys = bootstrapHistoryKeys.filterNot { it in retiredPreferredKeys }
     }
 
     fun isCurrent(key: String, rawStateGeneration: Long, timelineScopeId: String): Boolean = synchronized(this) {
@@ -2216,6 +2272,7 @@ internal class PendingDecryptQueue(
         latestTimelineScopeIdByKey.entries.removeAll { it.value == timelineScopeId }
         if (preferredHistoryScopeId == timelineScopeId) {
             preferredHistoryKeys = emptyList()
+            bootstrapHistoryKeys = emptyList()
             preferredHistoryScopeId = null
             preferredHistoryGeneration = -1L
         }
@@ -2226,6 +2283,35 @@ internal class PendingDecryptQueue(
         recordVisiblePoll()
         inFlight[work.key] = work
         work
+    }
+
+    /** Owned generation-zero fallback has no measured visibility and cannot occupy this reserved worker. */
+    fun pollReservedVisible(): PendingDecryptWork? = synchronized(this) {
+        removeFirstAvailable(visible, DecryptPriority.VISIBLE, measuredOnly = true)?.also { work ->
+            recordVisiblePoll()
+            inFlight[work.key] = work
+        }
+    }
+
+    /** Only two existing foreground workers call this; the third stays visible-only. */
+    fun pollForeground(): PendingDecryptWork? = synchronized(this) {
+        val work = removeFirstAvailable(visible, DecryptPriority.VISIBLE)?.also { recordVisiblePoll() }
+            ?: if (recentPollsSinceBacklog < historyFairnessVisibleBurst) {
+                firstBootstrapKey()?.let { key ->
+                    checkNotNull(history.remove(key)).toPendingWork(key, DecryptPriority.HISTORY).copy(bootstrapHistory = true)
+                }?.also { recentPollsSinceBacklog++ }
+            } else null
+        work?.also { inFlight[it.key] = it }
+    }
+
+    private fun firstBootstrapKey(): String? = bootstrapHistoryKeys.firstOrNull { key ->
+        val entry = history[key]
+        entry != null && key !in inFlight && entry.timelineScopeId == preferredHistoryScopeId &&
+            entry.releaseGeneration == preferredHistoryGeneration
+    }
+
+    fun hasForegroundWork(): Boolean = synchronized(this) {
+        visible.isNotEmpty() || recentPollsSinceBacklog < historyFairnessVisibleBurst && firstBootstrapKey() != null
     }
 
     fun pollVisibleOrHistory(): PendingDecryptWork? = synchronized(this) {
@@ -2280,6 +2366,11 @@ internal class PendingDecryptQueue(
     fun hasQueuedWork(): Boolean = synchronized(this) { visible.isNotEmpty() || history.isNotEmpty() || recentHistory.isNotEmpty() }
 
     fun hasVisibleWork(): Boolean = synchronized(this) { visible.isNotEmpty() }
+
+    fun hasReservedVisibleWork(): Boolean = synchronized(this) {
+        visible.any { (key, entry) -> key !in inFlight &&
+            (entry.releaseGeneration > 0L || entry.timelineScopeId == MatrixTimelineDiffProcessor.UNSCOPED_TIMELINE_RELEASE_SCOPE) }
+    }
 
     /** Work waiting to start. This is the quantity bounded by [maximumSize]. */
     fun pendingSize(): Int = synchronized(this) { visible.size + history.size + recentHistory.size }
@@ -2345,11 +2436,15 @@ internal class PendingDecryptQueue(
         items: LinkedHashMap<String, PendingDecryptEntry>,
         priority: DecryptPriority,
         recentHistory: Boolean = false,
+        measuredOnly: Boolean = false,
     ): PendingDecryptWork? {
         val iterator = items.entries.iterator()
         while (iterator.hasNext()) {
             val entry = iterator.next()
             if (entry.key in inFlight) continue
+            if (measuredOnly && entry.value.timelineScopeId != MatrixTimelineDiffProcessor.UNSCOPED_TIMELINE_RELEASE_SCOPE &&
+                entry.value.releaseGeneration == 0L
+            ) continue
             iterator.remove()
             return entry.value.toPendingWork(entry.key, priority, recentHistory)
         }
@@ -2462,6 +2557,7 @@ internal data class PendingDecryptWork(
     val releaseGeneration: Long = 0L,
     val recentHistory: Boolean = false,
     val recentProjection: Boolean = false,
+    val bootstrapHistory: Boolean = false,
 )
 
 private class DiffingResult(

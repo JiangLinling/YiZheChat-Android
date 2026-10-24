@@ -401,6 +401,7 @@ fun TimelineView(
                     timelineItems = state.timelineItems,
                     lazyListState = lazyListState,
                     userVisible = userVisible,
+                    isLive = state.isLive,
                     onViewportChanged = onViewportChanged
                         ?: { visibleItemIds -> state.eventSink(TimelineEvent.ViewportChanged(visibleItemIds, userVisible)) },
                 )
@@ -810,12 +811,15 @@ private fun TimelineViewportReleaseHelper(
     timelineItems: List<TimelineItem>,
     lazyListState: LazyListState,
     userVisible: Boolean,
+    isLive: Boolean,
     onViewportChanged: (List<UniqueId>) -> Unit,
 ) {
     val latestTimelineItems by rememberUpdatedState(timelineItems)
     val latestOnViewportChanged by rememberUpdatedState(onViewportChanged)
 
-    LaunchedEffect(lazyListState, userVisible) {
+    LaunchedEffect(lazyListState, userVisible, isLive) {
+        if (!userVisible || !isLive) latestOnViewportChanged(emptyList())
+        if (!userVisible) return@LaunchedEffect
         snapshotFlow {
             val layoutInfo = lazyListState.layoutInfo
             val items = latestTimelineItems

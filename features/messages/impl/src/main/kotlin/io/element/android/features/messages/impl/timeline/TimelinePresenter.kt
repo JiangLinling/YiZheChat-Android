@@ -335,7 +335,7 @@ class TimelinePresenter(
                 }
                 is TimelineEvent.ViewportChanged -> {
                     Timber.tag("YiZheReadViewport").d("viewport visible=%s live=%s count=%d", event.isUserVisible, isLive, event.visibleItemIds.size)
-                    timelineController.updateViewport(event.visibleItemIds)
+                    timelineController.updateViewport(event.visibleItemIds, allowInitialRender = event.isUserVisible && isLive)
                     readViewportActive = event.isUserVisible
                     if (!event.isUserVisible) { pendingReadIndex = null; return }
                     // Use rows from an actual measured viewport. Background sync alone must

@@ -67,9 +67,11 @@ class FakeTimeline(
     }
 ) : Timeline {
     val viewportUpdates = mutableListOf<List<UniqueId>>()
+    val initialRenderPermissions = mutableListOf<Boolean>()
 
-    override fun updateViewport(visibleItemIds: List<UniqueId>) {
+    override fun updateViewport(visibleItemIds: List<UniqueId>, allowInitialRender: Boolean) {
         viewportUpdates += visibleItemIds.toList()
+        initialRenderPermissions += allowInitialRender
     }
 
     var sendMessageLambda: (

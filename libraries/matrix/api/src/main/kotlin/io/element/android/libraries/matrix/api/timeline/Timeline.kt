@@ -84,7 +84,7 @@ interface Timeline : AutoCloseable {
      * order. Implementations may use this only to prioritize derived timeline work; it must not
      * change reliable-security or committed-send ownership.
      */
-    fun updateViewport(visibleItemIds: List<UniqueId>) = Unit
+    fun updateViewport(visibleItemIds: List<UniqueId>, allowInitialRender: Boolean = false) = Unit
 
     suspend fun sendMessage(
         body: String,

@@ -76,6 +76,160 @@ class MatrixTimelineDiffProcessorTest {
     private val anEvent2 = MatrixTimelineItem.Event(A_UNIQUE_ID_2, anEventTimelineItem())
 
     @Test
+    fun `owned initial render borrows two workers while actual visible work still progresses`() = runTest {
+        verifyInitialRenderBootstrap()
+    }
+
+    @Test
+    fun `initial render recognizes the measured rendered tail when all later text is still hidden`() = runTest {
+        verifyInitialRenderBootstrap(anchorBeforeHidden = true)
+    }
+
+    @Test
+    fun `initial render is opt in and unknown metadata or burn text never acquires bootstrap`() = runTest {
+        verifyInitialRenderBootstrap(allowInitialRender = false)
+        verifyInitialRenderBootstrap(metadataEligible = false)
+        verifyInitialRenderBootstrap(burn = true)
+    }
+
+    @Test
+    fun `leaving initial render retires pending eligibility and later raw arrivals cannot replenish it`() = runTest {
+        verifyInitialRenderBootstrap(retire = true)
+    }
+
+    @Test
+    fun `initial inactive viewport may arm once but cannot rearm after leaving active initial render`() = runTest {
+        verifyInitialRenderBootstrap(initialInactive = true, retire = true)
+    }
+
+    @Test
+    fun `unmeasured owned startup reads cannot occupy the measured visible reserved worker`() = runTest {
+        verifyInitialRenderBootstrap(startBeforeViewport = true)
+    }
+
+    @Test
+    fun `fully hidden initial room can reveal its first anchor through the original history lane`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val intents = mutableListOf<TimelineContentReleaseIntent>()
+        val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
+            override suspend fun timelineItemsShell(items: List<MatrixTimelineItem>) =
+                items.map { it.withText("").withProtectedStatus(ProtectedMessageStatus.DECRYPTING) }
+
+            override suspend fun hasTransientDecryptingShell(item: MatrixTimelineItem) = true
+
+            override suspend fun decryptItem(item: MatrixTimelineItem, timelineReleaseIntent: TimelineContentReleaseIntent): MatrixTimelineItem {
+                intents += timelineReleaseIntent
+                if (item.uniqueIdValue() != "all-hidden-3") gate.await()
+                val event = item.withText("first readable anchor") as MatrixTimelineItem.Event
+                return event.copy(event = event.event.copy(content = (event.event.content as MessageContent).copy(isContentProtectionAuthorized = true)))
+            }
+        }
+        val processor = createMatrixTimelineDiffProcessor(timelineItems, protectedContentAdapter = adapter)
+        val scope = TimelineCommitScope(174L)
+        processor.activateCommitScope(scope)
+        val raw = (0 until 4).map { index -> FakeFfiTimelineItem(uniqueId = "all-hidden-$index", asEventResult = aRustEventTimelineItem(
+            eventOrTransactionId = RustEventOrTransactionId.EventId("\$all-hidden-$index"),
+            content = aRustTimelineItemContentMsgLike("encrypted:$index"),
+        )) }
+        processor.commitDiffs(TimelineDiffTransaction(scope, 1L, 1L, listOf(TimelineDiff.Reset(raw))))
+        runCurrent()
+        advanceTimeBy(200)
+        runCurrent()
+        assertThat(intents).isNotEmpty()
+        assertThat(intents.all { it.releaseClass == TimelineContentReleaseClass.HISTORY_PREFETCH }).isTrue()
+        assertThat(timelineItems.value.any { it.uniqueIdValue() == "all-hidden-3" && it.textBody() == "first readable anchor" }).isTrue()
+        gate.complete(Unit)
+        runCurrent()
+        processor.invalidateCommitScope(scope)
+    }
+
+    private suspend fun TestScope.verifyInitialRenderBootstrap(
+        allowInitialRender: Boolean = true,
+        anchorBeforeHidden: Boolean = false,
+        metadataEligible: Boolean = true,
+        burn: Boolean = false,
+        retire: Boolean = false,
+        initialInactive: Boolean = false,
+        startBeforeViewport: Boolean = false,
+    ) {
+        val gate = CompletableDeferred<Unit>()
+        val observed = mutableListOf<Pair<String, TimelineContentReleaseIntent>>()
+        fun authorized(item: MatrixTimelineItem): MatrixTimelineItem {
+            val event = item.withText("authorized:${item.uniqueIdValue()}") as MatrixTimelineItem.Event
+            return event.copy(event = event.event.copy(content = (event.event.content as MessageContent).copy(isContentProtectionAuthorized = true)))
+        }
+        val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
+            override fun isInitialRenderText(item: MatrixTimelineItem): Boolean =
+                metadataEligible && item.uniqueIdValue().startsWith("initial-text-")
+
+            override suspend fun cachedProjectionForCurrentAuthorization(item: MatrixTimelineItem): MatrixTimelineItem? =
+                item.takeIf { it.uniqueIdValue() == "initial-anchor" }?.let(::authorized)
+
+            override suspend fun hasTransientDecryptingShell(item: MatrixTimelineItem): Boolean = item.uniqueIdValue() != "initial-anchor"
+
+            override suspend fun timelineItemsShell(items: List<MatrixTimelineItem>): List<MatrixTimelineItem> = items.map { item ->
+                if (item.uniqueIdValue() == "initial-anchor") item.withText("").withProtectedStatus(ProtectedMessageStatus.DECRYPTING) else {
+                    val text = item.uniqueIdValue().startsWith("initial-text-")
+                    val event = item.withText("").withProtectedStatus(
+                        if (text) ProtectedMessageStatus.DECRYPTING else ProtectedMessageStatus.ATTACHMENT_DECRYPTING
+                    ) as MatrixTimelineItem.Event
+                    event.copy(event = event.event.copy(content = (event.event.content as MessageContent).copy(isBurnAfterRead = burn && text)))
+                }
+            }
+
+            override suspend fun decryptItem(item: MatrixTimelineItem, timelineReleaseIntent: TimelineContentReleaseIntent): MatrixTimelineItem {
+                observed += item.uniqueIdValue() to timelineReleaseIntent
+                if (item.uniqueIdValue() != "initial-visible") gate.await()
+                return authorized(item)
+            }
+        }
+        fun raw(id: String) = FakeFfiTimelineItem(uniqueId = id, asEventResult = aRustEventTimelineItem(
+            eventOrTransactionId = RustEventOrTransactionId.EventId("\$$id"), content = aRustTimelineItemContentMsgLike("encrypted:$id"),
+        ))
+        val old = (0 until 20).map { raw("initial-old-$it") }
+        val hidden = (0 until 4).map { raw("initial-text-$it") }
+        val initial = old + if (anchorBeforeHidden) listOf(raw("initial-anchor")) + hidden else hidden + raw("initial-anchor")
+        val processor = createMatrixTimelineDiffProcessor(timelineItems, protectedContentAdapter = adapter)
+        val scope = TimelineCommitScope(173L)
+        processor.activateCommitScope(scope)
+        processor.commitDiffs(TimelineDiffTransaction(scope, 1L, 1L, listOf(TimelineDiff.Reset(initial))))
+        if (startBeforeViewport) {
+            runCurrent()
+            assertThat(observed).hasSize(3)
+            assertThat(observed.all { it.second.releaseClass == TimelineContentReleaseClass.HISTORY_PREFETCH }).isTrue()
+        }
+        var viewportGeneration = 0L
+        if (initialInactive) processor.updateViewport(scope, ++viewportGeneration, emptyList(), allowInitialRender = false)
+        processor.updateViewport(scope, ++viewportGeneration, listOf(UniqueId("initial-anchor")), allowInitialRender)
+        runCurrent()
+        val eligible = allowInitialRender && metadataEligible && !burn
+        val boot = observed.filter { it.second.releaseClass == TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP }
+        assertThat(boot.size).isEqualTo(if (eligible && !startBeforeViewport) 2 else 0)
+        assertThat(boot.map { it.first }).containsNoDuplicates()
+        if (eligible) {
+            if (!startBeforeViewport) assertThat(boot.map { it.first }).containsExactly("initial-text-3", "initial-text-2")
+            assertThat(processor.commitDiffs(TimelineDiffTransaction(scope, 2L, 1L,
+                listOf(TimelineDiff.Append(listOf(raw("initial-visible"))))))).isTrue()
+            processor.updateViewport(scope, ++viewportGeneration, listOf(UniqueId("initial-visible"), UniqueId("initial-anchor")), !retire)
+            runCurrent()
+            assertThat(observed.map { it.first }).contains("initial-visible")
+            assertThat(observed.single { it.first == "initial-visible" }.second.releaseClass)
+                .isEqualTo(TimelineContentReleaseClass.FOREGROUND_VISIBLE)
+            if (retire) {
+                processor.commitDiffs(TimelineDiffTransaction(scope, 3L, 1L, listOf(TimelineDiff.Append(listOf(raw("initial-text-late"))))))
+                processor.updateViewport(scope, ++viewportGeneration, listOf(UniqueId("initial-visible")), allowInitialRender = true)
+            }
+        }
+        gate.complete(Unit)
+        runCurrent()
+        advanceTimeBy(200)
+        runCurrent()
+        if (retire) assertThat(observed.filter { it.first == "initial-text-late" }
+            .none { it.second.releaseClass == TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP }).isTrue()
+        processor.invalidateCommitScope(scope)
+    }
+
+    @Test
     fun `initial hidden recent text keeps history authorization ahead of older shell backlog`() = runTest {
         verifyInitialHiddenHistoryScheduling(tailOnScreen = true)
     }
@@ -641,7 +795,9 @@ class MatrixTimelineDiffProcessorTest {
         val intent = observedIntents.single()
         assertThat(intent.scopeId).isEqualTo("owner-handle:7")
         assertThat(intent.generation).isEqualTo(0L)
-        assertThat(intent.releaseClass).isEqualTo(TimelineContentReleaseClass.FOREGROUND_VISIBLE)
+        // Generation zero has no measured visibility. Startup reads retain the original TIMELINE purpose.
+        assertThat(intent.releaseClass).isEqualTo(TimelineContentReleaseClass.HISTORY_PREFETCH)
+        assertThat(intent.readPurpose).isEqualTo(io.element.android.security.contentprotection.api.TimelineContentReadPurpose.TIMELINE)
         assertThat(intent.roomId).isNull()
         assertThat(intent.eventId).isNotEmpty()
         assertThat(openedScopes).containsExactly("7")
@@ -677,7 +833,8 @@ class MatrixTimelineDiffProcessorTest {
         var started = 0
         var cancelled = 0
         val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
-            override suspend fun timelineItemsShell(items: List<MatrixTimelineItem>) = items.map { it.withText("") }
+            override suspend fun timelineItemsShell(items: List<MatrixTimelineItem>) =
+                items.map { it.withText("").withProtectedStatus(ProtectedMessageStatus.ATTACHMENT_DECRYPTING) }
             override suspend fun hasTransientDecryptingShell(item: MatrixTimelineItem) = true
             override suspend fun decryptItem(item: MatrixTimelineItem, timelineReleaseIntent: TimelineContentReleaseIntent): MatrixTimelineItem {
                 if (timelineReleaseIntent.scopeId == "71") {
@@ -694,6 +851,8 @@ class MatrixTimelineDiffProcessorTest {
             FakeFfiTimelineItem(asEventResult = aRustEventTimelineItem(), uniqueId = "old-$i")
         }
         processor.commitDiffs(TimelineDiffTransaction(old, 1L, 1L, listOf(TimelineDiff.Reset(oldItems))))
+        // Measure the actual pending rows so this owner-exit case still exercises all four workers.
+        processor.updateViewport(old, 1L, oldItems.indices.map { UniqueId("old-$it") })
         runCurrent()
         assertThat(started).isEqualTo(oldItems.size)
         processor.invalidateCommitScope(old)
@@ -701,6 +860,7 @@ class MatrixTimelineDiffProcessorTest {
         processor.activateCommitScope(replacement)
         val fresh = FakeFfiTimelineItem(asEventResult = aRustEventTimelineItem(), uniqueId = "fresh-owner")
         processor.commitDiffs(TimelineDiffTransaction(replacement, 1L, 1L, listOf(TimelineDiff.Reset(listOf(fresh)))))
+        processor.updateViewport(replacement, 1L, listOf(UniqueId("fresh-owner")))
         runCurrent()
         advanceTimeBy(MatrixTimelineDiffProcessor.VISIBLE_DECRYPT_BATCH_WINDOW_MILLIS + 1L)
         runCurrent()
@@ -760,7 +920,10 @@ class MatrixTimelineDiffProcessorTest {
                 return item
             }
 
-            override fun updateTimelineReleaseViewport(scopeId: String, generation: Long, visibleRequestIds: List<String>) {
+            override fun updateTimelineReleaseViewport(
+                scopeId: String, generation: Long, visibleRequestIds: List<String>,
+                bootstrapRequestIds: List<String>,
+            ) {
                 viewportUpdates += Triple(scopeId, generation, visibleRequestIds)
             }
         }
@@ -1442,7 +1605,10 @@ class MatrixTimelineDiffProcessorTest {
                 }
             }
 
-            override fun updateTimelineReleaseViewport(scopeId: String, generation: Long, visibleRequestIds: List<String>) {
+            override fun updateTimelineReleaseViewport(
+                scopeId: String, generation: Long, visibleRequestIds: List<String>,
+                bootstrapRequestIds: List<String>,
+            ) {
                 viewportUpdates += Triple(scopeId, generation, visibleRequestIds)
             }
         }
@@ -4165,7 +4331,10 @@ class MatrixTimelineDiffProcessorTest {
                 closed += scopeId
                 if (currentOwner == scopeId) currentOwner = null
             }
-            override fun updateTimelineReleaseViewport(scopeId: String, generation: Long, visibleRequestIds: List<String>) {
+            override fun updateTimelineReleaseViewport(
+                scopeId: String, generation: Long, visibleRequestIds: List<String>,
+                bootstrapRequestIds: List<String>,
+            ) {
                 assertThat(generation).isEqualTo(1L)
                 assertThat(visibleRequestIds).containsExactly("event:retained-owner-event")
                 viewportOwners += scopeId
