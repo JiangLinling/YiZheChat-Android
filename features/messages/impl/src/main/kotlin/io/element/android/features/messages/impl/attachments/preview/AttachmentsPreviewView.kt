@@ -33,8 +33,8 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -87,6 +87,10 @@ import io.element.android.libraries.designsystem.theme.components.Switch
 import io.element.android.libraries.designsystem.theme.components.Text
 import io.element.android.libraries.designsystem.theme.components.TextButton
 import io.element.android.libraries.designsystem.utils.CommonDrawables
+import io.element.android.libraries.designsystem.utils.snackbar.LocalSnackbarDispatcher
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarHost
+import io.element.android.libraries.designsystem.utils.snackbar.collectSnackbarMessageAsState
+import io.element.android.libraries.designsystem.utils.snackbar.rememberSnackbarHostState
 import io.element.android.libraries.mediaviewer.api.local.LocalMedia
 import io.element.android.libraries.mediaviewer.api.local.LocalMediaRenderMode
 import io.element.android.libraries.mediaviewer.api.local.LocalMediaRenderer
@@ -113,6 +117,8 @@ fun AttachmentsPreviewView(
     modifier: Modifier = Modifier,
     onReturnToGallery: (() -> Unit)? = null,
 ) {
+    val snackbarMessage by LocalSnackbarDispatcher.current.collectSnackbarMessageAsState()
+    val snackbarHostState = rememberSnackbarHostState(snackbarMessage)
     var showCaption by remember { mutableStateOf(false) }
     var moreMenu by remember { mutableStateOf(false) }
     val canShowEditAction = when (state.sendActionState) {
@@ -195,6 +201,7 @@ fun AttachmentsPreviewView(
     } else {
         Scaffold(
             modifier = modifier,
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             topBar = {
                 androidx.compose.material3.CenterAlignedTopAppBar(
                     colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = Color(0xff303030), titleContentColor = Color.White),

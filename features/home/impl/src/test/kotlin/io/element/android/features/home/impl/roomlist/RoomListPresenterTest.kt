@@ -17,8 +17,8 @@ import io.element.android.features.home.impl.datasource.RoomListDataSource
 import io.element.android.features.home.impl.datasource.aRoomListRoomSummaryFactory
 import io.element.android.features.home.impl.filters.RoomListFiltersState
 import io.element.android.features.home.impl.filters.aRoomListFiltersState
-import io.element.android.features.home.impl.model.createRoomListRoomSummary
 import io.element.android.features.home.impl.model.LatestEvent
+import io.element.android.features.home.impl.model.createRoomListRoomSummary
 import io.element.android.features.home.impl.search.RoomListSearchEvent
 import io.element.android.features.home.impl.search.RoomListSearchState
 import io.element.android.features.home.impl.search.aRoomListSearchState
@@ -31,12 +31,9 @@ import io.element.android.features.invite.api.acceptdecline.anAcceptDeclineInvit
 import io.element.android.features.invite.test.InMemorySeenInvitesStore
 import io.element.android.features.leaveroom.api.LeaveRoomEvent
 import io.element.android.features.leaveroom.api.LeaveRoomState
-import io.element.android.features.messages.api.draft.ComposerDraftPreviewService
 import io.element.android.features.messages.api.MessageReferenceState
 import io.element.android.features.messages.api.MessageReferenceStore
-import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleaner
-import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleanupResult
-import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleanupTarget
+import io.element.android.features.messages.api.draft.ComposerDraftPreviewService
 import io.element.android.features.rageshake.test.logs.FakeAnnouncementService
 import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.dateformatter.api.DateFormatter
@@ -47,13 +44,13 @@ import io.element.android.libraries.featureflag.api.FeatureFlagService
 import io.element.android.libraries.featureflag.test.FakeFeatureFlagService
 import io.element.android.libraries.fullscreenintent.api.aFullScreenIntentPermissionsState
 import io.element.android.libraries.matrix.api.MatrixClient
-import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.EventId
+import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.encryption.RecoveryState
 import io.element.android.libraries.matrix.api.room.CurrentUserMembership
-import io.element.android.libraries.matrix.api.room.draft.ComposerDraft
 import io.element.android.libraries.matrix.api.room.RoomNotificationMode
+import io.element.android.libraries.matrix.api.room.draft.ComposerDraft
 import io.element.android.libraries.matrix.api.roomlist.RoomList
 import io.element.android.libraries.matrix.api.sync.SyncState
 import io.element.android.libraries.matrix.api.timeline.ReceiptType
@@ -79,10 +76,13 @@ import io.element.android.libraries.preferences.test.InMemorySessionPreferencesS
 import io.element.android.libraries.push.api.battery.aBatteryOptimizationState
 import io.element.android.libraries.push.api.notifications.NotificationCleaner
 import io.element.android.libraries.push.test.notifications.FakeNotificationCleaner
+import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleaner
+import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleanupResult
+import io.element.android.security.dataprotection.api.DeletedIdentityProjectionCleanupTarget
+import io.element.android.security.dataprotection.test.FakeDeletedIdentityProjection
+import io.element.android.security.dataprotection.test.FakeProtectedPreviewAuthorizationGate
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.analytics.test.FakeAnalyticsService
-import io.element.android.security.dataprotection.test.FakeProtectedPreviewAuthorizationGate
-import io.element.android.security.dataprotection.test.FakeDeletedIdentityProjection
 import io.element.android.services.analytics.test.watchers.FakeAnalyticsColdStartWatcher
 import io.element.android.tests.testutils.EventsRecorder
 import io.element.android.tests.testutils.WarmUpRule
@@ -97,6 +97,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
@@ -104,6 +105,90 @@ import kotlin.time.Duration.Companion.seconds
 
 @Suppress("LargeClass")
 class RoomListPresenterTest {
+    @Test
+    fun `marking notification seen tolerates a key locking after the user action`() = runTest {
+        var attempts = 0
+        val store = object : SeenInvitesStore by InMemorySeenInvitesStore() {
+            override suspend fun markNotificationSeen(roomId: RoomId) {
+                attempts++
+                throw io.element.android.security.securestorage.api.SecureStorageKeyUnavailableException()
+            }
+        }
+        createRoomListPresenter(seenInvitesStore = store).test {
+            awaitItem().eventSink(RoomListEvent.MarkInvitesAsSeen(setOf(A_ROOM_ID)))
+            runCurrent()
+            assertThat(attempts).isEqualTo(1)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `notification history key loss does not crash and retries the same room snapshot after authorization refresh`() = runTest {
+        val gate = FakeProtectedPreviewAuthorizationGate()
+        var attempts = 0
+        var completedProfiles = 0
+        val store = object : SeenInvitesStore by InMemorySeenInvitesStore() {
+            override suspend fun observeNotifications(
+                notifications: List<io.element.android.features.invite.api.InviteNotification>,
+                completeSnapshot: Boolean,
+            ) {
+                attempts++
+                if (attempts == 1) throw io.element.android.security.securestorage.api.SecureStorageKeyUnavailableException()
+            }
+
+            override suspend fun updateNotificationProfiles(profiles: Map<RoomId, Pair<String?, String?>>) {
+                completedProfiles++
+            }
+        }
+        val rooms = FakeDynamicRoomList(
+            summaries = MutableStateFlow(listOf(aRoomSummary())),
+            loadingState = MutableStateFlow(RoomList.LoadingState.Loaded(1)),
+        )
+        val presenter = createRoomListPresenter(
+            client = FakeMatrixClient(roomListService = FakeRoomListService(createRoomListLambda = { rooms })),
+            seenInvitesStore = store,
+            protectedPreviewAuthorizationGate = gate,
+        )
+        presenter.test {
+            runCurrent()
+            assertThat(attempts).isEqualTo(1)
+            assertThat(completedProfiles).isEqualTo(0)
+            gate.requestAuthorizationRefresh()
+            runCurrent()
+            assertThat(attempts).isEqualTo(2)
+            assertThat(completedProfiles).isEqualTo(1)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `locked notification history does not attempt a protected read on room changes`() = runTest {
+        var attempts = 0
+        val store = object : SeenInvitesStore by InMemorySeenInvitesStore() {
+            override suspend fun observeNotifications(
+                notifications: List<io.element.android.features.invite.api.InviteNotification>,
+                completeSnapshot: Boolean,
+            ) {
+                attempts++
+                error("Locked vault must not be opened")
+            }
+        }
+        val rooms = FakeDynamicRoomList(
+            summaries = MutableStateFlow(listOf(aRoomSummary())),
+            loadingState = MutableStateFlow(RoomList.LoadingState.Loaded(1)),
+        )
+        val presenter = createRoomListPresenter(
+            client = FakeMatrixClient(roomListService = FakeRoomListService(createRoomListLambda = { rooms })),
+            seenInvitesStore = store,
+            protectedPreviewAuthorizationGate = FakeProtectedPreviewAuthorizationGate(allowsPreview = false),
+        )
+        presenter.test {
+            runCurrent()
+            assertThat(attempts).isEqualTo(0)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     @get:Rule
     val warmUpRule = WarmUpRule()
 
@@ -713,6 +798,7 @@ class RoomListPresenterTest {
         notificationCleaner: NotificationCleaner = FakeNotificationCleaner(),
         appPreferencesStore: AppPreferencesStore = InMemoryAppPreferencesStore(),
         seenInvitesStore: SeenInvitesStore = InMemorySeenInvitesStore(),
+        protectedPreviewAuthorizationGate: FakeProtectedPreviewAuthorizationGate = FakeProtectedPreviewAuthorizationGate(),
         announcementService: AnnouncementService = FakeAnnouncementService(),
         featureFlagService: FeatureFlagService = FakeFeatureFlagService(),
         notificationSettingsService: FakeNotificationSettingsService = FakeNotificationSettingsService(),
@@ -762,6 +848,7 @@ class RoomListPresenterTest {
         notificationCleaner = notificationCleaner,
         appPreferencesStore = appPreferencesStore,
         seenInvitesStore = seenInvitesStore,
+        protectedPreviewAuthorizationGate = protectedPreviewAuthorizationGate,
         announcementService = announcementService,
         coldStartWatcher = FakeAnalyticsColdStartWatcher(),
         featureFlagService = featureFlagService,

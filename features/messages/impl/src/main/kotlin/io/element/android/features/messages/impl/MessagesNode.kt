@@ -57,6 +57,8 @@ import io.element.android.libraries.architecture.NodeInputs
 import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.architecture.inputs
 import io.element.android.libraries.designsystem.utils.OnLifecycleEvent
+import io.element.android.libraries.designsystem.utils.snackbar.LocalSnackbarDispatcher
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
 import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.di.annotations.ApplicationContext
@@ -113,11 +115,18 @@ class MessagesNode(
 
     private val inputs = inputs<Inputs>()
     private val callback: Callback = callback()
+    private val snackbarDispatcher = SnackbarDispatcher()
 
     private val presenter = presenterFactory.create(
         navigator = this,
-        composerPresenter = messageComposerPresenterFactory.create(timelineController, this, isInThread = false),
-        timelinePresenter = timelinePresenterFactory.create(timelineController = timelineController, this),
+        snackbarDispatcher = snackbarDispatcher,
+        composerPresenter = messageComposerPresenterFactory.create(
+            timelineController = timelineController,
+            navigator = this,
+            isInThread = false,
+            snackbarDispatcher = snackbarDispatcher,
+        ),
+        timelinePresenter = timelinePresenterFactory.create(timelineController = timelineController, navigator = this, snackbarDispatcher = snackbarDispatcher),
         actionListPresenter = actionListPresenterFactory.create(
             postProcessor = TimelineItemActionPostProcessor.Default,
             timelineMode = timelineController.mainTimelineMode(),
@@ -287,6 +296,7 @@ class MessagesNode(
         val canUseOverlay = !isTalkbackActive() && !hasExternalKeyboard()
         CompositionLocalProvider(
             LocalTimelineItemPresenterFactories provides timelineItemPresenterFactories,
+            LocalSnackbarDispatcher provides snackbarDispatcher,
         ) {
             val state = presenter.present()
             val visibleRoomContextTag = remember(room.sessionId, room.roomId, matrixClient.sessionId, matrixClient.deviceId) {

@@ -27,6 +27,8 @@ setupDependencyInjection()
 dependencies {
     api(projects.features.location.api)
     implementation(projects.features.messages.api)
+    // Keep standalone location builds on the catalog's native renderer fix as well.
+    implementation(libs.maplibre.asProvider())
     implementation(libs.maplibre.compose)
     implementation(libs.coil)
     implementation(projects.libraries.architecture)

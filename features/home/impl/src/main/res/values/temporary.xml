@@ -170,4 +170,5 @@
     <string name="screen_reachability_startup_pending">Faster startup is not ready yet</string>
     <string name="screen_reachability_startup_pending_detail">Access is enabled, but the background service is still recovering. You can keep chatting and check again later.</string>
     <string name="screen_reachability_startup_recheck">Check again</string>
+    <string name="screen_home_discovery">Discovery</string>
 </resources>

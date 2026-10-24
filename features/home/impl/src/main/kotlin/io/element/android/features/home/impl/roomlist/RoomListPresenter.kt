@@ -15,6 +15,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -66,6 +67,8 @@ import io.element.android.libraries.preferences.api.store.AppPreferencesStore
 import io.element.android.libraries.preferences.api.store.SessionPreferencesStore
 import io.element.android.libraries.push.api.battery.BatteryOptimizationState
 import io.element.android.libraries.push.api.notifications.NotificationCleaner
+import io.element.android.security.dataprotection.api.ProtectedPreviewAuthorizationGate
+import io.element.android.security.securestorage.api.SecureStorageException
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.analytics.api.watchers.AnalyticsColdStartWatcher
 import io.element.android.services.analyticsproviders.api.trackers.captureInteraction
@@ -77,10 +80,12 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 @Inject
 class RoomListPresenter(
@@ -105,6 +110,7 @@ class RoomListPresenter(
     private val notificationSettingsService: NotificationSettingsService,
     private val messageReferenceStore: MessageReferenceStore,
     private val staleRoomReconciler: StaleRoomReconciler,
+    private val protectedPreviewAuthorizationGate: ProtectedPreviewAuthorizationGate,
 ) : Presenter<RoomListState> {
     private val encryptionService = client.encryptionService
 
@@ -126,29 +132,39 @@ class RoomListPresenter(
         val contactsSummaries = remember(allRoomSummaries, allRoomsLoadingState) {
             contactsRoomSummaries(allRoomSummaries, allRoomsLoadingState)
         }
-        val notificationRecords by remember { seenInvitesStore.notifications() }.collectAsState(emptyList())
-        var inviteActionsInPlace by remember { mutableStateOf(false) }
-        LaunchedEffect(contactsSummaries) {
-            val rooms = (contactsSummaries as? AsyncData.Success)?.data ?: return@LaunchedEffect
-            seenInvitesStore.observeNotifications(rooms.mapNotNull { it.toNotification() }, completeSnapshot = true)
-            seenInvitesStore.updateNotificationProfiles(rooms.associate { it.roomId to (it.name to it.avatarData.url) })
-            seenInvitesStore.updateNotificationKinds(rooms.associate { room -> room.roomId to when {
-                room.isSpace -> io.element.android.features.invite.api.InviteNotification.Kind.SPACE
-                room.isDm -> io.element.android.features.invite.api.InviteNotification.Kind.FRIEND
-                else -> io.element.android.features.invite.api.InviteNotification.Kind.GROUP
-            } })
+        val previewAccess by protectedPreviewAuthorizationGate.accessState.collectAsState()
+        val authorizationRevision by protectedPreviewAuthorizationGate.authorizationRevision.collectAsState()
+        val notificationRecords by key(previewAccess, authorizationRevision) {
+            remember {
+                if (previewAccess.allowsPreviewAttempt) seenInvitesStore.notifications() else flowOf(emptyList())
+            }.collectAsState(emptyList())
         }
-        LaunchedEffect(contactsSummaries, allRoomSummaries, notificationRecords) {
+        var inviteActionsInPlace by remember { mutableStateOf(false) }
+        LaunchedEffect(contactsSummaries, previewAccess, authorizationRevision) {
             val rooms = (contactsSummaries as? AsyncData.Success)?.data ?: return@LaunchedEffect
-            notificationRecords.forEach { record ->
-                val membership = allRoomSummaries?.firstOrNull { it.roomId == record.roomId }?.info?.currentUserMembership
-                val ended = membership == io.element.android.libraries.matrix.api.room.CurrentUserMembership.LEFT ||
-                    membership == io.element.android.libraries.matrix.api.room.CurrentUserMembership.BANNED
-                val outcome = if (record.outcome == io.element.android.features.invite.api.InviteNotification.Outcome.PENDING && ended) {
-                    io.element.android.features.invite.api.InviteNotification.Outcome.UNAVAILABLE
-                } else reconciledOutcome(record, rooms.firstOrNull { it.roomId == record.roomId })
-                outcome?.let {
-                    seenInvitesStore.recordOutcome(record.roomId, it, seen = false, expectedSequence = record.sequence)
+            updateProtectedNotificationProjection(protectedPreviewAuthorizationGate) {
+                seenInvitesStore.observeNotifications(rooms.mapNotNull { it.toNotification() }, completeSnapshot = true)
+                seenInvitesStore.updateNotificationProfiles(rooms.associate { it.roomId to (it.name to it.avatarData.url) })
+                seenInvitesStore.updateNotificationKinds(rooms.associate { room -> room.roomId to when {
+                    room.isSpace -> io.element.android.features.invite.api.InviteNotification.Kind.SPACE
+                    room.isDm -> io.element.android.features.invite.api.InviteNotification.Kind.FRIEND
+                    else -> io.element.android.features.invite.api.InviteNotification.Kind.GROUP
+                } })
+            }
+        }
+        LaunchedEffect(contactsSummaries, allRoomSummaries, notificationRecords, previewAccess, authorizationRevision) {
+            val rooms = (contactsSummaries as? AsyncData.Success)?.data ?: return@LaunchedEffect
+            updateProtectedNotificationProjection(protectedPreviewAuthorizationGate) {
+                notificationRecords.forEach { record ->
+                    val membership = allRoomSummaries?.firstOrNull { it.roomId == record.roomId }?.info?.currentUserMembership
+                    val ended = membership == io.element.android.libraries.matrix.api.room.CurrentUserMembership.LEFT ||
+                        membership == io.element.android.libraries.matrix.api.room.CurrentUserMembership.BANNED
+                    val outcome = if (record.outcome == io.element.android.features.invite.api.InviteNotification.Outcome.PENDING && ended) {
+                        io.element.android.features.invite.api.InviteNotification.Outcome.UNAVAILABLE
+                    } else reconciledOutcome(record, rooms.firstOrNull { it.roomId == record.roomId })
+                    outcome?.let {
+                        seenInvitesStore.recordOutcome(record.roomId, it, seen = false, expectedSequence = record.sequence)
+                    }
                 }
             }
         }
@@ -222,7 +238,9 @@ class RoomListPresenter(
                     io.element.android.features.invite.api.acceptdecline.AcceptDeclineInviteEvents.ResetActions
                 )
                 is RoomListEvent.MarkInvitesAsSeen -> coroutineScope.launch {
-                    event.roomIds.forEach { seenInvitesStore.markNotificationSeen(it) }
+                    updateProtectedNotificationProjection(protectedPreviewAuthorizationGate) {
+                        event.roomIds.forEach { seenInvitesStore.markNotificationSeen(it) }
+                    }
                 }
                 is RoomListEvent.DeleteConversation -> coroutineScope.deleteConversation(event.roomId, event.cutoffTimestamp)
             }
@@ -449,5 +467,21 @@ class RoomListPresenter(
         client.getRoom(roomId)?.use { room ->
             room.clearEventCacheStorage()
         }
+    }
+}
+
+/** Vault revocation can race a background room update. Keep the stored projection intact and retry on authorization refresh. */
+internal suspend fun updateProtectedNotificationProjection(
+    authorizationGate: ProtectedPreviewAuthorizationGate,
+    update: suspend () -> Unit,
+): Boolean {
+    if (!authorizationGate.canAttemptPreview()) return false
+    return try {
+        update()
+        true
+    } catch (_: SecureStorageException) {
+        // Never replace an unreadable encrypted history with an empty successful snapshot.
+        Timber.w("Notification history update deferred because its protected storage is unavailable.")
+        false
     }
 }

@@ -1950,6 +1950,41 @@ class TimelinePresenterTest {
     )
 
     @Test
+    fun `retry failure stays in its conversation while the chat list is collecting feedback`() = runTest {
+        val roomDispatcher = io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher()
+        val listDispatcher = io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher()
+        val otherRoomDispatcher = io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher()
+        listDispatcher.snackbarMessage.test {
+            val listFeedback = this
+            assertThat(awaitItem()).isNull()
+            otherRoomDispatcher.snackbarMessage.test {
+                val otherRoomFeedback = this
+                assertThat(awaitItem()).isNull()
+                roomDispatcher.snackbarMessage.test {
+                    val roomFeedback = this
+                    assertThat(awaitItem()).isNull()
+                    createTimelinePresenter(snackbarDispatcher = roomDispatcher).test {
+                        val initial = awaitFirstItem()
+                        val event = aMessageEvent(
+                            sendState = io.element.android.libraries.matrix.api.timeline.item.event.LocalEventSendState.Failed.Unknown("previous failure"),
+                            sendHandleProvider = io.element.android.libraries.matrix.api.timeline.item.event.SendHandleProvider {
+                                io.element.android.libraries.matrix.api.core.SendHandle { Result.failure(IllegalStateException("retry failed")) }
+                            },
+                        )
+                        initial.eventSink(TimelineEvent.RetrySend(event))
+                        assertThat(roomFeedback.awaitItem()?.messageResId)
+                            .isEqualTo(io.element.android.features.messages.impl.R.string.error_message_retry_failed)
+                        runCurrent()
+                        listFeedback.expectNoEvents()
+                        otherRoomFeedback.expectNoEvents()
+                        cancelAndIgnoreRemainingEvents()
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun `previous SDK failure retries through the failure indicator entry point`() = runTest {
         val called = CompletableDeferred<Unit>()
         val presenter = createTimelinePresenter()
@@ -1988,6 +2023,8 @@ class TimelinePresenterTest {
         redactionReasonResolver: RedactionReasonResolver = RedactionReasonResolver.Noop,
         hiddenMessageRecoveryInventory: HiddenMessageRecoveryInventory = HiddenMessageRecoveryInventory.Noop,
         controller: TimelineController = TimelineController(room, timeline),
+        snackbarDispatcher: io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher =
+            io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher(),
     ): TimelinePresenter {
         return TimelinePresenter(
             timelineItemsFactoryCreator = aTimelineItemsFactoryCreator(),
@@ -2014,7 +2051,7 @@ class TimelinePresenterTest {
             messageReferenceStore = messageReferenceStore,
             redactionReasonResolver = redactionReasonResolver,
             hiddenMessageRecoveryInventory = hiddenMessageRecoveryInventory,
-            snackbarDispatcher = io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher(),
+            snackbarDispatcher = snackbarDispatcher,
         )
     }
 }

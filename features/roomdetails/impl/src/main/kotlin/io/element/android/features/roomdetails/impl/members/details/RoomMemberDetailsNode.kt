@@ -9,6 +9,7 @@
 package io.element.android.features.roomdetails.impl.members.details
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.bumble.appyx.core.lifecycle.subscribe
@@ -23,6 +24,8 @@ import io.element.android.features.userprofile.shared.UserProfileNodeHelper
 import io.element.android.features.userprofile.shared.UserProfileView
 import io.element.android.libraries.architecture.NodeInputs
 import io.element.android.libraries.architecture.inputs
+import io.element.android.libraries.designsystem.utils.snackbar.LocalSnackbarDispatcher
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.UserId
@@ -45,6 +48,7 @@ class RoomMemberDetailsNode(
 
     private val inputs = inputs<RoomMemberDetailsInput>()
     private val callback = inputs<UserProfileNodeHelper.Callback>()
+    private val snackbarDispatcher = SnackbarDispatcher()
     private val presenter = presenterFactory.create(inputs.roomMemberId)
     private val userProfileNodeHelper = UserProfileNodeHelper(inputs.roomMemberId)
 
@@ -57,7 +61,7 @@ class RoomMemberDetailsNode(
     }
 
     @Composable
-    override fun View(modifier: Modifier) {
+    override fun View(modifier: Modifier) = CompositionLocalProvider(LocalSnackbarDispatcher provides snackbarDispatcher) {
         val context = LocalContext.current
         val state = presenter.present()
 

@@ -37,6 +37,7 @@ import io.element.android.features.messages.impl.MessagesNavigator
 import io.element.android.features.messages.impl.attachments.Attachment
 import io.element.android.features.messages.impl.attachments.Attachment.Media
 import io.element.android.features.messages.impl.attachments.preview.error.sendAttachmentError
+import io.element.android.features.messages.impl.commoninfo.CommonInfoRepository
 import io.element.android.features.messages.impl.draft.ComposerDraftService
 import io.element.android.features.messages.impl.draft.MediaSelectionDraftStore
 import io.element.android.features.messages.impl.messagecomposer.suggestions.RoomAliasSuggestionsDataSource
@@ -63,6 +64,7 @@ import io.element.android.libraries.matrix.api.room.draft.ComposerDraftType
 import io.element.android.libraries.matrix.api.room.getDirectRoomMember
 import io.element.android.libraries.matrix.api.room.powerlevels.use
 import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
+import io.element.android.libraries.matrix.api.timeline.item.event.LocalEventSendState
 import io.element.android.libraries.matrix.api.timeline.item.event.MessageContent
 import io.element.android.libraries.matrix.api.timeline.item.event.toEventOrTransactionId
 import io.element.android.libraries.matrix.ui.messages.reply.InReplyToDetails
@@ -97,55 +99,53 @@ import io.element.android.libraries.textcomposer.model.TextEditorState
 import io.element.android.libraries.textcomposer.model.rememberMarkdownTextEditorState
 import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
 import io.element.android.security.dataprotection.api.FullAppLifecycleId
-import io.element.android.security.dataprotection.api.LifecycleStageTiming
 import io.element.android.security.dataprotection.api.LifecycleClientReceipt
 import io.element.android.security.dataprotection.api.LifecycleComponent
 import io.element.android.security.dataprotection.api.LifecyclePhase
+import io.element.android.security.dataprotection.api.LifecycleStageTiming
 import io.element.android.security.dataprotection.api.NON_TERMINAL_RESUMABLE_STATUSES
+import io.element.android.security.dataprotection.api.RelayEditException
 import io.element.android.security.dataprotection.api.lifecycleOperationRequest
 import io.element.android.security.dataprotection.api.perform
-import io.element.android.security.dataprotection.api.reconcileOriginalRelayEdit
-import io.element.android.security.dataprotection.api.RelayEditException
 import io.element.android.security.dataprotection.api.performIdempotentRelayEdit
 import io.element.android.security.dataprotection.api.performMessageWithDeferredReceipts
+import io.element.android.security.dataprotection.api.reconcileOriginalRelayEdit
 import io.element.android.security.securestorage.api.accountIdHash
 import io.element.android.services.analytics.api.AnalyticsService
 import io.element.android.services.analyticsproviders.api.trackers.captureInteraction
 import io.element.android.wysiwyg.compose.RichTextEditorState
 import io.element.android.wysiwyg.display.TextDisplay
-import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Duration.Companion.seconds
-import io.element.android.features.messages.impl.commoninfo.CommonInfoRepository
-import io.element.android.libraries.matrix.api.timeline.item.event.LocalEventSendState
 
 private const val TIMELINE_PERFORMANCE_TAG = "YiZheTimelinePerf"
 private const val NANOS_PER_MILLISECOND = 1_000_000L
@@ -179,7 +179,7 @@ class MessageComposerPresenter(
     private val sessionPreferencesStore: SessionPreferencesStore,
     private val localMediaFactory: LocalMediaFactory,
     mediaSenderFactory: MediaSenderFactory,
-    private val snackbarDispatcher: SnackbarDispatcher,
+    @Assisted private val snackbarDispatcher: SnackbarDispatcher,
     private val analyticsService: AnalyticsService,
     private val locationService: LocationService,
     private val messageComposerContext: DefaultMessageComposerContext,
@@ -203,6 +203,7 @@ class MessageComposerPresenter(
     @AssistedFactory
     interface Factory {
         fun create(
+            snackbarDispatcher: SnackbarDispatcher,
             timelineController: TimelineController,
             navigator: MessagesNavigator,
             isInThread: Boolean,

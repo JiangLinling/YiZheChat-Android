@@ -127,9 +127,12 @@ internal fun TimelineItemCallNotifyView(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        getCallDetail(timelineRoomInfo, content)?.let { detail ->
+                        val detail = getCallDetail(timelineRoomInfo, content)
+                        // Reserve the real text line at the user's font scale while DM details hydrate.
+                        // An absent detail stays empty: geometry must not invent a call lifecycle fact.
+                        if (detail != null || timelineRoomInfo.isDm) {
                             Text(
-                                text = detail,
+                                text = detail.orEmpty(),
                                 style = ElementTheme.typography.fontBodyXsRegular,
                                 color = ElementTheme.colors.textSecondary,
                                 maxLines = 1,

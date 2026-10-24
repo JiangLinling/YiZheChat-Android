@@ -9,11 +9,11 @@
 package io.element.android.features.roomdetails.impl
 
 import android.content.Context
-import androidx.compose.runtime.setValue
-import io.element.android.security.dataprotection.api.perform
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.lifecycleScope
@@ -29,10 +29,13 @@ import io.element.android.features.leaveroom.api.LeaveRoomRenderer
 import io.element.android.libraries.androidutils.system.startSharePlainTextIntent
 import io.element.android.libraries.architecture.appyx.launchMolecule
 import io.element.android.libraries.architecture.callback
+import io.element.android.libraries.designsystem.utils.snackbar.LocalSnackbarDispatcher
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.notification.CallIntent
 import io.element.android.libraries.matrix.api.room.BaseRoom
+import io.element.android.security.dataprotection.api.perform
 import io.element.android.services.analytics.api.AnalyticsService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -72,6 +75,7 @@ class RoomDetailsNode(
         fun navigateToSelectNewOwnersWhenLeaving()
     }
 
+    private val snackbarDispatcher = SnackbarDispatcher()
     private val presenter = presenterFactory.create(this)
     private val callback: Callback = callback()
 
@@ -92,14 +96,16 @@ class RoomDetailsNode(
         })
     }
 
-    private val stateFlow = launchMolecule { presenter.present() }
+    private val stateFlow = launchMolecule {
+        CompositionLocalProvider(LocalSnackbarDispatcher provides snackbarDispatcher) { presenter.present() }
+    }
 
     fun onNewOwnersSelected() {
         stateFlow.value.eventSink(RoomDetailsEvent.LeaveRoom(needsConfirmation = false))
     }
 
     @Composable
-    override fun View(modifier: Modifier) {
+    override fun View(modifier: Modifier) = CompositionLocalProvider(LocalSnackbarDispatcher provides snackbarDispatcher) {
         val context = LocalContext.current
         val state by stateFlow.collectAsState()
         var qrCapability by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<io.element.android.security.dataprotection.api.GroupShareCapability?>(null) }

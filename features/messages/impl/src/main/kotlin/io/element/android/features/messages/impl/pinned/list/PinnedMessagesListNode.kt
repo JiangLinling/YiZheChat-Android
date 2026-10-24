@@ -29,6 +29,8 @@ import io.element.android.features.messages.impl.timeline.model.TimelineItem
 import io.element.android.libraries.androidutils.system.copyToClipboard
 import io.element.android.libraries.androidutils.system.openUrlInExternalApp
 import io.element.android.libraries.architecture.callback
+import io.element.android.libraries.designsystem.utils.snackbar.LocalSnackbarDispatcher
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.ThreadId
@@ -62,8 +64,10 @@ class PinnedMessagesListNode(
     }
 
     private val callback: Callback = callback()
+    private val snackbarDispatcher = SnackbarDispatcher()
     private val presenter = presenterFactory.create(
         navigator = this,
+        snackbarDispatcher = snackbarDispatcher,
         actionListPresenter = actionListPresenterFactory.create(
             postProcessor = PinnedMessagesListTimelineActionPostProcessor(),
             timelineMode = Timeline.Mode.PinnedEvents,
@@ -108,6 +112,7 @@ class PinnedMessagesListNode(
         val canUseOverlay = !isTalkbackActive() && !hasExternalKeyboard()
         CompositionLocalProvider(
             LocalTimelineItemPresenterFactories provides timelineItemPresenterFactories,
+            LocalSnackbarDispatcher provides snackbarDispatcher,
         ) {
             val context = LocalContext.current
             val toastMessage = stringResource(CommonStrings.common_copied_to_clipboard)

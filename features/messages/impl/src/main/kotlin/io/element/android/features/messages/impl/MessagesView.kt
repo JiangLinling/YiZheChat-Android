@@ -106,8 +106,8 @@ import io.element.android.features.messages.impl.timeline.aGroupedEvents
 import io.element.android.features.messages.impl.timeline.aTimelineItemDaySeparator
 import io.element.android.features.messages.impl.timeline.aTimelineItemEvent
 import io.element.android.features.messages.impl.timeline.aTimelineState
-import io.element.android.features.messages.impl.timeline.components.GroupCallBanner
 import io.element.android.features.messages.impl.timeline.components.CallMenuItem
+import io.element.android.features.messages.impl.timeline.components.GroupCallBanner
 import io.element.android.features.messages.impl.timeline.components.customreaction.CustomReactionBottomSheet
 import io.element.android.features.messages.impl.timeline.components.customreaction.CustomReactionEvent
 import io.element.android.features.messages.impl.timeline.components.event.TimelineItemTextView
@@ -131,9 +131,8 @@ import io.element.android.features.messages.impl.timeline.model.event.canBeForwa
 import io.element.android.features.messages.impl.topbars.MessagesViewTopBar
 import io.element.android.features.messages.impl.topbars.ThreadTopBar
 import io.element.android.features.messages.impl.voicemessages.composer.VoiceMessagePermissionRationaleDialog
-import io.element.android.features.messages.impl.voicemessages.composer.VoiceRecordingPermissionLostDialog
 import io.element.android.features.messages.impl.voicemessages.composer.VoiceMessageSendingFailedDialog
-import io.element.android.libraries.matrix.api.room.DirectRoomRelationState
+import io.element.android.features.messages.impl.voicemessages.composer.VoiceRecordingPermissionLostDialog
 import io.element.android.features.roomcall.api.RoomCallState
 import io.element.android.libraries.androidutils.ui.hideKeyboard
 import io.element.android.libraries.designsystem.atomic.molecules.ComposerAlertMolecule
@@ -158,10 +157,11 @@ import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.designsystem.utils.snackbar.rememberSnackbarHostState
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomId
-import io.element.android.libraries.matrix.api.encryption.HistoryRecoveryStatus
 import io.element.android.libraries.matrix.api.core.UserId
+import io.element.android.libraries.matrix.api.encryption.HistoryRecoveryStatus
 import io.element.android.libraries.matrix.api.encryption.identity.IdentityState
 import io.element.android.libraries.matrix.api.notification.CallIntent
+import io.element.android.libraries.matrix.api.room.DirectRoomRelationState
 import io.element.android.libraries.matrix.api.room.tombstone.SuccessorRoom
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.api.timeline.item.event.LocalEventSendState
@@ -292,9 +292,10 @@ fun MessagesView(
         exitMultiSelect()
     }
 
-    val snackbarHostState = rememberSnackbarHostState(snackbarMessage = state.snackbarMessage)
     val roomActionSnackbarHostState = remember { SnackbarHostState() }
     val activeRoomActionSnackbarMessage = roomActionSnackbarMessage ?: state.favouriteSnackbarMessage
+    // A hidden host must not consume feedback while another room action is on screen.
+    val snackbarHostState = rememberSnackbarHostState(state.snackbarMessage.takeIf { activeRoomActionSnackbarMessage == null })
     val roomActionSnackbarText = activeRoomActionSnackbarMessage?.let { stringResource(it.messageResId) }
     LaunchedEffect(activeRoomActionSnackbarMessage?.id) {
         if (activeRoomActionSnackbarMessage != null && roomActionSnackbarText != null) {

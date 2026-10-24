@@ -9,6 +9,7 @@
 package io.element.android.features.messages.impl.attachments.preview
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -32,6 +33,7 @@ import io.element.android.libraries.architecture.NodeInputs
 import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.architecture.inputs
 import io.element.android.libraries.core.extensions.runCatchingExceptions
+import io.element.android.libraries.designsystem.utils.snackbar.LocalSnackbarDispatcher
 import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
 import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.di.RoomScope
@@ -66,7 +68,6 @@ class AttachmentsPreviewNode(
     private val pickerProvider: PickerProvider,
     private val localMediaFactory: LocalMediaFactory,
     private val coordinator: AppOperationalStateCoordinator,
-    private val snackbarDispatcher: SnackbarDispatcher,
 ) : Node(buildContext, plugins = plugins) {
     data class Inputs(
         val attachments: List<Attachment>,
@@ -79,6 +80,7 @@ class AttachmentsPreviewNode(
         fun onDone()
     }
 
+    private val snackbarDispatcher = SnackbarDispatcher()
     private val inputs: Inputs = inputs()
     private val callback: Callback = callback()
 
@@ -97,7 +99,7 @@ class AttachmentsPreviewNode(
     )
 
     @Composable
-    override fun View(modifier: Modifier) {
+    override fun View(modifier: Modifier) = CompositionLocalProvider(LocalSnackbarDispatcher provides snackbarDispatcher) {
         val colors by remember {
             enterpriseService.semanticColorsFlow(sessionId = sessionId)
         }.collectAsState(SemanticColorsLightDark.default)

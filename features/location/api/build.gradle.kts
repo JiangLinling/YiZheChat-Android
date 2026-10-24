@@ -72,6 +72,8 @@ dependencies {
     implementation(projects.libraries.uiStrings)
     implementation(libs.coil.compose)
     implementation(libs.datetime)
+    // Compose 0.13.0 otherwise resolves native 13.0.2, which can run an ImageManager callback after destruction.
+    implementation(libs.maplibre.asProvider())
     implementation(libs.maplibre.compose)
 
     testCommonDependencies(libs)

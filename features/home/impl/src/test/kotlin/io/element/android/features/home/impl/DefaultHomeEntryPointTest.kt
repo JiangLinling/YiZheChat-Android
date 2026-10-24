@@ -46,6 +46,8 @@ class DefaultHomeEntryPointTest {
                 leaveRoomRenderer = { _, _, _ -> lambdaError() },
                 preferencesRootRenderer = { _, _ -> lambdaError() },
                 onboardingInvitePresenter = mockk<OnboardingInvitePresenter>(relaxed = true),
+                discoveryAccess = io.element.android.features.discovery.test.FakeDiscoveryAccess(),
+                discoveryEntryPoint = { _, _ -> lambdaError() },
                 sessionCoroutineScope = backgroundScope,
             )
         }

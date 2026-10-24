@@ -69,7 +69,7 @@ class PinnedMessagesListPresenter(
     private val timelineProvider: DefaultPinnedEventsTimelineProvider,
     private val timelineProtectionPresenter: Presenter<TimelineProtectionState>,
     private val linkPresenter: Presenter<LinkState>,
-    private val snackbarDispatcher: SnackbarDispatcher,
+    @Assisted private val snackbarDispatcher: SnackbarDispatcher,
     @Assisted private val actionListPresenter: Presenter<ActionListState>,
     @SessionCoroutineScope
     private val sessionCoroutineScope: CoroutineScope,
@@ -80,6 +80,7 @@ class PinnedMessagesListPresenter(
     @AssistedFactory
     interface Factory {
         fun create(
+            snackbarDispatcher: SnackbarDispatcher,
             navigator: PinnedMessagesListNavigator,
             actionListPresenter: Presenter<ActionListState>,
         ): PinnedMessagesListPresenter

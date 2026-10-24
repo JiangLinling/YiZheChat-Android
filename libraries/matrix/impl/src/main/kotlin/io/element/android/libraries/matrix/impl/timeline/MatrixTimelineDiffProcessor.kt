@@ -97,7 +97,10 @@ internal class MatrixTimelineDiffProcessor(
     )
     private val visibleDecryptSignals = Channel<Unit>(capacity = VISIBLE_ONLY_DECRYPT_WORKER_COUNT)
     private val historyDecryptSignals = Channel<Unit>(capacity = HISTORY_DECRYPT_WORKER_COUNT)
-    private val decryptedItems = Channel<DecryptedItem>(capacity = DECRYPT_QUEUE_CAPACITY)
+    private val decryptedItems = Channel<DecryptedItem>(
+        capacity = DECRYPT_QUEUE_CAPACITY,
+        onUndeliveredElement = { update -> update.pendingWork?.let(pendingDecrypts::completePublication) },
+    )
     private val pendingDecryptingShells = mutableMapOf<String, Long>()
     private val revealedDecryptingShells = mutableSetOf<String>()
     // Encrypted source metadata only. Plaintext stays in the existing authorization-scoped cache.
@@ -142,6 +145,7 @@ internal class MatrixTimelineDiffProcessor(
                 }
             }
             coroutineScope.coroutineContext[Job]?.invokeOnCompletion {
+                decryptedItems.cancel()
                 preparedAttachmentBindings.clear()
                 refreshRegistration.close()
                 contentInvalidationRegistration.close()
@@ -170,7 +174,11 @@ internal class MatrixTimelineDiffProcessor(
                 }
             }
             coroutineScope.launch(decryptDispatcher) {
-                collectDecryptedItemBatches(decryptedItems, ::applyDecryptedItems)
+                collectDecryptedItemBatches(
+                    input = decryptedItems,
+                    releaseBatch = { batch -> batch.forEach { it.pendingWork?.let(pendingDecrypts::completePublication) } },
+                    applyBatch = ::applyDecryptedItems,
+                )
             }
         }
     }
@@ -316,6 +324,7 @@ internal class MatrixTimelineDiffProcessor(
             work.key, work.priority, work.recentHistory, work.recentProjection, work.timelineScopeId,
         )
         var retryAfterRevisionChange = false
+        var resultAwaitingPublication = false
         val revisionAtStart = adapter.authorizationRevision()
         try {
             val eventId = (work.item as? MatrixTimelineItem.Event)?.let { item ->
@@ -344,8 +353,10 @@ internal class MatrixTimelineDiffProcessor(
             }
             if (revisionAtStart == adapter.authorizationRevision()) {
                 LifecycleStageTiming.point("timeline_read_complete", eventId, "${work.timelineScopeId}#${work.priority}")
+                pendingDecrypts.awaitPublication(work)
                 decryptedItems.send(
                     DecryptedItem(
+                        pendingWork = work,
                         rawItem = work.item,
                         decryptedItem = decryptedItem,
                         authorizationRevision = revisionAtStart,
@@ -356,6 +367,7 @@ internal class MatrixTimelineDiffProcessor(
                         recentProjection = work.recentProjection,
                     )
                 )
+                resultAwaitingPublication = true
             } else {
                 retryAfterRevisionChange = true
             }
@@ -372,8 +384,10 @@ internal class MatrixTimelineDiffProcessor(
                 val failClosedItem = mutex.withLock {
                     safeShellItemsByKey[work.key] ?: work.item
                 }
+                pendingDecrypts.awaitPublication(work)
                 decryptedItems.send(
                     DecryptedItem(
+                        pendingWork = work,
                         rawItem = work.item,
                         decryptedItem = failClosedItem,
                         authorizationRevision = revisionAtStart,
@@ -384,6 +398,7 @@ internal class MatrixTimelineDiffProcessor(
                         recentProjection = work.recentProjection,
                     )
                 )
+                resultAwaitingPublication = true
             } else {
                 retryAfterRevisionChange = true
             }
@@ -395,6 +410,7 @@ internal class MatrixTimelineDiffProcessor(
             // Complete and conditionally retry atomically. A newer Set/Reset may already have
             // queued a different immutable raw item for this key; an older worker must never
             // overwrite that replacement while unwinding.
+            if (!resultAwaitingPublication) pendingDecrypts.completePublication(work)
             pendingDecrypts.complete(work, retry = retryAfterRevisionChange)
             signalPendingDecrypts()
         }
@@ -1928,6 +1944,7 @@ internal data class DecryptedItem(
     val recentHistory: Boolean = false,
     // UI publication hint only; does not select a worker or change the release class.
     val recentProjection: Boolean = false,
+    val pendingWork: PendingDecryptWork? = null,
 )
 
 private data class RawDecryptSnapshot(
@@ -1968,37 +1985,42 @@ private fun MatrixTimelineItem.hasAuthorizedOrdinaryMessage(): Boolean =
  */
 internal suspend fun collectDecryptedItemBatches(
     input: ReceiveChannel<DecryptedItem>,
+    releaseBatch: (List<DecryptedItem>) -> Unit = {},
     applyBatch: suspend (List<DecryptedItem>) -> Unit,
 ) {
     while (true) {
         val first = input.receiveCatching().getOrNull() ?: return
         val batch = ArrayList<DecryptedItem>(MatrixTimelineDiffProcessor.EXPECTED_DECRYPT_BATCH_SIZE)
         batch += first
-        val historyOnlyWindow = first.priority == DecryptPriority.HISTORY
-        val windowMillis = if (historyOnlyWindow) {
-            MatrixTimelineDiffProcessor.HISTORY_DECRYPT_BATCH_WINDOW_MILLIS
-        } else {
-            MatrixTimelineDiffProcessor.VISIBLE_DECRYPT_BATCH_WINDOW_MILLIS
-        }
-        if (first.recentHistory || first.recentProjection) {
-            // Already-authorized recent work keeps its original release class. Only the UI
-            // coalescing delay is removed, with ready projections drained within the same bound.
-            while (batch.size < MatrixTimelineDiffProcessor.DECRYPT_QUEUE_CAPACITY) {
-                batch += input.tryReceive().getOrNull() ?: break
+        try {
+            val historyOnlyWindow = first.priority == DecryptPriority.HISTORY
+            val windowMillis = if (historyOnlyWindow) {
+                MatrixTimelineDiffProcessor.HISTORY_DECRYPT_BATCH_WINDOW_MILLIS
+            } else {
+                MatrixTimelineDiffProcessor.VISIBLE_DECRYPT_BATCH_WINDOW_MILLIS
             }
-        } else {
-            withTimeoutOrNull(windowMillis) {
+            if (first.recentHistory || first.recentProjection) {
+                // Already-authorized recent work keeps its original release class. Only the UI
+                // coalescing delay is removed, with ready projections drained within the same bound.
                 while (batch.size < MatrixTimelineDiffProcessor.DECRYPT_QUEUE_CAPACITY) {
-                    val next = input.receiveCatching().getOrNull() ?: return@withTimeoutOrNull
-                    batch += next
-                    if (next.recentHistory || next.recentProjection || historyOnlyWindow && next.priority == DecryptPriority.VISIBLE) {
-                        // A new message/own confirmation must not wait for either window.
-                        return@withTimeoutOrNull
+                    batch += input.tryReceive().getOrNull() ?: break
+                }
+            } else {
+                withTimeoutOrNull(windowMillis) {
+                    while (batch.size < MatrixTimelineDiffProcessor.DECRYPT_QUEUE_CAPACITY) {
+                        val next = input.receiveCatching().getOrNull() ?: return@withTimeoutOrNull
+                        batch += next
+                        if (next.recentHistory || next.recentProjection || historyOnlyWindow && next.priority == DecryptPriority.VISIBLE) {
+                            // A new message/own confirmation must not wait for either window.
+                            return@withTimeoutOrNull
+                        }
                     }
                 }
             }
+            applyBatch(batch)
+        } finally {
+            releaseBatch(batch)
         }
-        applyBatch(batch)
     }
 }
 
@@ -2036,6 +2058,9 @@ internal class PendingDecryptQueue(
     private val history = LinkedHashMap<String, PendingDecryptEntry>()
     private val recentHistory = LinkedHashMap<String, PendingDecryptEntry>()
     private val inFlight = LinkedHashMap<String, PendingDecryptWork>()
+    // Raw source identities only, bounded by the existing result channel and publication batch.
+    // These are not worker reservations: a changed source or forced authorization retry can start.
+    private val awaitingPublication = mutableMapOf<String, PendingDecryptWork>()
     private val latestRawStateGenerationByKey = mutableMapOf<String, Long>()
     private val latestTimelineScopeIdByKey = mutableMapOf<String, String>()
     private var visiblePollsSinceHistory = 0
@@ -2138,6 +2163,7 @@ internal class PendingDecryptQueue(
         keys.forEach { key ->
             val latestGeneration = latestRawStateGenerationByKey[key]
             if (latestGeneration != null && rawStateGeneration < latestGeneration) return@forEach
+            awaitingPublication.remove(key)
             latestRawStateGenerationByKey[key] = rawStateGeneration
             visible.remove(key)
             history.remove(key)
@@ -2151,6 +2177,7 @@ internal class PendingDecryptQueue(
     }
 
     fun cancelScope(timelineScopeId: String) = synchronized(this) {
+        awaitingPublication.entries.removeAll { it.value.timelineScopeId == timelineScopeId }
         visible.entries.removeAll { it.value.timelineScopeId == timelineScopeId }
         history.entries.removeAll { it.value.timelineScopeId == timelineScopeId }
         recentHistory.entries.removeAll { it.value.timelineScopeId == timelineScopeId }
@@ -2174,6 +2201,14 @@ internal class PendingDecryptQueue(
         } ?: return@synchronized null
         inFlight[work.key] = work
         work
+    }
+
+    fun awaitPublication(work: PendingDecryptWork) = synchronized(this) {
+        awaitingPublication[work.key] = work
+    }
+
+    fun completePublication(work: PendingDecryptWork) = synchronized(this) {
+        if (awaitingPublication[work.key] === work) awaitingPublication.remove(work.key)
     }
 
     fun complete(work: PendingDecryptWork, retry: Boolean = false) = synchronized(this) {
@@ -2317,6 +2352,11 @@ internal class PendingDecryptQueue(
             recentHistory.remove(key)
         }
         latestTimelineScopeIdByKey[key] = timelineScopeId
+
+        val bufferedWork = awaitingPublication[key]
+        if (!force && bufferedWork?.item == item &&
+            bufferedWork.rawStateGeneration == rawStateGeneration && bufferedWork.timelineScopeId == timelineScopeId
+        ) return
 
         val inFlightWork = inFlight[key]
         if (!force &&

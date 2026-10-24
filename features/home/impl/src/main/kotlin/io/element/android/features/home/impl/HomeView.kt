@@ -116,6 +116,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun HomeView(
     homeState: HomeState,
+    discoveryAvailable: Boolean = false,
+    onDiscoveryClick: () -> Unit = {},
     onRoomClick: (RoomId) -> Unit,
     onSetUpRecoveryClick: () -> Unit,
     onConfirmRecoveryKeyClick: () -> Unit,
@@ -162,6 +164,8 @@ fun HomeView(
 
         HomeScaffold(
             state = homeState,
+            discoveryAvailable = discoveryAvailable,
+            onDiscoveryClick = { if (firstThrottler.canHandle()) onDiscoveryClick() },
             onSetUpRecoveryClick = onSetUpRecoveryClick,
             onConfirmRecoveryKeyClick = onConfirmRecoveryKeyClick,
             onRoomClick = { if (firstThrottler.canHandle()) onRoomClick(it) },
@@ -195,6 +199,8 @@ fun HomeView(
 @Composable
 private fun HomeScaffold(
     state: HomeState,
+    discoveryAvailable: Boolean,
+    onDiscoveryClick: () -> Unit,
     onSetUpRecoveryClick: () -> Unit,
     onConfirmRecoveryKeyClick: () -> Unit,
     onRoomClick: (RoomId) -> Unit,
@@ -317,6 +323,8 @@ private fun HomeScaffold(
         bottomBar = {
             val coroutineScope = rememberCoroutineScope()
             HomeBottomBar(
+                discoveryAvailable = discoveryAvailable,
+                onDiscoveryClick = onDiscoveryClick,
                 currentHomeNavigationBarItem = state.currentHomeNavigationBarItem,
                 unreadCount = unreadCount,
                 contactsUnreadCount = notificationState.notifications.count { !it.seen },
@@ -412,6 +420,8 @@ private fun HomeScaffold(
 
 @Composable
 private fun HomeBottomBar(
+    discoveryAvailable: Boolean,
+    onDiscoveryClick: () -> Unit,
     currentHomeNavigationBarItem: HomeNavigationBarItem,
     unreadCount: Long,
     contactsUnreadCount: Int,
@@ -427,6 +437,15 @@ private fun HomeBottomBar(
     )
     NavigationBar(modifier = modifier) {
         HomeNavigationBarItem.entries.forEach { item ->
+            if (item == HomeNavigationBarItem.Me && discoveryAvailable) {
+                NavigationBarItem(
+                    icon = { Icon(imageVector = CompoundIcons.Explore(), contentDescription = null) },
+                    label = { Text(stringResource(R.string.screen_home_discovery)) },
+                    selected = false,
+                    onClick = onDiscoveryClick,
+                    colors = itemColors,
+                )
+            }
             val isSelected = currentHomeNavigationBarItem == item
             NavigationBarItem(
                 icon = {

@@ -1302,6 +1302,125 @@ class MatrixTimelineDiffProcessorTest {
     }
 
     @Test
+    fun `cancelling the collector during its batching delay releases the unpublished source`() = runTest {
+        val queue = PendingDecryptQueue(8, 3)
+        queue.offer(listOf(anEvent), emptyList(), rawStateGeneration = 1L, timelineScopeId = "scope")
+        val work = requireNotNull(queue.pollVisible())
+        queue.awaitPublication(work)
+        queue.complete(work)
+        val input = Channel<DecryptedItem>(4)
+        input.send(DecryptedItem(anEvent, anEvent.withText("authorized"), 0L, DecryptPriority.VISIBLE,
+            rawStateGeneration = 1L, timelineScopeId = "scope", pendingWork = work))
+        var released = 0
+        val collector = backgroundScope.launch {
+            collectDecryptedItemBatches(input, releaseBatch = { batch ->
+                batch.forEach { item -> item.pendingWork?.let(queue::completePublication) }
+                released += batch.size
+            }) { error("Cancelled batch must not publish") }
+        }
+        runCurrent()
+        assertThat(released).isEqualTo(0)
+        collector.cancel()
+        runCurrent()
+        assertThat(released).isEqualTo(1)
+        queue.offer(listOf(anEvent), emptyList(), rawStateGeneration = 1L, timelineScopeId = "scope")
+        assertThat(queue.pollVisible()).isNotNull()
+        input.cancel()
+    }
+
+    @Test
+    fun `retiring scope and invalidating content retire only the matching buffered source`() {
+        val queue = PendingDecryptQueue(8, 3)
+        queue.offer(listOf(anEvent), emptyList(), rawStateGeneration = 1L, timelineScopeId = "old")
+        val old = requireNotNull(queue.pollVisible())
+        queue.awaitPublication(old)
+        queue.complete(old)
+        queue.offer(listOf(anEvent), emptyList(), rawStateGeneration = 2L, timelineScopeId = "new")
+        val current = requireNotNull(queue.pollVisible())
+        queue.awaitPublication(current)
+        queue.complete(current)
+        queue.cancelScope("old")
+        queue.invalidate(setOf(current.key), 1L)
+        queue.offer(listOf(anEvent), emptyList(), rawStateGeneration = 2L, timelineScopeId = "new")
+        assertThat(queue.pollVisible()).isNull()
+        queue.invalidate(setOf(current.key), 3L)
+        queue.offer(listOf(anEvent), emptyList(), rawStateGeneration = 3L, timelineScopeId = "new")
+        assertThat(queue.pollVisible()).isNotNull()
+    }
+
+    @Test
+    fun `buffered publication deduplication does not reserve a lane for an obsolete source`() {
+        val queue = PendingDecryptQueue(8, 3)
+        queue.offer(listOf(anEvent), emptyList(), rawStateGeneration = 1L, timelineScopeId = "scope")
+        val old = requireNotNull(queue.pollVisible())
+        queue.awaitPublication(old)
+        queue.complete(old)
+        val replacement = anEvent.withText("new encrypted source")
+        queue.offer(listOf(replacement), emptyList(), rawStateGeneration = 2L, timelineScopeId = "scope")
+        val current = requireNotNull(queue.pollVisible())
+        assertThat(current.item).isEqualTo(replacement)
+        queue.awaitPublication(current)
+        queue.complete(current)
+        queue.completePublication(old)
+        queue.offer(listOf(replacement), emptyList(), rawStateGeneration = 2L, timelineScopeId = "scope")
+        assertThat(queue.pollVisible()).isNull()
+        queue.completePublication(current)
+        queue.offer(listOf(replacement), emptyList(), rawStateGeneration = 2L, timelineScopeId = "scope")
+        assertThat(queue.pollVisible()?.item).isEqualTo(replacement)
+    }
+
+    @Test
+    fun `buffered result cannot suppress forced authorization retry or a new owner`() {
+        val queue = PendingDecryptQueue(8, 3)
+        queue.offer(listOf(anEvent), emptyList(), rawStateGeneration = 1L, timelineScopeId = "old-owner")
+        val old = requireNotNull(queue.pollVisible())
+        queue.awaitPublication(old)
+        queue.complete(old)
+        queue.offer(listOf(anEvent), emptyList(), force = true, rawStateGeneration = 1L, timelineScopeId = "old-owner")
+        val retry = requireNotNull(queue.pollVisible())
+        queue.complete(retry)
+        queue.cancelScope("old-owner")
+        queue.offer(listOf(anEvent), emptyList(), rawStateGeneration = 1L, timelineScopeId = "new-owner")
+        assertThat(queue.pollVisible()?.timelineScopeId).isEqualTo("new-owner")
+    }
+
+    @Test
+    fun `viewport update does not decrypt the same source again while its result awaits publication`() = runTest {
+        var decryptCount = 0
+        val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
+            override suspend fun timelineItemsShell(items: List<MatrixTimelineItem>) = items.map { it.withText("") }
+            override suspend fun hasTransientDecryptingShell(item: MatrixTimelineItem) = true
+            override suspend fun decryptItem(item: MatrixTimelineItem, timelineReleaseIntent: TimelineContentReleaseIntent): MatrixTimelineItem {
+                decryptCount++
+                return item.withText("authorized result")
+            }
+        }
+        val processor = createMatrixTimelineDiffProcessor(timelineItems, protectedContentAdapter = adapter)
+        val scope = TimelineCommitScope(106L)
+        val targetId = UniqueId("buffered-result")
+        processor.activateCommitScope(scope)
+        processor.updateViewport(scope, 1L, listOf(targetId))
+        processor.commitDiffs(TimelineDiffTransaction(scope, 1L, 1L, listOf(TimelineDiff.Reset(listOf(
+            FakeFfiTimelineItem(
+                asEventResult = aRustEventTimelineItem(content = aRustTimelineItemContentMsgLike("encrypted carrier")),
+                uniqueId = targetId.value,
+            )
+        )))))
+        runCurrent()
+        assertThat(decryptCount).isEqualTo(1)
+        assertThat(timelineItems.value.single().textBody()).isEmpty()
+        processor.updateViewport(scope, 2L, listOf(targetId))
+        runCurrent()
+        assertThat(decryptCount).isEqualTo(1)
+        advanceTimeBy(MatrixTimelineDiffProcessor.VISIBLE_DECRYPT_BATCH_WINDOW_MILLIS + 1)
+        runCurrent()
+        assertThat(timelineItems.value.single().textBody()).isEqualTo("authorized result")
+        processor.updateViewport(scope, 3L, listOf(targetId))
+        runCurrent()
+        assertThat(decryptCount).isEqualTo(1)
+    }
+
+    @Test
     fun `same visible viewport does not repeatedly reauthorize a temporary shell`() = runTest {
         var decryptCount = 0
         val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {

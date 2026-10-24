@@ -170,4 +170,5 @@
     <string name="screen_reachability_startup_pending">启动加速尚未就绪</string>
     <string name="screen_reachability_startup_pending_detail">授权已开启，后台服务仍在恢复。可以继续聊天，稍后重新检查。</string>
     <string name="screen_reachability_startup_recheck">重新检查</string>
+    <string name="screen_home_discovery">发现</string>
 </resources>

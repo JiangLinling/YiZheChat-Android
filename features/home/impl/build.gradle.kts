@@ -49,6 +49,7 @@ dependencies {
     implementation(projects.libraries.push.api)
     implementation(projects.libraries.sessionStorage.api)
     implementation(projects.features.announcement.api)
+    implementation(projects.features.discovery.api)
     implementation(projects.features.invite.api)
     implementation(projects.features.networkmonitor.api)
     implementation(projects.features.logout.api)
@@ -58,6 +59,7 @@ dependencies {
     implementation(projects.features.rageshake.api)
     implementation(projects.services.analytics.api)
     implementation(projects.security.dataProtection.api)
+    implementation(projects.security.secureStorage.api)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.haze)
     implementation(libs.haze.materials)
@@ -69,6 +71,7 @@ dependencies {
 
     testCommonDependencies(libs, true)
     testImplementation(projects.features.announcement.test)
+    testImplementation(projects.features.discovery.test)
     testImplementation(projects.features.invite.test)
     testImplementation(projects.features.logout.test)
     testImplementation(projects.features.networkmonitor.test)

@@ -29,8 +29,6 @@ import io.element.android.features.location.api.live.ActiveLiveLocationShareMana
 import io.element.android.features.messages.api.MessageReferenceStore
 import io.element.android.features.messages.impl.MessagesNavigator
 import io.element.android.features.messages.impl.R
-import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
-import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.features.messages.impl.UserEventPermissions
 import io.element.android.features.messages.impl.crypto.sendfailure.resolve.ResolveVerifiedUserSendFailureEvent
 import io.element.android.features.messages.impl.crypto.sendfailure.resolve.ResolveVerifiedUserSendFailureState
@@ -49,6 +47,8 @@ import io.element.android.features.poll.api.actions.SendPollResponseAction
 import io.element.android.features.roomcall.api.RoomCallState
 import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.di.annotations.SessionCoroutineScope
 import io.element.android.libraries.featureflag.api.FeatureFlagService
 import io.element.android.libraries.featureflag.api.FeatureFlags
@@ -64,10 +64,10 @@ import io.element.android.libraries.matrix.api.timeline.ReceiptType
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.api.timeline.item.event.TimelineItemEventOrigin
 import io.element.android.libraries.preferences.api.store.SessionPreferencesStore
-import io.element.android.security.dataprotection.api.DataProtectionPolicyProvider
-import io.element.android.security.dataprotection.api.DataProtectionPolicyRevisionProvider
 import io.element.android.security.contentprotection.api.RedactionReasonResolver
 import io.element.android.security.contentprotection.api.TrustedRedactionReason
+import io.element.android.security.dataprotection.api.DataProtectionPolicyProvider
+import io.element.android.security.dataprotection.api.DataProtectionPolicyRevisionProvider
 import io.element.android.services.analytics.api.AnalyticsLongRunningTransaction.DisplayFirstTimelineItems
 import io.element.android.services.analytics.api.AnalyticsLongRunningTransaction.NotificationToMessage
 import io.element.android.services.analytics.api.AnalyticsLongRunningTransaction.OpenRoom
@@ -118,13 +118,14 @@ class TimelinePresenter(
     private val messageReferenceStore: MessageReferenceStore,
     private val redactionReasonResolver: RedactionReasonResolver,
     private val hiddenMessageRecoveryInventory: HiddenMessageRecoveryInventory,
-    private val snackbarDispatcher: SnackbarDispatcher,
+    @Assisted private val snackbarDispatcher: SnackbarDispatcher,
 ) : Presenter<TimelineState> {
     private val tag = "TimelinePresenter"
 
     @AssistedFactory
     interface Factory {
         fun create(
+            snackbarDispatcher: SnackbarDispatcher,
             timelineController: TimelineController,
             navigator: MessagesNavigator
         ): TimelinePresenter

@@ -53,6 +53,8 @@ import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.architecture.callback
 import io.element.android.libraries.architecture.inputs
 import io.element.android.libraries.designsystem.utils.OnLifecycleEvent
+import io.element.android.libraries.designsystem.utils.snackbar.LocalSnackbarDispatcher
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
 import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.di.RoomScope
 import io.element.android.libraries.matrix.api.analytics.toAnalyticsViewRoom
@@ -103,6 +105,7 @@ class ThreadedMessagesNode(
 
     private val inputs = inputs<Inputs>()
     private val callback: Callback = callback()
+    private val snackbarDispatcher = SnackbarDispatcher()
 
     private var timelineController: TimelineController? by mutableStateOf(null)
     private var presenter: Presenter<MessagesState>? by mutableStateOf(null)
@@ -123,8 +126,14 @@ class ThreadedMessagesNode(
         this.timelineController = timelineController
         return presenterFactory.create(
             navigator = this,
-            composerPresenter = messageComposerPresenterFactory.create(timelineController, this, isInThread = true),
-            timelinePresenter = timelinePresenterFactory.create(timelineController = timelineController, this),
+            snackbarDispatcher = snackbarDispatcher,
+            composerPresenter = messageComposerPresenterFactory.create(
+                timelineController = timelineController,
+                navigator = this,
+                isInThread = true,
+                snackbarDispatcher = snackbarDispatcher,
+            ),
+            timelinePresenter = timelinePresenterFactory.create(timelineController = timelineController, navigator = this, snackbarDispatcher = snackbarDispatcher),
             // TODO add special processor for threaded timeline
             actionListPresenter = actionListPresenterFactory.create(
                 postProcessor = TimelineItemActionPostProcessor.Default,
@@ -280,6 +289,7 @@ class ThreadedMessagesNode(
         val canUseOverlay = !isTalkbackActive() && !hasExternalKeyboard()
         CompositionLocalProvider(
             LocalTimelineItemPresenterFactories provides timelineItemPresenterFactories,
+            LocalSnackbarDispatcher provides snackbarDispatcher,
         ) {
             // Only display the actual UI and lifecycle logic if the presenter is loaded
             presenter?.present()?.let { state ->

@@ -32,6 +32,8 @@ import dev.zacsweers.metro.AssistedInject
 import im.vector.app.features.analytics.plan.MobileScreen
 import io.element.android.annotations.ContributesNode
 import io.element.android.features.home.api.HomeEntryPoint
+import io.element.android.features.discovery.api.DiscoveryAccess
+import io.element.android.features.discovery.api.DiscoveryEntryPoint
 import io.element.android.features.home.impl.components.RoomListMenuAction
 import io.element.android.features.home.impl.model.RoomListRoomSummary
 import io.element.android.features.home.impl.onboarding.OnboardingInvitePresenter
@@ -86,6 +88,8 @@ class HomeFlowNode(
     private val leaveRoomRenderer: LeaveRoomRenderer,
     private val preferencesRootRenderer: PreferencesRootRenderer,
     private val onboardingInvitePresenter: OnboardingInvitePresenter,
+    private val discoveryAccess: DiscoveryAccess,
+    private val discoveryEntryPoint: DiscoveryEntryPoint,
     @SessionCoroutineScope private val sessionCoroutineScope: CoroutineScope,
 ) : BaseFlowNode<HomeFlowNode.NavTarget>(
     backstack = BackStack(
@@ -147,6 +151,9 @@ class HomeFlowNode(
 
         @Parcelize
         data object OnboardingInvite : NavTarget
+
+        @Parcelize
+        data object Discovery : NavTarget
     }
 
     private fun navigateToReportRoom(roomId: RoomId) {
@@ -196,6 +203,7 @@ class HomeFlowNode(
                 AtomicBoolean(false)
             }
             val state by stateFlow.collectAsState()
+            val discoveryState by discoveryAccess.state.collectAsState()
             val activity = requireNotNull(LocalActivity.current)
 
             fun navigateToRoom(
@@ -208,6 +216,10 @@ class HomeFlowNode(
 
             HomeView(
                 homeState = state,
+                discoveryAvailable = discoveryState.entryVisible,
+                onDiscoveryClick = {
+                    if (discoveryAccess.state.value.entryVisible) backstack.push(NavTarget.Discovery)
+                },
                 onRoomClick = ::navigateToRoom,
                 onAddFriendClick = callback::navigateToAddFriend,
                 onScanFriendClick = callback::navigateToFriendScanner,
@@ -265,6 +277,7 @@ class HomeFlowNode(
 
     @Composable
     override fun View(modifier: Modifier) {
+        ObserveHomeDiscovery(discoveryAccess)
         BackstackView()
     }
 
@@ -294,6 +307,7 @@ class HomeFlowNode(
                 )
             }
             NavTarget.OnboardingInvite -> onboardingInviteNode(buildContext)
+            NavTarget.Discovery -> discoveryEntryPoint.createNode(this, buildContext)
             NavTarget.Root -> rootNode(buildContext)
         }
     }
