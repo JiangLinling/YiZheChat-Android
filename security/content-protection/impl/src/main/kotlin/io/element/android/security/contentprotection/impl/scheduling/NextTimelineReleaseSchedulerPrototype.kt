@@ -34,10 +34,11 @@ internal class NextTimelineReleaseSchedulerPrototype<T>(
                     operationId = requireNotNull(request.reliableOperationId),
                 )
                 NextTimelineReleaseClass.FOREGROUND_VISIBLE,
+                NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP,
                 NextTimelineReleaseClass.HISTORY_PREFETCH -> NextTimelineReleaseAdmission.SkippedDuplicate(request.requestId)
             }
         }
-        if (request.releaseClass == NextTimelineReleaseClass.HISTORY_PREFETCH &&
+        if (request.releaseClass in setOf(NextTimelineReleaseClass.HISTORY_PREFETCH, NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP) &&
             nonForegroundPendingCount() >= config.maximumPending - config.foregroundReservedPending
         ) {
             return NextTimelineReleaseAdmission.SkippedBackpressure(request.requestId)
@@ -49,6 +50,7 @@ internal class NextTimelineReleaseSchedulerPrototype<T>(
                     operationId = requireNotNull(request.reliableOperationId),
                 )
                 NextTimelineReleaseClass.FOREGROUND_VISIBLE,
+                NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP,
                 NextTimelineReleaseClass.HISTORY_PREFETCH -> NextTimelineReleaseAdmission.SkippedBackpressure(request.requestId)
             }
         }
@@ -68,6 +70,7 @@ internal class NextTimelineReleaseSchedulerPrototype<T>(
         scopeId: String,
         currentGeneration: Long,
         visibleRequestIds: List<String>,
+        bootstrapRequestIds: List<String> = emptyList(),
     ): NextTimelineViewportReprioritization<T> {
         require(scopeId.isNotBlank()) { "scopeId must not be blank" }
         require(currentGeneration >= 0) { "currentGeneration must not be negative" }
@@ -85,11 +88,12 @@ internal class NextTimelineReleaseSchedulerPrototype<T>(
             }
         }
 
+        val bootstrapOrder = bootstrapRequestIds.distinct().take(30).withIndex().associate { it.value to it.index }
         val updated = matching.map { request ->
-            val nextClass = if (request.requestId in visibleOrder) {
-                NextTimelineReleaseClass.FOREGROUND_VISIBLE
-            } else {
-                NextTimelineReleaseClass.HISTORY_PREFETCH
+            val nextClass = when {
+                request.requestId in visibleOrder -> NextTimelineReleaseClass.FOREGROUND_VISIBLE
+                request.allowBootstrap && request.requestId in bootstrapOrder -> NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP
+                else -> NextTimelineReleaseClass.HISTORY_PREFETCH
             }
             request.copy(
                 releaseClass = nextClass,
@@ -101,6 +105,10 @@ internal class NextTimelineReleaseSchedulerPrototype<T>(
             .sortedBy { visibleOrder.getValue(it.requestId) }
             .forEach(pendingByClass.getValue(NextTimelineReleaseClass.FOREGROUND_VISIBLE)::addLast)
         updated
+            .filter { it.releaseClass == NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP }
+            .sortedBy { bootstrapOrder.getValue(it.requestId) }
+            .forEach(pendingByClass.getValue(NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP)::addLast)
+        updated
             .filter { it.releaseClass == NextTimelineReleaseClass.HISTORY_PREFETCH }
             .forEach(pendingByClass.getValue(NextTimelineReleaseClass.HISTORY_PREFETCH)::addLast)
 
@@ -108,6 +116,14 @@ internal class NextTimelineReleaseSchedulerPrototype<T>(
         val history = pendingByClass.getValue(NextTimelineReleaseClass.HISTORY_PREFETCH)
         while (nonForegroundPendingCount() > config.maximumPending - config.foregroundReservedPending && history.isNotEmpty()) {
             history.removeLast().also { removed ->
+                pendingCount -= 1
+                admittedKeys.remove(removed.deduplicationKey)
+                removedHistory += removed
+            }
+        }
+        val bootstrap = pendingByClass.getValue(NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP)
+        while (nonForegroundPendingCount() > config.maximumPending - config.foregroundReservedPending && bootstrap.isNotEmpty()) {
+            bootstrap.removeLast().also { removed ->
                 pendingCount -= 1
                 admittedKeys.remove(removed.deduplicationKey)
                 removedHistory += removed
@@ -228,6 +244,14 @@ internal class NextTimelineReleaseSchedulerPrototype<T>(
     }
 
     private fun pollNext(allowedClasses: Set<NextTimelineReleaseClass>): NextTimelineReleaseRequest<T>? {
+        // The two borrowing workers always serve real visible demand first.
+        // Other callers retain the original reliable/history weighted rotation.
+        if (allowedClasses == setOf(NextTimelineReleaseClass.FOREGROUND_VISIBLE, NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP)) {
+            pendingByClass.getValue(NextTimelineReleaseClass.FOREGROUND_VISIBLE).pollFirst()?.let { request ->
+                pendingCount--
+                return request
+            }
+        }
         repeat(DISPATCH_ORDER.size) {
             val releaseClass = DISPATCH_ORDER[laneIndex]
             val queue = pendingByClass.getValue(releaseClass)
@@ -255,10 +279,12 @@ internal class NextTimelineReleaseSchedulerPrototype<T>(
         val DISPATCH_ORDER = listOf(
             NextTimelineReleaseClass.FOREGROUND_VISIBLE,
             NextTimelineReleaseClass.RELIABLE_SECURITY,
+            NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP,
             NextTimelineReleaseClass.HISTORY_PREFETCH,
         )
         val CANCELLABLE_CLASSES = listOf(
             NextTimelineReleaseClass.FOREGROUND_VISIBLE,
+            NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP,
             NextTimelineReleaseClass.HISTORY_PREFETCH,
         )
     }
@@ -285,6 +311,7 @@ internal data class NextTimelineReleaseSchedulerConfig(
 
     fun weightFor(releaseClass: NextTimelineReleaseClass): Int = when (releaseClass) {
         NextTimelineReleaseClass.FOREGROUND_VISIBLE -> foregroundWeight
+        NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP -> historyWeight
         NextTimelineReleaseClass.HISTORY_PREFETCH -> historyWeight
         NextTimelineReleaseClass.RELIABLE_SECURITY -> reliableWeight
     }
@@ -297,6 +324,7 @@ internal data class NextTimelineViewportReprioritization<T>(
 
 internal enum class NextTimelineReleaseClass {
     FOREGROUND_VISIBLE,
+    FOREGROUND_BOOTSTRAP,
     HISTORY_PREFETCH,
     RELIABLE_SECURITY,
 }
@@ -324,6 +352,7 @@ internal data class NextTimelineReleaseRequest<T>(
     val payload: T,
     val viewportIdentity: NextTimelineViewportIdentity? = null,
     val reliableOperationId: String? = null,
+    val allowBootstrap: Boolean = false,
 ) {
     init {
         require(requestId.isNotBlank()) { "requestId must not be blank" }
@@ -333,6 +362,7 @@ internal data class NextTimelineReleaseRequest<T>(
                 require(!reliableOperationId.isNullOrBlank()) { "reliable work must retain its lifecycle operation id" }
             }
             NextTimelineReleaseClass.FOREGROUND_VISIBLE,
+            NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP,
             NextTimelineReleaseClass.HISTORY_PREFETCH -> {
                 require(viewportIdentity != null) { "viewport work must have a complete viewport identity" }
                 require(reliableOperationId == null) { "viewport work must not masquerade as reliable lifecycle work" }

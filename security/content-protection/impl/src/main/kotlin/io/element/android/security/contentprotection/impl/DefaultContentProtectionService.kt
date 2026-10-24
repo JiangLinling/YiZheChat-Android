@@ -53,6 +53,7 @@ import io.element.android.security.contentprotection.api.StageThreeOperation
 import io.element.android.security.contentprotection.api.StageThreeReleaseRetentionAuthority
 import io.element.android.security.contentprotection.api.StageThreeSecurityGate
 import io.element.android.security.contentprotection.api.StoreKmsShareRequest
+import io.element.android.security.contentprotection.api.TimelineContentReadPurpose
 import io.element.android.security.contentprotection.api.TimelineContentReleaseClass
 import io.element.android.security.contentprotection.api.TimelineContentReleaseIntent
 import io.element.android.security.contentprotection.api.TimelineReleaseScopeOwnerToken
@@ -236,7 +237,8 @@ class DefaultContentProtectionService internal constructor(
         generation: Long,
         visibleRequestIds: List<String>,
         ownerToken: TimelineReleaseScopeOwnerToken,
-    ): Boolean = onlineKmsReleaseBatcher.updateTimelineViewport(scopeId, generation, visibleRequestIds, ownerToken)
+        bootstrapRequestIds: List<String>,
+    ): Boolean = onlineKmsReleaseBatcher.updateTimelineViewport(scopeId, generation, visibleRequestIds, ownerToken, bootstrapRequestIds)
 
     override fun openTimelineReleaseScope(scopeId: String): TimelineReleaseScopeOwnerToken =
         onlineKmsReleaseBatcher.openTimelineScope(scopeId)
@@ -1864,6 +1866,9 @@ private class OnlineKmsReleaseBatcher(
     private data class TimelineViewportState(
         val generation: Long,
         val visibleRequestIds: Set<String>,
+        val bootstrapRequestIds: Set<String>,
+        val initialBootstrapRequestIds: Set<String>,
+        val bootstrapRetired: Boolean,
     )
 
     private val generation = AtomicLong(0)
@@ -1878,7 +1883,8 @@ private class OnlineKmsReleaseBatcher(
             foregroundReservedPending = MAX_SCHEDULED_IN_FLIGHT,
         )
     )
-    private val foregroundSignals = Channel<Unit>(capacity = MAX_SCHEDULED_IN_FLIGHT - 1)
+    private val foregroundSignals = Channel<Unit>(capacity = MAX_SCHEDULED_IN_FLIGHT - 2)
+    private val reservedForegroundSignals = Channel<Unit>(capacity = 1)
     private val historySignals = Channel<Unit>(capacity = 1)
     private val timelineStateLock = Any()
     private val timelineOwnerTokenSequence = AtomicLong(0)
@@ -1908,7 +1914,11 @@ private class OnlineKmsReleaseBatcher(
         repeat(MAX_SCHEDULED_IN_FLIGHT) { worker ->
             scope.launch {
                 val isHistoryWorker = worker == MAX_SCHEDULED_IN_FLIGHT - 1
-                val signals = if (isHistoryWorker) historySignals else foregroundSignals
+                val signals = when {
+                    isHistoryWorker -> historySignals
+                    worker == 0 -> reservedForegroundSignals
+                    else -> foregroundSignals
+                }
                 for (ignored in signals) {
                     while (true) {
                         val history = if (isHistoryWorker) {
@@ -1919,9 +1929,15 @@ private class OnlineKmsReleaseBatcher(
                         } else {
                             null
                         }
+                        // One permanent foreground worker never lends its slot to bootstrap.
+                        val foregroundClasses = if (worker == 0 || isHistoryWorker) {
+                            setOf(NextTimelineReleaseClass.FOREGROUND_VISIBLE)
+                        } else {
+                            setOf(NextTimelineReleaseClass.FOREGROUND_VISIBLE, NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP)
+                        }
                         val ticket = history ?: timelineScheduler.takeBatch(
                             limit = 1,
-                            allowedClasses = setOf(NextTimelineReleaseClass.FOREGROUND_VISIBLE),
+                            allowedClasses = foregroundClasses,
                         ).singleOrNull() ?: break
                         dispatchScheduled(ticket)
                     }
@@ -1990,10 +2006,12 @@ private class OnlineKmsReleaseBatcher(
                 ),
                 releaseClass = when (timelineIntent.releaseClass) {
                     TimelineContentReleaseClass.FOREGROUND_VISIBLE -> NextTimelineReleaseClass.FOREGROUND_VISIBLE
+                    TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP -> NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP
                     TimelineContentReleaseClass.HISTORY_PREFETCH -> NextTimelineReleaseClass.HISTORY_PREFETCH
                 },
                 payload = scheduledPending,
                 viewportIdentity = viewportIdentity,
+                allowBootstrap = timelineIntent.readPurpose == TimelineContentReadPurpose.TIMELINE,
             )
             val admission = synchronized(timelineStateLock) {
                 val registeredOwner = activeTimelineScopeOwners[timelineIntent.scopeId]
@@ -2010,11 +2028,18 @@ private class OnlineKmsReleaseBatcher(
                             generation = state.generation,
                             releaseClass = if (timelineIntent.requestId in state.visibleRequestIds) {
                                 TimelineContentReleaseClass.FOREGROUND_VISIBLE
+                            } else if (timelineIntent.readPurpose == TimelineContentReadPurpose.TIMELINE &&
+                                timelineIntent.requestId in state.bootstrapRequestIds
+                            ) {
+                                TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP
                             } else {
                                 TimelineContentReleaseClass.HISTORY_PREFETCH
                             },
                         )
-                    } ?: timelineIntent
+                    } ?: timelineIntent.copy(
+                        releaseClass = timelineIntent.releaseClass.takeUnless { it == TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP }
+                            ?: TimelineContentReleaseClass.HISTORY_PREFETCH,
+                    )
                     timelineScheduler.enqueue(
                         schedulerRequest.copy(
                             deduplicationKey = schedulerRequest.deduplicationKey.copy(
@@ -2022,6 +2047,7 @@ private class OnlineKmsReleaseBatcher(
                             ),
                             releaseClass = when (effectiveIntent.releaseClass) {
                                 TimelineContentReleaseClass.FOREGROUND_VISIBLE -> NextTimelineReleaseClass.FOREGROUND_VISIBLE
+                    TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP -> NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP
                                 TimelineContentReleaseClass.HISTORY_PREFETCH -> NextTimelineReleaseClass.HISTORY_PREFETCH
                             },
                             payload = scheduledPending.copy(intent = effectiveIntent),
@@ -2069,6 +2095,12 @@ private class OnlineKmsReleaseBatcher(
         if (requestIds.isEmpty()) return
         val cancellation = synchronized(timelineStateLock) {
             if (activeTimelineScopeOwners[scopeId] == ownerToken) {
+                timelineViewportStates[scopeId]?.let { state ->
+                    timelineViewportStates[scopeId] = state.copy(bootstrapRequestIds = state.bootstrapRequestIds - requestIds,
+                        initialBootstrapRequestIds = state.initialBootstrapRequestIds - requestIds,
+                        bootstrapRetired = state.bootstrapRetired ||
+                            state.initialBootstrapRequestIds.isNotEmpty() && (state.initialBootstrapRequestIds - requestIds).isEmpty())
+                }
                 timelineScheduler.cancelViewportRequests(scopeId, requestIds)
             } else {
                 null
@@ -2083,13 +2115,19 @@ private class OnlineKmsReleaseBatcher(
         generation: Long,
         visibleRequestIds: List<String>,
         ownerToken: TimelineReleaseScopeOwnerToken,
+        bootstrapRequestIds: List<String>,
     ): Boolean {
         val reprioritization = synchronized(timelineStateLock) {
             if (activeTimelineScopeOwners[scopeId] != ownerToken) return false
             val previous = timelineViewportStates[scopeId]
             if (previous != null && generation <= previous.generation) return false
-            timelineViewportStates[scopeId] = TimelineViewportState(generation, visibleRequestIds.toSet())
-            timelineScheduler.reprioritizeViewport(scopeId, generation, visibleRequestIds)
+            val initial = previous?.initialBootstrapRequestIds?.takeIf { it.isNotEmpty() }
+                ?: bootstrapRequestIds.distinct().take(30).toSet()
+            val wasActivated = previous?.initialBootstrapRequestIds?.isNotEmpty() == true
+            val retired = previous?.bootstrapRetired == true || wasActivated && bootstrapRequestIds.isEmpty()
+            val bootstrap = if (retired) emptySet() else bootstrapRequestIds.filter { it in initial }.toSet()
+            timelineViewportStates[scopeId] = TimelineViewportState(generation, visibleRequestIds.toSet(), bootstrap, initial, retired)
+            timelineScheduler.reprioritizeViewport(scopeId, generation, visibleRequestIds, bootstrap.toList())
         }
         reprioritization.removedHistory.forEach { request ->
             request.payload.request.clearTransportBytes()
@@ -2132,6 +2170,7 @@ private class OnlineKmsReleaseBatcher(
         timelineScheduler.pendingCount(
             when (releaseClass) {
                 TimelineContentReleaseClass.FOREGROUND_VISIBLE -> NextTimelineReleaseClass.FOREGROUND_VISIBLE
+                    TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP -> NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP
                 TimelineContentReleaseClass.HISTORY_PREFETCH -> NextTimelineReleaseClass.HISTORY_PREFETCH
             }
         )
@@ -2183,10 +2222,10 @@ private class OnlineKmsReleaseBatcher(
                             scheduled.operationContext,
                             transportResult,
                             timelineOwner = scheduled,
-                            transportPriority = if (ticket.request.releaseClass == NextTimelineReleaseClass.FOREGROUND_VISIBLE) {
-                                KmsTransportPriority.CURRENT_MESSAGE
-                            } else {
-                                KmsTransportPriority.BACKGROUND
+                            transportPriority = when (ticket.request.releaseClass) {
+                                NextTimelineReleaseClass.FOREGROUND_VISIBLE -> KmsTransportPriority.CURRENT_MESSAGE
+                                NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP -> KmsTransportPriority.FOREGROUND_BOOTSTRAP
+                                else -> KmsTransportPriority.BACKGROUND
                             },
                         ).transportEntry()
                     ) -> ContentProtectionException.KmsUnavailable()
@@ -2243,7 +2282,8 @@ private class OnlineKmsReleaseBatcher(
     }
 
     private fun signalScheduledWorkers() {
-        repeat(MAX_SCHEDULED_IN_FLIGHT - 1) { foregroundSignals.trySend(Unit) }
+        reservedForegroundSignals.trySend(Unit)
+        repeat(MAX_SCHEDULED_IN_FLIGHT - 2) { foregroundSignals.trySend(Unit) }
         historySignals.trySend(Unit)
     }
 

@@ -12,6 +12,55 @@ import org.junit.Test
 
 class NextTimelineReleaseSchedulerPrototypeTest {
     @Test
+    fun `real visible work precedes bootstrap even when shared rotation points to bootstrap`() {
+        val scheduler = scheduler(foregroundWeight = 1, historyWeight = 2)
+        scheduler.enqueue(viewportRequest("boot-0", NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP).copy(allowBootstrap = true))
+        scheduler.takeBatch(limit = 1, allowedClasses = setOf(NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP)).single().fail()
+        scheduler.enqueue(viewportRequest("boot-1", NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP).copy(allowBootstrap = true))
+        scheduler.enqueue(viewportRequest("real-visible", NextTimelineReleaseClass.FOREGROUND_VISIBLE))
+        val next = scheduler.takeBatch(limit = 1,
+            allowedClasses = setOf(NextTimelineReleaseClass.FOREGROUND_VISIBLE, NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP)).single()
+        assertThat(next.request.requestId).isEqualTo("real-visible")
+    }
+
+    @Test
+    fun `initial render hint keeps visible priority and retires when the owner leaves its initial tail`() {
+        val scheduler = scheduler()
+        val ordinary = viewportRequest("ordinary", NextTimelineReleaseClass.HISTORY_PREFETCH)
+        val initial = viewportRequest("initial", NextTimelineReleaseClass.HISTORY_PREFETCH).copy(allowBootstrap = true)
+        val preview = viewportRequest("preview", NextTimelineReleaseClass.HISTORY_PREFETCH)
+        scheduler.enqueue(ordinary)
+        scheduler.enqueue(initial)
+        scheduler.enqueue(preview)
+        val scope = checkNotNull(initial.viewportIdentity).scopeId
+        scheduler.reprioritizeViewport(scope, 2, listOf("ordinary"), listOf("initial", "preview"))
+        assertThat(scheduler.pendingCount(NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP)).isEqualTo(1)
+        val current = scheduler.takeBatch(limit = 1,
+            allowedClasses = setOf(NextTimelineReleaseClass.FOREGROUND_VISIBLE, NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP)).single()
+        assertThat(current.request.requestId).isEqualTo("ordinary")
+        current.fail()
+        scheduler.reprioritizeViewport(scope, 3, emptyList(), emptyList())
+        assertThat(scheduler.pendingCount(NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP)).isEqualTo(0)
+        assertThat(scheduler.pendingCount(NextTimelineReleaseClass.HISTORY_PREFETCH)).isEqualTo(2)
+    }
+
+    @Test
+    fun `bootstrap cannot spend foreground pending reserve and is cancelled with its viewport owner`() {
+        val scheduler = scheduler(maximumPending = 4, maximumBatchSize = 4, foregroundReservedPending = 1)
+        repeat(3) { index ->
+            scheduler.enqueue(viewportRequest("boot-$index", NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP).copy(allowBootstrap = true))
+        }
+        assertThat(scheduler.enqueue(viewportRequest("overflow", NextTimelineReleaseClass.FOREGROUND_BOOTSTRAP)))
+            .isEqualTo(NextTimelineReleaseAdmission.SkippedBackpressure("overflow"))
+        assertThat(scheduler.enqueue(viewportRequest("visible", NextTimelineReleaseClass.FOREGROUND_VISIBLE)))
+            .isEqualTo(NextTimelineReleaseAdmission.Enqueued)
+        val scope = checkNotNull(viewportRequest("x", NextTimelineReleaseClass.HISTORY_PREFETCH).viewportIdentity).scopeId
+        val cancellation = scheduler.cancelViewportScope(scope)
+        assertThat(cancellation.removedPending).hasSize(4)
+        assertThat(scheduler.pendingCount()).isEqualTo(0)
+    }
+
+    @Test
     fun `foreground receives first service opportunity while history stays queued`() {
         val scheduler = scheduler(foregroundWeight = 2, historyWeight = 1, reliableWeight = 1)
         scheduler.enqueue(viewportRequest("history", NextTimelineReleaseClass.HISTORY_PREFETCH))

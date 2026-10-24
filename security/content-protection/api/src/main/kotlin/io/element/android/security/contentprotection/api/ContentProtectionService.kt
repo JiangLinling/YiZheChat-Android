@@ -43,6 +43,8 @@ data class ReleaseContentRequest(
 
 enum class TimelineContentReleaseClass {
     FOREGROUND_VISIBLE,
+    /** Owned, finite initial render demand; never a claim of actual visibility or authorization. */
+    FOREGROUND_BOOTSTRAP,
     HISTORY_PREFETCH,
 }
 
@@ -132,6 +134,7 @@ interface ContentProtectionService {
         generation: Long,
         visibleRequestIds: List<String>,
         ownerToken: TimelineReleaseScopeOwnerToken,
+        bootstrapRequestIds: List<String> = emptyList(),
     ): Boolean = false
 
     /** Registers the active owner and returns its process-local, non-replayable capability. */

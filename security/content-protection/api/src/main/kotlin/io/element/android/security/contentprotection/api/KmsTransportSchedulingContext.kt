@@ -11,6 +11,7 @@ import kotlin.coroutines.CoroutineContext
 enum class KmsTransportPriority {
     CURRENT_MESSAGE,
     USER_MEDIA,
+    FOREGROUND_BOOTSTRAP,
     BACKGROUND,
 }
 

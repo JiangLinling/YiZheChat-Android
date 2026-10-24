@@ -13,6 +13,45 @@ import org.junit.Test
 
 class BoundedKmsTransportArbiterTest {
     @Test
+    fun `initial render borrows only two slots and never consumes the reserved current message slot`() {
+        val arbiter = BoundedKmsTransportArbiter<String>()
+        arbiter.tryEnqueue(entry("history", KmsTransportPriority.BACKGROUND))
+        val history = checkNotNull(arbiter.takeBatch())
+        repeat(5) { arbiter.tryEnqueue(entry("bootstrap-$it", KmsTransportPriority.FOREGROUND_BOOTSTRAP)) }
+        val first = checkNotNull(arbiter.takeBatch())
+        val second = checkNotNull(arbiter.takeBatch())
+        assertThat(first.values).containsExactly("bootstrap-0")
+        assertThat(second.values).containsExactly("bootstrap-1")
+        assertThat(arbiter.takeBatch()).isNull()
+        arbiter.tryEnqueue(entry("current", KmsTransportPriority.CURRENT_MESSAGE))
+        val current = checkNotNull(arbiter.takeBatch())
+        assertThat(current.values).containsExactly("current")
+        assertThat(arbiter.activeCount()).isEqualTo(4)
+        assertThat(arbiter.takeBatch()).isNull()
+        arbiter.complete(first)
+        assertThat(checkNotNull(arbiter.takeBatch()).values).containsExactly("bootstrap-2")
+        arbiter.complete(history)
+        arbiter.complete(second)
+        arbiter.complete(current)
+    }
+
+    @Test
+    fun `bootstrap admission preserves current message pending reserve and same operation order`() {
+        val bounded = BoundedKmsTransportArbiter<String>()
+        repeat(60) { assertThat(bounded.tryEnqueue(entry("boot-$it", KmsTransportPriority.FOREGROUND_BOOTSTRAP))).isTrue() }
+        assertThat(bounded.tryEnqueue(entry("boot-overflow", KmsTransportPriority.FOREGROUND_BOOTSTRAP))).isFalse()
+        repeat(4) { assertThat(bounded.tryEnqueue(entry("current-$it", KmsTransportPriority.CURRENT_MESSAGE))).isTrue() }
+        val ordered = BoundedKmsTransportArbiter<String>()
+        ordered.tryEnqueue(entry("one", KmsTransportPriority.FOREGROUND_BOOTSTRAP, "first"))
+        ordered.tryEnqueue(entry("one", KmsTransportPriority.CURRENT_MESSAGE, "second"))
+        val first = checkNotNull(ordered.takeBatch())
+        assertThat(first.values).containsExactly("first")
+        assertThat(ordered.takeBatch()).isNull()
+        ordered.complete(first)
+        assertThat(checkNotNull(ordered.takeBatch()).values).containsExactly("second")
+    }
+
+    @Test
     fun `legacy without operation keeps one active transport while queued current message overtakes history`() {
         val arbiter = BoundedKmsTransportArbiter<String>()
         arbiter.tryEnqueue(BoundedKmsTransportArbiter.Entry(LegacyKmsTransportOperation.CURRENT_MESSAGE, KmsTransportPriority.CURRENT_MESSAGE, "active"))

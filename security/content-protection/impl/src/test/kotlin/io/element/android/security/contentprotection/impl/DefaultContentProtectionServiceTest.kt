@@ -91,6 +91,103 @@ import javax.crypto.spec.OAEPParameterSpec
 import javax.crypto.spec.PSource
 
 class DefaultContentProtectionServiceTest {
+    @Test
+    fun `initial render serves two independent operations while reserving real foreground and retiring pending bootstrap`() = runBlocking {
+        val kms = OperationGatedKmsShareClient()
+        val service = serviceWithKms(kms)
+        val contents = protectDistinctContent(service, 6, "initial-render")
+        val scope = "initial-render-scope"
+        val owner = service.openTimelineReleaseScope(scope)
+        val reads = mutableListOf<kotlinx.coroutines.Deferred<ByteArray>>()
+        fun launchRead(index: Int, operation: String, releaseClass: TimelineContentReleaseClass) = async {
+            withContext(LifecycleOperationContext(operation, FullAppLifecycleId.LC_13)) {
+                service.decryptBytes(releaseRequest(contents[index].header).copy(
+                    timelineReleaseIntent = timelineIntent(index, releaseClass, scope, owner),
+                ), contents[index].ciphertext)
+            }
+        }.also { reads += it }
+        try {
+            assertThat(service.updateTimelineReleaseViewport(scope, 0, emptyList(), owner, emptyList())).isTrue()
+            launchRead(0, "old-history", TimelineContentReleaseClass.HISTORY_PREFETCH)
+            val old = withTimeout(BRIDGE_TEST_TIMEOUT_MILLIS) { kms.started.receive() }
+            assertThat(old.operationId).isEqualTo("old-history")
+            (1..4).forEach { launchRead(it, "initial-$it", TimelineContentReleaseClass.HISTORY_PREFETCH) }
+            withTimeout(BRIDGE_TEST_TIMEOUT_MILLIS) {
+                while (service.pendingTimelineReleaseAdmissionsForTest(TimelineContentReleaseClass.HISTORY_PREFETCH) != 4) delay(1)
+            }
+            assertThat(service.updateTimelineReleaseViewport(scope, 1, listOf("request-$scope-5"), owner,
+                (1..4).map { "request-$scope-$it" })).isTrue()
+            val first = withTimeout(BRIDGE_TEST_TIMEOUT_MILLIS) { kms.started.receive() }
+            val second = withTimeout(BRIDGE_TEST_TIMEOUT_MILLIS) { kms.started.receive() }
+            assertThat(first.operationId).startsWith("initial-")
+            assertThat(second.operationId).startsWith("initial-")
+            assertThat(first.operationId).isNotEqualTo(second.operationId)
+            assertThat(first.requests).hasSize(1)
+            assertThat(second.requests).hasSize(1)
+            withTimeout(BRIDGE_TEST_TIMEOUT_MILLIS) {
+                while (service.pendingTimelineReleaseAdmissionsForTest(TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP) != 2) delay(1)
+            }
+            assertThat(withTimeoutOrNull(NO_EXTRA_BATCH_MILLIS) { kms.started.receive() }).isNull()
+            val currentRead = launchRead(5, "actual-current", TimelineContentReleaseClass.FOREGROUND_VISIBLE)
+            val current = withTimeout(BRIDGE_TEST_TIMEOUT_MILLIS) { kms.started.receive() }
+            assertThat(current.operationId).isEqualTo("actual-current")
+            current.permit.complete(Unit)
+            assertThat(withTimeout(BRIDGE_TEST_TIMEOUT_MILLIS) { currentRead.await() }.decodeToString()).isEqualTo("initial-render-5")
+            assertThat(old.permit.isCompleted).isFalse()
+            assertThat(first.permit.isCompleted).isFalse()
+            assertThat(second.permit.isCompleted).isFalse()
+            assertThat(service.updateTimelineReleaseViewport(scope, 2, listOf("request-$scope-5"), owner, emptyList())).isTrue()
+            assertThat(service.pendingTimelineReleaseAdmissionsForTest(TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP)).isEqualTo(0)
+            assertThat(service.pendingTimelineReleaseAdmissionsForTest(TimelineContentReleaseClass.HISTORY_PREFETCH)).isEqualTo(2)
+            // Neither an older generation nor a later hint can replenish the retired entry set.
+            assertThat(service.updateTimelineReleaseViewport(scope, 1, emptyList(), owner, listOf("request-$scope-1"))).isFalse()
+            assertThat(service.updateTimelineReleaseViewport(scope, 3, emptyList(), owner, listOf("request-$scope-1"))).isTrue()
+            assertThat(service.pendingTimelineReleaseAdmissionsForTest(TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP)).isEqualTo(0)
+            first.permit.complete(Unit)
+            second.permit.complete(Unit)
+            assertThat(withTimeoutOrNull(NO_EXTRA_BATCH_MILLIS) { kms.started.receive() }).isNull()
+        } finally {
+            kms.releaseAll()
+            withTimeout(BRIDGE_TEST_TIMEOUT_MILLIS) { reads.forEach { it.await() } }
+        }
+    }
+
+    @Test
+    fun `preview and unhinted requests cannot claim bootstrap or use another scope owner`() = runBlocking {
+        val kms = OperationGatedKmsShareClient()
+        val service = serviceWithKms(kms)
+        val contents = protectDistinctContent(service, 3, "initial-reject")
+        val scope = "initial-reject-scope"
+        val owner = service.openTimelineReleaseScope(scope)
+        val reads = mutableListOf<kotlinx.coroutines.Deferred<ByteArray>>()
+        fun launchRead(index: Int, purpose: io.element.android.security.contentprotection.api.TimelineContentReadPurpose) = async {
+            withContext(LifecycleOperationContext("reject-$index", FullAppLifecycleId.LC_13)) {
+                service.decryptBytes(releaseRequest(contents[index].header).copy(
+                    timelineReleaseIntent = timelineIntent(index,
+                        if (index == 0) TimelineContentReleaseClass.HISTORY_PREFETCH else TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP,
+                        scope, owner).copy(readPurpose = purpose),
+                ), contents[index].ciphertext)
+            }
+        }.also { reads += it }
+        try {
+            launchRead(0, io.element.android.security.contentprotection.api.TimelineContentReadPurpose.TIMELINE)
+            withTimeout(BRIDGE_TEST_TIMEOUT_MILLIS) { kms.started.receive() }
+            assertThat(service.updateTimelineReleaseViewport(scope, 1, emptyList(), TimelineReleaseScopeOwnerToken(owner.value + 1),
+                listOf("request-$scope-1"))).isFalse()
+            assertThat(service.updateTimelineReleaseViewport(scope, 1, emptyList(), owner, listOf("request-$scope-1"))).isTrue()
+            launchRead(1, io.element.android.security.contentprotection.api.TimelineContentReadPurpose.ROOM_PREVIEW)
+            launchRead(2, io.element.android.security.contentprotection.api.TimelineContentReadPurpose.TIMELINE)
+            withTimeout(BRIDGE_TEST_TIMEOUT_MILLIS) {
+                while (service.pendingTimelineReleaseAdmissionsForTest(TimelineContentReleaseClass.HISTORY_PREFETCH) != 2) delay(1)
+            }
+            assertThat(service.pendingTimelineReleaseAdmissionsForTest(TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP)).isEqualTo(0)
+            assertThat(withTimeoutOrNull(NO_EXTRA_BATCH_MILLIS) { kms.started.receive() }).isNull()
+        } finally {
+            kms.releaseAll()
+            withTimeout(BRIDGE_TEST_TIMEOUT_MILLIS) { reads.forEach { it.await() } }
+        }
+    }
+
     @Test fun `external child is issuer owned preserves deadline and survives only parent close`() = runTest {
         val policy = io.mockk.mockk<io.element.android.security.dataprotection.api.DataProtectionPolicyV1>()
         io.mockk.every { policy.policyId } returns "policy-1"

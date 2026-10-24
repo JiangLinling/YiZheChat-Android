@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 
 /** Requests without an operation identity remain serial, but are not falsely treated as one FIFO operation. */
-internal enum class LegacyKmsTransportOperation { CURRENT_MESSAGE, USER_MEDIA, BACKGROUND }
+internal enum class LegacyKmsTransportOperation { CURRENT_MESSAGE, USER_MEDIA, FOREGROUND_BOOTSTRAP, BACKGROUND }
 
 /** One bounded queue. Operation heads wait in the queue, never holding an active transport slot. */
 internal class BoundedKmsTransportArbiter<T>(
@@ -73,6 +73,7 @@ internal class BoundedKmsTransportArbiter<T>(
     fun takeBatch(): Batch<T>? = synchronized(lock) {
         if (active.size >= maximumActive) return null
         val backgroundActive = active.values.count { it.priority == KmsTransportPriority.BACKGROUND }
+        val bootstrapActive = active.values.count { it.priority == KmsTransportPriority.FOREGROUND_BOOTSTRAP }
         val nonMessageActive = active.values.count { it.priority != KmsTransportPriority.CURRENT_MESSAGE }
         val seen = mutableSetOf<Any>()
         val eligible = queued.asSequence().filter { seen.add(it.operationKey) }.filter {
@@ -80,6 +81,7 @@ internal class BoundedKmsTransportArbiter<T>(
                 (it.operationKey !is LegacyKmsTransportOperation || active.keys.none { key -> key is LegacyKmsTransportOperation }) && when (it.priority) {
                 KmsTransportPriority.CURRENT_MESSAGE -> true
                 KmsTransportPriority.USER_MEDIA -> nonMessageActive < maximumActive - 1
+                KmsTransportPriority.FOREGROUND_BOOTSTRAP -> bootstrapActive < 2 && nonMessageActive < maximumActive - 1
                 KmsTransportPriority.BACKGROUND -> backgroundActive < 1 && nonMessageActive < maximumActive - 1
             }
         }.toList()
