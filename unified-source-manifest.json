@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-source-20261024-r74-chat-stability-owned-initial-render",
-  "frozen_utc": "2026-10-24T08:45:13.275303+00:00",
+  "revision": "unified-source-20261024-r75-unmeasured-history-worker-reservation",
+  "frozen_utc": "2026-10-24T09:29:45.125980+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -6126,7 +6126,7 @@
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/EncryptedProtectedSendOriginStore.kt": "1d639a239ff714b64c4f776f34040f7c07d5398317fa939fb141e02b94d06d1d",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/EventOrTransactionId.kt": "83448d99eb3bd80bd7a54f15dd4a3ba74f3b0d3e3c0ef08572286d82e9433dab",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixProtectedContentAdapter.kt": "d81c75f144f49a74d62bc4d56e39a4b96c290ed692e1bdf2b05701869b86f231",
-    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixTimelineDiffProcessor.kt": "e6852ac2fa6ff829b6152af5eeb1def0d0e2b5e78cfdeb562792906201049457",
+    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixTimelineDiffProcessor.kt": "6515c588bb965791e1e37bd86812a4d30ddc395e114270eced415a9283137212",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixTimelineItemMapper.kt": "18304972b3851a2104b7bdef9a7f47bf9e567ce2c55346c27b6eba02435b319f",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/PreparedAttachmentCleanup.kt": "1773a91ea0319d0412d624513a00b312dcac970de37f1956184e3b26da8e642f",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/ProtectedAttachmentTransactionBinding.kt": "1704ab6b8f0061ed72ceb7f8f08d3a9d6554099dcd198976cf89ea86c9d87a4a",
@@ -6339,7 +6339,7 @@
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/LocationSendOwnershipTest.kt": "5609285ac44a47ed0c08e4b2cc0d447bd3aaac7241e90bd40074f0eea5627e8e",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixProtectedContentOfflinePolicyTest.kt": "2c2e306f55ea6419140f68512cb09cd9579aba4e01aa7933e8f09bed2f692a21",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixProtectedContentProjectionTest.kt": "cce3381e8cd96b815a96fa39471aad2ffcde0a94fb48f70117b1c0d6160a8323",
-    "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixTimelineDiffProcessorTest.kt": "64afa346f3a820397f134ccf5f071acf97159c1974f11ca993f815902e96be15",
+    "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/MatrixTimelineDiffProcessorTest.kt": "9816048ea8b5000bf1ea50f6df5bfc3c72c1961e24c6744d94964596275f191a",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/MediaOriginIdentityStabilityTest.kt": "49d98d7a9ad90bfbaf06c53a3f382264c0af8496f6222973a6d5251417733c5d",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/PendingLocalEchoOwnershipTest.kt": "436fc5313eb9181f04ffc47f69db51388c6331610247cb7f328460bb125dd688",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/PendingTimelineSendsTest.kt": "6c527fe46d586643e153aa389f3181a4713012b6a277f034c75a29d34a8cf259",

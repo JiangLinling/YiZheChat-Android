@@ -34,8 +34,10 @@ KMS 按相同 owner 和递增 viewport generation 接收该有限集合；旧代
 Matrix 和 KMS timeline 都复用原有 3 个前台 worker 和 1 个历史 worker。
 其中最多 2 个前台 worker 可以借给首屏读取，另 1 个只接真实测量可见任务；历史 worker 的既有职责不变。
 独立的有界唤醒信号只通知原队列有可选任务，避免只处理可见项的 worker 吃掉首屏任务的唤醒。
-尚未测量的 owned generation-zero 读取诚实使用 HISTORY_PREFETCH，不能预先占用保留的可见 worker。
-其余 worker 仍可通过原历史路径读出全隐藏会话的第一条授权锚点，不等待测量形成循环依赖。
+尚未测量的 owned generation-zero 读取诚实使用 HISTORY_PREFETCH，只由原历史 worker 派发。
+三个前台 worker 都不能提前等待不可升级的 generation-zero 历史票据。
+完成真实测量后，其中两个才可处理有限首屏集合，另一个继续只处理真实可见任务。
+全隐藏会话仍由原历史 worker 读出第一条授权锚点，不等待测量形成循环依赖。
 
 物理 HTTP 总数仍最多 4；普通 BACKGROUND 最多 1，BOOTSTRAP 最多 2，全部非 CURRENT_MESSAGE 合计最多 3。
 真实可见消息在借用 worker 中先于待处理首屏项；原可靠工作和历史公平性保留。
@@ -47,4 +49,8 @@ Matrix 和 KMS timeline 都复用原有 3 个前台 worker 和 1 个历史 worke
 阻塞历史和两个独立首屏操作时的真实可见任务、4/2/1 上限、操作顺序、预留容量、preview 和 owner 隔离。
 共享读取、授权上下文、原接收生命周期、投影及聊天界面接线也运行相关回归。
 实际效果仍须由同一正常 Release APK 的 13、10S 首次和重复聊天窗口、基本通信及 scope 恢复验收确认。
-先前 73 包的首次历史投影未通过，不得由本地回归通过推断已解决或已发布。
+先前 73、74 包的首次历史投影均未通过，不得由本地回归通过推断已解决或已发布。
+74 的两台真机重复进入和 QA74 草稿输入正常，但首次进入仍有普通历史分批出现；该包未发布。
+后续本地复现确认：先启动 worker、后测量 viewport 时，两个可借用 worker 提前派发 HISTORY，
+导致首屏集合即使有效也没有空闲借用位置。回归须在旧历史 gate 仍阻塞时观测两个独立 BOOTSTRAP，
+同时让新实际可见项通过保留位置；总 worker 和 HTTP 上限、已派发票据、授权及身份判断均不变。

@@ -2293,9 +2293,9 @@ internal class PendingDecryptQueue(
         }
     }
 
-    /** Only two existing foreground workers call this; the third stays visible-only. */
+    /** Two existing foreground workers borrow bootstrap work after a real measurement. */
     fun pollForeground(): PendingDecryptWork? = synchronized(this) {
-        val work = removeFirstAvailable(visible, DecryptPriority.VISIBLE)?.also { recordVisiblePoll() }
+        val work = removeFirstAvailable(visible, DecryptPriority.VISIBLE, measuredOnly = true)?.also { recordVisiblePoll() }
             ?: if (recentPollsSinceBacklog < historyFairnessVisibleBurst) {
                 firstBootstrapKey()?.let { key ->
                     checkNotNull(history.remove(key)).toPendingWork(key, DecryptPriority.HISTORY).copy(bootstrapHistory = true)
@@ -2311,7 +2311,7 @@ internal class PendingDecryptQueue(
     }
 
     fun hasForegroundWork(): Boolean = synchronized(this) {
-        visible.isNotEmpty() || recentPollsSinceBacklog < historyFairnessVisibleBurst && firstBootstrapKey() != null
+        hasReservedVisibleWork() || recentPollsSinceBacklog < historyFairnessVisibleBurst && firstBootstrapKey() != null
     }
 
     fun pollVisibleOrHistory(): PendingDecryptWork? = synchronized(this) {

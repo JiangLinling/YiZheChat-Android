@@ -103,7 +103,7 @@ class MatrixTimelineDiffProcessorTest {
     }
 
     @Test
-    fun `unmeasured owned startup reads cannot occupy the measured visible reserved worker`() = runTest {
+    fun `unmeasured owned startup reads leave bootstrap workers free before the first viewport`() = runTest {
         verifyInitialRenderBootstrap(startBeforeViewport = true)
     }
 
@@ -195,7 +195,9 @@ class MatrixTimelineDiffProcessorTest {
         processor.commitDiffs(TimelineDiffTransaction(scope, 1L, 1L, listOf(TimelineDiff.Reset(initial))))
         if (startBeforeViewport) {
             runCurrent()
-            assertThat(observed).hasSize(3)
+            // Before measurement only the original history worker may start. Otherwise
+            // two foreground workers wait on HISTORY tickets that cannot be upgraded.
+            assertThat(observed).hasSize(1)
             assertThat(observed.all { it.second.releaseClass == TimelineContentReleaseClass.HISTORY_PREFETCH }).isTrue()
         }
         var viewportGeneration = 0L
@@ -204,10 +206,12 @@ class MatrixTimelineDiffProcessorTest {
         runCurrent()
         val eligible = allowInitialRender && metadataEligible && !burn
         val boot = observed.filter { it.second.releaseClass == TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP }
-        assertThat(boot.size).isEqualTo(if (eligible && !startBeforeViewport) 2 else 0)
+        assertThat(boot.size).isEqualTo(if (eligible) 2 else 0)
         assertThat(boot.map { it.first }).containsNoDuplicates()
         if (eligible) {
-            if (!startBeforeViewport) assertThat(boot.map { it.first }).containsExactly("initial-text-3", "initial-text-2")
+            assertThat(boot.map { it.first }).containsExactlyElementsIn(
+                if (startBeforeViewport) listOf("initial-text-2", "initial-text-1") else listOf("initial-text-3", "initial-text-2")
+            )
             assertThat(processor.commitDiffs(TimelineDiffTransaction(scope, 2L, 1L,
                 listOf(TimelineDiff.Append(listOf(raw("initial-visible"))))))).isTrue()
             processor.updateViewport(scope, ++viewportGeneration, listOf(UniqueId("initial-visible"), UniqueId("initial-anchor")), !retire)
@@ -1373,14 +1377,16 @@ class MatrixTimelineDiffProcessorTest {
         assertThat(timelineItems.value).isEmpty()
         runCurrent()
 
-        firstDecryptGate.complete(Unit)
+        // The original history lane starts from the newest raw event before any
+        // viewport exists. Its first authorized result must release the barrier.
+        secondDecryptGate.complete(Unit)
         runCurrent()
         advanceTimeBy(MatrixTimelineDiffProcessor.VISIBLE_DECRYPT_BATCH_WINDOW_MILLIS + 1)
         runCurrent()
         assertThat(timelineItems.value.map { it.textBody() })
-            .containsExactly("first cleartext", "").inOrder()
+            .containsExactly("", "second cleartext").inOrder()
 
-        secondDecryptGate.complete(Unit)
+        firstDecryptGate.complete(Unit)
         runCurrent()
         advanceTimeBy(MatrixTimelineDiffProcessor.VISIBLE_DECRYPT_BATCH_WINDOW_MILLIS + 1)
         runCurrent()
