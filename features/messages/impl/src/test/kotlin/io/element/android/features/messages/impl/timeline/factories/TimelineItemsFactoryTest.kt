@@ -26,8 +26,44 @@ import io.element.android.libraries.matrix.test.timeline.anEventTimelineItem
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
+import io.element.android.features.messages.impl.timeline.InitialHistoryPresentationControl
+import io.element.android.features.messages.impl.timeline.initialHistoryControl
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class TimelineItemsFactoryTest {
+    @Test
+    fun `initial loading changes publish with the same message references and stay at the oldest UI edge`() = runTest {
+        val factory = aTimelineItemsFactory(TimelineItemsFactoryConfig(computeReadReceipts = false, computeReactions = false))
+        val source = listOf(MatrixTimelineItem.Event(UniqueId("ready"), anEventTimelineItem(isRemote = true)))
+        val control = InitialHistoryPresentationControl()
+        factory.timelineItems.test {
+            factory.replaceWith(source, emptyList(), control)
+            val loading = awaitItem()
+            assertThat(loading.initialHistoryControl()).isSameInstanceAs(control)
+            assertThat((loading.last() as TimelineItem.Virtual).id).isEqualTo(control.id)
+            val message = loading.events().single()
+            factory.replaceWith(source, emptyList(), null)
+            val ready = awaitItem()
+            assertThat(ready.initialHistoryControl()).isNull()
+            assertThat(ready.events().single()).isSameInstanceAs(message)
+        }
+    }
+
+    @Test
+    fun `navigation waiting for a collection release is cancelled when that collection closes`() = runTest {
+        val factory = aTimelineItemsFactory(TimelineItemsFactoryConfig(computeReadReceipts = false, computeReactions = false))
+        val control = InitialHistoryPresentationControl()
+        factory.replaceWith(emptyList(), emptyList(), control)
+        val navigation = async { factory.releaseInitialHistoryForNavigation(EventId("\$target")) }
+        runCurrent()
+        assertThat(control.retired.value).isTrue()
+        control.close()
+        assertThat(runCatching { navigation.await() }.exceptionOrNull()).isInstanceOf(CancellationException::class.java)
+    }
+
     @Test
     fun `each changed row reads its current shield once and unchanged rows keep their presentation`() = runTest {
         val factory = aTimelineItemsFactory(TimelineItemsFactoryConfig(computeReadReceipts = false, computeReactions = false))

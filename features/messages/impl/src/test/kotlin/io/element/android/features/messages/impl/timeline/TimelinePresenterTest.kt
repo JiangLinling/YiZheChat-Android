@@ -112,6 +112,38 @@ import kotlin.time.Duration.Companion.seconds
 @Suppress("LargeClass")
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class TimelinePresenterTest {
+    @Test
+    fun `focus on a held but already loaded live target releases shaping without creating another timeline`() = runTest {
+        fun row(id: String, pending: Boolean = false) = MatrixTimelineItem.Event(UniqueId(id), anEventTimelineItem(
+            eventId = EventId("\$$id"), isRemote = true,
+            content = aMessageContent(body = if (pending) "" else id).copy(
+                protectedMessageStatus = if (pending) ProtectedMessageStatus.DECRYPTING else null,
+                isContentProtectionAuthorized = !pending,
+            ),
+        ))
+        val target = row("held-live-target")
+        val live = FakeTimeline(timelineItems = flowOf(listOf(target, row("pending-gap", true), row("latest"))))
+        var focusedTimelineRequests = 0
+        val room = FakeJoinedRoom(liveTimeline = live, createTimelineResult = {
+            focusedTimelineRequests++
+            Result.failure(IllegalStateException("Target is already loaded"))
+        })
+        val controller = TimelineController(room, live, requireContentProtection = true)
+        try {
+            createTimelinePresenter(timeline = live, room = room, controller = controller).test {
+                val loading = consumeItemsUntilPredicate { it.timelineItems.initialHistoryControl() != null }.last()
+                assertThat(loading.timelineItems.flatMap { it.events() }.any { it.eventId == target.eventId }).isFalse()
+                loading.eventSink(TimelineEvent.FocusOnEvent(checkNotNull(target.eventId)))
+                val focused = consumeItemsUntilPredicate { it.focusRequestState is FocusRequestState.Success }.last()
+                val expectedIndex = focused.timelineItems.indexOfFirst { it.events().any { event -> event.eventId == target.eventId } }
+                assertThat(expectedIndex).isAtLeast(0)
+                assertThat((focused.focusRequestState as FocusRequestState.Success).index).isEqualTo(expectedIndex)
+                assertThat(focused.timelineItems.initialHistoryControl()).isNull()
+                assertThat(focusedTimelineRequests).isEqualTo(0)
+            }
+        } finally { controller.close() }
+    }
+
     @get:Rule
     val warmUpRule = WarmUpRule()
 
