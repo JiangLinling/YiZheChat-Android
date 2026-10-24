@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-source-20261024-r67-chat-stability-feedback",
-  "frozen_utc": "2026-10-24T02:57:59.459693+00:00",
+  "revision": "unified-source-20261024-r68-chat-stability-feedback-render",
+  "frozen_utc": "2026-10-24T03:59:19.166043+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -2605,7 +2605,7 @@
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/timeline/TimelineState.kt": "7007ba25f5e2c8bd685ae22ee8acf28494abaa48de6859fad0f23af2f63e1c1f",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/timeline/TimelineStateProvider.kt": "6694be72465fcb7f57f7eb0d874ce49921647c6056dabaa7ac8d50429a4da79c",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/timeline/TimelineUserVisibility.kt": "5d65acc0e2bf154d824017e75c7e8559c64a35dba102b7fc92c80e6ad2db833e",
-    "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/timeline/TimelineView.kt": "63466f7439dc2a1a93fd411403e3e1ed2122e951fda6c3059bb1d87d9fe690e0",
+    "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/timeline/TimelineView.kt": "9ddfd6d9a0421ad7cf234ee2f18a78caeb0a99888473f7373363d847a2763ba0",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/timeline/TimelineViewMessageShieldPreview.kt": "186f21c562f11ce98be31dff7a8f4dd276a7f9e4af2a38c995ad600076d43c76",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/timeline/TimelineViewportAnchor.kt": "bb3f88a1417e17aee64b4599f830db0111b845706696963534dadc7e528b09b7",
     "features/messages/impl/src/main/kotlin/io/element/android/features/messages/impl/timeline/VerifiedTextSendState.kt": "1dee45944c7c6c4808e9f5b36c5fa273834ed13fea78f2a9cedbac3801d88376",
@@ -2945,6 +2945,7 @@
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/DisplayIdentityProjectionCacheTest.kt": "c0859dd6564dfce6121b12dc62fc36393efeb53135f7373cbba94bdcee256232",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/FailedMessageRetryTest.kt": "8f155539e87782114bbfca4861fb007950ca3eecb2990e6da34f6222339caea9",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/FakeMarkAsFullyRead.kt": "bc1f8b158cf4fcf4f52a6b60213b147167ab9cd5ee9794588643e67ca193d169",
+    "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/MessageDestructionRowTest.kt": "736f39f15dde29f45e134d33f5c215017870337099daa5aaa9798121d0149d5e",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/NewMessageNavigationTest.kt": "cb4e97c1d7cc9007af499b0263f888ba3e9493dc5340d35adadb253afd5643be",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/PendingMediaSendPresentationTest.kt": "8cd37258d4077c098db605b365ea3828f02f705934ede7f897b7c2c464911114",
     "features/messages/impl/src/test/kotlin/io/element/android/features/messages/impl/timeline/RoomReadReceiptPolicyTest.kt": "e351b6a8eb39e9d68651368bdabe84300e7f8d1ae281f93367bbc557fdb5f5de",

@@ -629,7 +629,7 @@ private fun TimelineViewportAnchorKeeper(
  * Killing the process therefore discards only this animation state, never the destruction state.
  */
 @Composable
-private fun MessageDestructionRow(
+internal fun MessageDestructionRow(
     isDestroying: Boolean,
     isPending: Boolean,
     content: @Composable () -> Unit,
@@ -660,9 +660,11 @@ private fun MessageDestructionRow(
     ) {
         val settleProgress = (progress / 0.28f).coerceIn(0f, 1f)
         val fragmentProgress = ((progress - 0.22f) / 0.78f).coerceIn(0f, 1f)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
+        // Ordinary messages do not need an extra drawing layer or fragment renderer.
+        // Keep the same content composition and terminal animation; only attach its effects
+        // while the existing animation has a nonzero progress value.
+        val destructionEffects = if (progress > 0f) {
+            Modifier
                 .graphicsLayer {
                     scaleX = 1f - settleProgress * 0.03f
                     scaleY = 1f - settleProgress * 0.03f
@@ -698,7 +700,12 @@ private fun MessageDestructionRow(
                             }
                         }
                     }
-                },
+                }
+        } else {
+            Modifier
+        }
+        Box(
+            modifier = Modifier.fillMaxWidth().then(destructionEffects),
         ) {
             content()
             if (showPending && !isDestroying) {
