@@ -338,4 +338,5 @@
     <string name="error_relay_edit_expired">The original edit has expired. Its status remains retained for verification.</string>
     <string name="error_relay_edit_terminal">The original edit did not complete. Its record is retained.</string>
     <string name="error_relay_edit_authority_unavailable">The original edit cannot be verified right now. Try checking its status later.</string>
+    <string name="screen_room_initial_history_loading">Securely loading recent messages…</string>
 </resources>

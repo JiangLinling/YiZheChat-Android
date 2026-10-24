@@ -105,6 +105,11 @@ import io.element.android.libraries.matrix.api.timeline.protectedTextTransaction
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onCompletion
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * This controller is responsible of using the right timeline to display messages and make associated actions.
@@ -284,21 +289,35 @@ class TimelineController(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun timelineItems(): Flow<List<MatrixTimelineItem>> {
+    fun timelineItems(): Flow<List<MatrixTimelineItem>> = timelinePresentation().map { it.completeItems }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun timelinePresentation(): Flow<TimelinePresentation> = flow {
         val displayProjectionCache = DisplayIdentityProjectionCache()
-        return combine(
+        val initialPresentation = InitialHistoryPresentation()
+        val control = InitialHistoryPresentationControl()
+        val selectedOwner = AtomicReference<Any?>()
+        var firstOwner: Any? = null
+        emitAll(combine(
             currentTimelineFlow.flatMapLatest { timeline ->
+                val owner = Any()
+                selectedOwner.set(owner)
                 combine(
                     timeline.timelineItems,
                     timeline.backwardPaginationStatus.map { !it.hasMoreToLoad }.distinctUntilChanged(),
                 ) { items, historyStartReached ->
-                    LoadedTimelineWindow(items, historyStartReached)
+                    LoadedTimelineWindow(items, historyStartReached, timeline, owner)
                 }
             },
             optimisticLocalEchoes,
             localReferenceState,
             localReferenceStateReady,
-        ) { window, localEchoes, messageReferenceState, referenceStateReady ->
+            control.retired,
+        ) { window, localEchoes, messageReferenceState, referenceStateReady, retiredByIntent ->
+            if (window.owner !== selectedOwner.get() || window.timeline !== detachedTimelineFlow.value.orElse(liveTimeline)) {
+                return@combine null
+            }
+            if (firstOwner == null) firstOwner = window.owner
             val timelineItems = window.items
             val identityItems = timelineItems.coalesceDuplicateRemoteEvents()
             val projectionItems = identityItems.withoutConfirmedSdkLocalEchoes()
@@ -451,7 +470,7 @@ class TimelineController(
             val stableTimelineItems = displayProjectionCache.project(projectionItems, protectedShellReplacements) { index, item ->
                 stableDisplayIds[index] ?: confirmedDisplayId(item)
             }
-            val result = stableTimelineItems
+            val orderedItems = stableTimelineItems
                 .insertPendingEventsBeforeTrailingVirtualItems(unmatchedLocalEchoes.filter { item ->
                     // Restoring the encrypted outbox must not fill an incomplete live window with
                     // days-old failures. Keep those entries intact and reveal them when pagination
@@ -461,6 +480,20 @@ class TimelineController(
                         oldestLoadedRemoteTimestamp?.let { item.event.timestamp >= it } == true
                 })
                 .withCanonicalEventOrder(::canonicalTimestamp)
+            val initialEligible = requireContentProtection && window.timeline.mode == Timeline.Mode.Live && firstOwner === window.owner
+            val needsInitialSource = initialEligible && !retiredByIntent && initialPresentation.needsSource(window.owner)
+            val initial = initialPresentation.project(
+                owner = window.owner,
+                eligible = initialEligible,
+                sourceItems = if (needsInitialSource) {
+                    stableTimelineItems.filter { it.isVisibleAcrossIdentityResetBoundary(accountHistoryAccessBoundary) }
+                } else emptyList(),
+                orderedItems = orderedItems,
+                historyStartReached = window.historyStartReached,
+                retiredByIntent = retiredByIntent,
+                immediateIds = if (needsInitialSource) localEchoes.mapTo(mutableSetOf()) { it.item.uniqueId } else emptySet(),
+            )
+            val result = orderedItems
                 .filter { it.isAuthorizedForTimelineDisplay(requireContentProtection) }
                 .filter { it.isVisibleAcrossIdentityResetBoundary(accountHistoryAccessBoundary) }
                 .withoutEmptyDayDividers()
@@ -477,8 +510,19 @@ class TimelineController(
                     }
                 }
             }
-            result
-        }
+            if (window.owner !== selectedOwner.get() || window.timeline !== detachedTimelineFlow.value.orElse(liveTimeline)) {
+                return@combine null
+            }
+            val visibleItems = if (!initial.loading) result else {
+                val retained = java.util.IdentityHashMap<MatrixTimelineItem, Boolean>()
+                initial.items.forEach { retained[it] = true }
+                result.filter { retained.containsKey(it) }.withoutEmptyDayDividers()
+            }
+            TimelinePresentation(visibleItems, control.takeIf { initial.loading }, completeItems = result)
+        }.filterNotNull().onCompletion {
+            control.close()
+            selectedOwner.set(null)
+        })
     }
 
     private fun MatrixTimelineItem.isVisibleAcrossIdentityResetBoundary(
@@ -1262,6 +1306,8 @@ private data class OptimisticLocalEcho(
 private data class LoadedTimelineWindow(
     val items: List<MatrixTimelineItem>,
     val historyStartReached: Boolean,
+    val timeline: Timeline,
+    val owner: Any,
 )
 
 private data class OptimisticMedia(

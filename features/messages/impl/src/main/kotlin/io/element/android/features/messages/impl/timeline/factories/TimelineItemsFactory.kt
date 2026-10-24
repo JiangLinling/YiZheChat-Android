@@ -35,6 +35,15 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import io.element.android.features.messages.impl.timeline.InitialHistoryPresentationControl
+import io.element.android.features.messages.impl.timeline.model.virtual.TimelineItemInitialHistoryLoadingModel
+import io.element.android.features.messages.impl.timeline.initialHistoryControl
+import io.element.android.features.messages.impl.timeline.events
+import io.element.android.libraries.matrix.api.core.EventId
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 
 @AssistedInject
 class TimelineItemsFactory(
@@ -58,6 +67,7 @@ class TimelineItemsFactory(
     private val reportedUiRedactions = mutableSetOf<String>()
     private var previousTimelineItems = emptyList<MatrixTimelineItem>()
     private var previousRoomMembers = emptyList<RoomMember>()
+    private var initialHistoryLoading: InitialHistoryPresentationControl? = null
     private val diffCacheUpdater = DiffCacheUpdater<MatrixTimelineItem, TimelineItem>(
         diffCache = diffCache,
         detectMoves = false,
@@ -74,11 +84,25 @@ class TimelineItemsFactory(
 
     val timelineItems: Flow<ImmutableList<TimelineItem>> = _timelineItems.distinctUntilChanged()
 
+    /** Release only this collection's shaping before searching the actual current live UI index. */
+    internal suspend fun releaseInitialHistoryForNavigation(eventId: EventId): Int? {
+        val control = _timelineItems.replayCache.lastOrNull()?.initialHistoryControl() ?: return null
+        control.retire()
+        return timelineItems.combine(control.closed) { rows, closed ->
+            if (closed) throw CancellationException("Initial presentation collection closed")
+            rows.takeIf { it.initialHistoryControl() !== control }
+                ?.indexOfFirst { row -> row.events().any { it.eventId == eventId } }
+        }.filterNotNull().first().takeIf { it >= 0 }
+    }
+
     suspend fun replaceWith(
         timelineItems: List<MatrixTimelineItem>,
         roomMembers: List<RoomMember>,
+        initialHistoryLoading: InitialHistoryPresentationControl? = null,
     ) = withContext(dispatchers.computation) {
         lock.withLock {
+            val initialLoadingChanged = this@TimelineItemsFactory.initialHistoryLoading !== initialHistoryLoading
+            this@TimelineItemsFactory.initialHistoryLoading = initialHistoryLoading
             val timelineReferencesUnchanged = sameReferences(previousTimelineItems, timelineItems)
             val roomMembersChanged = previousRoomMembers != roomMembers
             val changedReadReceiptMemberIds = if (roomMembersChanged) {
@@ -97,7 +121,7 @@ class TimelineItemsFactory(
                     }
                 }.toSet()
             }
-            if (hasEmittedTimelineItems && timelineReferencesUnchanged && readReceiptAffectedKeys.isEmpty()) {
+            if (hasEmittedTimelineItems && timelineReferencesUnchanged && readReceiptAffectedKeys.isEmpty() && !initialLoadingChanged) {
                 // Room members are loaded independently from the timeline. Most member changes cannot affect
                 // a message row at all; receipts and unresolved sender profiles use member data. Remember the
                 // latest snapshot without rebuilding or republishing every visible message.
@@ -206,7 +230,11 @@ class TimelineItemsFactory(
                 projectionItems.size,
             )
         }
-        val result = timelineItemGrouper.group(projectionItems).toImmutableList()
+        val grouped = timelineItemGrouper.group(projectionItems)
+        val control = initialHistoryLoading
+        val result = if (control == null) grouped.toImmutableList() else {
+            (grouped + TimelineItem.Virtual(control.id, TimelineItemInitialHistoryLoadingModel(control))).toImmutableList()
+        }
         emissionGeneration++
         if (isInDebug) {
             logDuplicateComposeKeys(result, emissionGeneration)

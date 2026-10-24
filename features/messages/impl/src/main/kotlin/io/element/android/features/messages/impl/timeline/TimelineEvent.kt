@@ -18,6 +18,7 @@ import io.element.android.libraries.matrix.api.timeline.Timeline
 import kotlin.time.Duration
 
 sealed interface TimelineEvent {
+    data class RetireInitialHistoryPresentation(val control: InitialHistoryPresentationControl) : TimelineEvent
     data class OnScrollFinished(val firstIndex: Int, val isUserVisible: Boolean = true) : TimelineEvent
     data class ViewportChanged(val visibleItemIds: List<UniqueId>, val isUserVisible: Boolean = true) : TimelineEvent
     data class FocusOnEvent(val eventId: EventId, val debounce: Duration = Duration.ZERO) : TimelineEvent

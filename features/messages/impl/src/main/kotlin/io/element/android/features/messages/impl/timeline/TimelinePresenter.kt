@@ -304,6 +304,7 @@ class TimelinePresenter(
                         timelineController.paginate(direction = event.direction)
                     }
                 }
+                is TimelineEvent.RetireInitialHistoryPresentation -> event.control.retire()
                 is TimelineEvent.OnScrollFinished -> {
                     Timber.tag("YiZheReadViewport").d("scroll visible=%s live=%s index=%d", event.isUserVisible, isLive, event.firstIndex)
                     readViewportActive = event.isUserVisible
@@ -587,16 +588,18 @@ class TimelinePresenter(
                 }
                 .launchIn(this)
 
-            combine(timelineController.timelineItems(), room.membersStateFlow, room.roomInfoFlow) { items, membersState, currentRoomInfo ->
+            combine(timelineController.timelinePresentation(), room.membersStateFlow, room.roomInfoFlow) { presentation, membersState, currentRoomInfo ->
+                val items = presentation.items
                 val parent = analyticsService.getLongRunningTransaction(DisplayFirstTimelineItems)
                 val transaction = parent?.startChild("timelineItemsFactory.replaceWith", "Processing timeline items")
                 transaction?.putExtraData(AnalyticsUserData.TIMELINE_ITEM_COUNT, items.count().toString())
                 timelineItemsFactory.replaceWith(
                     timelineItems = items.withoutDirectCallSignals(currentRoomInfo.isDm),
-                    roomMembers = membersState.roomMembers().orEmpty()
+                    roomMembers = membersState.roomMembers().orEmpty(),
+                    initialHistoryLoading = presentation.initialHistoryLoading,
                 )
                 transaction?.finish()
-                items
+                presentation.completeItems
             }
                 .onEach(redactedVoiceMessageManager::onEachMatrixTimelineItem)
                 .flowOn(dispatchers.computation)
@@ -964,6 +967,11 @@ class TimelinePresenter(
         eventId: EventId,
         focusRequestState: MutableState<FocusRequestState>,
     ) {
+        val releasedIndex = timelineItemsFactory.releaseInitialHistoryForNavigation(eventId)
+        if (releasedIndex != null) {
+            focusRequestState.value = FocusRequestState.Success(eventId = eventId, index = releasedIndex)
+            return
+        }
         if (timelineItemIndexer.isKnown(eventId)) {
             val index = timelineItemIndexer.indexOf(eventId)
             focusRequestState.value = FocusRequestState.Success(eventId = eventId, index = index)

@@ -406,6 +406,19 @@ fun TimelineView(
                         ?: { visibleItemIds -> state.eventSink(TimelineEvent.ViewportChanged(visibleItemIds, userVisible)) },
                 )
 
+                TimelineInitialHistoryInteraction(
+                    viewportScopeId = viewportScopeId,
+                    control = remember(state.timelineItems) {
+                        state.timelineItems.initialHistoryControl()
+                    },
+                    lazyListState = lazyListState,
+                    userVisible = userVisible,
+                    isLive = state.isLive,
+                    programmaticScrollInProgress = programmaticScrollInProgress.value,
+                    focusNavigationInProgress = state.focusRequestState !is FocusRequestState.None,
+                    eventSink = state.eventSink,
+                )
+
                 if (!state.navigatingToFirstNewMessage) FocusRequestStateView(
                     focusRequestState = state.focusRequestState,
                     onClearFocusRequestState = ::clearFocusRequestState

@@ -32,6 +32,8 @@ import io.element.android.features.messages.impl.timeline.model.virtual.Timeline
 import io.element.android.features.messages.impl.timeline.model.virtual.TimelineItemTypingNotificationModel
 import io.element.android.features.messages.impl.typing.TypingNotificationView
 import timber.log.Timber
+import io.element.android.features.messages.impl.timeline.components.virtual.TimelineInitialHistoryLoadingView
+import io.element.android.features.messages.impl.timeline.model.virtual.TimelineItemInitialHistoryLoadingModel
 
 @Composable
 fun TimelineItemVirtualRow(
@@ -42,6 +44,7 @@ fun TimelineItemVirtualRow(
 ) {
     Box(modifier = modifier) {
         when (virtual.model) {
+            is TimelineItemInitialHistoryLoadingModel -> TimelineInitialHistoryLoadingView()
             // YiZheChat renders WeChat-style date/time markers immediately above the first event in
             // each time segment. Keep the virtual item for indexing and the floating date badge only.
             is TimelineItemDaySeparatorModel -> Spacer(modifier = Modifier)
