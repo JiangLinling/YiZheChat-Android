@@ -298,7 +298,7 @@ internal class MatrixTimelineDiffProcessor(
                     val key = itemKey(item) ?: return@mapNotNull null
                     item.takeIf { isEmptyOrdinaryPendingShell(safeShellItemsByKey[key]) &&
                         decryptAdapter?.isInitialRenderText(it) == true }?.let { key to it }
-                }.toMap()
+                }.toMap().takeIf { it.isNotEmpty() }
             }
             val candidates = initialRenderCandidates.orEmpty()
             val renderedTailOnScreen = anchorIsDisplayable && rawItems.drop(anchor + 1).all { item ->

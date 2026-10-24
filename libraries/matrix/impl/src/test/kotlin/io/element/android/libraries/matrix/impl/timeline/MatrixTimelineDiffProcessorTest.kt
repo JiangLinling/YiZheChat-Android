@@ -108,6 +108,16 @@ class MatrixTimelineDiffProcessorTest {
     }
 
     @Test
+    fun `initial empty candidate measurement does not consume the first valid initial render set`() = runTest {
+        verifyInitialRenderBootstrap(initialAnchorOnly = true)
+    }
+
+    @Test
+    fun `same id remap cannot borrow initial render workers without the captured raw identity`() = runTest {
+        verifyInitialRenderBootstrap(remapBeforeDispatch = true)
+    }
+
+    @Test
     fun `fully hidden initial room can reveal its first anchor through the original history lane`() = runTest {
         val gate = CompletableDeferred<Unit>()
         val intents = mutableListOf<TimelineContentReleaseIntent>()
@@ -151,6 +161,8 @@ class MatrixTimelineDiffProcessorTest {
         retire: Boolean = false,
         initialInactive: Boolean = false,
         startBeforeViewport: Boolean = false,
+        initialAnchorOnly: Boolean = false,
+        remapBeforeDispatch: Boolean = false,
     ) {
         val gate = CompletableDeferred<Unit>()
         val observed = mutableListOf<Pair<String, TimelineContentReleaseIntent>>()
@@ -192,7 +204,21 @@ class MatrixTimelineDiffProcessorTest {
         val processor = createMatrixTimelineDiffProcessor(timelineItems, protectedContentAdapter = adapter)
         val scope = TimelineCommitScope(173L)
         processor.activateCommitScope(scope)
-        processor.commitDiffs(TimelineDiffTransaction(scope, 1L, 1L, listOf(TimelineDiff.Reset(initial))))
+        var sequence = 0L
+        var structuralEpoch = 1L
+        var viewportGeneration = 0L
+        if (initialAnchorOnly) {
+            processor.commitDiffs(TimelineDiffTransaction(scope, ++sequence, structuralEpoch,
+                listOf(TimelineDiff.Reset(listOf(raw("initial-anchor"))))))
+            processor.updateViewport(scope, ++viewportGeneration, listOf(UniqueId("initial-anchor")), allowInitialRender)
+            structuralEpoch++
+        }
+        processor.commitDiffs(TimelineDiffTransaction(scope, ++sequence, structuralEpoch, listOf(TimelineDiff.Reset(initial))))
+        if (remapBeforeDispatch) {
+            processor.updateViewport(scope, ++viewportGeneration, listOf(UniqueId("initial-anchor")), allowInitialRender)
+            val remapped = old + hidden + raw("initial-anchor")
+            processor.commitDiffs(TimelineDiffTransaction(scope, ++sequence, ++structuralEpoch, listOf(TimelineDiff.Reset(remapped))))
+        }
         if (startBeforeViewport) {
             runCurrent()
             // Before measurement only the original history worker may start. Otherwise
@@ -200,11 +226,10 @@ class MatrixTimelineDiffProcessorTest {
             assertThat(observed).hasSize(1)
             assertThat(observed.all { it.second.releaseClass == TimelineContentReleaseClass.HISTORY_PREFETCH }).isTrue()
         }
-        var viewportGeneration = 0L
         if (initialInactive) processor.updateViewport(scope, ++viewportGeneration, emptyList(), allowInitialRender = false)
         processor.updateViewport(scope, ++viewportGeneration, listOf(UniqueId("initial-anchor")), allowInitialRender)
         runCurrent()
-        val eligible = allowInitialRender && metadataEligible && !burn
+        val eligible = allowInitialRender && metadataEligible && !burn && !remapBeforeDispatch
         val boot = observed.filter { it.second.releaseClass == TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP }
         assertThat(boot.size).isEqualTo(if (eligible) 2 else 0)
         assertThat(boot.map { it.first }).containsNoDuplicates()
@@ -212,7 +237,7 @@ class MatrixTimelineDiffProcessorTest {
             assertThat(boot.map { it.first }).containsExactlyElementsIn(
                 if (startBeforeViewport) listOf("initial-text-2", "initial-text-1") else listOf("initial-text-3", "initial-text-2")
             )
-            assertThat(processor.commitDiffs(TimelineDiffTransaction(scope, 2L, 1L,
+            assertThat(processor.commitDiffs(TimelineDiffTransaction(scope, ++sequence, structuralEpoch,
                 listOf(TimelineDiff.Append(listOf(raw("initial-visible"))))))).isTrue()
             processor.updateViewport(scope, ++viewportGeneration, listOf(UniqueId("initial-visible"), UniqueId("initial-anchor")), !retire)
             runCurrent()
@@ -220,7 +245,7 @@ class MatrixTimelineDiffProcessorTest {
             assertThat(observed.single { it.first == "initial-visible" }.second.releaseClass)
                 .isEqualTo(TimelineContentReleaseClass.FOREGROUND_VISIBLE)
             if (retire) {
-                processor.commitDiffs(TimelineDiffTransaction(scope, 3L, 1L, listOf(TimelineDiff.Append(listOf(raw("initial-text-late"))))))
+                processor.commitDiffs(TimelineDiffTransaction(scope, ++sequence, structuralEpoch, listOf(TimelineDiff.Append(listOf(raw("initial-text-late"))))))
                 processor.updateViewport(scope, ++viewportGeneration, listOf(UniqueId("initial-visible")), allowInitialRender = true)
             }
         }
