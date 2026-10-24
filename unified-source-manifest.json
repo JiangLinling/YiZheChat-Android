@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-source-20261024-r68-chat-stability-feedback-render",
-  "frozen_utc": "2026-10-24T03:59:19.166043+00:00",
+  "revision": "unified-source-20261024-r69-chat-stability-feedback-render-profile",
+  "frozen_utc": "2026-10-24T04:26:09.864486+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -264,7 +264,7 @@
     "app/src/main/assets/element-call/assets/ringtone-B-nJXbbw.ogg": "25a8b8942fadbee7c877bd3f8a1f29085fb6c810e2d740d2003c705db124eaa8",
     "app/src/main/assets/element-call/assets/ringtone-B2csBdU4.mp3": "479d6268de7e3c7d4608ce88302c2bd01633f8afd0b02da734e6ec21964be755",
     "app/src/main/assets/element-call/assets/zh-Hans-app-d-m--oHo.json": "5c6db8de66beffd04d8ded8dbd05b737b2c77dc21ec8b0de4cee505486be5521",
-    "app/src/main/baseline-prof.txt": "fd442dc0a6633571ef79883ed55ab728b749cb9bb0053c7fb09a32aa2419834f",
+    "app/src/main/baseline-prof.txt": "08fe26d893802cbef0fb52e2da44baeef7ab57f5f316e3f3284d8354a8f4cb61",
     "app/src/main/kotlin/io/element/android/x/ElementXApplication.kt": "8bee1a2bd425c8bcb64db67b36290d954b03a94dab6cb35787c772f274026c4f",
     "app/src/main/kotlin/io/element/android/x/FloatingNotificationChatActivity.kt": "3cf2dbcc7e9a577e1b28af1c6a1ae11233b784677f5b746e657de9dc7e5a2447",
     "app/src/main/kotlin/io/element/android/x/MainActivity.kt": "ed81ff88652e5fbd91f943c67c4712afb61122bb8bba498aa18e7f49e2f5b945",

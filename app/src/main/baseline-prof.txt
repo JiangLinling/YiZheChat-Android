@@ -8719,3 +8719,10 @@ SLio/element/android/x/security/ManagementControlWorker$MetroFactory$Companion;-
 SLio/element/android/x/security/ManagementControlWorker$MetroFactory$Companion;-><init>(Lkotlin/jvm/internal/DefaultConstructorMarker;)V
 SLio/element/android/x/security/ManagementControlWorker$MetroFactory$Companion;->create(Ldev/zacsweers/metro/Provider;Ldev/zacsweers/metro/Provider;)Lio/element/android/x/security/ManagementControlWorker$MetroFactory;
 SLio/element/encrypteddb/DefaultDatabaseSecurityMaintenance$MetroFactory;->create()Ldev/zacsweers/metro/internal/Factory;
+HPLio/element/android/features/messages/impl/**->**(**)**
+HPLio/element/android/features/roomdetails/impl/**->**(**)**
+HPLio/element/android/features/home/impl/**->**(**)**
+HPLio/element/android/libraries/matrix/impl/timeline/**->**(**)**
+HPLio/element/android/libraries/matrix/ui/**->**(**)**
+HPLio/element/android/libraries/designsystem/**->**(**)**
+HPLio/element/android/libraries/architecture/**->**(**)**
