@@ -259,12 +259,29 @@ internal class MatrixTimelineDiffProcessor(
                                 displayItems[current.index].isTemporarilyUnavailableProtectedProjection()))
                 }
             }
+            // Hidden ordinary text cannot participate in the measured viewport. When the
+            // actual newest event is still on screen, keep that nearby text ahead of older
+            // speculative history instead of appending it behind the existing backlog.
+            // It remains HISTORY_PREFETCH, with the same owner, generation and raw identity.
+            // Reading older messages does not activate this scheduling hint.
+            val tailIsOnScreen = rawItems.lastOrNull { it is MatrixTimelineItem.Event }?.let(::itemKey) in visibleKeys
+            val preferredHiddenHistory = if (tailIsOnScreen) {
+                val tailKeys = rawItems.takeLast(VISIBLE_FIRST_ITEM_COUNT).mapNotNullTo(mutableSetOf(), ::itemKey)
+                shellCandidates.filter { item ->
+                    val key = itemKey(item) ?: return@filter false
+                    val content = (safeShellItemsByKey[key] as? MatrixTimelineItem.Event)?.event?.content as? MessageContent
+                    key !in visibleKeys && key in tailKeys && content?.protectedMessageStatus == ProtectedMessageStatus.DECRYPTING
+                }
+            } else {
+                emptyList()
+            }
             pendingDecrypts.reprioritize(
                 visibleKeys = visibleKeys,
                 shellCandidates = shellCandidates.filter { itemKey(it) in visibleKeys },
                 rawStateGeneration = rawStateGeneration,
                 timelineScopeId = activeScope.releaseScopeId,
                 releaseGeneration = generation,
+                preferredHistoryKeys = preferredHiddenHistory.mapNotNull(::itemKey),
             )
             pendingDecrypts.offer(
                 visible = emptyList(),
@@ -2066,10 +2083,16 @@ internal class PendingDecryptQueue(
     private var visiblePollsSinceHistory = 0
     private var recentPollsSinceBacklog = 0
     private var historyWindowKeys: Set<String>? = null
+    // A current-viewport scheduling hint only. Entries remain in their original history FIFO;
+    // actual incremental recent arrivals retain their separate existing queue and semantics.
+    private var preferredHistoryKeys = emptyList<String>()
+    private var preferredHistoryScopeId: String? = null
+    private var preferredHistoryGeneration = -1L
 
     fun retainHistoryWindow(keys: Set<String>) = synchronized(this) {
         historyWindowKeys = keys
         history.keys.removeAll { it !in keys }
+        preferredHistoryKeys = preferredHistoryKeys.filter { it in keys }
     }
 
     fun offer(
@@ -2120,6 +2143,7 @@ internal class PendingDecryptQueue(
         rawStateGeneration: Long,
         timelineScopeId: String,
         releaseGeneration: Long,
+        preferredHistoryKeys: List<String> = emptyList(),
     ) = synchronized(this) {
         val visibleKeySet = visibleKeys.toSet()
         val visibleIterator = visible.entries.iterator()
@@ -2152,6 +2176,11 @@ internal class PendingDecryptQueue(
                 releaseGeneration = releaseGeneration,
             )
         }
+        if (preferredHistoryScopeId != timelineScopeId || releaseGeneration >= preferredHistoryGeneration) {
+            this.preferredHistoryKeys = preferredHistoryKeys.distinct().take(MatrixTimelineDiffProcessor.VISIBLE_FIRST_ITEM_COUNT)
+            preferredHistoryScopeId = timelineScopeId
+            preferredHistoryGeneration = releaseGeneration
+        }
         trimToMaximumSize()
     }
 
@@ -2160,6 +2189,7 @@ internal class PendingDecryptQueue(
      * authorization snapshot or worker retry from an older generation cannot resurrect the item.
      */
     fun invalidate(keys: Set<String>, rawStateGeneration: Long) = synchronized(this) {
+        val retiredPreferredKeys = mutableSetOf<String>()
         keys.forEach { key ->
             val latestGeneration = latestRawStateGenerationByKey[key]
             if (latestGeneration != null && rawStateGeneration < latestGeneration) return@forEach
@@ -2168,7 +2198,9 @@ internal class PendingDecryptQueue(
             visible.remove(key)
             history.remove(key)
             recentHistory.remove(key)
+            retiredPreferredKeys += key
         }
+        preferredHistoryKeys = preferredHistoryKeys.filterNot { it in retiredPreferredKeys }
     }
 
     fun isCurrent(key: String, rawStateGeneration: Long, timelineScopeId: String): Boolean = synchronized(this) {
@@ -2182,6 +2214,11 @@ internal class PendingDecryptQueue(
         history.entries.removeAll { it.value.timelineScopeId == timelineScopeId }
         recentHistory.entries.removeAll { it.value.timelineScopeId == timelineScopeId }
         latestTimelineScopeIdByKey.entries.removeAll { it.value == timelineScopeId }
+        if (preferredHistoryScopeId == timelineScopeId) {
+            preferredHistoryKeys = emptyList()
+            preferredHistoryScopeId = null
+            preferredHistoryGeneration = -1L
+        }
     }
 
     fun pollVisible(): PendingDecryptWork? = synchronized(this) {
@@ -2271,7 +2308,18 @@ internal class PendingDecryptQueue(
         }
         return removeFirstAvailable(recentHistory, DecryptPriority.HISTORY, recentHistory = true)?.also {
             recentPollsSinceBacklog = minOf(recentPollsSinceBacklog + 1, historyFairnessVisibleBurst)
+        } ?: removePreferredHistory()?.also {
+            recentPollsSinceBacklog = minOf(recentPollsSinceBacklog + 1, historyFairnessVisibleBurst)
         } ?: removeFirstAvailable(history, DecryptPriority.HISTORY)?.also { recentPollsSinceBacklog = 0 }
+    }
+
+    private fun removePreferredHistory(): PendingDecryptWork? {
+        val key = preferredHistoryKeys.firstOrNull { key ->
+            val entry = history[key]
+            entry != null && key !in inFlight && entry.timelineScopeId == preferredHistoryScopeId &&
+                entry.releaseGeneration == preferredHistoryGeneration
+        } ?: return null
+        return checkNotNull(history.remove(key)).toPendingWork(key, DecryptPriority.HISTORY)
     }
 
     /**
@@ -2303,20 +2351,24 @@ internal class PendingDecryptQueue(
             val entry = iterator.next()
             if (entry.key in inFlight) continue
             iterator.remove()
-            LifecycleStageTiming.observed("timeline_queue_dispatch", (entry.value.item as? MatrixTimelineItem.Event)?.eventId?.value.orEmpty(),
-                "${entry.value.timelineScopeId}#${priority}#${entry.value.rawStateGeneration}")
-            return PendingDecryptWork(
-                key = entry.key,
-                item = entry.value.item,
-                priority = priority,
-                rawStateGeneration = entry.value.rawStateGeneration,
-                timelineScopeId = entry.value.timelineScopeId,
-                releaseGeneration = entry.value.releaseGeneration,
-                recentHistory = recentHistory,
-                recentProjection = entry.value.recentProjection,
-            )
+            return entry.value.toPendingWork(entry.key, priority, recentHistory)
         }
         return null
+    }
+
+    private fun PendingDecryptEntry.toPendingWork(key: String, priority: DecryptPriority, recentHistory: Boolean = false): PendingDecryptWork {
+        LifecycleStageTiming.observed("timeline_queue_dispatch", (item as? MatrixTimelineItem.Event)?.eventId?.value.orEmpty(),
+            "${timelineScopeId}#${priority}#${rawStateGeneration}")
+        return PendingDecryptWork(
+            key = key,
+            item = item,
+            priority = priority,
+            rawStateGeneration = rawStateGeneration,
+            timelineScopeId = timelineScopeId,
+            releaseGeneration = releaseGeneration,
+            recentHistory = recentHistory,
+            recentProjection = recentProjection,
+        )
     }
 
     private fun offerItem(

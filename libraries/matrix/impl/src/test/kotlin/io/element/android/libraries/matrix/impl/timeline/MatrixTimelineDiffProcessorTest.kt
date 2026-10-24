@@ -66,6 +66,7 @@ import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.TimelineDiff
 import org.matrix.rustcomponents.sdk.TimelineItemContent
 import org.matrix.rustcomponents.sdk.EventOrTransactionId as RustEventOrTransactionId
+import org.matrix.rustcomponents.sdk.VirtualTimelineItem as RustVirtualTimelineItem
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MatrixTimelineDiffProcessorTest {
@@ -73,6 +74,193 @@ class MatrixTimelineDiffProcessorTest {
 
     private val anEvent = MatrixTimelineItem.Event(A_UNIQUE_ID, anEventTimelineItem())
     private val anEvent2 = MatrixTimelineItem.Event(A_UNIQUE_ID_2, anEventTimelineItem())
+
+    @Test
+    fun `initial hidden recent text keeps history authorization ahead of older shell backlog`() = runTest {
+        verifyInitialHiddenHistoryScheduling(tailOnScreen = true)
+    }
+
+    @Test
+    fun `initial old viewport does not expedite hidden recent text`() = runTest {
+        verifyInitialHiddenHistoryScheduling(tailOnScreen = false)
+    }
+
+    @Test
+    fun `initial tail hint retires before dispatch when reader moves to old messages`() = runTest {
+        verifyInitialHiddenHistoryScheduling(tailOnScreen = true, leaveTailBeforeDispatch = true)
+    }
+
+    @Test
+    fun `initial hidden history hint ignores a trailing virtual item`() = runTest {
+        verifyInitialHiddenHistoryScheduling(tailOnScreen = true, trailingVirtualItem = true)
+    }
+
+    @Test
+    fun `initial history hint retires without moving FIFO or erasing incremental recent arrivals`() {
+        fun item(id: String) = MatrixTimelineItem.Event(UniqueId(id), anEventTimelineItem())
+        val queue = PendingDecryptQueue(maximumSize = 8, historyFairnessVisibleBurst = 30)
+        queue.offer(
+            visible = emptyList(),
+            history = listOf(item("older-backlog"), item("hidden-text")),
+            recentHistory = listOf(item("arrival-a"), item("arrival-b")),
+            rawStateGeneration = 7L,
+            timelineScopeId = "startup-owner",
+            releaseGeneration = 1L,
+        )
+        queue.reprioritize(
+            visibleKeys = emptyList(), shellCandidates = emptyList(), rawStateGeneration = 7L,
+            timelineScopeId = "startup-owner", releaseGeneration = 1L,
+            preferredHistoryKeys = listOf("event:hidden-text"),
+        )
+        val firstArrival = checkNotNull(queue.pollVisibleOrHistory())
+        assertThat(firstArrival.key).isEqualTo("event:arrival-a")
+        assertThat(firstArrival.recentHistory).isTrue()
+        queue.complete(firstArrival)
+
+        // The next real viewport is away from the tail. This retires only bootstrap preference.
+        queue.reprioritize(
+            visibleKeys = emptyList(), shellCandidates = emptyList(), rawStateGeneration = 7L,
+            timelineScopeId = "startup-owner", releaseGeneration = 2L,
+        )
+        val secondArrival = checkNotNull(queue.pollVisibleOrHistory())
+        assertThat(secondArrival.key).isEqualTo("event:arrival-b")
+        assertThat(secondArrival.recentHistory).isTrue()
+        assertThat(secondArrival.releaseGeneration).isEqualTo(2L)
+        queue.complete(secondArrival)
+        val backlog = checkNotNull(queue.pollVisibleOrHistory())
+        assertThat(backlog.key).isEqualTo("event:older-backlog")
+        queue.complete(backlog)
+        val hidden = checkNotNull(queue.pollVisibleOrHistory())
+        assertThat(hidden.key).isEqualTo("event:hidden-text")
+        assertThat(hidden.priority).isEqualTo(DecryptPriority.HISTORY)
+        assertThat(hidden.recentHistory).isFalse()
+        assertThat(hidden.timelineScopeId).isEqualTo("startup-owner")
+        assertThat(hidden.releaseGeneration).isEqualTo(2L)
+    }
+
+    @Test
+    fun `initial preferred history dispatches consume the existing backlog fairness budget`() {
+        fun item(id: String) = MatrixTimelineItem.Event(UniqueId(id), anEventTimelineItem())
+        val queue = PendingDecryptQueue(maximumSize = 8, historyFairnessVisibleBurst = 2)
+        queue.offer(
+            visible = emptyList(),
+            history = listOf(item("older-backlog")) + (0 until 4).map { item("hidden-$it") },
+            rawStateGeneration = 3L, timelineScopeId = "startup-owner", releaseGeneration = 1L,
+        )
+        queue.reprioritize(
+            visibleKeys = emptyList(), shellCandidates = emptyList(), rawStateGeneration = 3L,
+            timelineScopeId = "startup-owner", releaseGeneration = 1L,
+            preferredHistoryKeys = (3 downTo 0).map { "event:hidden-$it" },
+        )
+        val keys = (0 until 3).map {
+            val work = checkNotNull(queue.pollVisibleOrHistory())
+            assertThat(work.priority).isEqualTo(DecryptPriority.HISTORY)
+            assertThat(work.recentHistory).isFalse()
+            queue.complete(work)
+            work.key
+        }
+        assertThat(keys).containsExactly("event:hidden-3", "event:hidden-2", "event:older-backlog").inOrder()
+    }
+
+    private suspend fun TestScope.verifyInitialHiddenHistoryScheduling(
+        tailOnScreen: Boolean,
+        leaveTailBeforeDispatch: Boolean = false,
+        trailingVirtualItem: Boolean = false,
+    ) {
+        val olderAttachmentGate = CompletableDeferred<Unit>()
+        val observedIntents = mutableListOf<Pair<String, TimelineContentReleaseIntent>>()
+        fun authorized(item: MatrixTimelineItem, body: String): MatrixTimelineItem {
+            val projected = item.withText(body) as MatrixTimelineItem.Event
+            val content = projected.event.content as MessageContent
+            return projected.copy(event = projected.event.copy(content = content.copy(isContentProtectionAuthorized = true)))
+        }
+        val adapter = object : MatrixProtectedContentAdapter by DisabledMatrixProtectedContentAdapter {
+            override suspend fun timelineItemsShell(items: List<MatrixTimelineItem>): List<MatrixTimelineItem> = items.map { item ->
+                when {
+                    item.uniqueIdValue() == "startup-qa" -> item.withText("latest QA already readable")
+                    item.uniqueIdValue().startsWith("startup-attachment-") ->
+                        item.withText("").withProtectedStatus(ProtectedMessageStatus.ATTACHMENT_DECRYPTING)
+                    else -> item.withText("").withProtectedStatus(ProtectedMessageStatus.DECRYPTING)
+                }
+            }
+
+            override suspend fun hasTransientDecryptingShell(item: MatrixTimelineItem): Boolean =
+                item is MatrixTimelineItem.Event && item.uniqueIdValue() != "startup-qa"
+
+            override suspend fun cachedProjectionForCurrentAuthorization(item: MatrixTimelineItem): MatrixTimelineItem? =
+                item.takeIf { it.uniqueIdValue() == "startup-qa" }?.let { authorized(it, "latest QA already readable") }
+
+            override suspend fun decryptItem(item: MatrixTimelineItem, timelineReleaseIntent: TimelineContentReleaseIntent): MatrixTimelineItem {
+                if (item !is MatrixTimelineItem.Event) return item
+                val identity = item.uniqueIdValue()
+                observedIntents += identity to timelineReleaseIntent
+                if (identity.startsWith("startup-attachment-")) olderAttachmentGate.await()
+                return authorized(item, "authorized:$identity")
+            }
+        }
+        fun raw(identity: String) = FakeFfiTimelineItem(
+            uniqueId = identity,
+            asEventResult = aRustEventTimelineItem(
+                eventOrTransactionId = RustEventOrTransactionId.EventId("\$$identity"),
+                content = aRustTimelineItemContentMsgLike("encrypted:$identity"),
+            ),
+        )
+        val expectedRawOrder = (0 until 40).map { "startup-attachment-$it" } +
+            (0 until 4).map { "startup-text-$it" } + "startup-qa" +
+            if (trailingVirtualItem) listOf("startup-read-marker") else emptyList()
+        val rawOrder = expectedRawOrder.map { identity ->
+            if (identity == "startup-read-marker") {
+                FakeFfiTimelineItem(uniqueId = identity, asVirtualResult = RustVirtualTimelineItem.ReadMarker)
+            } else {
+                raw(identity)
+            }
+        }
+        val processor = createMatrixTimelineDiffProcessor(timelineItems, protectedContentAdapter = adapter)
+        val scope = TimelineCommitScope(172L)
+        processor.activateCommitScope(scope)
+        assertThat(processor.commitDiffs(TimelineDiffTransaction(
+            scope = scope,
+            sequence = 1L,
+            structuralEpoch = 1L,
+            diffs = listOf(TimelineDiff.Reset(rawOrder)),
+        ))).isTrue()
+
+        // Hidden ordinary text has no layout node. The real viewport can therefore contain
+        // older attachment shells and the already authorized latest QA item, but not that text.
+        val measuredIds = (36 until 39).map { UniqueId("startup-attachment-$it") } +
+            if (tailOnScreen) listOf(UniqueId("startup-qa")) else emptyList()
+        assertThat(processor.updateViewport(scope, 1L, measuredIds)).isTrue()
+        if (leaveTailBeforeDispatch) {
+            assertThat(processor.updateViewport(scope, 2L, measuredIds.filterNot { it.value == "startup-qa" })).isTrue()
+        }
+        runCurrent()
+
+        val textRequests = observedIntents.filter { it.first.startsWith("startup-text-") }
+        if (!tailOnScreen || leaveTailBeforeDispatch) {
+            assertThat(textRequests).isEmpty()
+            assertThat(observedIntents.any { (identity, intent) ->
+                identity.startsWith("startup-attachment-") && intent.releaseClass == TimelineContentReleaseClass.HISTORY_PREFETCH
+            }).isTrue()
+            return
+        }
+        assertThat(textRequests.map { it.first }).contains("startup-text-3")
+        assertThat(textRequests.map { it.second.releaseClass }.toSet()).containsExactly(TimelineContentReleaseClass.HISTORY_PREFETCH)
+        assertThat(textRequests.all { (identity, intent) ->
+            intent.scopeId == "172" && intent.generation == 1L && intent.requestId == "event:$identity" && intent.eventId == "\$$identity"
+        }).isTrue()
+        assertThat(textRequests.none { UniqueId(it.first) in measuredIds }).isTrue()
+        assertThat(observedIntents.any { (identity, intent) ->
+            identity.startsWith("startup-attachment-") && intent.releaseClass == TimelineContentReleaseClass.HISTORY_PREFETCH
+        }).isTrue()
+
+        advanceTimeBy(MatrixTimelineDiffProcessor.HISTORY_DECRYPT_BATCH_WINDOW_MILLIS + 1)
+        runCurrent()
+        val projected = timelineItems.value
+        assertThat(projected.map { it.uniqueIdValue() }).containsExactlyElementsIn(expectedRawOrder).inOrder()
+        assertThat(projected.filter { it.uniqueIdValue().startsWith("startup-attachment-") }
+            .all { it.protectedStatus() == ProtectedMessageStatus.ATTACHMENT_DECRYPTING }).isTrue()
+        assertThat(projected.first { it.uniqueIdValue() == "startup-text-3" }.textBody()).isEqualTo("authorized:startup-text-3")
+    }
 
     @Test
     fun `one arrival with media origins enabled preserves all unchanged historical text references`() = runTest {
