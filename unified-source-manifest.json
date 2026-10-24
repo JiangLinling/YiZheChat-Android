@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-source-20261024-r70-sampling-diagnostic-not-for-publication",
-  "frozen_utc": "2026-10-24T04:53:13.754090+00:00",
+  "revision": "unified-source-20261024-r71-effective-sampling-diagnostic-not-for-publication",
+  "frozen_utc": "2026-10-24T05:10:13.542526+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -255,7 +255,7 @@
     "app/src/gplayInternalRelease/res/values/huawei_push.xml": "6ff8ef3a64b1783b2e1640f16caf5fead0514d3424116ed6fdeb565a46e5ddfa",
     "app/src/gplayRelease/agconnect-services.json": "2ddee811e3e85ce5596040cfa34e2a42981bff07bed8bb94d672d745e6ef0c2c",
     "app/src/gplayRelease/res/values/huawei_push.xml": "1e25e5cab355e6ceaebdfb0fe5bf942387382e4d6f2805c304b5ad25fc44701e",
-    "app/src/internalBackgroundBinding/AndroidManifest.xml": "65bab7d96949789fa58b889a82f63d2245818e40b68cbb521f5e3107ac5ff01b",
+    "app/src/internalBackgroundBinding/AndroidManifest.xml": "00281c5940e37c2ac6523675d2dcd309a26b64aed031b13d9a794d6a4058d0e6",
     "app/src/internalBackgroundBinding/kotlin/io/element/android/x/backgroundtest/BackgroundBindingTestActivity.kt": "bef2f8f22d08776639adb581e27ccabd08055da6384486c9a2a7f4b872d46bfd",
     "app/src/internalBackgroundBinding/res/values-zh/temporary.xml": "edc7bf3b6aa579b75c5f27f146e0ed5354151e9f847d6e6bf5eb8768f7ed1493",
     "app/src/internalBackgroundBinding/res/values/temporary.xml": "07222a9b377a7c10d9e78816cb4302b3f170f38cfae97b4d78863fc9c95a3e19",
@@ -322,7 +322,6 @@
     "app/src/nextDebug/res/values-zh/temporary.xml": "8987880d2a13c778b930008f64053c2f339246e5097e70dda70b9a6dbfd6d778",
     "app/src/nextDebug/res/values/temporary.xml": "e5dc3d50c54c4bd111540d799c659eded3aee0419c09abfbf6875bb3b6613893",
     "app/src/nextDebug/res/xml/background_binding_test.xml": "c0cbed41523dab76785b8ec182b514cdefd53dee75c71eb8009ee7c9c566dcee",
-    "app/src/nextInternalRelease/AndroidManifest.xml": "c517c21dc4725c2eeb37c334e56c1768c304d22cb940ce297b47dfa3b08ceb1a",
     "app/src/nextInternalRelease/res/values-zh/strings.xml": "69aaf966352a4fb86b82686231082d822e125049fd20d116d48b2cf091042434",
     "app/src/nextInternalRelease/res/values/strings.xml": "69aaf966352a4fb86b82686231082d822e125049fd20d116d48b2cf091042434",
     "app/src/test/kotlin/io/element/android/x/FloatingChatWindowBoundsTest.kt": "879e79f5a906a302e2524211dfe7cf5324c951a9da2a3873680d6e745badf0f5",
