@@ -75,3 +75,14 @@ Matrix 派发不等于物理 HTTP 已发出；本地摘要与录屏也不宣称�
 用户不可见时隐藏摘要，scope/账号退出及 hard authorization invalidation 清理；旧 owner 不能清除新 owner。
 Release 的 debug/profileable/tracing/logcat/崩溃附件限制保持；不生成日志文件、不写磁盘、不发网络或加入 bug report。
 这里没有恢复生产明文日志；若未来要持久诊断，仍须另行遵守 Log Key、脱敏和加密轮换合同。
+
+## 77 真机观察后的完成投影等待修正
+
+77 两机首入实际都捕获到 8 个原身份匹配候选，并分别记录 6、4 次 Matrix BOOTSTRAP 派发。
+首入仍陆续补齐并移动内容，重复进入稳定；这些计数不能解释为物理 HTTP 耗时或全部根因已确定。
+精确关联到的部分 LC-13 是原事件早已完成的稳定操作；旧回执时长不代表本次首开耗时。
+本地三个红测试复现出：已经完成的首屏结果没有走即时投影，单独或进入历史批次可等原 500ms 窗口，
+进入可见批次也仍等原较短窗口。修正只由原 pendingWork.bootstrapHistory 选择现有有界 drain/flush 通路。
+不改 release class、owner、原始对象、授权 revision、全局等待常量、apply 前复核或 finally 释放。
+稳定 raw 的正常认证 CALL_STATE 投影没有重复 offer；HIDDEN 占位不是成功授权，不增加完成缓存。
+上述局部等待修正仍须同一正常候选的双机实际验收；77 观察包未发布，不能以本地通过宣布体验完成。

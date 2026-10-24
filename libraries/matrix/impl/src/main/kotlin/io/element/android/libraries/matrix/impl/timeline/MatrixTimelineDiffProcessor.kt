@@ -2124,6 +2124,11 @@ private fun MatrixTimelineItem.hasAuthorizedOrdinaryMessage(): Boolean =
         it.isContentProtectionAuthorized && !it.isBurnAfterRead && it.protectedMessageStatus == null
     } == true
 
+// Completed bootstrap work keeps its original owner and release class. Only UI coalescing is skipped;
+// applyDecryptedItems still revalidates the source, scope and authorization revision before publication.
+private fun DecryptedItem.requiresImmediatePublication(): Boolean =
+    recentHistory || recentProjection || pendingWork?.bootstrapHistory == true
+
 /**
  * Coalesces derived decrypt projections without delaying a recent arrival/own confirmation or
  * a visible result behind an off-screen history window. Authorization refreshes do not use this path: they still publish safe shells
@@ -2146,7 +2151,7 @@ internal suspend fun collectDecryptedItemBatches(
             } else {
                 MatrixTimelineDiffProcessor.VISIBLE_DECRYPT_BATCH_WINDOW_MILLIS
             }
-            if (first.recentHistory || first.recentProjection) {
+            if (first.requiresImmediatePublication()) {
                 // Already-authorized recent work keeps its original release class. Only the UI
                 // coalescing delay is removed, with ready projections drained within the same bound.
                 while (batch.size < MatrixTimelineDiffProcessor.DECRYPT_QUEUE_CAPACITY) {
@@ -2157,7 +2162,7 @@ internal suspend fun collectDecryptedItemBatches(
                     while (batch.size < MatrixTimelineDiffProcessor.DECRYPT_QUEUE_CAPACITY) {
                         val next = input.receiveCatching().getOrNull() ?: return@withTimeoutOrNull
                         batch += next
-                        if (next.recentHistory || next.recentProjection || historyOnlyWindow && next.priority == DecryptPriority.VISIBLE) {
+                        if (next.requiresImmediatePublication() || historyOnlyWindow && next.priority == DecryptPriority.VISIBLE) {
                             // A new message/own confirmation must not wait for either window.
                             return@withTimeoutOrNull
                         }
