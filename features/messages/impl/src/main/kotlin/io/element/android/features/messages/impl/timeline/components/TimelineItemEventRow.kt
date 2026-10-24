@@ -482,6 +482,73 @@ private fun TimelineItemEventRowContent(
         }
     }
 
+    // Keep media/preview composition alive if initially unknown room metadata resolves to a DM.
+    // Pass the latest renderer as a parameter so moved content never captures an old event.
+    val messageBubble = remember {
+        movableContentOf<Modifier, @Composable (Modifier) -> Unit> { bubbleModifier, render -> render(bubbleModifier) }
+    }
+    val renderMessageBubble: @Composable (Modifier) -> Unit = { bubbleModifier ->
+        MessageEventBubble(
+            modifier = bubbleModifier,
+            state = bubbleState,
+            interactionSource = null,
+            onClick = onContentClick,
+            onLongClick = onLongClick,
+            drawBackground = !isEmojiOnly,
+            contentHandlesGestures = event.content is TimelineItemVoiceContent,
+        ) {
+            MessageEventBubbleContent(
+                event = event,
+                timelineMode = timelineMode,
+                timelineProtectionState = timelineProtectionState,
+                onMessageLongClick = onLongClick,
+                inReplyToClick = inReplyToClick,
+                readReceiptState = readReceiptState,
+                renderReadReceipts = renderReadReceipts,
+                onReadReceiptsClick = onReadReceiptsClick,
+                eventSink = eventSink,
+                eventContentView = eventContentView,
+            )
+        }
+    }
+
+    if (timelineRoomInfo.isDm) {
+        DirectMessageRowLayout(
+            isMine = event.isMine,
+            modifier = modifier.wrapContentHeight().fillMaxWidth(),
+            avatar = { DirectRoomAvatar(event, onUserDataClick) },
+            bubble = { messageBubble(Modifier, renderMessageBubble) },
+            deliveryIndicator = {
+                if (event.isMine) TimelineItemDeliveryIndicator(
+                    state = readReceiptState,
+                    renderReadReceipts = renderReadReceipts,
+                    onFailureClick = ::onDeliveryFailureClick,
+                    onReadReceiptsClick = onReadReceiptsClick,
+                )
+            },
+            pinIcon = {
+                if (isEventPinned) Icon(
+                    imageVector = CompoundIcons.PinSolid(),
+                    contentDescription = stringResource(CommonStrings.common_pinned),
+                    tint = ElementTheme.colors.iconTertiary,
+                    modifier = Modifier.padding(1.dp).size(16.dp),
+                )
+            },
+            reactions = {
+                if (event.reactionsState.reactions.isNotEmpty()) TimelineItemReactionsView(
+                    reactionsState = event.reactionsState,
+                    userCanSendReaction = timelineRoomInfo.userHasPermissionToSendReaction,
+                    isOutgoing = event.isMine,
+                    onReactionClick = onReactionClick,
+                    onReactionLongClick = onReactionLongClick,
+                    onMoreReactionsClick = { onMoreReactionsClick(event) },
+                    modifier = Modifier.padding(start = 22.dp, end = 16.dp),
+                )
+            },
+        )
+        return
+    }
+
     ConstraintLayout(
         modifier = modifier
             .wrapContentHeight()
@@ -532,8 +599,8 @@ private fun TimelineItemEventRowContent(
         }
 
         // Message bubble
-        MessageEventBubble(
-            modifier = Modifier
+        messageBubble(
+            Modifier
                 .constrainAs(message) {
                     val topMargin = if (bubbleState.cutTopStart) {
                         NEGATIVE_MARGIN_FOR_BUBBLE
@@ -553,26 +620,8 @@ private fun TimelineItemEventRowContent(
                         start.linkTo(parent.start, margin = 16.dp + BUBBLE_INCOMING_OFFSET)
                     }
                 },
-            state = bubbleState,
-            interactionSource = null,
-            onClick = onContentClick,
-            onLongClick = onLongClick,
-            drawBackground = !isEmojiOnly,
-            contentHandlesGestures = event.content is TimelineItemVoiceContent,
-        ) {
-            MessageEventBubbleContent(
-                event = event,
-                timelineMode = timelineMode,
-                timelineProtectionState = timelineProtectionState,
-                onMessageLongClick = onLongClick,
-                inReplyToClick = inReplyToClick,
-                readReceiptState = readReceiptState,
-                renderReadReceipts = renderReadReceipts,
-                onReadReceiptsClick = onReadReceiptsClick,
-                eventSink = eventSink,
-                eventContentView = eventContentView,
-            )
-        }
+            renderMessageBubble,
+        )
 
         if (event.isMine) {
             TimelineItemDeliveryIndicator(
