@@ -76,7 +76,7 @@ class RoomDetailsNode(
     }
 
     private val snackbarDispatcher = SnackbarDispatcher()
-    private val presenter = presenterFactory.create(this)
+    private val presenter = presenterFactory.create(navigator = this, snackbarDispatcher = snackbarDispatcher)
     private val callback: Callback = callback()
 
     init {
@@ -96,9 +96,7 @@ class RoomDetailsNode(
         })
     }
 
-    private val stateFlow = launchMolecule {
-        CompositionLocalProvider(LocalSnackbarDispatcher provides snackbarDispatcher) { presenter.present() }
-    }
+    private val stateFlow = launchMolecule { presenter.present() }
 
     fun onNewOwnersSelected() {
         stateFlow.value.eventSink(RoomDetailsEvent.LeaveRoom(needsConfirmation = false))

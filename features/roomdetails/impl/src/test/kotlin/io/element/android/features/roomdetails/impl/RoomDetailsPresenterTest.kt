@@ -9,6 +9,7 @@
 package io.element.android.features.roomdetails.impl
 
 import androidx.lifecycle.Lifecycle
+import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import im.vector.app.features.analytics.plan.Interaction
 import io.element.android.features.leaveroom.api.LeaveRoomEvent
@@ -22,6 +23,7 @@ import io.element.android.libraries.androidutils.clipboard.ClipboardHelper
 import io.element.android.libraries.androidutils.clipboard.FakeClipboardHelper
 import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.core.UserId
@@ -92,6 +94,7 @@ class RoomDetailsPresenterTest {
         navigator: RoomDetailsNavigator = FakeRoomDetailsNavigator(),
         notificationCleaner: NotificationCleaner = FakeNotificationCleaner(),
         sessionPreferencesStore: SessionPreferencesStore = InMemorySessionPreferencesStore(),
+        snackbarDispatcher: SnackbarDispatcher = SnackbarDispatcher(),
     ): RoomDetailsPresenter {
         val matrixClient = FakeMatrixClient(notificationSettingsService = notificationSettingsService)
         val roomMemberDetailsPresenterFactory = object : RoomMemberDetailsPresenter.Factory {
@@ -109,6 +112,7 @@ class RoomDetailsPresenterTest {
         }
         return RoomDetailsPresenter(
             navigator = navigator,
+            snackbarDispatcher = snackbarDispatcher,
             client = matrixClient,
             room = room,
             notificationSettingsService = matrixClient.notificationSettingsService,
@@ -123,6 +127,27 @@ class RoomDetailsPresenterTest {
             sessionPreferencesStore = sessionPreferencesStore,
             friendProfileRepository = FakeFriendProfileRepository(),
         )
+    }
+
+    @Test
+    fun `room details copy feedback stays on its own dispatcher while the list listens`() = runTest {
+        val listDispatcher = SnackbarDispatcher()
+        val roomDispatcher = SnackbarDispatcher()
+        val clipboard = FakeClipboardHelper()
+        listDispatcher.snackbarMessage.test {
+            val listFeedback = this
+            assertThat(awaitItem()).isNull()
+            createRoomDetailsPresenter(clipboardHelper = clipboard, snackbarDispatcher = roomDispatcher)
+                .testWithLifecycleOwner(lifecycleOwner = fakeLifecycleOwner) {
+                    awaitItem().eventSink(RoomDetailsEvent.CopyToClipboard("qa-room-reference"))
+                    val state = consumeItemsUntilPredicate { it.snackbarMessage != null }.last()
+                    assertThat(state.snackbarMessage?.messageResId)
+                        .isEqualTo(io.element.android.libraries.ui.strings.CommonStrings.common_copied_to_clipboard)
+                    assertThat(clipboard.clipboardContents).isEqualTo("qa-room-reference")
+                    listFeedback.expectNoEvents()
+                    cancelAndIgnoreRemainingEvents()
+                }
+        }
     }
 
     @Test

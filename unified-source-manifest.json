@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-source-20261024-r66-chat-stability-feedback",
-  "frozen_utc": "2026-10-24T02:45:24.325993+00:00",
+  "revision": "unified-source-20261024-r67-chat-stability-feedback",
+  "frozen_utc": "2026-10-24T02:57:59.459693+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -3723,8 +3723,8 @@
     "features/roomdetails/impl/src/main/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsEvent.kt": "53676f2599e8f6c6ec01ae0828d2ef47816719ec8cb1ca2364039c8ca0785638",
     "features/roomdetails/impl/src/main/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsFlowNode.kt": "beba03c51606862ac39b82915c4b3fed8e5a974663dcd634f65f5addec59df06",
     "features/roomdetails/impl/src/main/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsNavigator.kt": "d7cf98ca5180ebe7b11c4932bd3f3ddadda1ce6a87ab75423b21ddaf2fb125c0",
-    "features/roomdetails/impl/src/main/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsNode.kt": "e4ac1cdad0ef082719c7d2792a2466348b9e802a8b754b98f7bfade7b55b998c",
-    "features/roomdetails/impl/src/main/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsPresenter.kt": "9d592a1c86be07c617e4cc8af8f428531cfdb6029c9de48f602c8af2ed37ee09",
+    "features/roomdetails/impl/src/main/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsNode.kt": "3c38b4cf259a9df15dd98aceca37e8fdc12d078e2a735b15f9921803ff3875e6",
+    "features/roomdetails/impl/src/main/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsPresenter.kt": "43a4560e3e06a49cf797696cca467bf302855eca827008c894531c9e3082b1dd",
     "features/roomdetails/impl/src/main/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsState.kt": "ad6e10b99ab05d2fc7b19470d22a3a7de0f67957409258ffc354ad928226ff1f",
     "features/roomdetails/impl/src/main/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsStateProvider.kt": "fd263b4b3f52b69c7922d88ce14fd4385c52fa0a751651c1fe8406ff8b1c99f9",
     "features/roomdetails/impl/src/main/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsView.kt": "ce61728114a02f399fa86f87e4152f6ced03b7de2d8078e6f423e7b0d7b46b8e",
@@ -3799,7 +3799,7 @@
     "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/DefaultRoomDetailsEntryPointTest.kt": "56e5244109f16f6823cf59fb85b82ae3523fe5c48d5e77275d2355ce49507da8",
     "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/FakeRoomDetailsNavigator.kt": "0e187649f060bd9e45e5db07fd943b32a995b0cb368cc67ffcab6727b201b82d",
     "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/MatrixRoomFixture.kt": "69b681ebcc1d7333060ec5e62e9888041890f1c53dd8cbbc94da08df419cd6f3",
-    "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsPresenterTest.kt": "56e015e90abc9c3bfb292ca3e5b95baa2524f3de698a542d0ae82ce761bc5b76",
+    "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsPresenterTest.kt": "f07d1eb98d64c1d69bba9be7b72ae543090c35b035ea2193c1c8884e6ca22a28",
     "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsSearchNavigationTest.kt": "fe4d418879182f090507aa286d48b2b9017ae7c74c6a66d116b168feba4a2ce8",
     "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsStateTest.kt": "62360daf5df1f8f7f72752006523e7f508010ba6845520b2e66cb2ca20907a8b",
     "features/roomdetails/impl/src/test/kotlin/io/element/android/features/roomdetails/impl/RoomDetailsViewTest.kt": "d02bebf885125492156e539e0378841ab1e720232e375b56dcce5efa70a1b43c",

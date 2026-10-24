@@ -37,7 +37,7 @@ import io.element.android.features.userprofile.api.matrixDisplayNameOrNull
 import io.element.android.libraries.androidutils.clipboard.ClipboardHelper
 import io.element.android.libraries.architecture.Presenter
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
-import io.element.android.libraries.designsystem.utils.snackbar.LocalSnackbarDispatcher
+import io.element.android.libraries.designsystem.utils.snackbar.SnackbarDispatcher
 import io.element.android.libraries.designsystem.utils.snackbar.SnackbarMessage
 import io.element.android.libraries.designsystem.utils.snackbar.collectSnackbarMessageAsState
 import io.element.android.libraries.matrix.api.MatrixClient
@@ -69,6 +69,7 @@ import kotlinx.coroutines.launch
 @AssistedInject
 class RoomDetailsPresenter(
     @Assisted private val navigator: RoomDetailsNavigator,
+    @Assisted private val snackbarDispatcher: SnackbarDispatcher,
     private val client: MatrixClient,
     private val room: JoinedRoom,
     private val notificationSettingsService: NotificationSettingsService,
@@ -87,6 +88,7 @@ class RoomDetailsPresenter(
     interface Factory {
         fun create(
             navigator: RoomDetailsNavigator,
+            snackbarDispatcher: SnackbarDispatcher,
         ): RoomDetailsPresenter
     }
 
@@ -170,7 +172,6 @@ class RoomDetailsPresenter(
 
         val roomNotificationSettingsState by room.roomNotificationSettingsStateFlow.collectAsState()
 
-        val snackbarDispatcher = LocalSnackbarDispatcher.current
         val snackbarMessage by snackbarDispatcher.collectSnackbarMessageAsState()
 
         fun handleEvent(event: RoomDetailsEvent) {
