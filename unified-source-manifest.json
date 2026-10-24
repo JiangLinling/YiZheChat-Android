@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-source-20261024-r69-chat-stability-feedback-render-profile",
-  "frozen_utc": "2026-10-24T04:26:09.864486+00:00",
+  "revision": "unified-source-20261024-r70-sampling-diagnostic-not-for-publication",
+  "frozen_utc": "2026-10-24T04:53:13.754090+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -322,6 +322,7 @@
     "app/src/nextDebug/res/values-zh/temporary.xml": "8987880d2a13c778b930008f64053c2f339246e5097e70dda70b9a6dbfd6d778",
     "app/src/nextDebug/res/values/temporary.xml": "e5dc3d50c54c4bd111540d799c659eded3aee0419c09abfbf6875bb3b6613893",
     "app/src/nextDebug/res/xml/background_binding_test.xml": "c0cbed41523dab76785b8ec182b514cdefd53dee75c71eb8009ee7c9c566dcee",
+    "app/src/nextInternalRelease/AndroidManifest.xml": "c517c21dc4725c2eeb37c334e56c1768c304d22cb940ce297b47dfa3b08ceb1a",
     "app/src/nextInternalRelease/res/values-zh/strings.xml": "69aaf966352a4fb86b82686231082d822e125049fd20d116d48b2cf091042434",
     "app/src/nextInternalRelease/res/values/strings.xml": "69aaf966352a4fb86b82686231082d822e125049fd20d116d48b2cf091042434",
     "app/src/test/kotlin/io/element/android/x/FloatingChatWindowBoundsTest.kt": "879e79f5a906a302e2524211dfe7cf5324c951a9da2a3873680d6e745badf0f5",
