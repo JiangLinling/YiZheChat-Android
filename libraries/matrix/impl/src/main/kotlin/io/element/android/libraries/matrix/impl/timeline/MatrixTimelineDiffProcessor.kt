@@ -11,6 +11,13 @@ package io.element.android.libraries.matrix.impl.timeline
 import androidx.compose.ui.util.fastForEach
 import io.element.android.libraries.matrix.api.core.UniqueId
 import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
+import io.element.android.libraries.matrix.api.timeline.InitialRenderDiagnosticCause
+import io.element.android.libraries.matrix.api.timeline.InitialRenderDiagnosticSnapshot
+import io.element.android.libraries.matrix.api.timeline.InitialRenderDiagnosticState
+import io.element.android.libraries.matrix.api.timeline.InitialRenderDiagnostics
+import io.element.android.libraries.matrix.api.timeline.InitialRenderMatrixLane
+import io.element.android.libraries.matrix.api.timeline.InitialRenderTailBlock
+import io.element.android.libraries.matrix.api.timeline.InitialRenderUnavailable
 import io.element.android.libraries.matrix.api.timeline.item.event.AudioMessageType
 import io.element.android.libraries.matrix.api.timeline.item.event.CallLifecycleState
 import io.element.android.libraries.matrix.api.timeline.item.event.CallNotifyContent
@@ -115,6 +122,14 @@ internal class MatrixTimelineDiffProcessor(
     private var initialRenderCandidates: Map<String, MatrixTimelineItem>? = null
     private var initialRenderActivated = false
     private var initialRenderRetired = false
+    private data class InitialRenderObservation(
+        val releaseScopeId: String,
+        val owner: InitialRenderDiagnostics.Owner,
+        val baseRawGeneration: Long,
+        var captureEmptyShells: Int = 0,
+        var captureMetadataEligible: Int = 0,
+    )
+    @Volatile private var initialRenderObservation: InitialRenderObservation? = null
     private var latestViewportGeneration = 0L
     private var hasMeasuredViewport = false
     private var visibleViewportItemKeys = emptyList<String>()
@@ -160,6 +175,7 @@ internal class MatrixTimelineDiffProcessor(
                     decryptAdapter.closeTimelineReleaseScope(owner.releaseScopeId)
                 }
                 activeCommitScope = null
+                closeInitialRenderObservation()
             }
             repeat(VISIBLE_ONLY_DECRYPT_WORKER_COUNT) { worker ->
                 coroutineScope.launch(decryptDispatcher) {
@@ -200,6 +216,7 @@ internal class MatrixTimelineDiffProcessor(
             decryptAdapter?.closeTimelineReleaseScope(it.releaseScopeId)
         }
         val releaseScopeId = if (previous?.scope != scope) {
+            closeInitialRenderObservation()
             initialStructuralProjectionBarrier = null
             latestViewportGeneration = 0L
             initialRenderCandidates = null
@@ -212,12 +229,16 @@ internal class MatrixTimelineDiffProcessor(
             requireNotNull(previous).releaseScopeId
         }
         activeCommitScope = ActiveCommitScope(scope, releaseScopeId)
+        if (previous?.scope != scope && decryptAdapter != null) {
+            initialRenderObservation = InitialRenderObservation(releaseScopeId, InitialRenderDiagnostics.newOwner(), rawStateGeneration)
+        }
         hasActivatedCommitScope = true
     }
 
     /** Invalidates only the matching scope, so a late unsubscribe cannot close a newer subscription. */
     suspend fun invalidateCommitScope(scope: TimelineCommitScope) = mutex.withLock {
         activeCommitScope?.takeIf { it.scope == scope }?.let { activeScope ->
+            closeInitialRenderObservation()
             pendingOriginalSendSources.clear()
             initialRenderCandidates = null
             initialRenderRetired = true
@@ -229,6 +250,12 @@ internal class MatrixTimelineDiffProcessor(
             cancelDecryptScope(activeScope.releaseScopeId)
             decryptAdapter?.closeTimelineReleaseScope(activeScope.releaseScopeId)
         }
+    }
+
+    private fun closeInitialRenderObservation(cause: InitialRenderUnavailable = InitialRenderUnavailable.OWNER_CLOSED) {
+        val previous = initialRenderObservation
+        initialRenderObservation = null
+        previous?.let { InitialRenderDiagnostics.close(it.owner, cause) }
     }
 
     /**
@@ -294,16 +321,28 @@ internal class MatrixTimelineDiffProcessor(
             val anchorIsDisplayable = anchor >= 0 && displayItems.size == rawItems.size &&
                 (displayItems[anchor] as? MatrixTimelineItem.Event)?.event?.content?.isAuthorizedForUserDisplay(true) == true
             if (!initialRenderRetired && allowInitialRender && anchorIsDisplayable && initialRenderCandidates == null) {
+                initialRenderObservation?.let { it.captureEmptyShells = 0; it.captureMetadataEligible = 0 }
                 initialRenderCandidates = rawItems.takeLast(VISIBLE_FIRST_ITEM_COUNT).mapNotNull { item ->
                     val key = itemKey(item) ?: return@mapNotNull null
-                    item.takeIf { isEmptyOrdinaryPendingShell(safeShellItemsByKey[key]) &&
-                        decryptAdapter?.isInitialRenderText(it) == true }?.let { key to it }
+                    val emptyShell = isEmptyOrdinaryPendingShell(safeShellItemsByKey[key])
+                    if (emptyShell) initialRenderObservation?.let { it.captureEmptyShells++ }
+                    val metadataEligible = emptyShell && decryptAdapter?.isInitialRenderText(item) == true
+                    if (metadataEligible) initialRenderObservation?.let { it.captureMetadataEligible++ }
+                    item.takeIf { metadataEligible }?.let { key to it }
                 }.toMap().takeIf { it.isNotEmpty() }
+                initialRenderObservation?.let { InitialRenderDiagnostics.recordCapture(it.owner, initialRenderCandidates == null) }
             }
             val candidates = initialRenderCandidates.orEmpty()
+            var tailBlock = if (anchorIsDisplayable) InitialRenderTailBlock.NONE else InitialRenderTailBlock.NO_ANCHOR
             val renderedTailOnScreen = anchorIsDisplayable && rawItems.drop(anchor + 1).all { item ->
-                item is MatrixTimelineItem.Virtual || candidates[itemKey(item)] === item &&
-                    isEmptyOrdinaryPendingShell(displayItems[rawItemSlotsByKey[itemKey(item)]?.index ?: return@all false])
+                if (item is MatrixTimelineItem.Virtual) return@all true
+                val key = itemKey(item)
+                if (candidates[key] !== item) {
+                    tailBlock = if (key in candidates) InitialRenderTailBlock.RAW_IDENTITY_CHANGED else InitialRenderTailBlock.UNCAPTURED_EVENT
+                    return@all false
+                }
+                val slot = rawItemSlotsByKey[key]?.index ?: run { tailBlock = InitialRenderTailBlock.MISSING_SLOT; return@all false }
+                isEmptyOrdinaryPendingShell(displayItems[slot]).also { if (!it) tailBlock = InitialRenderTailBlock.NOT_EMPTY_TEXT }
             }
             val eligible = allowInitialRender && renderedTailOnScreen && !initialRenderRetired
             if (initialRenderActivated && !eligible) initialRenderRetired = true
@@ -314,6 +353,36 @@ internal class MatrixTimelineDiffProcessor(
             if (bootstrapKeys.isNotEmpty()) initialRenderActivated = true
             else if (initialRenderActivated) initialRenderRetired = true
             updatedBootstrapKeys = bootstrapKeys
+            initialRenderObservation?.let { observation ->
+                if (visibleKeys.isEmpty()) InitialRenderDiagnostics.hide(observation.owner) else {
+                    val matching = candidates.count { (key, item) -> rawItemSlotsByKey[key]?.value === item }
+                    val cause = when {
+                        !allowInitialRender -> InitialRenderDiagnosticCause.NOT_OPTED_IN
+                        initialRenderRetired -> InitialRenderDiagnosticCause.RETIRED
+                        !anchorIsDisplayable -> InitialRenderDiagnosticCause.NO_DISPLAYABLE_ANCHOR
+                        candidates.isEmpty() -> InitialRenderDiagnosticCause.EMPTY_CANDIDATES
+                        !renderedTailOnScreen -> InitialRenderDiagnosticCause.TAIL_BLOCKED
+                        matching < candidates.size -> InitialRenderDiagnosticCause.RAW_IDENTITY_CHANGED
+                        bootstrapKeys.isEmpty() -> InitialRenderDiagnosticCause.NO_PENDING_CANDIDATE
+                        else -> InitialRenderDiagnosticCause.SELECTED
+                    }
+                    InitialRenderDiagnostics.recordViewport(observation.owner, InitialRenderDiagnosticSnapshot(
+                        state = when {
+                            initialRenderRetired -> InitialRenderDiagnosticState.RETIRED
+                            initialRenderActivated -> InitialRenderDiagnosticState.ACTIVE
+                            else -> InitialRenderDiagnosticState.UNARMED
+                        },
+                        cause = cause, tailBlock = tailBlock, allowInitialRender = allowInitialRender,
+                        measured = hasMeasuredViewport, anchorDisplayable = anchorIsDisplayable, tailOnScreen = renderedTailOnScreen,
+                        rawCount = rawItems.size, shellCount = shellCandidates.size, initialWindowSize = minOf(rawItems.size, VISIBLE_FIRST_ITEM_COUNT),
+                        displayCount = displayItems.size, visibleItemCount = visibleKeys.size,
+                        matchingVisibleRawSlots = visibleKeys.take(64).count { it in rawItemSlotsByKey },
+                        lastCaptureEmptyShells = observation.captureEmptyShells, lastCaptureMetadataEligible = observation.captureMetadataEligible,
+                        candidateCount = candidates.size, matchingRawCandidates = matching, selectedBootstrap = bootstrapKeys.size,
+                        rawRevisionChanges = (rawStateGeneration - observation.baseRawGeneration).coerceIn(0, 65535).toInt(),
+                    ))
+                }
+            }
             pendingDecrypts.reprioritize(
                 visibleKeys = visibleKeys,
                 shellCandidates = shellCandidates.filter { itemKey(it) in visibleKeys },
@@ -376,6 +445,14 @@ internal class MatrixTimelineDiffProcessor(
 
     private suspend fun executePendingDecryptWork(work: PendingDecryptWork) {
         val adapter = decryptAdapter ?: return
+        initialRenderObservation?.takeIf { it.releaseScopeId == work.timelineScopeId }?.let { observation ->
+            val lane = when {
+                work.bootstrapHistory -> InitialRenderMatrixLane.BOOTSTRAP
+                work.priority == DecryptPriority.VISIBLE && work.releaseGeneration > 0L -> InitialRenderMatrixLane.VISIBLE
+                else -> InitialRenderMatrixLane.HISTORY
+            }
+            InitialRenderDiagnostics.recordDispatch(observation.owner, lane, work.releaseGeneration == 0L)
+        }
         val workStartedAt = System.nanoTime()
         Timber.tag(PERFORMANCE_TAG).d(
             "stage=decrypt_work_start key=%s priority=%s recent=%s projection_recent=%s scope=%s",
@@ -530,6 +607,7 @@ internal class MatrixTimelineDiffProcessor(
             val hasUnseenHardInvalidation =
                 refresh.latestHardInvalidationRevision > latestHardInvalidationRevision
             if (hasUnseenHardInvalidation) {
+                closeInitialRenderObservation(InitialRenderUnavailable.HARD_INVALIDATION)
                 // Cache clearing retires the KMS scope owner. A retained room subscription must
                 // acquire a fresh owner; the old owner and its queued/in-flight work stay invalid.
                 activeCommitScope?.let { previous ->
@@ -1190,6 +1268,7 @@ internal class MatrixTimelineDiffProcessor(
                 removeAt(diff.index.toInt())
             }
             is TimelineDiff.Reset -> {
+                initialRenderObservation?.let { InitialRenderDiagnostics.recordReset(it.owner) }
                 // A Clear followed by Reset is one structural replacement. Preserve the stable
                 // display identity from the pre-Clear snapshot so Compose does not recreate every
                 // row merely because Rust allocated fresh transient ids during the rebuild.

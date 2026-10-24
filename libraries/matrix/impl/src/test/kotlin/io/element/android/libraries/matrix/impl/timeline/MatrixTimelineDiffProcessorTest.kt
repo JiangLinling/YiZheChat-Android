@@ -233,6 +233,11 @@ class MatrixTimelineDiffProcessorTest {
         val boot = observed.filter { it.second.releaseClass == TimelineContentReleaseClass.FOREGROUND_BOOTSTRAP }
         assertThat(boot.size).isEqualTo(if (eligible) 2 else 0)
         assertThat(boot.map { it.first }).containsNoDuplicates()
+        val diagnostic = io.element.android.libraries.matrix.api.timeline.InitialRenderDiagnostics.read()
+        assertThat(diagnostic.unavailable).isNull()
+        assertThat(diagnostic.matrixBootstrap).isEqualTo(boot.size)
+        if (initialAnchorOnly) assertThat(diagnostic.emptyCaptures).isAtLeast(1)
+        if (remapBeforeDispatch) assertThat(diagnostic.samples.last().matchingRawCandidates).isEqualTo(0)
         if (eligible) {
             assertThat(boot.map { it.first }).containsExactlyElementsIn(
                 if (startBeforeViewport) listOf("initial-text-2", "initial-text-1") else listOf("initial-text-3", "initial-text-2")

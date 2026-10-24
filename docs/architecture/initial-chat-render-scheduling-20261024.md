@@ -58,3 +58,20 @@ Matrix 和 KMS timeline 都复用原有 3 个前台 worker 和 1 个历史 worke
 75 真机首次展示仍未通过；本地另复现出先锚点-only、后同 scope 初始 Reset 补齐文字时的空捕获问题。
 修正只让空候选保留 null；一旦捕获非空集合仍不补充，Reset 后相同 eventId 也不能替代原始对象身份。
 本地 189 项相关回归通过不代表该问题已被证明是真机全部根因，下一候选仍须双机验收。
+
+## 76 未通过后的最小只读观察
+
+76 的正常双机首次窗口仍显示迟到历史，因此停止根据局部假设连续修改，先观察实际分支。
+本轮仅补 LC-23 的非持久匿名计数，观察 LC-02/LC-13；不修改授权、密钥、生命周期、排队或显示资格。
+每个原 scope 的观察对象只接收 enum/int/bool；仅真实非空测量窗口可选择当前观察 owner。
+摘要固定最多 16 条不可变状态，保留前 4 条及最近 12 条；计数有界，不存任何原始对象或标识。
+内容包括现有分支已算出的 raw/shell/有限集合数量、raw 引用匹配数、尾部拒绝枚举、初始 Reset 和 Matrix 派发计数。
+Matrix 派发不等于物理 HTTP 已发出；本地摘要与录屏也不宣称精确同钟时延。
+
+正常内测包可主动经 Android 既有 Activity.dump 请求专用参数 `--yizhe-initial-render-metadata`。
+该分支仅写已有系统请求的输出流后返回，不调用 super.dump，不输出原始 prefix/args，不新增权限、组件或外部接口。
+未知参数保留原有 dump 行为；识别到专用选择器但额外参数、非内测包或受保护前台不可见时，只返回 UNAVAILABLE。
+读路径只读已捕获快照，不拿 Processor 锁、不查 Room/Vault、不解析信封、不发 KMS、不改变队列或清状态。
+用户不可见时隐藏摘要，scope/账号退出及 hard authorization invalidation 清理；旧 owner 不能清除新 owner。
+Release 的 debug/profileable/tracing/logcat/崩溃附件限制保持；不生成日志文件、不写磁盘、不发网络或加入 bug report。
+这里没有恢复生产明文日志；若未来要持久诊断，仍须另行遵守 Log Key、脱敏和加密轮换合同。

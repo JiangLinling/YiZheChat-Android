@@ -78,6 +78,8 @@ import io.element.android.services.appnavstate.api.ROOM_OPENED_FROM_NOTIFICATION
 import io.element.android.x.di.AppBindings
 import io.element.android.x.intent.SafeUriHandler
 import io.element.android.x.update.AppUpdateGate
+import java.io.FileDescriptor
+import java.io.PrintWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -143,6 +145,17 @@ open class MainActivity : NodeActivity() {
     private var foregroundCurtain: View? = null
     private var screenCaptureCallback: Activity.ScreenCaptureCallback? = null
     private var screenCaptureCallbackRegistered = false
+
+    override fun dump(prefix: String, fd: FileDescriptor?, writer: PrintWriter, args: Array<String>?) {
+        if (InitialRenderDump.writeIfRequested(
+                args = args,
+                internalPackage = BuildConfig.APPLICATION_ID == "com.yizhe.chat.internal",
+                protectedForegroundVisible = mainContentShown && protectedActivityResumed &&
+                    !foregroundContentHidden.value && startupLockState == LockScreenLockState.Unlocked,
+                writer = writer,
+            )) return
+        super.dump(prefix, fd, writer, args)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         StartupTrace.mark("MainActivity.onCreate")
