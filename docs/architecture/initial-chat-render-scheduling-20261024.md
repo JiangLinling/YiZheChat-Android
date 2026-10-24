@@ -86,3 +86,13 @@ Release 的 debug/profileable/tracing/logcat/崩溃附件限制保持；不生�
 不改 release class、owner、原始对象、授权 revision、全局等待常量、apply 前复核或 finally 释放。
 稳定 raw 的正常认证 CALL_STATE 投影没有重复 offer；HIDDEN 占位不是成功授权，不增加完成缓存。
 上述局部等待修正仍须同一正常候选的双机实际验收；77 观察包未发布，不能以本地通过宣布体验完成。
+
+## 78 未通过后的 Release 日志前置过滤
+
+78 双机首次进入仍未通过，未发布。实际普通制品仍先格式化 app Timber DEBUG/TRACE，再经过 Rust/JNA，
+关闭最终日志输出不会自动省掉这些处理。历史诊断样本仅支持存在这条处理链，不能推算当前首屏节省量。
+最小修正只在 BuildType.RELEASE 的 app Timber 树设置固定 INFO 下限，先于格式化和底层转发过滤；
+DEBUG、NIGHTLY 保持原行为，INFO、WARN、ERROR 继续转发，ASSERT 正确映射为 ERROR。
+原 native SDK 日志偏好继续约束下游，但选择 DEBUG 不会恢复 Release app Timber 的低级别诊断。
+不新增输出、队列、线程、持久化、网络、权限或授权通路；调用 Timber 前已求值的插值和参数也不会被省掉。
+回归覆盖参数格式化、Throwable、tag 消费、直接调用防御和保留级别；首屏收益仍须普通候选的双机验收。

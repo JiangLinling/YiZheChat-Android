@@ -13,6 +13,7 @@ import dev.zacsweers.metro.ContributesBinding
 import io.element.android.libraries.core.data.ByteUnit
 import io.element.android.libraries.core.data.megaBytes
 import io.element.android.libraries.core.meta.BuildMeta
+import io.element.android.libraries.core.meta.BuildType
 import io.element.android.libraries.matrix.api.tracing.LogLevel
 import io.element.android.libraries.matrix.api.tracing.TracingConfiguration
 import io.element.android.libraries.matrix.api.tracing.TracingService
@@ -28,6 +29,9 @@ class RustTracingService(private val buildMeta: BuildMeta) : TracingService {
         return RustTracingTree(
             target = target,
             retrieveFromStackTrace = buildMeta.isDebuggable,
+            // Release app-Timber has a fixed INFO safety floor. Native SDK preferences still
+            // control their existing downstream filter; DEBUG and NIGHTLY keep their old behavior.
+            minimumPriority = if (buildMeta.buildType == BuildType.RELEASE) android.util.Log.INFO else null,
             diagnosticDispatcher = if (buildMeta.isDebuggable) RustDiagnosticLogDispatcher::dispatch else null,
         )
     }

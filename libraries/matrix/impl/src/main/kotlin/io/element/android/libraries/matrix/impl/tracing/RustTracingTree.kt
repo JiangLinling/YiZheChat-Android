@@ -30,6 +30,7 @@ private val fqcnIgnore = listOf(
 internal class RustTracingTree(
     private val target: String,
     private val retrieveFromStackTrace: Boolean,
+    private val minimumPriority: Int? = null,
     private val locationProvider: (() -> LogEventLocation)? = null,
     private val diagnosticDispatcher: ((() -> Unit) -> Unit)? = null,
     private val isMainThread: () -> Boolean = { Thread.currentThread() === Looper.getMainLooper().thread },
@@ -37,7 +38,12 @@ internal class RustTracingTree(
         logEvent(file = location.file, line = location.line, level = level, target = logTarget, message = text)
     },
 ) : Timber.Tree() {
+    // Timber consumes the tag before this check and formats only accepted messages.
+    public override fun isLoggable(tag: String?, priority: Int): Boolean = minimumPriority?.let { priority >= it } ?: true
+
     public override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
+        // Also defend direct callers that bypass Timber.prepareLog; this is not the formatting gate.
+        if (!isLoggable(tag, priority)) return
         // These typed timing events already carry stage/span/operation identities. Capturing
         // a Throwable stack for every start/finish/queue marker makes the measured path slower,
         // especially on older phones. Preserve every log and all exception/warning locations.
@@ -82,7 +88,7 @@ private fun Int.toLogLevel(): LogLevel {
         Log.DEBUG -> LogLevel.DEBUG
         Log.INFO -> LogLevel.INFO
         Log.WARN -> LogLevel.WARN
-        Log.ERROR -> LogLevel.ERROR
+        Log.ERROR, Log.ASSERT -> LogLevel.ERROR
         else -> LogLevel.DEBUG
     }
 }

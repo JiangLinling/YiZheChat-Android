@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-source-20261024-r78-initial-render-prompt-publication",
-  "frozen_utc": "2026-10-24T11:35:09.421115+00:00",
+  "revision": "unified-source-20261024-r79-release-timber-prefilter",
+  "frozen_utc": "2026-10-24T12:31:43.007443+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -6168,8 +6168,8 @@
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/timeline/reply/InReplyToMapper.kt": "9d19ede74faf5da1532d411beadef847e32a5044ef5f91a954568609478a9f0a",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/tracing/LogEventLocation.kt": "68fdd3961c7c39fbd8e62c4d74d662f422bbf4c130de7c8d970a0c05fe85d60b",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/tracing/RustDiagnosticLogDispatcher.kt": "398cc943735f167130ee433d6fe4b8f4d587315ceff0304aa41d08fc10e52566",
-    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/tracing/RustTracingService.kt": "6229368ae1f5cecb943a4df04157b002be0fea31150b0564c2e0a48264252f7f",
-    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/tracing/RustTracingTree.kt": "4acd4bc31bae3cc3d5eea7a11cea36fb52c58fb920e61e3f67165932f7469e56",
+    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/tracing/RustTracingService.kt": "b1c45581c9b8da9e3440c0b75e821365b5fe908069727ca59c89ec06bdd27504",
+    "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/tracing/RustTracingTree.kt": "3fa37b813323783fc2dc0f217144c98ecb3a7059ca8c427f73b75b98ee5e7fea",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/tracing/TraceLogPacksMapping.kt": "9f1eb313682a4ba145ee0cc20e66fdfbde2b048f5cb766096d6487a47d48731a",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/usersearch/UserSearchResultMapper.kt": "5a65e7eff590e6202da6c9726ac57bfa9466522892f3ce3eca0c57d9fc9e050b",
     "libraries/matrix/impl/src/main/kotlin/io/element/android/libraries/matrix/impl/util/CallbackFlow.kt": "340f3686e7ca3430d71f8834f74f1a757b17387018d97703185aecb6cfea2f52",
@@ -6386,6 +6386,8 @@
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/postprocessor/LastForwardIndicatorsPostProcessorTest.kt": "23de94d0834a852a9d8a90125397ee00f5265cce44b0a995290ab14657cc64c4",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/postprocessor/LoadingIndicatorsPostProcessorTest.kt": "73350e0f5f3186b4cd1b44a92158f1d1cc0a25864d9f2aac9849b6a58f53d33b",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/timeline/postprocessor/RoomBeginningPostProcessorTest.kt": "bf812faccb66e501ee250ae78978fbe13ecfa51bb09d70bafd8e4cc8d22ea0e4",
+    "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/tracing/ReleaseLogFilteringTest.kt": "2926bd44a533ea82b197027d833fa030cc140bdb8184bc954737eabaf1e87da5",
+    "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/tracing/ReleaseLoggingGateTest.kt": "9d40c43f1c261f6d96bc533769b4bc6a59f656a1b2a63c820a27623b09c105a1",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/tracing/RustDiagnosticLogDispatcherTest.kt": "3ec3dd58e8a09c32fcbcab5c0750f9938e7b1fe0236c7eb3c51af76ca700c2ad",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/tracing/RustTracingTreeTest.kt": "b920c01d0d81fe7ef24123dfc1b2e4f7106601742201fa75820e1d652f25db3f",
     "libraries/matrix/impl/src/test/kotlin/io/element/android/libraries/matrix/impl/usersearch/UserSearchResultMapperTest.kt": "2443d2fe2aa5b4fae8a6675f3ec016b5aa87181acf9d4cb32279212208e72500",
