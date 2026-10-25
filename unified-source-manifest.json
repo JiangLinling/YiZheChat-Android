@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-source-20261026-r88-r2-startup-restriction",
-  "frozen_utc": "2026-10-25T17:03:15.191547+00:00",
+  "revision": "unified-source-20261026-r89-ci-format-only",
+  "frozen_utc": "2026-10-25T17:50:36.992311+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -8182,7 +8182,7 @@
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/BuiltInDataProtectionPolicyProvider.kt": "d90c311598b1703bb149dd49b7de91865ca538872d9f0c76b736018c019ff607",
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/DefaultAccountHistoryAccessBoundaryProvider.kt": "30ac49db07714d6874e46fbc49bedbd91ce3cd0b0930f9ec3c4dcab8456d8a29",
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/DefaultAccountIdentityResetLifecycleRecorder.kt": "6b12944b94c8efd3f0d2b638f456cb3e333f74c18b4b61fabaffae944dea235a",
-    "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/DefaultAppOperationalStateCoordinator.kt": "55564ca80141e6cab1230474fb17df5130dfc480bcce3b8aa8c116442230bcb2",
+    "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/DefaultAppOperationalStateCoordinator.kt": "d8ae884da3f928b94ac0edd4a76d0831aa6ebfa1078aef9207c8c5e62aab1220",
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/DefaultDataDeletionCoordinator.kt": "297aef8d4847804154c5b3ed4911ee70a8eb8999aca4a1c6d8d92b51ecbc9c72",
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/DefaultDeletedIdentityProjectionCleaner.kt": "17a385aac495e623df6839bf9024c9494ac0d90c0a3c4fdedf8a5aa936e35dcf",
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/DefaultNextInternalCutoverMigration.kt": "bd68038bc1dba6620dd441038c5efb775fe3c7088a394c7c230a7b72174c5546",
@@ -8196,7 +8196,7 @@
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/DurableMediaClosureOwner.kt": "680472c369843f326c5d7bd5708f25fec06f4eab62de4e1708ea217cff72557e",
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/EncryptedAccountReactivationScopeStore.kt": "545c9e3f1bfecb947f5a6d01785e02d6420335cf680f514b1ec56db0b273aaf0",
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/FriendshipRemovalClient.kt": "c0058825a62a5b2831bc832f8a70d0e5e685c2ba943e92551f562bf3587dbf1f",
-    "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/HttpManagementControlService.kt": "b78357d6969f7c79145a90a9fe94e637ee244cfafddb39fe720383b25b083374",
+    "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/HttpManagementControlService.kt": "41e7f0dd2187e865f5bf3e3f8d34c35c16004c9d8642c513878738c289af324a",
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/HttpMapProviderConfigurationService.kt": "4e783c33ec26649e54a0260448efca7ad870a4b48f1b0d0e41f3ff97e4ff8e2a",
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/LegacyPlaintextCleaner.kt": "c09ae7f2d411713d2b6f562f8af24b857dbd14003765737a07b12991b881cb1f",
     "security/data-protection/impl/src/main/kotlin/io/element/android/security/dataprotection/impl/LifecycleClientReceiptAcknowledgement.kt": "85aefe0eb95ca098f9344f64ae698baca768bdad098b14aa4b702e522fe1c14e",
