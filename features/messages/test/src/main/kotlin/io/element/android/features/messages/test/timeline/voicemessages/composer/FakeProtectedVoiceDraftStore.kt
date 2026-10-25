@@ -26,6 +26,8 @@ class FakeProtectedVoiceDraftStore : ProtectedVoiceDraftStore {
     private val mutableRevocationGeneration = MutableStateFlow(0L)
     override val revocationGeneration: StateFlow<Long> = mutableRevocationGeneration.asStateFlow()
 
+    override suspend fun prepareSourceAuthorization() = Unit
+
     fun revokeComposerDrafts() {
         mutableRevocationGeneration.value += 1L
     }

@@ -45,6 +45,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.util.UUID
@@ -67,6 +69,8 @@ data class ProtectedVoiceDraft(
 interface ProtectedVoiceDraftStore {
     /** Monotonic signal for hard authorization transitions affecting composer-owned drafts. */
     val revocationGeneration: StateFlow<Long>
+    /** Prepare the existing signed source observation only; never issues a lease or captures media. */
+    suspend fun prepareSourceAuthorization()
     suspend fun protect(operationId: String, recording: VoiceRecorderState.Finished): ProtectedVoiceDraft
     suspend fun reauthorize(draft: ProtectedVoiceDraft): ProtectedVoiceDraft
     suspend fun discard(draft: ProtectedVoiceDraft): Boolean
@@ -94,6 +98,7 @@ class DefaultProtectedVoiceDraftStore(
     private val vaultId = deriveAccountVaultId(matrixClient.sessionId.value, matrixClient.deviceId.value)
     private val roomIdHash = room.roomId.value.sha256Hex()
     private val activeOperationIds = ConcurrentHashMap.newKeySet<String>()
+    private val sourceAuthorizationMutex = Mutex()
     private val mutableRevocationGeneration = MutableStateFlow(0L)
     override val revocationGeneration: StateFlow<Long> = mutableRevocationGeneration.asStateFlow()
 
@@ -115,6 +120,28 @@ class DefaultProtectedVoiceDraftStore(
                     }
                 }
         }
+    }
+
+    override suspend fun prepareSourceAuthorization() {
+        val sourceIdentity = currentSourceIdentity()
+        val authorizationRevision = protectedPreviewAuthorizationGate.authorizationRevision.value
+        check(dataProtectionPolicyProvider.current().source != DataProtectionPolicySource.FAIL_CLOSED) {
+            "Voice draft access is blocked by policy."
+        }
+        check(protectedPreviewAuthorizationGate.canAttemptPreview()) { "Voice draft access is not currently authorized." }
+        sourceAuthorizationMutex.withLock {
+            resolveVoiceDraftSourceAuthorization(
+                appOperationalStateCoordinator = appOperationalStateCoordinator,
+                accountIdHash = sourceIdentity.accountIdHash,
+                matrixDeviceIdHash = sourceIdentity.matrixDeviceIdHash,
+                contextStillCurrent = {
+                    currentSourceIdentity() == sourceIdentity &&
+                        protectedPreviewAuthorizationGate.canAttemptPreview() &&
+                        protectedPreviewAuthorizationGate.authorizationRevision.value == authorizationRevision
+                },
+            )
+        }
+        // Preparation grants nothing. issueLease samples and checks all mutable inputs again.
     }
 
     override suspend fun protect(
@@ -239,16 +266,18 @@ class DefaultProtectedVoiceDraftStore(
             "Voice draft access is blocked by policy."
         }
         check(protectedPreviewAuthorizationGate.canAttemptPreview()) { "Voice draft access is not currently authorized." }
-        val sourceAuthorization = resolveVoiceDraftSourceAuthorization(
-            appOperationalStateCoordinator = appOperationalStateCoordinator,
-            accountIdHash = sourceIdentity.accountIdHash,
-            matrixDeviceIdHash = sourceIdentity.matrixDeviceIdHash,
-            contextStillCurrent = {
-                currentSourceIdentity() == sourceIdentity &&
-                    protectedPreviewAuthorizationGate.canAttemptPreview() &&
-                    protectedPreviewAuthorizationGate.authorizationRevision.value == authorizationRevision
-            },
-        )
+        val sourceAuthorization = sourceAuthorizationMutex.withLock {
+            resolveVoiceDraftSourceAuthorization(
+                appOperationalStateCoordinator = appOperationalStateCoordinator,
+                accountIdHash = sourceIdentity.accountIdHash,
+                matrixDeviceIdHash = sourceIdentity.matrixDeviceIdHash,
+                contextStillCurrent = {
+                    currentSourceIdentity() == sourceIdentity &&
+                        protectedPreviewAuthorizationGate.canAttemptPreview() &&
+                        protectedPreviewAuthorizationGate.authorizationRevision.value == authorizationRevision
+                },
+            )
+        }
         // Refresh can suspend. Every mutable authority input used by the lease must be sampled again.
         val nowEpochMillis = System.currentTimeMillis()
         val activePolicy = dataProtectionPolicyProvider.current()

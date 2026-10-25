@@ -255,6 +255,24 @@ class DefaultVoiceMessageComposerPresenterTest {
     }
 
     @Test
+    fun `source preparation begins after recording without waiting to start microphone or authorizing a send`() = runTest {
+        val store = FakeProtectedVoiceDraftStore().apply { suspendPreparation = true }
+        val presenter = createDefaultVoiceMessageComposerPresenter(protectedVoiceDraftStore = store)
+        presenter.test {
+            awaitItem().eventSink(VoiceMessageComposerEvent.RecorderEvent(VoiceMessageRecorderEvent.Start))
+            val recording = awaitItem()
+            runCurrent()
+            assertThat(recording.voiceMessageState).isEqualTo(RECORDING_STATE)
+            voiceRecorder.assertCalls(started = 1)
+            assertThat(store.preparationStarted.isCompleted).isTrue()
+            assertThat(store.protectedOperationIds).isEmpty()
+            assertThat(appOperationalStateCoordinator.startedRequests.none { it.trigger == "record_stop" }).isTrue()
+            store.allowPreparation.complete(Unit)
+            testPauseAndDestroy(recording)
+        }
+    }
+
+    @Test
     fun `present - recording state - number of levels is limited`() = runTest {
         val numberOfLevels = 200
         val levels = List(numberOfLevels) { it / numberOfLevels.toFloat() }
@@ -1420,6 +1438,13 @@ class DefaultVoiceMessageComposerPresenterTest {
 private class FakeProtectedVoiceDraftStore : ProtectedVoiceDraftStore {
     private val mutableRevocationGeneration = MutableStateFlow(0L)
     override val revocationGeneration: StateFlow<Long> = mutableRevocationGeneration.asStateFlow()
+    var suspendPreparation = false
+    val preparationStarted = CompletableDeferred<Unit>()
+    val allowPreparation = CompletableDeferred<Unit>()
+    override suspend fun prepareSourceAuthorization() {
+        preparationStarted.complete(Unit)
+        if (suspendPreparation) allowPreparation.await()
+    }
     val protectedOperationIds = mutableListOf<String>()
     val reauthorizedOperationIds = mutableListOf<String>()
     val discardedOperationIds = mutableListOf<String>()

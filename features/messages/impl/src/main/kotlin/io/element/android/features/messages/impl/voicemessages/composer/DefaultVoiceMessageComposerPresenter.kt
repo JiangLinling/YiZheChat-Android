@@ -779,6 +779,18 @@ class DefaultVoiceMessageComposerPresenter(
                 }
                 captureOwnerId = ownerId
                 voiceRecorder.startRecord(captureOperationId)
+                // Start the microphone first. Resolve the same signed source observation while
+                // recording, so a short send can join it instead of starting a second refresh.
+                // No lease or send operation is issued here; the protected handoff rechecks both.
+                launch {
+                    try {
+                        if (draftHandoffOwner.isCurrent(handoff)) protectedVoiceDraftStore.prepareSourceAuthorization()
+                    } catch (failure: CancellationException) {
+                        throw failure
+                    } catch (failure: Exception) {
+                        Timber.w(failure, "Voice source preparation unavailable; handoff will recheck authorization")
+                    }
+                }
             } catch (e: CancellationException) {
                 withContext(NonCancellable) {
                     audioFocus.release(ownerId)

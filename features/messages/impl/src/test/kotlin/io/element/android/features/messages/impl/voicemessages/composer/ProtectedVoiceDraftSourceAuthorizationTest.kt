@@ -39,6 +39,10 @@ import io.element.android.security.securestorage.api.SensitiveFileStore
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -441,7 +445,101 @@ class ProtectedVoiceDraftSourceAuthorizationTest {
     }
 }
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ProtectedVoiceDraftStoreAuthorizationIntegrationTest {
+    @Test
+    fun `recording preparation and released draft join one refresh without issuing an early lease`() = runTest {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val coordinator = RecordingRefreshCoordinator(
+            AppOperationalCoordinatorState.Discovering,
+            integrationSnapshot(sourceIdentity(), System.currentTimeMillis(), AppOperationalStatus.READY),
+            beforeRefreshReturn = { entered.complete(Unit); release.await() },
+        )
+        val fixture = fixture(coordinator)
+        val preparation = launch { fixture.store.prepareSourceAuthorization() }
+        entered.await()
+        val send = async { fixture.issueSuccess() }
+        runCurrent()
+        assertThat(coordinator.refreshRequests).hasSize(1)
+        assertThat(fixture.leaseManager.issueCount).isEqualTo(0)
+        assertThat(send.isCompleted).isFalse()
+        release.complete(Unit)
+        preparation.join()
+        send.await()
+        assertThat(coordinator.refreshRequests).hasSize(1)
+        assertThat(fixture.leaseManager.issueCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `prepared source does not survive current revocation`() = runTest {
+        val now = System.currentTimeMillis()
+        val source = integrationSnapshot(sourceIdentity(), now, AppOperationalStatus.READY)
+        val coordinator = RecordingRefreshCoordinator(AppOperationalCoordinatorState.Discovering, source)
+        val fixture = fixture(coordinator)
+        fixture.store.prepareSourceAuthorization()
+        assertThat(fixture.leaseManager.issueCount).isEqualTo(0)
+        coordinator.publish(integrationSnapshot(sourceIdentity(), now, AppOperationalStatus.TERMINATED))
+        assertThat(fixture.issueFailure()).isInstanceOf(IllegalStateException::class.java)
+        assertThat(fixture.leaseManager.issueCount).isEqualTo(0)
+        assertThat(coordinator.refreshRequests).hasSize(1)
+    }
+
+    @Test
+    fun `prepared source never extends expired observations`() = runTest {
+        val now = System.currentTimeMillis()
+        val source = integrationSnapshot(sourceIdentity(), now, AppOperationalStatus.READY)
+        val coordinator = RecordingRefreshCoordinator(AppOperationalCoordinatorState.Discovering, source)
+        val fixture = fixture(coordinator)
+        fixture.store.prepareSourceAuthorization()
+        coordinator.publish(integrationSnapshot(sourceIdentity(), now - 120_000, AppOperationalStatus.READY))
+        fixture.issueSuccess()
+        assertThat(coordinator.refreshRequests).hasSize(2)
+        assertThat(fixture.leaseManager.lastRequest?.isReadAuthorized?.invoke()).isTrue()
+        assertThat(fixture.leaseManager.lastRequest?.timeToLive?.inWholeMilliseconds).isAtMost(60_000)
+    }
+
+    @Test
+    fun `gate revision changes while waiting for preparation deny lease`() = runTest {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val gate = FakeProtectedPreviewAuthorizationGate()
+        val coordinator = RecordingRefreshCoordinator(
+            AppOperationalCoordinatorState.Discovering,
+            integrationSnapshot(sourceIdentity(), System.currentTimeMillis(), AppOperationalStatus.READY),
+            beforeRefreshReturn = { entered.complete(Unit); release.await() },
+        )
+        val fixture = fixture(coordinator, gate)
+        val preparation = async { runCatching { fixture.store.prepareSourceAuthorization() } }
+        entered.await()
+        val send = async { fixture.issueFailure() }
+        runCurrent()
+        gate.requestAuthorizationRefresh()
+        release.complete(Unit)
+        assertThat(preparation.await().isFailure).isTrue()
+        assertThat(send.await()).isInstanceOf(IllegalStateException::class.java)
+        assertThat(fixture.leaseManager.issueCount).isEqualTo(0)
+    }
+
+    @Test
+    fun `cancelled preparation unlocks later authoritative refresh without granting a lease`() = runTest {
+        var calls = 0
+        val coordinator = RecordingRefreshCoordinator(
+            AppOperationalCoordinatorState.Discovering,
+            integrationSnapshot(sourceIdentity(), System.currentTimeMillis(), AppOperationalStatus.READY),
+            beforeRefreshReturn = { if (++calls == 1) awaitCancellation() },
+        )
+        val fixture = fixture(coordinator)
+        val preparation = launch { fixture.store.prepareSourceAuthorization() }
+        runCurrent()
+        preparation.cancel()
+        preparation.join()
+        assertThat(fixture.leaseManager.issueCount).isEqualTo(0)
+        fixture.issueSuccess()
+        assertThat(coordinator.refreshRequests).hasSize(2)
+        assertThat(fixture.leaseManager.issueCount).isEqualTo(1)
+    }
+
     @Test
     fun `new capture lease remains usable while historical recovery is revoked`() = runTest {
         val now = System.currentTimeMillis()
