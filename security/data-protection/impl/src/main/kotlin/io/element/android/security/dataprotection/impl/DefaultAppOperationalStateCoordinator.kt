@@ -266,7 +266,9 @@ class DefaultAppOperationalStateCoordinator internal constructor(
                 activeIds.chunked(128).flatMap { ids ->
                     val batch = if (snapshot.verifiedSignedJson != null) {
                         managementControlService.lifecycleOperationsForSnapshot(snapshot, ids)
-                    } else null
+                    } else {
+                        null
+                    }
                     if (batch != null) {
                         check(batch.size == ids.size && batch.map { it.operationId }.toSet() == ids.toSet())
                         batch.map { it.operationId to it }

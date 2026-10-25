@@ -808,8 +808,16 @@ class HttpManagementControlService(
             throw failure
         }
         val payload = json.parseToJsonElement(response.decodeToString()).jsonObject
-        decodeOperationalRecoveryBatch(json, payload, snapshot, operationIds, nonce,
-            sha256Hex(signatureVerifier.canonicalJson(proof)), System.currentTimeMillis(), signatureVerifier::verifyDetached)
+        decodeOperationalRecoveryBatch(
+            json,
+            payload,
+            snapshot,
+            operationIds,
+            nonce,
+            sha256Hex(signatureVerifier.canonicalJson(proof)),
+            System.currentTimeMillis(),
+            signatureVerifier::verifyDetached,
+        )
             .map { it.toApi() }
     }
 
@@ -2522,7 +2530,9 @@ class HttpManagementControlService(
                 val source = response.body.source()
                 check(!source.request(OPERATION_SNAPSHOT_MAX_RESPONSE_BYTES.toLong() + 1)) { "Operation recovery response is too large." }
                 source.readByteArray()
-            } else response.body.bytes()
+            } else {
+                response.body.bytes()
+            }
             if (!response.isSuccessful) {
                 if (request.url.encodedPath == ONBOARDING_ACTIVATE_PATH) {
                     onboardingActivationError(response.code, safeServerDetail(bytes))?.let { throw it }
