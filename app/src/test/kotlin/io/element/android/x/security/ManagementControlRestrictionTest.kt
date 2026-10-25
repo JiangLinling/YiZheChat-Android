@@ -8,6 +8,7 @@
 package io.element.android.x.security
 
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.sessionstorage.test.InMemorySessionStore
 import io.element.android.libraries.sessionstorage.test.aSessionData
@@ -65,9 +66,10 @@ class ManagementControlRestrictionTest {
         fixture.report = ManagementSyncReport(ManagementSyncStatus.SYNCHRONIZED, acceptedPolicyVersion = 13,
             deviceSecurityState = io.element.android.security.dataprotection.api.ManagedDeviceSecurityState.READY,
             errorCode = "REGISTRATION_PENDING")
-        val coordinator = fixture.coordinator(backgroundScope)
+        val coordinator = fixture.coordinator(backgroundScope, testCoroutineDispatchers())
         val readiness = coordinator.awaitStartupReadiness(System.currentTimeMillis() + 10_000)
-        assertThat(readiness.state).isEqualTo(StartupSecurityReadinessState.READY_FOR_LC01)
+        assertWithMessage("startup reason=%s", readiness.reasonCode).that(readiness.state)
+            .isEqualTo(StartupSecurityReadinessState.READY_FOR_LC01)
         assertThat(readiness.reasonCode).isEqualTo("REGISTRATION_PENDING")
         assertThat(coordinator.localEntryRestriction.value).isNull()
         assertThat(fixture.sessions.getAllSessions()).hasSize(1)
@@ -379,6 +381,8 @@ class ManagementControlRestrictionTest {
             assertThat(coordinator.localEntryRestriction.value).isEqualTo("DEVICE_ADMINISTRATIVELY_LOCKED")
         }
         fixture.report = ManagementSyncReport(ManagementSyncStatus.RETRY_REQUIRED)
+        // A retry result alone is not evidence of a network transition.
+        coordinator.onNetworkUnavailable()
         coordinator.refreshSecurityAccess()
         assertThat(coordinator.entryIsOffline.value).isTrue()
         assertThat(coordinator.localEntryRestriction.value).isEqualTo("DEVICE_ADMINISTRATIVELY_LOCKED")
@@ -406,6 +410,16 @@ class ManagementControlRestrictionTest {
         coordinator.refreshSecurityAccess()
         assertThat(coordinator.localEntryRestriction.value).isEqualTo("SECURITY_POLICY_REJECTED")
         assertThat(fixture.trust.current().allowsLocalVaultAccess).isFalse()
+    }
+
+    @Test
+    fun `unexpired transport failure keeps its precise reason without claiming an expired grant`() = runTest {
+        val fixture = Fixture()
+        coEvery { fixture.service.isOfflineDeadlineExceeded() } returns false
+        fixture.report = ManagementSyncReport(ManagementSyncStatus.RETRY_REQUIRED, errorCode = "CONTROL_DNS_UNAVAILABLE")
+        val coordinator = fixture.coordinator(backgroundScope)
+        coordinator.refreshSecurityAccess()
+        assertThat(coordinator.localEntryRestriction.value).isEqualTo("CONTROL_DNS_UNAVAILABLE")
     }
 
     private class Fixture {

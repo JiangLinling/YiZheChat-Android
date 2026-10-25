@@ -485,7 +485,7 @@ class ManagementControlCoordinator(
         } else if (sessionStore.getAllSessions().isNotEmpty() && managementControlService.offlineEntryStatus() == null) {
             // A transport retry cannot replace a known administrative/security restriction.
             mutableEntryRestriction.update { current ->
-                current ?: retryEntryRestriction(syncReport.errorCode)
+                current ?: if (offlineDeadlineExceeded) "OFFLINE_ENTRY_EXPIRED" else retryEntryRestriction(syncReport.errorCode)
             }
             // Offline expiry preserves the account, Vault and drafts. The UI gate hides protected projections.
         }
