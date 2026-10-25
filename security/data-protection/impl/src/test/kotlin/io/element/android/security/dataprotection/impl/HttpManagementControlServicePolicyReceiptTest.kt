@@ -82,7 +82,8 @@ class HttpManagementControlServicePolicyReceiptTest {
                 assertThat(result.exceptionOrNull()?.message).isEqualTo("QA_CHALLENGE_PROBE")
             }
             assertThat(f.enrollmentPaths).containsExactly(
-                "/v1/device/challenge/$INSTALLATION_ID", "/v1/device/challenge/$INSTALLATION_ID",
+                "/v1/device/challenge/$INSTALLATION_ID",
+                "/v1/device/challenge/$INSTALLATION_ID",
             ).inOrder()
             assertThat(f.enrollmentChallenges.map { it.decodeToString() }).containsExactly("fresh-1", "fresh-2").inOrder()
             assertThat(f.currentTrustState()).isEqualTo(DeviceTrustState.PENDING)
@@ -103,8 +104,15 @@ class HttpManagementControlServicePolicyReceiptTest {
 
     @Test
     fun `explicit retry does not re-enroll an admitted or security restricted device`() = runTest {
-        for (state in listOf(DeviceTrustState.TRUSTED, DeviceTrustState.MANAGED,
-                             DeviceTrustState.REVOKED, DeviceTrustState.LOST, DeviceTrustState.INTEGRITY_WARNING)) {
+        for (
+            state in listOf(
+                DeviceTrustState.TRUSTED,
+                DeviceTrustState.MANAGED,
+                DeviceTrustState.REVOKED,
+                DeviceTrustState.LOST,
+                DeviceTrustState.INTEGRITY_WARNING,
+            )
+        ) {
             withFixture { f ->
                 f.probeEnrollment(state)
                 val result = runCatching { f.service.recheckPendingDeviceEnrollment() }
