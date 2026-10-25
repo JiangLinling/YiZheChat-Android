@@ -24,6 +24,19 @@ import javax.net.ssl.SSLHandshakeException
 
 class HttpManagementControlServiceTest {
     @Test
+    fun `registration recovery distinguishes pending from an actual authorization rejection`() {
+        assertThat(onboardingActivationError(503, "REGISTRATION_PENDING"))
+            .isInstanceOf(io.element.android.security.dataprotection.api.RegistrationPending::class.java)
+        assertThat(onboardingActivationError(409, "registration is already being processed"))
+            .isInstanceOf(io.element.android.security.dataprotection.api.RegistrationPending::class.java)
+        assertThat(onboardingActivationError(403, "REGISTRATION_REJECTED"))
+            .isInstanceOf(io.element.android.security.dataprotection.api.RegistrationRejected::class.java)
+        assertThat(onboardingActivationError(403, "REGISTRATION_PENDING")).isNull()
+        assertThat(onboardingActivationError(503, "REGISTRATION_REJECTED")).isNull()
+        assertThat(onboardingActivationError(503, "unrelated service error")).isNull()
+    }
+
+    @Test
     fun `sync response treats omitted policy as absent while signed trust remains required`() {
         val json = Json { ignoreUnknownKeys = false }
         val requiredFields = """

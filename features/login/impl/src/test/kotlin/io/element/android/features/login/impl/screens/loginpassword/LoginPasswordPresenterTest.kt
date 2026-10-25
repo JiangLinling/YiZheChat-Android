@@ -364,6 +364,8 @@ class LoginPasswordPresenterTest {
     @Test
     fun `network generic unauthorized agreement change and cancellation never refresh registration`() = runTest {
         listOf(java.io.IOException("network unavailable"), IllegalStateException("HTTP 401"),
+            io.element.android.security.dataprotection.api.RegistrationPending(),
+            io.element.android.security.dataprotection.api.RegistrationRejected(),
             io.element.android.security.dataprotection.api.RegistrationAgreementChanged(),
             kotlinx.coroutines.CancellationException("cancelled"),
         ).forEach { failure ->

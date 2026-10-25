@@ -40,6 +40,25 @@ import org.robolectric.annotation.Config
 @RunWith(AndroidJUnit4::class)
 class LoginPasswordViewTest {
     @Test
+    fun `interrupted registration shows actionable feedback without claiming account completion`() = runAndroidComposeUiTest {
+        setLoginPasswordView(aLoginPasswordState(loginAction = AsyncData.Failure(
+            io.element.android.security.dataprotection.api.RegistrationPending(),
+        )))
+        val resources = activity!!.resources
+        onNodeWithText(resources.getString(R.string.screen_registration_pending)).assertExists()
+    }
+
+    @Test
+    fun `rejected registration does not ask the user to repeat an unavailable operation`() = runAndroidComposeUiTest {
+        setLoginPasswordView(aLoginPasswordState(loginAction = AsyncData.Failure(
+            io.element.android.security.dataprotection.api.RegistrationRejected(),
+        )))
+        val resources = activity!!.resources
+        onNodeWithText(resources.getString(R.string.screen_registration_rejected)).assertExists()
+        onNodeWithText(resources.getString(R.string.screen_registration_pending)).assertDoesNotExist()
+    }
+
+    @Test
     fun `shows concise branding and security reassurance`() = runAndroidComposeUiTest {
         setLoginPasswordView(aLoginPasswordState())
 
@@ -228,6 +247,7 @@ class LoginPasswordViewTest {
                 invitationFormState = InvitationRegistrationFormState.Default.copy(
                     displayName = "天军",
                     preferredStem = "tianjun",
+                    agreementAccepted = true,
                 ),
                 invitationAction = AsyncData.Failure(IllegalStateException("expired invitation")),
             )

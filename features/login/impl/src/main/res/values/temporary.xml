@@ -43,4 +43,6 @@
     <string name="screen_registration_agreement_required">Please read the agreement and tick the box before registering.</string>
     <string name="screen_registration_agreement_changed">The agreement has changed. Update the app, read the current agreement and confirm your choice before registering. Your existing account is unaffected.</string>
     <string name="screen_registration_verification_expired">Registration verification expired. Check the original invitation code and try again; your entries are kept.</string>
+    <string name="screen_registration_pending">Registration is not complete. Wait a moment and try again using the same invitation and details.</string>
+    <string name="screen_registration_rejected">Registration cannot continue because the invitation or room permissions changed. Check with your inviter.</string>
 </resources>

@@ -2525,13 +2525,7 @@ class HttpManagementControlService(
             } else response.body.bytes()
             if (!response.isSuccessful) {
                 if (request.url.encodedPath == ONBOARDING_ACTIVATE_PATH) {
-                    when (safeServerDetail(bytes)) {
-                        "activation session has expired" -> if (response.code == 401) {
-                            throw io.element.android.security.dataprotection.api.RegistrationActivationExpired()
-                        }
-                        "REGISTRATION_AGREEMENT_REQUIRED" -> throw io.element.android.security.dataprotection.api.RegistrationAgreementRequired()
-                        "REGISTRATION_AGREEMENT_CHANGED" -> throw io.element.android.security.dataprotection.api.RegistrationAgreementChanged()
-                    }
+                    onboardingActivationError(response.code, safeServerDetail(bytes))?.let { throw it }
                 }
                 if (request.url.encodedPath.endsWith(ACCOUNT_DELETION_PREPARE_PATH) &&
                     isPermanentDeletionSubmissionBlocked(response.code, bytes)
@@ -3457,6 +3451,17 @@ internal fun aggregateMatrixIdentityState(statuses: List<SessionVerifiedStatus>)
     statuses.all { it is SessionVerifiedStatus.Verified } -> "VERIFIED"
     statuses.any { it is SessionVerifiedStatus.NotVerified } -> "UNVERIFIED"
     else -> "UNKNOWN"
+}
+
+internal fun onboardingActivationError(status: Int, detail: String?): Throwable? = when {
+    status == 401 && detail == "activation session has expired" -> io.element.android.security.dataprotection.api.RegistrationActivationExpired()
+    detail == "REGISTRATION_AGREEMENT_REQUIRED" -> io.element.android.security.dataprotection.api.RegistrationAgreementRequired()
+    detail == "REGISTRATION_AGREEMENT_CHANGED" -> io.element.android.security.dataprotection.api.RegistrationAgreementChanged()
+    status == 503 && detail in setOf("REGISTRATION_PENDING", "account creation is temporarily unavailable") ||
+        status == 409 && detail == "registration is already being processed" -> io.element.android.security.dataprotection.api.RegistrationPending()
+    status == 403 && detail == "REGISTRATION_REJECTED" ||
+        status == 409 && detail == "invitation is no longer available" -> io.element.android.security.dataprotection.api.RegistrationRejected()
+    else -> null
 }
 
 internal fun parseRetryAfterMillis(value: String?, nowEpochMillis: Long = System.currentTimeMillis()): Long? {

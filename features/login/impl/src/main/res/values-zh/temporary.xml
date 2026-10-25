@@ -37,4 +37,6 @@
     <string name="screen_login_register_action">注册并登录</string>
     <string name="screen_login_error_security_sync">设备安全状态同步失败，请重试。错误码：%1$s</string>
     <string name="screen_registration_verification_expired">注册验证已过期，请重新核验原邀请码后重试；已填资料会保留。</string>
+    <string name="screen_registration_pending">注册暂未完成，请稍后用原邀请码和原资料重试。</string>
+    <string name="screen_registration_rejected">邀请或房间权限已改变，请联系邀请人确认后再注册。</string>
 </resources>
