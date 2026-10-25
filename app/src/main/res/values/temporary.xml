@@ -98,7 +98,7 @@
     <string name="screen_entry_compatibility_policy_title">Device compatibility is restricted</string>
     <string name="screen_entry_compatibility_policy_description">Your organization does not allow automatic compatibility access. Contact your administrator to check the device policy.</string>
     <string name="screen_entry_compatibility_evidence_title">Device security check failed</string>
-    <string name="screen_entry_compatibility_evidence_description">The device security evidence did not pass verification. Update the app and check the system integrity, then try again.</string>
+    <string name="screen_entry_compatibility_evidence_description">Device verification failed. Update the app and try again.</string>
     <string name="screen_entry_compatibility_binding_title">Another device is active</string>
     <string name="screen_entry_compatibility_binding_description">Your previous installation still holds device authorization. Continue here to transfer it to this installation and disable access on the old one. You can then recover your chats or explicitly reset your encrypted identity.</string>
     <string name="a11y_notification_window_left">Hold and drag the lower left handle to resize</string>

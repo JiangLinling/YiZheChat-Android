@@ -594,6 +594,8 @@ private fun LoginErrorDialog(error: Throwable, onDismiss: () -> Unit) {
         stringResource(R.string.screen_registration_agreement_required)
     } else if (error is io.element.android.security.dataprotection.api.RegistrationAgreementChanged) {
         stringResource(R.string.screen_registration_agreement_changed)
+    } else if (error is io.element.android.security.dataprotection.api.RegistrationActivationExpired) {
+        stringResource(R.string.screen_registration_verification_expired)
     } else if (error is LoginSecuritySynchronizationException) {
         stringResource(R.string.screen_login_error_security_sync, error.errorCode)
     } else {

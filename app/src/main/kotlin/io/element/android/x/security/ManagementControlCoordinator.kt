@@ -232,9 +232,10 @@ class ManagementControlCoordinator(
                         nextDelayMillis = heartbeat.nextHeartbeatDelayMillis
                     }
                     ManagementHeartbeatStatus.RETRY_REQUIRED -> {
-                        mutableEntryIsOffline.value = true
                         if (managementControlService.offlineEntryStatus() == null) {
-                            mutableEntryRestriction.update { current -> current ?: "OFFLINE_ENTRY_EXPIRED" }
+                            mutableEntryRestriction.update { current ->
+                                current ?: retryEntryRestriction("CONTROL_PLANE_UNAVAILABLE")
+                            }
                         }
                         nextDelayMillis = heartbeat.nextHeartbeatDelayMillis
                     }
@@ -475,7 +476,7 @@ class ManagementControlCoordinator(
         val offlineDeadlineExceeded = !completingRevokedCommand &&
             syncReport.status != ManagementSyncStatus.SYNCHRONIZED &&
             managementControlService.isOfflineDeadlineExceeded()
-        mutableEntryIsOffline.value = syncReport.status == ManagementSyncStatus.RETRY_REQUIRED
+        if (syncReport.status == ManagementSyncStatus.SYNCHRONIZED) mutableEntryIsOffline.value = false
         if (syncReport.status == ManagementSyncStatus.SECURITY_REJECTED) {
             mutableEntryRestriction.value = syncReport.toStartupSecurityReadiness().reasonCode ?: "SECURITY_POLICY_REJECTED"
             restrictLocalAccess()
@@ -483,7 +484,9 @@ class ManagementControlCoordinator(
             mutableEntryRestriction.value = null
         } else if (sessionStore.getAllSessions().isNotEmpty() && managementControlService.offlineEntryStatus() == null) {
             // A transport retry cannot replace a known administrative/security restriction.
-            mutableEntryRestriction.update { current -> current ?: "OFFLINE_ENTRY_EXPIRED" }
+            mutableEntryRestriction.update { current ->
+                current ?: retryEntryRestriction(syncReport.errorCode)
+            }
             // Offline expiry preserves the account, Vault and drafts. The UI gate hides protected projections.
         }
         val commands = if (completingRevokedCommand) {
@@ -914,6 +917,12 @@ class ManagementControlCoordinator(
  * Converts implementation exceptions into stable, user-safe startup reasons. Exception messages,
  * URLs, identifiers and response bodies must never cross this projection boundary.
  */
+internal fun retryEntryRestriction(failureReason: String?): String = when {
+    failureReason in setOf("CONTROL_DNS_UNAVAILABLE", "CONTROL_CONNECTION_FAILED", "CONTROL_REQUEST_TIMEOUT", "CONTROL_NETWORK_IO",
+        "CONTROL_SERVER_UNAVAILABLE", "CONTROL_RATE_LIMITED", "CONTROL_PLANE_UNAVAILABLE") -> checkNotNull(failureReason)
+    else -> "CONTROL_PLANE_UNAVAILABLE"
+}
+
 internal fun startupFailureReasonCode(failure: Throwable): String {
     val chain = generateSequence(failure) { it.cause }.take(MAX_STARTUP_FAILURE_CAUSES).toList()
     fun hasType(vararg typeNames: String): Boolean = chain.any { throwable ->

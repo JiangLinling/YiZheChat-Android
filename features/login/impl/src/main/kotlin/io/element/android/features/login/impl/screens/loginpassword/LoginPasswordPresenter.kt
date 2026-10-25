@@ -243,17 +243,7 @@ class LoginPasswordPresenter(
                 appOperationalStateCoordinator.perform(
                     lifecycleOperationRequest(FullAppLifecycleId.LC_05, "registration_submit")
                 ) {
-                    val activation = managementControlService.activateOnboardingInvitation(
-                        activationSession = invitation.activationSession,
-                        displayName = formState.displayName,
-                        preferredStem = formState.preferredStem,
-                        password = formState.password,
-                        idempotencyKey = formState.idempotencyKey,
-                        consent = io.element.android.security.dataprotection.api.RegistrationConsent(
-                            io.element.android.security.dataprotection.api.RegistrationAgreement.VERSION,
-                            io.element.android.security.dataprotection.api.RegistrationAgreement.SHA256,
-                        ),
-                    )
+                    val activation = activateInvitationRegistration(formState, invitation)
                     usernameSuggestion.value = AsyncData.Success(
                         OnboardingUsernameSuggestion(
                             displayName = activation.displayName,
@@ -270,6 +260,35 @@ class LoginPasswordPresenter(
             }.onFailure { failure ->
                 loginAction.value = AsyncData.Failure(failure)
             }
+        }
+    }
+
+    internal suspend fun activateInvitationRegistration(
+        formState: InvitationRegistrationFormState,
+        invitation: VerifiedOnboardingInvitation,
+    ): io.element.android.security.dataprotection.api.OnboardingActivation {
+        if (!formState.agreementAccepted) throw io.element.android.security.dataprotection.api.RegistrationAgreementRequired()
+        val consent = io.element.android.security.dataprotection.api.RegistrationConsent(
+            io.element.android.security.dataprotection.api.RegistrationAgreement.VERSION,
+            io.element.android.security.dataprotection.api.RegistrationAgreement.SHA256,
+        )
+        suspend fun activate(session: String) = managementControlService.activateOnboardingInvitation(
+            activationSession = session, displayName = formState.displayName, preferredStem = formState.preferredStem,
+            password = formState.password, idempotencyKey = formState.idempotencyKey, consent = consent,
+        )
+        return try {
+            activate(invitation.activationSession)
+        } catch (expired: io.element.android.security.dataprotection.api.RegistrationActivationExpired) {
+            // Only this exact server rejection permits one refresh of the original invitation.
+            // No retry on generic 401, transport failure, agreement change or cancellation.
+            if (invitation.installationId == null) throw expired
+            val refreshed = managementControlService.verifyOnboardingInvitation(
+                publicId = formState.publicId, code = if (formState.publicId == null) formState.inviteCode else null,
+            )
+            if (refreshed.installationId != invitation.installationId || refreshed.inviteCode != invitation.inviteCode ||
+                refreshed.inviterUserId != invitation.inviterUserId
+            ) throw expired
+            activate(refreshed.activationSession)
         }
     }
 

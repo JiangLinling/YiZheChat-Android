@@ -1,8 +1,9 @@
 <resources>
-    <string name="screen_registration_agreement_accept">我已阅读并同意《内测用户协议与个人信息处理说明》，并确认已满十八周岁。</string>
+    <string name="screen_registration_agreement_accept">我已阅读并同意《%1$s》，并确认已满十八周岁。</string>
     <string name="screen_registration_agreement_read">阅读完整协议</string>
     <string name="screen_registration_agreement_title">内测用户协议与个人信息处理说明</string>
     <string name="screen_registration_agreement_return">返回注册</string>
     <string name="screen_registration_agreement_required">请先阅读并勾选同意《内测用户协议与个人信息处理说明》，再注册。</string>
     <string name="screen_registration_agreement_changed">协议版本已更新。请更新 App，阅读当前协议并重新确认后注册；已有账号不受影响。</string>
+    <string name="screen_registration_verification_expired">注册验证已过期，请重新核验原邀请码后重试；已填资料会保留。</string>
 </resources>

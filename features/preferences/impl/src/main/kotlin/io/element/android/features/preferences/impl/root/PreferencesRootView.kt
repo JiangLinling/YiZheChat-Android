@@ -133,7 +133,6 @@ fun PreferencesRootView(
             trailingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ChevronRight())),
             onClick = onOpenMessageFavourites,
         )
-        HorizontalDivider()
         if (state.isMultiAccountEnabled || state.accountManagementUrl != null || state.showLinkNewDevice || state.showBlockedUsersItem) {
             SettingsNavigationRow(
                 title = stringResource(R.string.screen_settings_accounts_devices),
@@ -263,7 +262,6 @@ private fun ColumnScope.GeneralSection(
         onClick = onOpenAdvancedSettings,
     )
     if (canReportBug) {
-        HorizontalDivider()
         ListItem(
             headlineContent = { Text(stringResource(R.string.screen_preferences_problem_feedback)) },
             leadingContent = ListItemContent.Icon(IconSource.Vector(CompoundIcons.ChatProblem())),

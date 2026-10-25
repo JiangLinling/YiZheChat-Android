@@ -17,6 +17,26 @@ import org.junit.Test
 
 class AppUpdateGatePolicyTest {
     @Test
+    fun `a rejected admission permits only a verified mandatory update and never account content`() {
+        assertThat(releaseAdmissionDecision(false, Result.success(release(mandatory = true))))
+            .isEqualTo(ReleaseAdmissionDecision.UPDATE_ONLY)
+        listOf(null, Result.success(null), Result.success(release(mandatory = false)), Result.failure<ManagedAppRelease?>(SecurityException()))
+            .forEach { result ->
+                assertThat(releaseAdmissionDecision(false, result)).isEqualTo(ReleaseAdmissionDecision.KEEP_RESTRICTED)
+            }
+        assertThat(releaseAdmissionDecision(true, Result.success(null))).isEqualTo(ReleaseAdmissionDecision.CONTENT_ALLOWED)
+        assertThat(releaseAdmissionDecision(true, Result.failure(SecurityException()))).isEqualTo(ReleaseAdmissionDecision.KEEP_RESTRICTED)
+    }
+
+    @Test
+    fun `release retries do not trigger pending device evidence re-enrollment`() {
+        assertThat(shouldRefreshPendingEvidence("COMPATIBILITY_EVIDENCE_REJECTED")).isTrue()
+        assertThat(shouldRefreshPendingEvidence("DEVICE_TRUST_NOT_READY")).isTrue()
+        listOf("RELEASE_MANIFEST_UNAVAILABLE", "CONTROL_SERVER_UNAVAILABLE", "CONTROL_REQUEST_TIMEOUT", "DEVICE_REVOKED")
+            .forEach { assertThat(shouldRefreshPendingEvidence(it)).isFalse() }
+    }
+
+    @Test
     fun `binding conflict exposes explicit handover while other security failures remain blocked`() {
         val conflict = startupGateAccessibilityContract("COMPATIBILITY_BINDING_CONFLICT")
         assertThat(conflict.primaryAction).isEqualTo(StartupGatePrimaryAction.TRANSFER_MANAGED_AUTHORIZATION)

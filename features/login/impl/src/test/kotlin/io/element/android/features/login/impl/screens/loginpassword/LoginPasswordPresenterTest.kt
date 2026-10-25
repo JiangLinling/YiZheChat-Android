@@ -331,6 +331,101 @@ class LoginPasswordPresenterTest {
         }
     }
 
+    @Test
+    fun `only explicit expiry refreshes original invitation once with unchanged input consent and attempt`() = runTest {
+        val service = mockk<ManagementControlService>()
+        val original = registrationInvitation()
+        val refreshed = original.copy(activationSession = "refreshed-original-session")
+        val form = registrationForm()
+        val activation = mockk<io.element.android.security.dataprotection.api.OnboardingActivation>()
+        val sessions = mutableListOf<String>()
+        coEvery { service.activateOnboardingInvitation(any(), any(), any(), any(), any(), any()) } coAnswers {
+            sessions += firstArg<String>()
+            assertThat(arg<String>(1)).isEqualTo(form.displayName)
+            assertThat(arg<String>(2)).isEqualTo(form.preferredStem)
+            assertThat(arg<String>(3)).isEqualTo(form.password)
+            assertThat(arg<String>(4)).isEqualTo(form.idempotencyKey)
+            assertThat(arg<io.element.android.security.dataprotection.api.RegistrationConsent>(5)).isEqualTo(
+                io.element.android.security.dataprotection.api.RegistrationConsent(
+                    io.element.android.security.dataprotection.api.RegistrationAgreement.VERSION,
+                    io.element.android.security.dataprotection.api.RegistrationAgreement.SHA256,
+                )
+            )
+            if (sessions.size == 1) throw io.element.android.security.dataprotection.api.RegistrationActivationExpired()
+            activation
+        }
+        coEvery { service.verifyOnboardingInvitation(null, form.inviteCode) } returns refreshed
+        val presenter = createLoginPasswordPresenter(managementControlService = service)
+        assertThat(presenter.activateInvitationRegistration(form, original)).isSameInstanceAs(activation)
+        assertThat(sessions).containsExactly(original.activationSession, refreshed.activationSession).inOrder()
+        io.mockk.coVerify(exactly = 1) { service.verifyOnboardingInvitation(null, form.inviteCode) }
+    }
+
+    @Test
+    fun `network generic unauthorized agreement change and cancellation never refresh registration`() = runTest {
+        listOf(java.io.IOException("network unavailable"), IllegalStateException("HTTP 401"),
+            io.element.android.security.dataprotection.api.RegistrationAgreementChanged(),
+            kotlinx.coroutines.CancellationException("cancelled"),
+        ).forEach { failure ->
+            val service = mockk<ManagementControlService>()
+            coEvery { service.activateOnboardingInvitation(any(), any(), any(), any(), any(), any()) } throws failure
+            val presenter = createLoginPasswordPresenter(managementControlService = service)
+            assertThat(runCatching { presenter.activateInvitationRegistration(registrationForm(), registrationInvitation()) }
+                .exceptionOrNull()).isSameInstanceAs(failure)
+            io.mockk.coVerify(exactly = 1) { service.activateOnboardingInvitation(any(), any(), any(), any(), any(), any()) }
+            io.mockk.coVerify(exactly = 0) { service.verifyOnboardingInvitation(any(), any()) }
+        }
+    }
+
+    @Test
+    fun `refreshed installation invitation or inviter mismatch never submits another activation`() = runTest {
+        val original = registrationInvitation()
+        listOf(original.copy(installationId = "installation-another-0001"), original.copy(inviteCode = "654321"),
+            original.copy(inviterUserId = "@another:yizhesy.cn"),
+        ).forEach { refreshed ->
+            val service = mockk<ManagementControlService>()
+            coEvery { service.activateOnboardingInvitation(any(), any(), any(), any(), any(), any()) } throws
+                io.element.android.security.dataprotection.api.RegistrationActivationExpired()
+            coEvery { service.verifyOnboardingInvitation(any(), any()) } returns refreshed
+            val presenter = createLoginPasswordPresenter(managementControlService = service)
+            assertThat(runCatching { presenter.activateInvitationRegistration(registrationForm(), original) }.isFailure).isTrue()
+            io.mockk.coVerify(exactly = 1) { service.activateOnboardingInvitation(any(), any(), any(), any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun `a second explicit expiry is returned without another refresh loop`() = runTest {
+        val service = mockk<ManagementControlService>()
+        coEvery { service.activateOnboardingInvitation(any(), any(), any(), any(), any(), any()) } throws
+            io.element.android.security.dataprotection.api.RegistrationActivationExpired()
+        coEvery { service.verifyOnboardingInvitation(any(), any()) } returns registrationInvitation().copy(activationSession = "fresh-session")
+        val presenter = createLoginPasswordPresenter(managementControlService = service)
+        assertThat(runCatching { presenter.activateInvitationRegistration(registrationForm(), registrationInvitation()) }.isFailure).isTrue()
+        io.mockk.coVerify(exactly = 2) { service.activateOnboardingInvitation(any(), any(), any(), any(), any(), any()) }
+        io.mockk.coVerify(exactly = 1) { service.verifyOnboardingInvitation(any(), any()) }
+    }
+
+    @Test
+    fun `registration without agreement never starts activation or refresh`() = runTest {
+        val service = mockk<ManagementControlService>()
+        val presenter = createLoginPasswordPresenter(managementControlService = service)
+        assertThat(runCatching {
+            presenter.activateInvitationRegistration(registrationForm().copy(agreementAccepted = false), registrationInvitation())
+        }.isFailure).isTrue()
+        io.mockk.coVerify(exactly = 0) { service.activateOnboardingInvitation(any(), any(), any(), any(), any(), any()) }
+        io.mockk.coVerify(exactly = 0) { service.verifyOnboardingInvitation(any(), any()) }
+    }
+
+    private fun registrationInvitation() = io.element.android.security.dataprotection.api.VerifiedOnboardingInvitation(
+        activationSession = "original-session", inviteCode = "123456", inviterUserId = "@qa:yizhesy.cn",
+        inviterDisplayName = "QA", expiresAtEpochMillis = Long.MAX_VALUE, installationId = "installation-original-0001",
+    )
+
+    private fun registrationForm() = InvitationRegistrationFormState.Default.copy(
+        inviteCode = "123456", displayName = "QA", preferredStem = "qa", password = "Test-password-2026",
+        passwordConfirmation = "Test-password-2026", idempotencyKey = "original-registration-attempt-0001", agreementAccepted = true,
+    )
+
     private fun createLoginPasswordPresenter(
         initialLogin: String = "",
         authenticationService: FakeMatrixAuthenticationService = FakeMatrixAuthenticationService(),

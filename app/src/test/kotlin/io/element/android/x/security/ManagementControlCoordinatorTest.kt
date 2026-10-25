@@ -44,6 +44,14 @@ import javax.net.ssl.SSLHandshakeException
 
 class ManagementControlCoordinatorTest {
     @Test
+    fun `a service retry does not assert that the device network is offline`() {
+        assertThat(retryEntryRestriction("CONTROL_SERVER_UNAVAILABLE")).isEqualTo("CONTROL_SERVER_UNAVAILABLE")
+        assertThat(retryEntryRestriction("CONTROL_REQUEST_TIMEOUT")).isEqualTo("CONTROL_REQUEST_TIMEOUT")
+        assertThat(retryEntryRestriction(null)).isEqualTo("CONTROL_PLANE_UNAVAILABLE")
+        assertThat(retryEntryRestriction("untrusted response text")).isEqualTo("CONTROL_PLANE_UNAVAILABLE")
+    }
+
+    @Test
     fun `only a signed session scoped handover can yield the global cleanup gate`() {
         val handover = command(ManagementCommandType.CLEAR_ACCOUNT).copy(
             reasonCode = "ACCOUNT_MOBILE_SUPERSEDED", targetMatrixDeviceIdHash = "b".repeat(64), mobileGeneration = 2,

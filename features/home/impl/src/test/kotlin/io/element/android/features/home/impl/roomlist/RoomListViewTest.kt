@@ -162,7 +162,7 @@ class RoomListViewTest {
     }
 
     @Test
-    fun `clicking on close setup key banner emits the expected Event`() = runAndroidComposeUiTest {
+    fun `rooms do not proactively ask for a recovery setup key`() = runAndroidComposeUiTest {
         val eventsRecorder = EventsRecorder<RoomListEvent>()
         setRoomListView(
             state = aRoomListState(
@@ -174,9 +174,8 @@ class RoomListViewTest {
         // Remove automatic initial events
         eventsRecorder.clear()
 
-        val close = activity!!.getString(CommonStrings.action_close)
-        onNodeWithContentDescription(close).performClick()
-        eventsRecorder.assertSingle(RoomListEvent.DismissBanner)
+        onNodeWithText(activity!!.getString(R.string.banner_set_up_recovery_submit)).assertDoesNotExist()
+        eventsRecorder.assertEmpty()
     }
 
     @Test
@@ -201,21 +200,15 @@ class RoomListViewTest {
     }
 
     @Test
-    fun `clicking on continue setup key banner invokes the expected callback`() = runAndroidComposeUiTest {
+    fun `empty home does not proactively ask for a recovery setup key`() = runAndroidComposeUiTest {
         val eventsRecorder = EventsRecorder<RoomListEvent>()
-        ensureCalledOnce { callback ->
-            setRoomListView(
-                state = aRoomListState(
-                    contentState = aRoomsContentState(securityBannerState = SecurityBannerState.SetUpRecovery),
-                    eventSink = eventsRecorder,
-                ),
-                onSetUpRecoveryClick = callback,
-            )
-            // Remove automatic initial events
-            eventsRecorder.clear()
-            clickOn(R.string.banner_set_up_recovery_submit)
-            eventsRecorder.assertEmpty()
-        }
+        setRoomListView(state = aRoomListState(
+            contentState = anEmptyContentState(securityBannerState = SecurityBannerState.SetUpRecovery),
+            eventSink = eventsRecorder,
+        ))
+        eventsRecorder.clear()
+        onNodeWithText(activity!!.getString(R.string.banner_set_up_recovery_submit)).assertDoesNotExist()
+        eventsRecorder.assertEmpty()
     }
 
     @Test

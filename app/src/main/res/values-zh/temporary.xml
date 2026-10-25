@@ -84,9 +84,9 @@
     <string name="screen_force_update_downloading">正在下载 %1$d%% · %2$s / %3$s</string>
     <string name="screen_force_update_downloading_unknown">正在下载 · %1$s</string>
     <string name="screen_entry_offline_expired_title">请联网验证后继续</string>
-    <string name="screen_entry_offline_expired_description">网络已断开，联网后自动恢复。账号和聊天已保留。</string>
+    <string name="screen_entry_offline_expired_description">需要联网完成安全验证，请重试。</string>
     <string name="screen_entry_service_retry_title">正在重新连接安全服务</string>
-    <string name="screen_entry_service_retry_description">服务暂时无法连接，正在重试；恢复后会自动继续。</string>
+    <string name="screen_entry_service_retry_description">暂时无法连接安全服务，请重试。</string>
     <string name="screen_entry_rate_limit_title">请稍候再试</string>
     <string name="screen_entry_rate_limit_description">请求较频繁，正在等待服务器规定的间隔，之后自动继续。</string>
     <string name="screen_entry_policy_pending_title">正在应用安全策略</string>
@@ -96,7 +96,7 @@
     <string name="screen_entry_compatibility_policy_title">设备兼容访问受限</string>
     <string name="screen_entry_compatibility_policy_description">当前管理策略不允许自动配置兼容访问。请联系管理员检查设备策略。</string>
     <string name="screen_entry_compatibility_evidence_title">设备安全校验未通过</string>
-    <string name="screen_entry_compatibility_evidence_description">设备提供的安全证据未通过验证。请更新应用、检查系统完整性后重试。</string>
+    <string name="screen_entry_compatibility_evidence_description">设备验证未通过，请更新后重试。</string>
     <string name="screen_entry_compatibility_binding_title">账号设备状态冲突</string>
     <string name="screen_entry_compatibility_binding_description">旧安装仍持有设备授权。继续后，授权将转移到本机，旧安装将停止访问。随后可以恢复聊天，或确认重置加密身份后继续使用原账号。</string>
     <string name="a11y_notification_window_left">按住左下角灰色线条拖动缩放</string>

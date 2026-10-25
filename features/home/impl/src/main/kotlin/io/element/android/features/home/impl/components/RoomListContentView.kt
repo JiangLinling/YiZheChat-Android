@@ -75,6 +75,10 @@ import io.element.android.libraries.matrix.api.sync.SyncState
 import io.element.android.libraries.ui.strings.CommonStrings
 import kotlinx.collections.immutable.ImmutableList
 
+/** Hide only the proactive setup recommendation; the real recovery state and manual entry stay intact. */
+internal fun SecurityBannerState.withoutAutomaticRecoverySetup(): SecurityBannerState =
+    if (this == SecurityBannerState.SetUpRecovery) SecurityBannerState.None else this
+
 @Composable
 fun RoomListContentView(
     contentState: RoomListContentState,
@@ -99,8 +103,8 @@ fun RoomListContentView(
         NetworkStatusBanner(syncState = syncState, onRetrySync = onRetrySync)
         val canShowReachabilityGuide = when (contentState) {
             is RoomListContentState.Skeleton -> false
-            is RoomListContentState.Empty -> contentState.securityBannerState == SecurityBannerState.None
-            is RoomListContentState.Rooms -> contentState.securityBannerState == SecurityBannerState.None
+            is RoomListContentState.Empty -> contentState.securityBannerState.withoutAutomaticRecoverySetup() == SecurityBannerState.None
+            is RoomListContentState.Rooms -> contentState.securityBannerState.withoutAutomaticRecoverySetup() == SecurityBannerState.None
         }
         val callPermissions = when (contentState) {
             is RoomListContentState.Skeleton -> null
@@ -109,7 +113,7 @@ fun RoomListContentView(
         }
         val reachabilityGuideShown = if (canShowReachabilityGuide && callPermissions != null) ReachabilityGuideBanner(callPermissions) else false
         if (contentState is RoomListContentState.Empty &&
-            contentState.securityBannerState == SecurityBannerState.None && !reachabilityGuideShown
+            contentState.securityBannerState.withoutAutomaticRecoverySetup() == SecurityBannerState.None && !reachabilityGuideShown
         ) {
             when {
                 contentState.fullScreenIntentPermissionsState.shouldDisplayHomeBanner -> {
@@ -258,7 +262,7 @@ private fun EmptyView(
             modifier = Modifier.align(Alignment.Center),
         )
         Box {
-            when (state.securityBannerState) {
+            when (state.securityBannerState.withoutAutomaticRecoverySetup()) {
                 SecurityBannerState.SetUpRecovery -> {
                     SetUpRecoveryKeyBanner(
                         onContinueClick = onSetUpRecoveryClick,
@@ -383,7 +387,7 @@ private fun RoomsViewList(
         modifier = modifier,
         contentPadding = contentPadding,
     ) {
-        when (state.securityBannerState) {
+        when (state.securityBannerState.withoutAutomaticRecoverySetup()) {
             SecurityBannerState.SetUpRecovery -> {
                 item {
                     SetUpRecoveryKeyBanner(

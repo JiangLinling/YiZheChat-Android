@@ -270,7 +270,9 @@ fun AppUpdateGate(
 
     LaunchedEffect(restriction) {
 
-        restriction?.let { state = AppUpdateGateState.CheckFailed(startupGateAccessibilityContract(it)) }
+        restriction?.takeIf { state !is AppUpdateGateState.Required }?.let {
+            state = AppUpdateGateState.CheckFailed(startupGateAccessibilityContract(it))
+        }
 
         if (restriction == null && state is AppUpdateGateState.CheckFailed) checkAttempt++
 
@@ -460,10 +462,17 @@ fun AppUpdateGate(
 
             )
 
-            null
+            // The pinned public manifest is not account-content authorization. A device rejected
+            // by LC-06 must still be able to install the signed repair without claiming READY.
+            withTimeoutOrNull(5_000L) {
+                runCatching { managementControlService.latestAppRelease() }
+                    .onFailure { if (it is CancellationException) throw it }
+            }
 
         }
 
+        val releaseAdmission = releaseAdmissionDecision(readiness.canStartLc01(), release)
+        val requiredPublicUpdate = release?.getOrNull()?.takeIf { releaseAdmission == ReleaseAdmissionDecision.UPDATE_ONLY }
         val offlineDeadlineExceeded = runCatching { managementControlService.isOfflineDeadlineExceeded() }
 
             .getOrDefault(true)
@@ -484,13 +493,15 @@ fun AppUpdateGate(
 
         state = when {
 
+            requiredPublicUpdate != null -> AppUpdateGateState.Required(requiredPublicUpdate, AppUpdatePhase.ReadyToDownload)
+
             restriction != null -> AppUpdateGateState.CheckFailed(startupGateAccessibilityContract(checkNotNull(restriction)))
 
             (isOffline || networkDisconnected) && managementControlService.offlineEntryStatus() == null ->
 
                 AppUpdateGateState.CheckFailed(startupGateAccessibilityContract("OFFLINE_ENTRY_EXPIRED"))
 
-            release?.isSuccess == true -> release.getOrNull().toGateState()
+            releaseAdmission == ReleaseAdmissionDecision.CONTENT_ALLOWED -> AppUpdateGateState.Allowed
 
             canUseBoundedOfflineStartup(readiness, offlineDeadlineExceeded) &&
 
@@ -529,6 +540,8 @@ fun AppUpdateGate(
 
 
     val displayedState = when {
+
+        state is AppUpdateGateState.Required -> state
 
         restriction != null -> AppUpdateGateState.CheckFailed(startupGateAccessibilityContract(restriction))
 
@@ -573,7 +586,32 @@ fun AppUpdateGate(
 
             modifier = modifier,
 
-            onRetry = { if (!handoverRunning && !checkRunning && System.currentTimeMillis() >= (retryNotBefore ?: 0L)) checkAttempt++ },
+            onRetry = {
+                if (!handoverRunning && !checkRunning && System.currentTimeMillis() >= (retryNotBefore ?: 0L)) {
+                    if (!shouldRefreshPendingEvidence(current.accessibility.reasonCode)) {
+                        checkAttempt++
+                        return@AppUpdateCheckFailedView
+                    }
+                    checkRunning = true
+                    scope.launch {
+                        try {
+                            // A user retry may refresh pending evidence through the original challenge/PoP
+                            // path. The following startup pass still owns signed readiness and LC-06 recovery.
+                            managementControlService.recheckPendingDeviceEnrollment()
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            state = AppUpdateGateState.CheckFailed(
+                                startupGateAccessibilityContract(io.element.android.x.security.startupFailureReasonCode(failure))
+                            )
+                        } finally {
+                            checkRunning = false
+                            // Even an evidence transport failure must not block the public update probe.
+                            checkAttempt++
+                        }
+                    }
+                }
+            },
 
             handoverRunning = handoverRunning,
 
@@ -640,6 +678,19 @@ fun AppUpdateGate(
 internal fun restrictEntryWithoutOfflineGrant(isOffline: Boolean, networkDisconnected: Boolean, grantValidated: Boolean): Boolean =
 
     (isOffline || networkDisconnected) && !grantValidated
+
+internal fun shouldRefreshPendingEvidence(reasonCode: String): Boolean = reasonCode in setOf(
+    "COMPATIBILITY_EVIDENCE_REJECTED", "DEVICE_TRUST_NOT_READY",
+)
+
+internal enum class ReleaseAdmissionDecision { UPDATE_ONLY, CONTENT_ALLOWED, KEEP_RESTRICTED }
+
+/** A verified public update is installable without granting account or content access. */
+internal fun releaseAdmissionDecision(readyForLc01: Boolean, verifiedRelease: Result<ManagedAppRelease?>?): ReleaseAdmissionDecision = when {
+    verifiedRelease?.getOrNull()?.mandatory == true -> ReleaseAdmissionDecision.UPDATE_ONLY
+    readyForLc01 && verifiedRelease?.isSuccess == true -> ReleaseAdmissionDecision.CONTENT_ALLOWED
+    else -> ReleaseAdmissionDecision.KEEP_RESTRICTED
+}
 
 
 
