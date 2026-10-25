@@ -171,6 +171,7 @@ sealed interface SecuritySetupEvent {
     data object TransferManagedAuthorization : SecuritySetupEvent
     data object Retry : SecuritySetupEvent
     data object UseAnotherDevice : SecuritySetupEvent
+    data object ContinueRegistration : SecuritySetupEvent
     data class RecoveryKeyChanged(val recoveryKey: String) : SecuritySetupEvent
     data object ToggleRecoveryKeyVisibility : SecuritySetupEvent
     data object SubmitRecoveryKey : SecuritySetupEvent
@@ -244,6 +245,8 @@ fun SecuritySetupRoute(
     canRestoreRetainedList: suspend () -> Boolean = { false },
     completeAccountHandover: suspend () -> Unit = { error("Account handover is unavailable") },
     startRecoveryVerification: suspend () -> Unit = {},
+    onContinueRegistration: () -> Unit = {},
+    onRegistrationPendingChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -371,6 +374,7 @@ fun SecuritySetupRoute(
             "YZSETUP_SYNC status=${report.status.name} device_state=${report.deviceSecurityState?.name ?: "NONE"}",
         )
         errorCode = report.errorCode
+        onRegistrationPendingChanged(report.errorCode == "REGISTRATION_PENDING")
         locationAccepted = report.locationEvidenceState == DeviceLocationEvidenceState.ACCEPTED
         retryNotBeforeEpochMillis = report.retryAfterMillis?.let {
             runCatching { Math.addExact(System.currentTimeMillis(), it) }.getOrDefault(Long.MAX_VALUE)
@@ -776,6 +780,7 @@ fun SecuritySetupRoute(
 
     val eventSink: (SecuritySetupEvent) -> Unit = { event ->
         when (event) {
+            SecuritySetupEvent.ContinueRegistration -> onContinueRegistration()
             SecuritySetupEvent.TransferManagedAuthorization -> transferManagedAuthorization()
             SecuritySetupEvent.Submit -> submitApproval()
             SecuritySetupEvent.CollectLocation -> {
@@ -838,7 +843,12 @@ fun SecuritySetupRoute(
         }
     }
 
-    if (identityResetConvergenceState == IdentityResetConvergenceState.RUNNING) {
+    if (errorCode == "REGISTRATION_PENDING") {
+        SecuritySetupView(
+            state = SecuritySetupState(phase = SecuritySetupPhase.ACTION_REQUIRED, errorCode = errorCode, eventSink = eventSink),
+            modifier = modifier.revealStartupSplashWhenLaidOut(),
+        )
+    } else if (identityResetConvergenceState == IdentityResetConvergenceState.RUNNING) {
         StartupWaitingView(modifier)
     } else if (recoverySessionState is RecoverySessionState.Discovering &&
         (phase == SecuritySetupPhase.CHECKING || phase == SecuritySetupPhase.READY) &&
@@ -1014,6 +1024,30 @@ fun SecuritySetupView(
     modifier: Modifier = Modifier,
 ) {
     BackHandler(enabled = true) {}
+    if (state.errorCode == "REGISTRATION_PENDING") {
+        HeaderFooterPage(
+            modifier = modifier.statusBarsPadding().fillMaxSize(),
+            background = { OnboardingBackground() },
+            header = {
+                IconTitleSubtitleMolecule(
+                    modifier = Modifier.padding(top = 48.dp, bottom = 24.dp),
+                    iconStyle = BigIcon.Style.Default(CompoundIcons.Shield()),
+                    title = stringResource(R.string.screen_registration_pending_title),
+                    subTitle = stringResource(R.string.screen_registration_pending_description),
+                )
+            },
+            footer = {
+                ButtonColumnMolecule {
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = stringResource(R.string.screen_registration_pending_continue),
+                        onClick = { state.eventSink(SecuritySetupEvent.ContinueRegistration) },
+                    )
+                }
+            },
+        ) {}
+        return
+    }
     if (state.identityConfirmationRequired) {
         IdentityConfirmationView(state = state, modifier = modifier)
         return
@@ -1344,7 +1378,10 @@ internal suspend fun synchronizeBeforeActivationResume(
     }
 }
 
-internal fun ManagementSyncReport.toSecuritySetupPhase(accountIdHash: String): SecuritySetupPhase = when (status) {
+internal fun ManagementSyncReport.toSecuritySetupPhase(accountIdHash: String): SecuritySetupPhase = when {
+    errorCode == "REGISTRATION_PENDING" && status in setOf(ManagementSyncStatus.SYNCHRONIZED, ManagementSyncStatus.RETRY_REQUIRED) ->
+        SecuritySetupPhase.ACTION_REQUIRED
+    else -> when (status) {
     ManagementSyncStatus.SYNCHRONIZED -> when (deviceSecurityState) {
         ManagedDeviceSecurityState.LOCATION_REQUIRED -> SecuritySetupPhase.LOCATION_REQUIRED
         ManagedDeviceSecurityState.VALIDATION_PENDING -> SecuritySetupPhase.VALIDATION_PENDING
@@ -1359,6 +1396,7 @@ internal fun ManagementSyncReport.toSecuritySetupPhase(accountIdHash: String): S
     ManagementSyncStatus.RETRY_REQUIRED -> SecuritySetupPhase.SERVICE_UNAVAILABLE
     ManagementSyncStatus.DISABLED,
     ManagementSyncStatus.SECURITY_REJECTED -> SecuritySetupPhase.ACTION_REQUIRED
+    }
 }
 
 internal fun Throwable.toSecuritySetupPhase(): SecuritySetupPhase = when (this) {
@@ -1467,6 +1505,7 @@ private suspend fun currentLocation(context: Context): Location? = withTimeoutOr
 
 private class SecuritySetupStateProvider : PreviewParameterProvider<SecuritySetupState> {
     override val values = sequenceOf(
+        SecuritySetupState(SecuritySetupPhase.ACTION_REQUIRED, errorCode = "REGISTRATION_PENDING", eventSink = {}),
         SecuritySetupState(SecuritySetupPhase.LOCATION_REQUIRED) {},
         SecuritySetupState(SecuritySetupPhase.VALIDATION_PENDING) {},
         SecuritySetupState(SecuritySetupPhase.SERVICE_UNAVAILABLE) {},

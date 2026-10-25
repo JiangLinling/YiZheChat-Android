@@ -60,7 +60,7 @@ internal data class HeartbeatWire(
     @SerialName("offline_entry_protocol_version") val offlineEntryProtocolVersion: Int = 1,
     @SerialName("local_list_entry_protocol_version") val localListEntryProtocolVersion: Int = 1,
     @SerialName("account_handover_protocol_version") val accountHandoverProtocolVersion: Int = 1,
-    @SerialName("restriction_reason_protocol_version") val restrictionReasonProtocolVersion: Int = 1,
+    @SerialName("restriction_reason_protocol_version") val restrictionReasonProtocolVersion: Int = 2,
     @SerialName("tombstone_sequence") val tombstoneSequence: Long = 0,
 )
 

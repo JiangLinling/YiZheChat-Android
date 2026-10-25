@@ -10,5 +10,5 @@ import io.element.android.security.dataprotection.api.StartupSecurityReadinessSt
 internal fun canReuseStartupDeviceReady(readiness: StartupSecurityReadiness?, now: Long = System.currentTimeMillis()): Boolean =
     readiness != null && readiness.state == StartupSecurityReadinessState.READY_FOR_LC01 &&
         readiness.isFresh(now) && readiness.expiresAtEpochMillis != null && readiness.observedAtEpochMillis <= now &&
-        readiness.deviceSecurityState == ManagedDeviceSecurityState.READY &&
+        readiness.deviceSecurityState == ManagedDeviceSecurityState.READY && readiness.reasonCode != "REGISTRATION_PENDING" &&
         readiness.policyVersion != null && !readiness.installationId.isNullOrBlank() && !readiness.offlineEligible

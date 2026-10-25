@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="screen_registration_pending_title">注册尚未完成</string>
+    <string name="screen_registration_pending_description">请先退出当前会话，再用原邀请码和原资料继续注册。</string>
+    <string name="screen_registration_pending_continue">退出当前会话并继续注册</string>
     <string name="screen_security_identity_title">确认你的数字身份</string>
     <string name="screen_security_identity_subtitle">可在本页输入恢复密钥，也可使用另一台可信设备确认；两者都无法使用时，才重置数字身份。</string>
     <string name="screen_security_identity_use_other_device">使用其它设备</string>

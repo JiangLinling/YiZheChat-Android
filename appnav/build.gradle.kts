@@ -19,6 +19,9 @@ plugins {
 
 android {
     namespace = "io.element.android.appnav"
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 setupDependencyInjection()
@@ -61,7 +64,7 @@ dependencies {
     implementation(projects.services.appnavstate.api)
     implementation(projects.services.analytics.api)
 
-    testCommonDependencies(libs)
+    testCommonDependencies(libs, true)
     testImplementation(projects.features.login.test)
     testImplementation(projects.features.share.test)
     testImplementation(projects.libraries.matrix.test)

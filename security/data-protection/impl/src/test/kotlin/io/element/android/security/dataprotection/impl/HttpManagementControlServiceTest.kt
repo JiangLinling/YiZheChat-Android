@@ -24,6 +24,16 @@ import javax.net.ssl.SSLHandshakeException
 
 class HttpManagementControlServiceTest {
     @Test
+    fun `pending product registration preserves completed device synchronization`() {
+        assertThat(managementSyncStatusForRestriction("REGISTRATION_PENDING"))
+            .isEqualTo(io.element.android.security.dataprotection.api.ManagementSyncStatus.SYNCHRONIZED)
+        assertThat(managementSyncStatusForRestriction("DEVICE_ADMINISTRATIVELY_LOCKED"))
+            .isEqualTo(io.element.android.security.dataprotection.api.ManagementSyncStatus.SECURITY_REJECTED)
+        assertThat(managementSyncStatusForRestriction(null))
+            .isEqualTo(io.element.android.security.dataprotection.api.ManagementSyncStatus.SYNCHRONIZED)
+    }
+
+    @Test
     fun `registration recovery distinguishes pending from an actual authorization rejection`() {
         assertThat(onboardingActivationError(503, "REGISTRATION_PENDING"))
             .isInstanceOf(io.element.android.security.dataprotection.api.RegistrationPending::class.java)

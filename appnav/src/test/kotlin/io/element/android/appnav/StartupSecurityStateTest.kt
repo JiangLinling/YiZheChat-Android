@@ -17,6 +17,19 @@ import kotlinx.coroutines.test.runTest
 
 class StartupSecurityStateTest {
     @Test
+    fun `partial registration blocks retained home but preserves the normal sign out child across generic startup timeouts`() = runTest {
+        val pending = StartupSecurityState(securityReady = true, setupComplete = true,
+            ftueState = FtueState.Complete, verificationStatus = SessionVerifiedStatus.Verified,
+            coreReady = true, sessionInitialized = true, retainedHomeReady = true, registrationPending = true)
+        assertThat(pending.destination()).isEqualTo(StartupDestination.SECURITY_SETUP)
+        assertThat(pending.copy(failureReasonCode = "DEVICE_REVOKED").destination()).isEqualTo(StartupDestination.ERROR)
+        val events = flowOf(pending, pending.copy(failureReasonCode = "POST_LOGIN_STARTUP_FAILED"),
+            pending.copy(failureReasonCode = "CORE_READY_STARTUP_TIMEOUT")).distinctStartupNavigation().toList()
+        assertThat(events).containsExactly(pending)
+        assertThat(pending.copy(registrationPending = false).destination()).isEqualTo(StartupDestination.HOME)
+    }
+
+    @Test
     fun `verification completion keeps the recovery child until its callback but revocation changes the root`() = runTest {
         val recovering = StartupSecurityState(securityReady = false, setupComplete = false,
             ftueState = FtueState.Unknown, verificationStatus = SessionVerifiedStatus.Unknown,

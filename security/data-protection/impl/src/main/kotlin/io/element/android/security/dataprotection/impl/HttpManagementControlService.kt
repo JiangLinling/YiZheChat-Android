@@ -2604,7 +2604,7 @@ class HttpManagementControlService(
             else -> null
         }
         if (terminalPolicyError == null && trustDecision.toManagedDeviceSecurityState() == ManagedDeviceSecurityState.READY &&
-            repository.pendingCommands().isEmpty()
+            repository.pendingCommands().isEmpty() && trustDecision.restrictionReasonCode != "REGISTRATION_PENDING"
         ) {
             repository.acceptOfflineEntry(response.deviceTrust)
             repository.acceptLocalListEntry(response.deviceTrust)
@@ -2614,11 +2614,7 @@ class HttpManagementControlService(
         }
         val restrictionReason = terminalPolicyError ?: trustDecision.restrictionReasonCode
         return ManagementSyncReport(
-            status = if (restrictionReason == null) {
-                ManagementSyncStatus.SYNCHRONIZED
-            } else {
-                ManagementSyncStatus.SECURITY_REJECTED
-            },
+            status = managementSyncStatusForRestriction(restrictionReason),
             acceptedPolicyVersion = policyVersion ?: repository.currentPolicyVersion(),
             pendingCommandCount = repository.pendingCommands().size,
             errorCode = restrictionReason ?: trustDecision.automaticLicenseErrorCode,
@@ -2784,7 +2780,8 @@ class HttpManagementControlService(
         check(decision.expiresAtEpochMillis > serverTimeEpochMillis)
         check(
             decision.restrictionReasonCode == null ||
-                decision.restrictionReasonCode == "DEVICE_ADMINISTRATIVELY_LOCKED" && decision.trustState == "STALE"
+                decision.restrictionReasonCode == "DEVICE_ADMINISTRATIVELY_LOCKED" && decision.trustState == "STALE" ||
+                decision.restrictionReasonCode == "REGISTRATION_PENDING" && decision.trustState in setOf("TRUSTED", "MANAGED")
         ) {
             "Signed device restriction contradicts the trust decision."
         }
@@ -3451,6 +3448,12 @@ internal fun aggregateMatrixIdentityState(statuses: List<SessionVerifiedStatus>)
     statuses.all { it is SessionVerifiedStatus.Verified } -> "VERIFIED"
     statuses.any { it is SessionVerifiedStatus.NotVerified } -> "UNVERIFIED"
     else -> "UNKNOWN"
+}
+
+internal fun managementSyncStatusForRestriction(reason: String?): ManagementSyncStatus = when (reason) {
+    null -> ManagementSyncStatus.SYNCHRONIZED
+    "REGISTRATION_PENDING" -> ManagementSyncStatus.SYNCHRONIZED
+    else -> ManagementSyncStatus.SECURITY_REJECTED
 }
 
 internal fun onboardingActivationError(status: Int, detail: String?): Throwable? = when {

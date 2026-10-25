@@ -902,6 +902,9 @@ fun ManagementSyncReport.toStartupSecurityReadiness(
         }
     }
     val reasonCode = when {
+        errorCode == "REGISTRATION_PENDING" && status in setOf(ManagementSyncStatus.SYNCHRONIZED, ManagementSyncStatus.RETRY_REQUIRED) &&
+            acceptedPolicyVersion != null && hasValidInstallationBinding && deviceSecurityState == ManagedDeviceSecurityState.READY ->
+            "REGISTRATION_PENDING"
         status == ManagementSyncStatus.DISABLED -> "STARTUP_CONFIGURATION_DISABLED"
         status == ManagementSyncStatus.SECURITY_REJECTED && errorCode == "CONTROL_SYNC_OLDER_SNAPSHOT" -> "STARTUP_SNAPSHOT_STALE"
         status == ManagementSyncStatus.SECURITY_REJECTED && errorCode == "CONTROL_SYNC_CONTRADICTORY_AUTHORITY" -> "STARTUP_AUTHORITY_CONTRADICTORY"
@@ -946,7 +949,7 @@ fun ManagementSyncReport.toStartupSecurityReadiness(
             null
         },
         retryAtEpochMillis = retryAfterMillis?.let { runCatching { Math.addExact(observedAtEpochMillis, it.coerceAtLeast(0)) }.getOrDefault(Long.MAX_VALUE) },
-        offlineEligible = offlineEligible && state == StartupSecurityReadinessState.RETRYABLE_FAILURE,
+        offlineEligible = offlineEligible && errorCode != "REGISTRATION_PENDING" && state == StartupSecurityReadinessState.RETRYABLE_FAILURE,
     )
 }
 

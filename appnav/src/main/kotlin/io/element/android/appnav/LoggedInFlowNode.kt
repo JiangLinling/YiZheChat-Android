@@ -248,6 +248,7 @@ class LoggedInFlowNode(
 
     private val callback: Callback = callback()
     private val securitySetupReady = MutableStateFlow(false)
+    private val registrationPending = MutableStateFlow(false)
     private val securityRecoveryCompletionToken = MutableStateFlow(0L)
     private val unifiedSetupComplete = MutableStateFlow(false)
     private val matrixSyncStarted = MutableStateFlow(false)
@@ -605,11 +606,13 @@ class LoggedInFlowNode(
                     startupFailureReasonCode,
                     deletionRecoveryRequired,
                     recoveryKeySubmissionService.recoveryState,
-                ) { startupState, failureReasonCode, deletionRecovery, recovery ->
+                    registrationPending,
+                ) { startupState, failureReasonCode, deletionRecovery, recovery, pendingRegistration ->
                     startupState.copy(
                         failureReasonCode = failureReasonCode,
                         deletionRecoveryRequired = deletionRecovery,
                         recoveryRequired = recovery.requiresGate,
+                        registrationPending = pendingRegistration,
                     )
                 }
                     .distinctStartupNavigation()
@@ -1217,6 +1220,8 @@ class LoggedInFlowNode(
                         securitySetupReady.value = true
                     },
                     onUseAnotherDevice = { backstack.push(NavTarget.VerifyCurrentSession) },
+                    onContinueRegistration = { backstack.push(NavTarget.Settings(PreferencesEntryPoint.InitialTarget.SignOut)) },
+                    onRegistrationPendingChanged = { registrationPending.value = it },
                     onOpenLockScreenSetup = { backstack.push(NavTarget.LockScreenSetup) },
                     onAnalyticsChoice = { consent ->
                         lifecycleScope.launch {
@@ -1579,6 +1584,7 @@ internal data class StartupSecurityState(
     val offlineCoreRestored: Boolean = false,
     val recoveryRequired: Boolean = false,
     val retainedHomeReady: Boolean = false,
+    val registrationPending: Boolean = false,
 )
 
 internal enum class CoreReadyEnforcement {
@@ -1598,11 +1604,17 @@ internal enum class StartupDestination {
 /** Equivalent readiness updates must not dismiss an in-progress recovery child. */
 internal fun kotlinx.coroutines.flow.Flow<StartupSecurityState>.distinctStartupNavigation() =
     distinctUntilChanged { previous, current ->
-        previous.destination() == current.destination() && previous.failureReasonCode == current.failureReasonCode
+        previous.destination() == current.destination() && previous.navigationReasonCode() == current.navigationReasonCode()
     }
+
+internal fun StartupSecurityState.navigationReasonCode(): String? =
+    if (registrationPending && failureReasonCode in setOf(null, POST_LOGIN_STARTUP_FAILURE, POST_LOGIN_STARTUP_EXPIRED, CORE_READY_STARTUP_TIMEOUT)) {
+        "REGISTRATION_PENDING"
+    } else failureReasonCode
 
 internal fun StartupSecurityState.destination(): StartupDestination = when {
     deletionRecoveryRequired -> StartupDestination.DELETION_RECOVERY
+    navigationReasonCode() == "REGISTRATION_PENDING" -> StartupDestination.SECURITY_SETUP
     failureReasonCode != null -> StartupDestination.ERROR
     recoveryRequired || !securityReady || !setupComplete -> StartupDestination.SECURITY_SETUP
     retainedHomeReady && ftueState is FtueState.Complete && verificationStatus is SessionVerifiedStatus.Verified -> StartupDestination.HOME

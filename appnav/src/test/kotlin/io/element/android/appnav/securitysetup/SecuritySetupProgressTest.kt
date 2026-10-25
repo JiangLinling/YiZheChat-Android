@@ -22,6 +22,15 @@ import org.junit.Test
 
 class SecuritySetupProgressTest {
     @Test
+    fun `partial registration is an actionable product state rather than a device evidence failure`() {
+        for (status in listOf(ManagementSyncStatus.SYNCHRONIZED, ManagementSyncStatus.RETRY_REQUIRED)) {
+            val report = ManagementSyncReport(status = status,
+                deviceSecurityState = ManagedDeviceSecurityState.READY, errorCode = "REGISTRATION_PENDING")
+            assertThat(report.toSecuritySetupPhase("a".repeat(64))).isEqualTo(SecuritySetupPhase.ACTION_REQUIRED)
+        }
+    }
+
+    @Test
     fun `candidate identity and device evidence must be ready before activation resume`() = kotlinx.coroutines.test.runTest {
         for (status in ManagementSyncStatus.entries) {
             val report = ManagementSyncReport(status = status, deviceSecurityState = ManagedDeviceSecurityState.READY)

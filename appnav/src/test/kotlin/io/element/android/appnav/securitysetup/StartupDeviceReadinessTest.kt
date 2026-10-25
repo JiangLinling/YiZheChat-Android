@@ -21,6 +21,9 @@ class StartupDeviceReadinessTest {
     @Test fun `fresh signed startup READY can be reused`() {
         assertThat(canReuseStartupDeviceReady(ready(), 1_500)).isTrue()
     }
+    @Test fun `partial registration must reach its exit action instead of cached approval`() {
+        assertThat(canReuseStartupDeviceReady(ready().copy(reasonCode = "REGISTRATION_PENDING"), 1_500)).isFalse()
+    }
     @Test fun `expiry and clock rollback force a new check`() {
         assertThat(canReuseStartupDeviceReady(ready(), 2_000)).isFalse()
         assertThat(canReuseStartupDeviceReady(ready(), 999)).isFalse()

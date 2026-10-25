@@ -60,6 +60,19 @@ import org.robolectric.annotation.Config
 @Config(manifest = Config.NONE)
 class ManagementControlRestrictionTest {
     @Test
+    fun `signed partial registration reaches startup exit without a false local access restriction`() = runTest {
+        val fixture = Fixture()
+        fixture.report = ManagementSyncReport(ManagementSyncStatus.SYNCHRONIZED, acceptedPolicyVersion = 13,
+            deviceSecurityState = io.element.android.security.dataprotection.api.ManagedDeviceSecurityState.READY,
+            errorCode = "REGISTRATION_PENDING")
+        val coordinator = fixture.coordinator(backgroundScope)
+        val readiness = coordinator.awaitStartupReadiness(System.currentTimeMillis() + 10_000)
+        assertThat(readiness.state).isEqualTo(StartupSecurityReadinessState.READY_FOR_LC01)
+        assertThat(readiness.reasonCode).isEqualTo("REGISTRATION_PENDING")
+        assertThat(coordinator.localEntryRestriction.value).isNull()
+        assertThat(fixture.sessions.getAllSessions()).hasSize(1)
+    }
+    @Test
     fun `global replacement waits for original same account cleanup across multiple command replacements`() = runTest {
         for (oldId in listOf("original-command", "two-replacements-before-current")) {
             val fixture = Fixture()

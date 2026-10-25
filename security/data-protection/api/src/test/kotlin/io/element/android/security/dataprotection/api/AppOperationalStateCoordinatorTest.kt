@@ -11,6 +11,19 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class AppOperationalStateCoordinatorTest {
+    @Test fun `pending registration reaches limited startup while retaining its reason and denying offline content`() {
+        val report = ManagementSyncReport(ManagementSyncStatus.SYNCHRONIZED, acceptedPolicyVersion = 7,
+            deviceSecurityState = ManagedDeviceSecurityState.READY, errorCode = "REGISTRATION_PENDING")
+        val readiness = report.toStartupSecurityReadiness(1_000, installationId = "original-installation", offlineEligible = true)
+        assertThat(readiness.canStartLc01(1_001)).isTrue()
+        assertThat(readiness.reasonCode).isEqualTo("REGISTRATION_PENDING")
+        assertThat(readiness.offlineEligible).isFalse()
+        assertThat(report.copy(acceptedPolicyVersion = null).toStartupSecurityReadiness(1_000,
+            installationId = "original-installation").canStartLc01(1_001)).isFalse()
+        assertThat(report.copy(status = ManagementSyncStatus.SECURITY_REJECTED,
+            errorCode = "DEVICE_ADMINISTRATIVELY_LOCKED").toStartupSecurityReadiness(1_000,
+            installationId = "original-installation").canStartLc01(1_001)).isFalse()
+    }
     @Test fun `LC17 resource metadata cannot create preview or upload owner capability`() {
         val descriptor = LifecycleOperationOwnerDescriptor("original-live-stop-resource", FullAppLifecycleId.LC_17,
             null, LifecycleOperationOwnerPhase.AVAILABLE, 0, 1000)

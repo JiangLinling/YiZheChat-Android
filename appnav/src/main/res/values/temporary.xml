@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="screen_registration_pending_title">Registration is not complete</string>
+    <string name="screen_registration_pending_description">Sign out of this session, then continue registration using the original invitation and details.</string>
+    <string name="screen_registration_pending_continue">Sign out and continue registration</string>
     <string name="screen_security_identity_title">Confirm your digital identity</string>
     <string name="screen_security_identity_subtitle">Use a recovery key here, approve this device from another trusted device, or explicitly reset your identity.</string>
     <string name="screen_security_identity_use_other_device">Use another device</string>
