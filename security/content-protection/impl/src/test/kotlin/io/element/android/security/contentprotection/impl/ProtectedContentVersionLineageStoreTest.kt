@@ -42,6 +42,59 @@ class ProtectedContentVersionLineageStoreTest {
     val temporaryFolder = TemporaryFolder()
 
     @Test
+    fun `authority restore commits complete root child and branch once and preserves an independent root`() = runTest {
+        val f = fixture()
+        val independent = root().copy(contentId = ContentId("independent"), rootContentId = ContentId("independent"),
+            operationId = "independent-operation")
+        f.store.append(SCOPE, independent)
+        val nodes = listOf(root(), child("child-one", "operation-child-one", ROOT, 8_000),
+            child("child-two", "operation-child-two", ROOT, 7_000))
+        val restored = f.store.restoreAuthorityGraph(SCOPE, nodes)
+        assertThat(restored.generation).isEqualTo(2)
+        assertThat(restored.versions).containsExactlyElementsIn(nodes)
+        assertThat(f.store.graph(SCOPE, independent.contentId)!!.versions).containsExactly(independent)
+        assertThat(f.store.restoreAuthorityGraph(SCOPE, nodes).generation).isEqualTo(2)
+        val reopened = ProtectedContentVersionLineageStore(f.files, f.roots)
+        assertThat(reopened.rootForContent(SCOPE, nodes.last().contentId)).isEqualTo(ContentId(ROOT))
+    }
+
+    @Test
+    fun `failed authority pointer commit exposes no editable prefix and can retry complete graph`() = runTest {
+        val files = FakeSensitiveFileStore()
+        val roots = roots()
+        val failed = FailingIndexWriteStore(files, roots, failAtWrite = 2)
+        val nodes = listOf(root(), child("restored-child", "restored-child-operation", ROOT, 8_000))
+        assertThat(runCatching { failed.restoreAuthorityGraph(SCOPE, nodes) }.isFailure).isTrue()
+        val reopened = ProtectedContentVersionLineageStore(files, roots)
+        assertThat(reopened.rootForContent(SCOPE, ContentId(ROOT))).isNull()
+        assertThat(reopened.rootForContent(SCOPE, nodes.last().contentId)).isNull()
+        assertThat(reopened.restoreAuthorityGraph(SCOPE, nodes).versions).containsExactlyElementsIn(nodes)
+    }
+
+    @Test
+    fun `authority restore cannot overwrite an identity or discard an existing child`() = runTest {
+        val f = fixture()
+        f.store.append(SCOPE, root())
+        val edit = child("existing-child", "existing-child-operation", ROOT, 8_000)
+        f.store.append(SCOPE, edit)
+        assertThat(runCatching { f.store.restoreAuthorityGraph(SCOPE, listOf(root())) }.exceptionOrNull())
+            .isInstanceOf(ContentVersionLineageConflictException::class.java)
+        assertThat(runCatching { f.store.restoreAuthorityGraph(SCOPE, listOf(root(), edit.copy(eventIdSha256 = "b".repeat(64)))) }.exceptionOrNull())
+            .isInstanceOf(ContentVersionLineageConflictException::class.java)
+        assertThat(f.store.graph(SCOPE, ContentId(ROOT))!!.versions).containsExactly(root(), edit)
+    }
+
+    @Test
+    fun `incomplete or extending authority graph never publishes a root`() = runTest {
+        val f = fixture()
+        val bad = child("invalid-child", "invalid-child-operation", "missing-parent", 8_000)
+        assertThat(runCatching { f.store.restoreAuthorityGraph(SCOPE, listOf(root(), bad)) }.isFailure).isTrue()
+        assertThat(runCatching { f.store.restoreAuthorityGraph(SCOPE, listOf(root(), bad.copy(parentContentId = ContentId(ROOT),
+            expiresAtEpochMillis = 10_001))) }.isFailure).isTrue()
+        assertThat(f.store.graph(SCOPE, ContentId(ROOT))).isNull()
+    }
+
+    @Test
     fun `enumerates a real root child and branch graph with independent non-extending expiries`() = runTest {
         val fixture = fixture()
         fixture.store.append(SCOPE, root())

@@ -16,6 +16,7 @@ internal fun protectedSendErrorResource(failure: Throwable): Int {
             is ContentProtectionException.KmsUnavailable -> return R.string.error_share_security_service_unavailable
             is ContentProtectionException.RoomEpochConflict -> return io.element.android.features.messages.impl.R.string.error_room_epoch_conflict
             is ContentProtectionException.SendBindingPending -> return R.string.error_send_confirmation_pending
+            is ContentProtectionException.VersionLineageUnavailable -> return R.string.error_text_version_unavailable
         }
         current = current?.cause
     }

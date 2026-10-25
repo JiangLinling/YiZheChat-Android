@@ -49,6 +49,10 @@ class ContentVersionLineageCorruptException(message: String, cause: Throwable? =
     IllegalStateException(message, cause)
 
 interface ContentVersionLineageStore {
+    /** Atomically imports a complete authoritative graph; never publishes a partial prefix or overwrites a conflict. */
+    suspend fun restoreAuthorityGraph(scope: ContentVersionLineageScope, nodes: List<ContentVersionNode>): ContentVersionGraph =
+        throw ContentProtectionException.VersionLineageUnavailable()
+
     /**
      * Atomically appends one immutable version. Repeating the same operation and node is idempotent.
      * Reusing an operation for different data, adding a missing-parent branch, or extending a parent's expiry fails closed.

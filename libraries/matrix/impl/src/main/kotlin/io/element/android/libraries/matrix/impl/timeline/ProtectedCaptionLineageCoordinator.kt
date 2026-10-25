@@ -12,6 +12,7 @@ import io.element.android.libraries.matrix.api.core.DeviceId
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.security.contentprotection.api.ContentId
+import io.element.android.security.contentprotection.api.ContentProtectionException
 import io.element.android.security.contentprotection.api.ContentVersionLineageScope
 import io.element.android.security.contentprotection.api.ContentVersionLineageStore
 import io.element.android.security.contentprotection.api.ContentVersionNode
@@ -159,7 +160,7 @@ class ProtectedCaptionLineageCoordinator(
         val operationId = requireNotNull(currentLifecycleOperationContext()).operationId
         return operationLocks.withKey("${scope.vaultId.value}\u0000$operationId") {
             val expectedRoot = lineage.rootForContent(scope, contentId)
-                ?: throw SecurityException("TEXT version membership is unknown; historical lineage cannot be inferred.")
+                ?: restoreTextMembership(targetEventId, contentId, expiresAt)
             withRootLock(expectedRoot) {
                 val context = requireNotNull(currentLifecycleOperationContext())
                 val owner = requireNotNull(currentCoroutineContext()[TextVersionReceiptOwner])
@@ -170,7 +171,7 @@ class ProtectedCaptionLineageCoordinator(
                     "TEXT edit outcome is pending; reconcile the original operation before another edit."
                 }
                 val rootId = lineage.rootForContent(scope, contentId)
-                    ?: throw SecurityException("TEXT version membership is unknown; historical lineage cannot be inferred.")
+                    ?: throw ContentProtectionException.VersionLineageUnavailable()
                 check(rootId == expectedRoot) { "TEXT lineage root changed during lock acquisition." }
                 check(!pending.isDestructionFenced(scope, rootId.value) && !pending.isDestructionFenced(scope, contentId.value))
                 val graph = requireNotNull(lineage.graph(scope, rootId))
@@ -188,6 +189,29 @@ class ProtectedCaptionLineageCoordinator(
                 ProtectedCaptionEditPlan(targetEventId, context.operationId, child)
             }
         }
+    }
+
+    private suspend fun restoreTextMembership(targetEventId: String, contentId: ContentId, expiresAt: Long): ContentId {
+        val context = requireNotNull(currentLifecycleOperationContext())
+        val owner = requireNotNull(currentCoroutineContext()[TextVersionReceiptOwner])
+        require(context.lifecycleId == FullAppLifecycleId.LC_13 && owner.operationId == context.operationId &&
+            owner.roomIdHash == digest(scope.roomId) && expiresAt > System.currentTimeMillis())
+        val nodes = kms.recoverTextVersions(contentId, requireNotNull(owner.accountIdHash), digest(scope.roomId), digest(targetEventId), expiresAt)
+        if (nodes.size !in 1..4096) throw ContentProtectionException.VersionLineageUnavailable()
+        val target = nodes.singleOrNull { it.contentId == contentId }
+            ?: throw ContentProtectionException.VersionLineageUnavailable()
+        require(target.eventIdSha256 == digest(targetEventId) && target.expiresAtEpochMillis == expiresAt)
+        val root = target.rootContentId
+        withRootLock(root) {
+            val now = System.currentTimeMillis()
+            require(nodes.all { it.rootContentId == root && it.eventIdSha256 == digest(targetEventId) && it.expiresAtEpochMillis > now })
+            nodes.forEach { check(!pending.isDestructionFenced(scope, it.contentId.value)) }
+            check(!pending.isDestructionFenced(scope, root.value))
+            // The existing encrypted store validates the entire graph and publishes one atomic pointer.
+            // A failed import cannot expose a root-only prefix as an editable leaf.
+            lineage.restoreAuthorityGraph(scope, nodes)
+        }
+        return root
     }
 
     suspend fun parentExpiry(contentId: ContentId): Long? = pending.all(scope)

@@ -245,6 +245,47 @@ class HttpKmsShareClientTest {
     }
 
     @Test
+    fun `TEXT recovery binds current operation owner installation target and unchanged expiry`() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            val operation = "text-recovery-operation-001"
+            val expiry = System.currentTimeMillis() + 120_000
+            val node = """{"content_id":"text-root","root_content_id":"text-root","parent_content_id":null,
+                "operation_id":"original-text-operation-001","room_id_sha256":"${"c".repeat(64)}",
+                "owner_account_id_hash":"$ACCOUNT_HASH","sender_installation_id":"$INSTALLATION_ID",
+                "content_kind":"TEXT","policy_id":"test-policy","policy_version":2,
+                "expires_at":$expiry,"matrix_event_id_sha256":"${"d".repeat(64)}",
+                "immutable_context_digest":"${"e".repeat(64)}","created_at":${expiry - 120_000}}""".trimIndent()
+            val body = """{"content_id":"text-root","operation_id":"$operation","installation_id":"$INSTALLATION_ID","nodes":[$node]}"""
+            val device = object : DeviceShareKeyService by NoOpDeviceShareKeyService {
+                override suspend fun descriptor() = DeviceShareKeyDescriptor(
+                    INSTALLATION_ID, "test-key", ContentProtectionFormat.DEVICE_SHARE_ALGORITHM, byteArrayOf(1), HardwareSecurityLevel.STRONGBOX,
+                )
+            }
+            val kms = client(server, signingKey(), deviceShareKeyService = device)
+            kotlinx.coroutines.withContext(io.element.android.security.dataprotection.api.LifecycleOperationContext(
+                operation, io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_13,
+            )) {
+                server.enqueue(MockResponse().setBody(body).setHeader("Content-Type", "application/json"))
+                assertThat(kms.recoverTextVersions(ContentId("text-root"), ACCOUNT_HASH, "c".repeat(64), "d".repeat(64), expiry)).hasSize(1)
+                assertThat(server.takeRequest().path).isEqualTo("/v1/content-version-lineage/text-members/text-root")
+                for (bad in listOf(body.replace(ACCOUNT_HASH, "f".repeat(64)), body.replace(operation, "wrong-operation"),
+                    body.replace(INSTALLATION_ID, "wrong-installation"), body.replace("d".repeat(64), "f".repeat(64)),
+                    body.replace("\"expires_at\":$expiry", "\"expires_at\":${expiry + 1}"))) {
+                    server.enqueue(MockResponse().setBody(bad).setHeader("Content-Type", "application/json"))
+                    assertThat(runCatching { kms.recoverTextVersions(ContentId("text-root"), ACCOUNT_HASH, "c".repeat(64), "d".repeat(64), expiry) }.isFailure).isTrue()
+                }
+                server.enqueue(MockResponse().setResponseCode(409).setBody("""{"detail":"TEXT_VERSION_LINEAGE_UNAVAILABLE"}"""))
+                assertThat(runCatching { kms.recoverTextVersions(ContentId("text-root"), ACCOUNT_HASH, "c".repeat(64), "d".repeat(64), expiry) }.exceptionOrNull())
+                    .isInstanceOf(ContentProtectionException.VersionLineageUnavailable::class.java)
+            }
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun `caption version accepts complete server node and rejects unknown fields`() = runTest {
         val server = MockWebServer()
         server.start()

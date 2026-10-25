@@ -108,6 +108,37 @@ class HttpKmsShareClient(
     @Volatile private var cachedApi: CachedApi? = null
     private val secureRandom = java.security.SecureRandom()
 
+    override suspend fun recoverTextVersions(
+        contentId: ContentId,
+        accountIdHash: String,
+        roomIdHash: String,
+        eventIdHash: String,
+        expiresAtEpochMillis: Long,
+    ): List<io.element.android.security.contentprotection.api.ContentVersionNode> {
+        val operation = requireNotNull(currentLifecycleOperationContext())
+        require(operation.lifecycleId == io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_13)
+        val installationId = deviceShareKeyService.descriptor().installationId
+        val response = requireTextRecoveryBody(executeAuthorized { api, authorization -> api.recoverTextVersions(contentId.value, authorization) })
+        if (response.contentId != contentId.value || response.operationId != operation.operationId || response.installationId != installationId ||
+            response.nodes.size !in 1..4096) throw ContentProtectionException.AccessDenied()
+        val now = System.currentTimeMillis()
+        val target = response.nodes.singleOrNull { it.contentId == contentId.value } ?: throw ContentProtectionException.AccessDenied()
+        if (target.matrixEventIdSha256 != eventIdHash || target.expiresAtEpochMillis != expiresAtEpochMillis) {
+            throw ContentProtectionException.AccessDenied()
+        }
+        if (!response.nodes.all {
+            it.contentKind == "TEXT" && it.ownerAccountIdHash == accountIdHash && it.roomIdSha256 == roomIdHash &&
+                it.senderInstallationId == installationId && it.rootContentId == target.rootContentId &&
+                it.createdAtEpochMillis in 1..it.expiresAtEpochMillis && it.expiresAtEpochMillis > now
+        }) throw ContentProtectionException.AccessDenied()
+        return response.nodes.map {
+            io.element.android.security.contentprotection.api.ContentVersionNode(
+                ContentId(it.contentId), ContentId(it.rootContentId), it.parentContentId?.let(::ContentId), it.operationId,
+                it.matrixEventIdSha256, it.createdAtEpochMillis, it.expiresAtEpochMillis,
+            )
+        }
+    }
+
     override suspend fun registerContentVersion(request: RegisterContentVersionRequest): RegisterContentVersionResult {
         require(request.operationId == currentLifecycleOperationContext()?.operationId) {
             "Content-version operation does not match the authenticated lifecycle operation."
@@ -1237,6 +1268,21 @@ class HttpKmsShareClient(
             authorizationProvider.authorization()
         }) ?: throw ContentProtectionException.KmsUnavailable()
 
+    private fun <T> requireTextRecoveryBody(response: Response<T>): T {
+        if (response.code() == 409) {
+            val detail = runCatching {
+                response.errorBody()?.use { body ->
+                    val source = body.source()
+                    source.request(MAX_ROOM_EPOCH_ERROR_BODY_BYTES.toLong() + 1)
+                    if (source.buffer.size > MAX_ROOM_EPOCH_ERROR_BODY_BYTES) return@use null
+                    ERROR_JSON.decodeFromString<PrivateProfileErrorResponse>(source.readUtf8()).detail
+                }
+            }.getOrNull()
+            if (detail == "TEXT_VERSION_LINEAGE_UNAVAILABLE") throw ContentProtectionException.VersionLineageUnavailable()
+        }
+        return requireBody(response)
+    }
+
     private fun <T> requireBody(response: Response<T>): T {
         if (response.code() == 403 || response.code() == 409) {
             val detail = runCatching {
@@ -2067,6 +2113,12 @@ class HttpKmsShareClient(
 }
 
 private interface KmsApi {
+    @GET("v1/content-version-lineage/text-members/{contentId}")
+    suspend fun recoverTextVersions(
+        @Path("contentId") contentId: String,
+        @Header("Authorization") authorization: String,
+    ): Response<RecoverTextVersionsResponse>
+
     @POST("v1/content-version-lineage/versions")
     suspend fun registerContentVersion(
         @Header("Authorization") authorization: String,
@@ -2240,6 +2292,14 @@ private data class RegisterContentVersionBody(
 @Serializable
 private data class RegisterContentVersionResponse(
     val node: RegisterContentVersionNode,
+)
+
+@Serializable
+private data class RecoverTextVersionsResponse(
+    @SerialName("content_id") val contentId: String,
+    @SerialName("operation_id") val operationId: String,
+    @SerialName("installation_id") val installationId: String,
+    val nodes: List<RegisterContentVersionNode>,
 )
 
 @Serializable

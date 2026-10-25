@@ -50,6 +50,52 @@ open class ProtectedContentVersionLineageStore(
     private val sensitiveFileStore: SensitiveFileStore,
     private val roots: SecureStorageRoots,
 ) : ContentVersionLineageStore {
+    override suspend fun restoreAuthorityGraph(
+        scope: ContentVersionLineageScope,
+        nodes: List<ContentVersionNode>,
+    ): ContentVersionGraph = withScopeLock(scope) { indexFile ->
+        validateScope(scope)
+        require(nodes.isNotEmpty() && nodes.size <= MAX_NODES)
+        validateGraph(nodes)
+        val root = nodes.first().rootContentId
+        require(nodes.all { it.rootContentId == root })
+        val byId = nodes.associateBy(ContentVersionNode::contentId)
+        val index = recoverStagingLocked(indexFile, scope, readIndex(indexFile, scope))
+        val pages: Map<Int, List<ContentVersionNode>>
+        val existing: List<ContentVersionNode>
+        if (index.partitioned) {
+            pages = nodes.flatMap(::buckets).toSet().associateWith { readPage(scope, index, it) }
+            existing = pages.getValue(rootBucket(root)).filter { it.rootContentId == root }
+            validateGraph(existing)
+            nodes.forEach { node ->
+                val content = pages.getValue(contentBucket(node.contentId)).singleOrNull { it.contentId == node.contentId }
+                val operation = pages.getValue(operationBucket(node.operationId)).singleOrNull { it.operationId == node.operationId }
+                if (content != null && content != node || operation != null && operation != node) conflict("authority conflicts with local identity")
+                if (content != operation || content != existing.singleOrNull { it.contentId == node.contentId }) {
+                    corrupt("lineage identity indexes disagree during restore")
+                }
+            }
+        } else {
+            val legacy = readNodes(scope, index).also(::validateGraph)
+            existing = legacy.filter { it.rootContentId == root }
+            nodes.forEach { node ->
+                if (legacy.any { (it.contentId == node.contentId || it.operationId == node.operationId) && it != node }) {
+                    conflict("authority conflicts with local identity")
+                }
+            }
+            pages = (legacy + nodes.filter { node -> legacy.none { it == node } }).flatMap { node ->
+                buckets(node).map { it to node }
+            }.groupBy({ it.first }, { it.second })
+        }
+        if (existing.any { byId[it.contentId] != it }) conflict("authority would discard or change a local version")
+        if (existing.size == nodes.size) return@withScopeLock project(root, index.generation, existing, index.debtCount())
+        val updated = if (index.partitioned) pages.mapValues { (bucket, entries) ->
+            entries + nodes.filter { node -> bucket in buckets(node) && entries.none { it.contentId == node.contentId } }
+        } else pages
+        val committed = commitPages(indexFile, scope, index, updated)
+        project(root, committed.generation, nodes, committed.debtCount())
+    }
+
     override suspend fun append(
         scope: ContentVersionLineageScope,
         node: ContentVersionNode,

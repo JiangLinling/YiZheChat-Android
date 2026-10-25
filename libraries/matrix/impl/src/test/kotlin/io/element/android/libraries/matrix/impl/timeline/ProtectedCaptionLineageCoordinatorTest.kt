@@ -60,6 +60,48 @@ class ProtectedCaptionLineageCoordinatorTest {
     private val rootNode = ContentVersionNode(root, root, null, "root-operation-0001", sha(targetEvent), now - 1000, expiry)
     private val graph = ContentVersionGraph(root, 1, listOf(rootNode), 0)
 
+    @Test fun `missing local TEXT root and child recover exact complete authority before edit intent`() = runTest {
+        val editNode = rootNode.copy(contentId = ContentId("original-child"), parentContentId = root, operationId = "original-child-operation")
+        for (versions in listOf(listOf(rootNode), listOf(rootNode, editNode))) {
+            val target = versions.last()
+            val restored = graph.copy(versions = versions)
+            val lineage = mockk<ContentVersionLineageStore>()
+            coEvery { lineage.rootForContent(scope, target.contentId) } returnsMany listOf(null, root)
+            coEvery { lineage.graph(scope, root) } returns restored
+            coEvery { lineage.restoreAuthorityGraph(scope, versions) } returns restored
+            val kms = mockk<KmsShareClient>()
+            coEvery { kms.recoverTextVersions(target.contentId, any(), sha(scope.roomId), sha(targetEvent), expiry) } returns versions
+            val pending = MemoryPending()
+            val owner = textOwner()
+            val coordinator = ProtectedCaptionLineageCoordinator(scope, pending, lineage, mockk(), kms)
+            withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_13) + owner) {
+                coordinator.prepareText(targetEvent, target.contentId, expiry)
+            }
+            coVerify(exactly = 1) { lineage.restoreAuthorityGraph(scope, versions) }
+            assertThat(pending.all(scope).single().parentContentId).isEqualTo(target.contentId.value)
+            assertThat(pending.all(scope).single().parentExpiresAt).isEqualTo(expiry)
+            assertThat(owner.delegated).isTrue()
+        }
+    }
+
+    @Test fun `destroyed TEXT recovery and wrong target event never import history or persist edit`() = runTest {
+        for (destroyed in listOf(true, false)) {
+            val lineage = mockk<ContentVersionLineageStore>()
+            coEvery { lineage.rootForContent(scope, root) } returns null
+            val pending = MemoryPending()
+            if (destroyed) pending.fenceDestruction(scope, root.value)
+            val versions = listOf(if (destroyed) rootNode else rootNode.copy(eventIdSha256 = sha("other-event")))
+            val kms = mockk<KmsShareClient>()
+            coEvery { kms.recoverTextVersions(root, any(), any(), any(), expiry) } returns versions
+            val coordinator = ProtectedCaptionLineageCoordinator(scope, pending, lineage, mockk(), kms)
+            withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_13) + textOwner()) {
+                assertThat(runCatching { coordinator.prepareText(targetEvent, root, expiry) }.isFailure).isTrue()
+            }
+            coVerify(exactly = 0) { lineage.restoreAuthorityGraph(any(), any()) }
+            assertThat(pending.all(scope)).isEmpty()
+        }
+    }
+
     @Test fun `old root registration does not block a new root in the same room`() = runTest {
         val store = MemoryPending()
         val lineage = FakeLineage(graph)

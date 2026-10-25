@@ -266,6 +266,15 @@ interface DeviceShareKeyService {
 }
 
 interface KmsShareClient {
+    /** Existing TEXT authority only, bound to the current LC-13 operation and exact original target. */
+    suspend fun recoverTextVersions(
+        contentId: ContentId,
+        accountIdHash: String,
+        roomIdHash: String,
+        eventIdHash: String,
+        expiresAtEpochMillis: Long,
+    ): List<ContentVersionNode> = throw ContentProtectionException.VersionLineageUnavailable()
+
     suspend fun registerContentVersion(request: RegisterContentVersionRequest): RegisterContentVersionResult =
         throw ContentProtectionException.KmsUnavailable()
 

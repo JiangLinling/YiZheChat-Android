@@ -1,4 +1,5 @@
 <resources>
+    <string name="error_text_version_unavailable">这条消息的编辑记录暂不可用，未提交修改。编辑内容已保留。</string>
     <string name="error_share_recipient_device_unavailable">本次未发送：接收方的设备授权已失效或发生变更，可能已退出账号、换机或尚未完成验证。请联系对方登录并完成设备验证，稍后重试。群聊可能涉及其中一名成员。</string>
     <string name="error_share_security_access_denied">本次发送未获得安全授权。请检查自己的账号和设备验证状态后重试；若仍受限，请联系管理员。</string>
     <string name="error_share_security_service_unavailable">暂时无法连接安全服务。请检查网络，稍后重试；这不能说明对方是否离线。</string>

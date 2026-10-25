@@ -246,7 +246,7 @@ class HttpManagementControlServicePolicyReceiptTest {
             assertThat(startup.reasonCode).isEqualTo("DEVICE_ADMINISTRATIVELY_LOCKED")
             assertThat(f.currentTrustState()).isEqualTo(DeviceTrustState.STALE)
             assertThat(JSON.parseToJsonElement(f.requests.single().body).jsonObject
-                .getValue("restriction_reason_protocol_version").jsonPrimitive.content).isEqualTo("1")
+                .getValue("restriction_reason_protocol_version").jsonPrimitive.content).isEqualTo("2")
             f.assertSignedPost(f.requests.single(), "original-locked-sync")
         }
     }
