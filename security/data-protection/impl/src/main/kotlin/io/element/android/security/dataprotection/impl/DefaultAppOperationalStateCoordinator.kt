@@ -257,10 +257,25 @@ class DefaultAppOperationalStateCoordinator internal constructor(
             Triple(verifiedSnapshot, snapshotRevision, mutableOperations.value.keys)
         }
         return try {
-            val snapshot = managementControlService.appOperationalSnapshot(accountIdHash, matrixDeviceIdHash)
+            val snapshot = LifecycleStageTiming.measure("operational_snapshot_fetch") {
+                managementControlService.appOperationalSnapshot(accountIdHash, matrixDeviceIdHash)
+            }
             val activeIds = snapshot.activeOperationIds.toSet()
-            val recovered = activeIds.associateWith { operationId ->
-                managementControlService.lifecycleOperation(operationId)
+            val recovered = LifecycleStageTiming.measure("operational_operation_restore", scope = "count_${activeIds.size}") {
+                // Verify every operation before publishing, reusing the existing bounded reader.
+                activeIds.chunked(128).flatMap { ids ->
+                    val batch = if (snapshot.verifiedSignedJson != null) {
+                        managementControlService.lifecycleOperationsForSnapshot(snapshot, ids)
+                    } else null
+                    if (batch != null) {
+                        check(batch.size == ids.size && batch.map { it.operationId }.toSet() == ids.toSet())
+                        batch.map { it.operationId to it }
+                    } else {
+                        readStartupOperationIndex(ids) { operationId ->
+                            operationId to managementControlService.lifecycleOperation(operationId)
+                        }
+                    }
+                }.toMap()
             }.toMutableMap()
             operationIdStore.latest(FullAppLifecycleId.LC_05)
                 ?.takeUnless(activeIds::contains)

@@ -71,3 +71,4 @@ object RegistrationAgreement {
 data class RegistrationConsent(val version: String, val sha256: String)
 class RegistrationAgreementRequired : IllegalStateException("Registration agreement required")
 class RegistrationAgreementChanged : IllegalStateException("Registration agreement changed")
+class RegistrationActivationExpired : IllegalStateException("Registration verification expired")

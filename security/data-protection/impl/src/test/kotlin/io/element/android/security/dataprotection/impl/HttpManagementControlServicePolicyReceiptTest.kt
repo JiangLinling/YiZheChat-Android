@@ -72,6 +72,55 @@ import java.util.Base64
 
 class HttpManagementControlServicePolicyReceiptTest {
     @Test
+    fun `only explicit pending recheck obtains a fresh challenge for the same identity`() = runTest {
+        withFixture { f ->
+            f.probeEnrollment(DeviceTrustState.PENDING)
+            f.service.ensureDeviceEnrollment()
+            assertThat(f.requests).isEmpty()
+            repeat(2) {
+                val result = runCatching { f.service.recheckPendingDeviceEnrollment() }
+                assertThat(result.exceptionOrNull()?.message).isEqualTo("QA_CHALLENGE_PROBE")
+            }
+            assertThat(f.enrollmentPaths).containsExactly(
+                "/v1/device/challenge/$INSTALLATION_ID", "/v1/device/challenge/$INSTALLATION_ID",
+            ).inOrder()
+            assertThat(f.enrollmentChallenges.map { it.decodeToString() }).containsExactly("fresh-1", "fresh-2").inOrder()
+            assertThat(f.currentTrustState()).isEqualTo(DeviceTrustState.PENDING)
+        }
+    }
+
+    @Test
+    fun `pending retry does not force enrollment after concurrent admission at the same version`() = runTest {
+        withFixture { f ->
+            f.probeEnrollment(DeviceTrustState.PENDING)
+            f.admitOnNextEnrollmentLockRead()
+            f.service.recheckPendingDeviceEnrollment()
+            assertThat(f.enrollmentPaths).isEmpty()
+            assertThat(f.enrollmentChallenges).isEmpty()
+            assertThat(f.currentTrustState()).isEqualTo(DeviceTrustState.TRUSTED)
+        }
+    }
+
+    @Test
+    fun `explicit retry does not re-enroll an admitted or security restricted device`() = runTest {
+        for (state in listOf(DeviceTrustState.TRUSTED, DeviceTrustState.MANAGED,
+                             DeviceTrustState.REVOKED, DeviceTrustState.LOST, DeviceTrustState.INTEGRITY_WARNING)) {
+            withFixture { f ->
+                f.probeEnrollment(state)
+                val result = runCatching { f.service.recheckPendingDeviceEnrollment() }
+                if (state in setOf(DeviceTrustState.TRUSTED, DeviceTrustState.MANAGED)) {
+                    assertThat(result.isSuccess).isTrue()
+                } else {
+                    assertThat(result.exceptionOrNull()).isInstanceOf(SecurityException::class.java)
+                }
+                assertThat(f.requests).isEmpty()
+                assertThat(f.enrollmentChallenges).isEmpty()
+                assertThat(f.currentTrustState()).isEqualTo(state)
+            }
+        }
+    }
+
+    @Test
     fun `verified global child reports original device signed facts without ambient heartbeat or a new root`() = runTest {
         for (ambientHeartbeat in listOf(false, true)) {
             withFixture { f ->
@@ -1218,6 +1267,41 @@ class HttpManagementControlServicePolicyReceiptTest {
             trustSnapshot = trustSnapshot.copy(trustState = DeviceTrustState.STALE)
         }
         fun currentTrustState() = trustSnapshot.trustState
+
+        val enrollmentChallenges = mutableListOf<ByteArray>()
+        val enrollmentPaths = mutableListOf<String>()
+        fun admitOnNextEnrollmentLockRead() {
+            var reads = 0
+            coEvery { deviceTrustService.current() } answers {
+                reads++
+                if (reads == 2) trustSnapshot = trustSnapshot.copy(trustState = DeviceTrustState.TRUSTED)
+                trustSnapshot
+            }
+        }
+        fun probeEnrollment(state: DeviceTrustState) {
+            trustSnapshot = trustSnapshot.copy(trustState = state)
+            every { android.util.Base64.decode(any<String>(), any()) } answers {
+                Base64.getDecoder().decode(firstArg<String>())
+            }
+            coEvery { deviceTrustService.initialize() } answers { trustSnapshot }
+            coEvery { deviceTrustService.refresh(any()) } answers {
+                enrollmentChallenges += firstArg<ByteArray>()
+                // Stop before signing/upload: this probe proves the real HTTP challenge path only.
+                throw IllegalStateException("QA_CHALLENGE_PROBE")
+            }
+            var next = 0
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    enrollmentPaths += checkNotNull(request.path)
+                    next++
+                    return MockResponse().setHeader("Content-Type", "application/json").setBody(
+                        """{"challenge_id":"challenge-$next",
+                            "challenge_b64":"${Base64.getEncoder().encodeToString("fresh-$next".encodeToByteArray())}",
+                            "expires_at_epoch_millis":${System.currentTimeMillis() + 60000}}"""
+                    )
+                }
+            }
+        }
 
         fun serveSignedRestriction(trustState: String, reason: String) {
             val publication = revisionEnvelope(1, minimumSecurityEpoch = 3)

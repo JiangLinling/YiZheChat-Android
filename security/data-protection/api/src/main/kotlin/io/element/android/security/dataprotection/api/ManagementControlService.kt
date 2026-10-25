@@ -546,6 +546,9 @@ interface ManagementControlService {
      */
     suspend fun ensureDeviceEnrollment() = Unit
 
+    /** Explicit user recheck only: refresh pending evidence without rotating the installation or its keys. */
+    suspend fun recheckPendingDeviceEnrollment() = ensureDeviceEnrollment()
+
     suspend fun synchronize(): ManagementSyncReport
 
     /** Returns only the locally verified R05 application record; it never implies server receipt delivery. */
@@ -575,6 +578,9 @@ interface ManagementControlService {
         accountIdHash: String,
         matrixDeviceIdHash: String,
     ): AppOperationalSnapshot = throw UnsupportedOperationException("App operational snapshots are not available.")
+
+    /** Complete original recovery reads bound to a verified snapshot; null means legacy endpoint unavailable. */
+    suspend fun lifecycleOperationsForSnapshot(snapshot: AppOperationalSnapshot, operationIds: List<String>): List<LifecycleOperation>? = null
 
     /** Installation-owned startup intents only. This index grants no account or content access. */
     suspend fun startupLifecycleOperations(
@@ -796,6 +802,7 @@ data class VerifiedOnboardingInvitation(
     val inviterUserId: String,
     val inviterDisplayName: String,
     val expiresAtEpochMillis: Long,
+    val installationId: String? = null,
 )
 
 data class OnboardingUsernameSuggestion(

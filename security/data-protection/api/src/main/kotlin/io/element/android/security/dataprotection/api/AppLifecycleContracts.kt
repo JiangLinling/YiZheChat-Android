@@ -238,6 +238,8 @@ data class AppOperationalSnapshot(
     val blockers: List<String> = emptyList(),
     val signingKeyId: String,
     val signatureBase64: String,
+    // Original verified wire payload, including unknown signed fields; never a second authority.
+    val verifiedSignedJson: String? = null,
 ) {
     init {
         LifecycleSubjectHashes(

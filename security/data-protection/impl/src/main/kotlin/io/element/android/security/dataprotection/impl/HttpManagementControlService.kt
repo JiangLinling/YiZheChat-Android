@@ -179,6 +179,16 @@ class HttpManagementControlService(
         )
     }
 
+    override suspend fun recheckPendingDeviceEnrollment(): Unit = withContext(Dispatchers.IO) {
+        if (!configuration.isConfigured) return@withContext
+        val observed = deviceTrustService.current()
+        ensureDeviceEnrollmentLocked(
+            forceRemoteEnrollment = observed.trustState == DeviceTrustState.PENDING,
+            observedAttestationVersion = observed.attestationVersion,
+            forcePendingOnly = true,
+        )
+    }
+
     private val synchronizationMutex = kotlinx.coroutines.sync.Mutex()
     private var restoredAccessConfirmationPending = false
 
@@ -268,7 +278,8 @@ class HttpManagementControlService(
         check(wire.installationId == trust.installationId) { "App operational snapshot targets another installation." }
         check(wire.accountIdHash == accountIdHash) { "App operational snapshot targets another account." }
         check(wire.matrixDeviceIdHash == matrixDeviceIdHash) { "App operational snapshot targets another Matrix device." }
-        wire.toApi().also {
+        check(wire.activeOperationIds.size <= 128 && wire.activeOperationIds.distinct().size == wire.activeOperationIds.size)
+        wire.toApi().copy(verifiedSignedJson = payload.toString()).also {
             check(it.isUsableAt(System.currentTimeMillis(), APP_OPERATIONAL_SNAPSHOT_MAX_FUTURE_ISSUE_SKEW_MILLIS)) {
                 "App operational snapshot is outside its accepted time window."
             }
@@ -773,6 +784,33 @@ class HttpManagementControlService(
         ) { payload, signature ->
             signatureVerifier.verifyDetached(payload, configuration.signingKeyId, signature)
         }
+    }
+
+    override suspend fun lifecycleOperationsForSnapshot(
+        snapshot: AppOperationalSnapshot,
+        operationIds: List<String>,
+    ): List<LifecycleOperation>? = withContext(Dispatchers.IO) {
+        val proof = json.parseToJsonElement(checkNotNull(snapshot.verifiedSignedJson)).jsonObject
+        require(operationIds.size in 1..128 && operationIds.distinct().size == operationIds.size)
+        require(operationIds.all { it.matches(LIFECYCLE_OPERATION_ID_PATTERN) && it in snapshot.activeOperationIds })
+        check(snapshot.installationId == deviceTrustService.current().installationId)
+        val nonce = ByteArray(NONCE_LENGTH_BYTES).also(random::nextBytes).toBase64Url()
+        val request = kotlinx.serialization.json.buildJsonObject {
+            put("snapshot", proof)
+            put("operation_ids", kotlinx.serialization.json.JsonArray(operationIds.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+            put("nonce", nonce)
+        }.toString().encodeToByteArray()
+        require(request.size <= OPERATION_SNAPSHOT_MAX_REQUEST_BYTES)
+        val response = try {
+            executeSignedPost(OPERATION_SNAPSHOT_PATH, request, bindLifecycle = false)
+        } catch (failure: HttpStatusException) {
+            if (failure.statusCode == 404 || failure.statusCode == 405) return@withContext null
+            throw failure
+        }
+        val payload = json.parseToJsonElement(response.decodeToString()).jsonObject
+        decodeOperationalRecoveryBatch(json, payload, snapshot, operationIds, nonce,
+            sha256Hex(signatureVerifier.canonicalJson(proof)), System.currentTimeMillis(), signatureVerifier::verifyDetached)
+            .map { it.toApi() }
     }
 
     override suspend fun lifecycleOperation(operationId: String): LifecycleOperation = withContext(Dispatchers.IO) {
@@ -1764,6 +1802,7 @@ class HttpManagementControlService(
             inviterUserId = wire.inviterUserId,
             inviterDisplayName = wire.inviterDisplayName,
             expiresAtEpochMillis = wire.expiresAtEpochMillis,
+            installationId = installationId,
         )
     }
 
@@ -2300,12 +2339,13 @@ class HttpManagementControlService(
     private suspend fun ensureDeviceEnrollmentLocked(
         forceRemoteEnrollment: Boolean,
         observedAttestationVersion: Long,
+        forcePendingOnly: Boolean = false,
     ) {
         enrollmentMutex.withLock {
             val current = deviceTrustService.current()
             when (
                 deviceEnrollmentDecision(
-                    forceRemoteEnrollment = forceRemoteEnrollment,
+                    forceRemoteEnrollment = forceRemoteEnrollment && (!forcePendingOnly || current.trustState == DeviceTrustState.PENDING),
                     observedAttestationVersion = observedAttestationVersion,
                     currentAttestationVersion = current.attestationVersion,
                     currentTrustState = current.trustState,
@@ -2478,10 +2518,17 @@ class HttpManagementControlService(
 
     private fun execute(request: Request, httpClient: OkHttpClient = client): ByteArray {
         return httpClient.newCall(request).execute().use { response ->
-            val bytes = response.body.bytes()
+            val bytes = if (request.url.encodedPath == OPERATION_SNAPSHOT_PATH) {
+                val source = response.body.source()
+                check(!source.request(OPERATION_SNAPSHOT_MAX_RESPONSE_BYTES.toLong() + 1)) { "Operation recovery response is too large." }
+                source.readByteArray()
+            } else response.body.bytes()
             if (!response.isSuccessful) {
                 if (request.url.encodedPath == ONBOARDING_ACTIVATE_PATH) {
                     when (safeServerDetail(bytes)) {
+                        "activation session has expired" -> if (response.code == 401) {
+                            throw io.element.android.security.dataprotection.api.RegistrationActivationExpired()
+                        }
                         "REGISTRATION_AGREEMENT_REQUIRED" -> throw io.element.android.security.dataprotection.api.RegistrationAgreementRequired()
                         "REGISTRATION_AGREEMENT_CHANGED" -> throw io.element.android.security.dataprotection.api.RegistrationAgreementChanged()
                     }
