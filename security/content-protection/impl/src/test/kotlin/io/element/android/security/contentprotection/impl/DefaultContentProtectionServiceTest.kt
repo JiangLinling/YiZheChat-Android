@@ -1440,6 +1440,59 @@ class DefaultContentProtectionServiceTest {
     }
 
     @Test
+    fun `old edit contract refresh keeps its immutable parent deadline`() = runTest {
+        kms.resolvedRoomLifecycle = roomLifecycle("contract_012345678901234567890125", EXPIRY)
+        kms.lifecycleContractExpiryFailures = 1
+        val protected = service.protectBytes(
+            protectRequest().copy(
+                roomLifecycle = roomLifecycle("contract_012345678901234567890124", EXPIRY),
+                maximumMessageExpiresAtEpochMillis = EXPIRY,
+            ),
+            "bounded edit".encodeToByteArray(),
+        )
+        assertThat(kms.resolveExpiryCaps).containsExactly(EXPIRY)
+        assertThat(kms.storeAttemptExpiries).containsExactly(EXPIRY, EXPIRY).inOrder()
+        assertThat(protected.header.policy.expiresAtEpochMillis).isEqualTo(EXPIRY)
+    }
+
+    @Test
+    fun `a refreshed edit contract exceeding its parent fails before another store`() = runTest {
+        kms.resolvedRoomLifecycle = roomLifecycle("contract_012345678901234567890127", EXPIRY + 1)
+        kms.lifecycleContractExpiryFailures = 1
+        val result = runCatchingExceptions {
+            service.protectBytes(
+                protectRequest().copy(
+                    roomLifecycle = roomLifecycle("contract_012345678901234567890126", EXPIRY),
+                    maximumMessageExpiresAtEpochMillis = EXPIRY,
+                ),
+                "never extended".encodeToByteArray(),
+            )
+        }
+        assertThat(result.exceptionOrNull()).isInstanceOf(ContentProtectionException.AuthenticationFailed::class.java)
+        assertThat(kms.resolveExpiryCaps).containsExactly(EXPIRY)
+        assertThat(kms.storeAttemptExpiries).containsExactly(EXPIRY)
+        assertThat(kms.hasStoredShare(CONTENT_ID)).isFalse()
+    }
+
+    @Test
+    fun `edit refresh also preserves an already selected shorter child deadline`() = runTest {
+        val childExpiry = EXPIRY - 1000
+        kms.resolvedRoomLifecycle = roomLifecycle("contract_012345678901234567890128", childExpiry)
+        kms.lifecycleContractExpiryFailures = 1
+        val protected = service.protectBytes(
+            protectRequest().copy(
+                policy = protectRequest().policy.copy(expiresAtEpochMillis = childExpiry),
+                roomLifecycle = roomLifecycle("contract_012345678901234567890129", childExpiry),
+                maximumMessageExpiresAtEpochMillis = EXPIRY,
+            ),
+            "child deadline".encodeToByteArray(),
+        )
+        assertThat(kms.resolveExpiryCaps).containsExactly(childExpiry)
+        assertThat(kms.storeAttemptExpiries).containsExactly(childExpiry, childExpiry).inOrder()
+        assertThat(protected.header.policy.expiresAtEpochMillis).isEqualTo(childExpiry)
+    }
+
+    @Test
     fun `a second expired v3 contract fails closed without an unbounded retry`() = runTest {
         val oldContract = roomLifecycle("contract_012345678901234567890122", EXPIRY)
         val freshExpiry = EXPIRY + 60_000
@@ -2356,6 +2409,7 @@ class DefaultContentProtectionServiceTest {
         var resolvedRoomLifecycle: ResolvedRoomLifecycle? = null
         var lifecycleContractExpiryFailures = 0
         var resolveRoomLifecycleCount = 0
+        val resolveExpiryCaps = mutableListOf<Long>()
         val storeAttemptExpiries = mutableListOf<Long>()
         val storeAttemptContractIds = mutableListOf<String?>()
         val releaseOperationIds = mutableListOf<String?>()
@@ -2365,6 +2419,11 @@ class DefaultContentProtectionServiceTest {
             require(roomId == ROOM_ID)
             resolveRoomLifecycleCount++
             return requireNotNull(resolvedRoomLifecycle)
+        }
+
+        override suspend fun resolveRoomLifecycle(roomId: String, maximumMessageExpiresAtEpochMillis: Long): ResolvedRoomLifecycle {
+            resolveExpiryCaps += maximumMessageExpiresAtEpochMillis
+            return resolveRoomLifecycle(roomId)
         }
 
         override suspend fun acquireRoomEpoch(request: AcquireRoomEpochRequest): ReleasedRoomEpoch {

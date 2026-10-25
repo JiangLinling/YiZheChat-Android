@@ -40,8 +40,12 @@ import io.element.android.security.contentprotection.api.RoomLifecycleRecoveryPo
 import io.element.android.security.contentprotection.api.StartDeviceRecoveryRequest
 import io.element.android.security.contentprotection.api.StoreKmsShareRequest
 import io.element.android.security.contentprotection.api.TrustedRedactionReason
+import io.element.android.security.contentprotection.api.TextEditTerminalFenceQuery
 import io.element.android.security.securestorage.api.HardwareSecurityLevel
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Test
@@ -55,6 +59,160 @@ import java.security.Signature
 import java.util.Base64
 
 class HttpKmsShareClientTest {
+    @Test
+    fun `terminal edit proof verifies signature nonce scope original receipt and freshness`() = runTest {
+        val server = MockWebServer()
+        val key = signingKey()
+        var fault = "valid"
+        val currentOperation = "current-edit-operation-0001"
+        val query = TextEditTerminalFenceQuery(
+            "original-edit-operation-0001", "planned-child", "parent", "root", "e".repeat(64),
+            System.currentTimeMillis() + 120_000, ACCOUNT_HASH, "b".repeat(64), "c".repeat(64), "original-terminal",
+        )
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                assertThat(request.path).isEqualTo("/v1/content-version-lineage/text-edit-terminal-fences")
+                val fields = Json.parseToJsonElement(request.body.readUtf8()) as JsonObject
+                val proof = (fields + mapOf(
+                    "purpose" to JsonPrimitive("TEXT_EDIT_TERMINAL_FENCE_V1"),
+                    "current_operation_id" to JsonPrimitive(currentOperation),
+                    "account_id_hash" to JsonPrimitive(query.accountIdHash),
+                    "installation_id" to JsonPrimitive(INSTALLATION_ID),
+                    "matrix_device_id_hash" to JsonPrimitive(query.matrixDeviceIdHash),
+                    "room_id_hash" to JsonPrimitive(query.roomIdHash),
+                    "terminal_receipt_id" to JsonPrimitive(query.terminalReceiptId),
+                    "terminal_state" to JsonPrimitive("FAILED_FINAL"),
+                    "store_fence_policy" to JsonPrimitive("LC13_TEXT_ORIGINAL_OPERATION_V1"),
+                    "observed_at_ms" to JsonPrimitive(System.currentTimeMillis()),
+                )).toMutableMap()
+                when (fault) {
+                    "nonce" -> proof["request_nonce_b64"] = JsonPrimitive("wrong-nonce")
+                    "scope" -> proof["room_id_hash"] = JsonPrimitive("f".repeat(64))
+                    "receipt" -> proof["terminal_receipt_id"] = JsonPrimitive("another-terminal")
+                    "capability" -> proof["store_fence_policy"] = JsonPrimitive("unverified")
+                    "stale" -> proof["observed_at_ms"] = JsonPrimitive(System.currentTimeMillis() - 120_000)
+                    "missing" -> proof.remove("child_content_id")
+                }
+                val payload = JsonObject(proof).toString().encodeToByteArray()
+                val signature = sign(if (fault == "signature") signingKey() else key, payload)
+                return jsonResponse(JsonObject(mapOf(
+                    "payload_b64" to JsonPrimitive(Base64.getEncoder().encodeToString(payload)),
+                    "server_signature_b64" to JsonPrimitive(Base64.getEncoder().encodeToString(signature)),
+                )).toString())
+            }
+        }
+        server.start()
+        try {
+            val device = object : DeviceShareKeyService by NoOpDeviceShareKeyService {
+                override suspend fun descriptor() = DeviceShareKeyDescriptor(
+                    INSTALLATION_ID, "test-key", ContentProtectionFormat.DEVICE_SHARE_ALGORITHM, byteArrayOf(1), HardwareSecurityLevel.STRONGBOX,
+                )
+            }
+            val kms = client(server, key, deviceShareKeyService = device)
+            kotlinx.coroutines.withContext(io.element.android.security.dataprotection.api.LifecycleOperationContext(
+                currentOperation, io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_13,
+            )) {
+                kms.verifyTextEditTerminalFence(query)
+                for (kind in listOf("nonce", "scope", "receipt", "capability", "stale", "missing", "signature")) {
+                    fault = kind
+                    assertThat(runCatching { kms.verifyTextEditTerminalFence(query) }.exceptionOrNull())
+                        .isInstanceOf(ContentProtectionException.AuthenticationFailed::class.java)
+                }
+            }
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `old edit accepts a signed earlier deadline and sends its cap`() = runTest {
+        val server = MockWebServer()
+        val key = signingKey()
+        server.start()
+        try {
+            val cap = System.currentTimeMillis() + 60_000
+            enqueueBoundedContract(server, key, cap)
+            val snapshot = client(server, key).resolveRoomLifecycle("!bounded:yizhe.test", cap)
+            assertThat(snapshot.messageExpiresAtEpochMillis).isEqualTo(cap)
+            assertThat(server.takeRequest().body.readUtf8()).contains("\"maximum_message_expires_at_ms\":$cap")
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `bounded contract cannot exceed the requested parent or lose its signature`() = runTest {
+        val server = MockWebServer()
+        val key = signingKey()
+        server.start()
+        try {
+            val cap = System.currentTimeMillis() + 60_000
+            enqueueBoundedContract(server, key, cap + 1)
+            val overCap = runCatching { client(server, key).resolveRoomLifecycle("!bounded:yizhe.test", cap) }
+            assertThat(overCap.exceptionOrNull()).isInstanceOf(ContentProtectionException.AuthenticationFailed::class.java)
+            enqueueBoundedContract(server, key, cap, tampered = true)
+            val tampered = runCatching { client(server, key).resolveRoomLifecycle("!bounded:yizhe.test", cap) }
+            assertThat(tampered.exceptionOrNull()).isInstanceOf(ContentProtectionException.AuthenticationFailed::class.java)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `ordinary new message still rejects a prematurely shortened room contract`() = runTest {
+        val server = MockWebServer()
+        val key = signingKey()
+        server.start()
+        try {
+            enqueueBoundedContract(server, key, System.currentTimeMillis() + 60_000)
+            val result = runCatching { client(server, key).resolveRoomLifecycle("!bounded:yizhe.test") }
+            assertThat(result.exceptionOrNull()).isInstanceOf(ContentProtectionException.AuthenticationFailed::class.java)
+            val expired = runCatching { client(server, key).resolveRoomLifecycle("!bounded:yizhe.test", System.currentTimeMillis() - 1) }
+            assertThat(expired.exceptionOrNull()).isInstanceOf(ContentProtectionException.Expired::class.java)
+            assertThat(server.requestCount).isEqualTo(1)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `bounded edit rejects an arbitrary signed shorter deadline instead of exact authority min`() = runTest {
+        val server = MockWebServer()
+        val key = signingKey()
+        server.start()
+        try {
+            val cap = System.currentTimeMillis() + 8L * 24 * 60 * 60_000
+            enqueueBoundedContract(server, key, System.currentTimeMillis() + 7L * 24 * 60 * 60_000 + 1234)
+            val result = runCatching { client(server, key).resolveRoomLifecycle("!bounded:yizhe.test", cap) }
+            assertThat(result.exceptionOrNull()).isInstanceOf(ContentProtectionException.AuthenticationFailed::class.java)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    private fun enqueueBoundedContract(server: MockWebServer, key: KeyPair, deadline: Long, tampered: Boolean = false) {
+        val issuedAt = System.currentTimeMillis()
+        val expiresAt = issuedAt + 5 * 60_000
+        val roomHash = MessageDigest.getInstance("SHA-256").digest("!bounded:yizhe.test".encodeToByteArray()).toHex()
+        val contractId = "contract_012345678901234567890129"
+        val keyId = MessageDigest.getInstance("SHA-256").digest(key.public.encoded).toHex().take(16)
+        val contractDigest = MessageDigest.getInstance("SHA-256").digest(
+            roomLifecycleContractPayload(contractId, roomHash, 7L, deadline, issuedAt, expiresAt, keyId)
+        ).toHex()
+        val signature = sign(key, roomLifecyclePayload(roomHash, 7L, deadline, issuedAt, expiresAt, contractId, contractDigest, keyId))
+        server.enqueue(jsonResponse(roomLifecycleJson(
+            roomHash = roomHash,
+            profileRevision = 7L,
+            messageExpiresAt = if (tampered) deadline - 1 else deadline,
+            issuedAt = issuedAt,
+            expiresAt = expiresAt,
+            contractId = contractId,
+            contractSha256 = contractDigest,
+            signingKeyId = keyId,
+            signature = signature,
+        )))
+    }
+
     @Test
     fun `new share rejects retired recipient even when sender cached its device`() = runTest {
         val server = MockWebServer()

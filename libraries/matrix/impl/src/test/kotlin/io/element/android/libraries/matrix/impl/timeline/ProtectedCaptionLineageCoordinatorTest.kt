@@ -14,6 +14,7 @@ import io.element.android.security.dataprotection.api.LifecycleStep
 import io.element.android.security.dataprotection.api.LifecycleStepStatus
 import io.element.android.security.dataprotection.api.LifecycleSubjectHashes
 import io.element.android.security.contentprotection.api.ContentId
+import io.element.android.security.contentprotection.api.ContentProtectionException
 import io.element.android.security.contentprotection.api.ContentVersionAppendResult
 import io.element.android.security.contentprotection.api.ContentVersionGraph
 import io.element.android.security.contentprotection.api.ContentVersionLineageScope
@@ -870,6 +871,152 @@ class ProtectedCaptionLineageCoordinatorTest {
 
     private fun textOwner(id: String = operationId) = TextVersionReceiptOwner(id, "a".repeat(64), "b".repeat(64), sha(scope.roomId))
 
+    private inner class FailedTextEditHarness(val store: CaptionPendingStore = MemoryPending()) {
+        val oldId = "failed-text-edit-0001"
+        val child = ContentId("failed-edit-child")
+        val lifecycle = mockk<AppOperationalStateCoordinator>()
+        val kms = mockk<KmsShareClient>()
+        val coordinator = ProtectedCaptionLineageCoordinator(scope, store, FakeLineage(graph), lifecycle, kms)
+        val original = OwnedRootHarness().current.copy(
+            operationId = oldId, lifecycleId = FullAppLifecycleId.LC_13,
+            status = LifecycleOperationStatus.FAILED_FINAL, currentPhase = LifecyclePhase.RECEIPTED,
+            terminalReceiptId = "immutable-failed-terminal",
+        )
+        init {
+            coEvery { lifecycle.operation(oldId) } returns original
+            coEvery { kms.verifyTextEditTerminalFence(any()) } returns Unit
+        }
+        suspend fun seed() = store.put(scope, CaptionPending(
+            oldId, targetEvent, child.value, root.value, root.value, rootNode.operationId, FullAppLifecycleId.LC_13.name,
+            expiry, phase = CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name,
+            serviceReceiptOwner = CaptionServiceReceiptOwner("a".repeat(64), "b".repeat(64), sha(scope.roomId)),
+        ))
+        suspend fun prepare() = withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_13) + textOwner()) {
+            coordinator.prepareText(targetEvent, root, expiry)
+        }
+    }
+
+    @Test fun `verified terminal child is fenced and retained as debt while parent remains editable`() = runTest {
+        val h = FailedTextEditHarness()
+        h.seed()
+        val next = h.prepare()
+        assertThat(h.store.all(scope)).hasSize(2)
+        assertThat(h.store.all(scope).single { it.operationId == h.oldId }.phase).isEqualTo(CaptionPendingPhase.DESTRUCTION_PENDING.name)
+        assertThat(h.store.isDestructionFenced(scope, h.child.value)).isTrue()
+        assertThat(h.store.isDestructionFenced(scope, root.value)).isFalse()
+        assertThat(next.childContentId).isNotEqualTo(h.child)
+        expectSuspendFailure<SecurityException> { h.coordinator.observeBoundEvent(h.child, targetEvent, expiry) }
+        coVerify(exactly = 0) { h.kms.registerContentVersion(any()) }
+    }
+
+    @Test fun `unverified current absence never retires or fences an unknown edit`() = runTest {
+        val h = FailedTextEditHarness()
+        h.seed()
+        coEvery { h.kms.verifyTextEditTerminalFence(any()) } throws ContentProtectionException.AccessDenied()
+        assertThat(runCatching { h.prepare() }.isFailure).isTrue()
+        assertThat(h.store.all(scope).single().phase).isEqualTo(CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name)
+        assertThat(h.store.isDestructionFenced(scope, h.child.value)).isFalse()
+    }
+
+    @Test fun `failure between child fence and debt commit remains blocked and rechecks authority after reopen`() = runTest {
+        val original = MemoryPending()
+        var rejectDebt = true
+        val failing = object : CaptionPendingStore by original {
+            override suspend fun put(scope: ContentVersionLineageScope, pending: CaptionPending) {
+                if (rejectDebt && pending.phase == CaptionPendingPhase.DESTRUCTION_PENDING.name) error("journal unavailable")
+                original.put(scope, pending)
+            }
+        }
+        val first = FailedTextEditHarness(failing)
+        first.seed()
+        assertThat(runCatching { first.prepare() }.isFailure).isTrue()
+        assertThat(original.isDestructionFenced(scope, first.child.value)).isTrue()
+        assertThat(original.all(scope).single().phase).isEqualTo(CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name)
+        rejectDebt = false
+        val reopened = FailedTextEditHarness(failing)
+        reopened.prepare()
+        coVerify(exactly = 1) { reopened.kms.verifyTextEditTerminalFence(any()) }
+        assertThat(original.all(scope)).hasSize(2)
+    }
+
+    @Test fun `one fenced old debt cannot conceal another unresolved edit on the same target`() = runTest {
+        val h = FailedTextEditHarness()
+        h.seed()
+        val second = h.store.all(scope).single().copy(operationId = "another-failed-edit-0002", contentId = "another-child")
+        h.store.put(scope, second)
+        coEvery { h.lifecycle.operation(second.operationId) } returns h.original.copy(
+            operationId = second.operationId, status = LifecycleOperationStatus.RUNNING, terminalReceiptId = null,
+        )
+        assertThat(runCatching { h.prepare() }.isFailure).isTrue()
+        assertThat(h.store.all(scope)).hasSize(2)
+        assertThat(h.store.isDestructionFenced(scope, second.contentId)).isFalse()
+    }
+
+    @Test fun `definite prestore rejection closes the original attempt and a new edit need not wait for its deadline`() = runTest {
+        val h = OwnedRootHarness()
+        h.current = h.current.copy(lifecycleId = FullAppLifecycleId.LC_13)
+        coEvery { h.kms.verifyTextEditTerminalFence(any()) } returns Unit
+        coEvery { h.lifecycle.recordClientReceipt(any()) } answers {
+            h.receipts += firstArg<LifecycleClientReceipt>()
+            h.current.copy(status = LifecycleOperationStatus.FAILED_FINAL, terminalReceiptId = "prestore-terminal").also { h.current = it }
+        }
+        val child = withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_13) + textOwner()) {
+            val plan = h.coordinator.prepareText(targetEvent, root, expiry)
+            h.coordinator.textStoreNotStarted(plan.childContentId)
+            plan.childContentId
+        }
+        val fact = h.receipts.single()
+        assertThat(fact.resultCode).isEqualTo("TEXT_EDIT_SHARE_NOT_STORED")
+        assertThat(fact.receiptReference).isEqualTo("text-edit-prestore:${child.value}")
+        assertThat(h.store.all(scope).single().phase).isEqualTo(CaptionPendingPhase.PRESTORE_REJECTED.name)
+        assertThat(h.store.all(scope).single().preStoreRejectedAt).isEqualTo(fact.occurredAtEpochMillis)
+        val nextId = "next-edit-operation-0002"
+        withContext(LifecycleOperationContext(nextId, FullAppLifecycleId.LC_13) + textOwner(nextId)) {
+            h.coordinator.prepareText(targetEvent, root, expiry)
+        }
+        assertThat(h.store.all(scope)).hasSize(2)
+        assertThat(h.store.all(scope).single { it.operationId == operationId }.phase).isEqualTo(CaptionPendingPhase.DESTRUCTION_PENDING.name)
+        assertThat(h.store.isDestructionFenced(scope, root.value)).isFalse()
+    }
+
+    @Test fun `persisted store-start cannot be downgraded to definite rejection or a fake failure receipt`() = runTest {
+        val h = OwnedRootHarness()
+        h.current = h.current.copy(lifecycleId = FullAppLifecycleId.LC_13)
+        withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_13) + textOwner()) {
+            val plan = h.coordinator.prepareText(targetEvent, root, expiry)
+            h.coordinator.textStoreStarting(plan.childContentId)
+            assertThat(runCatching { h.coordinator.textStoreNotStarted(plan.childContentId) }.isFailure).isTrue()
+            assertThat(h.store.all(scope).single().phase).isEqualTo(CaptionPendingPhase.KMS_STORE_STARTED.name)
+            h.coordinator.protectionOutcomeUnknown(plan.childContentId)
+        }
+        assertThat(h.store.all(scope).single().phase).isEqualTo(CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name)
+        coVerify(exactly = 0) { h.lifecycle.recordClientReceipt(any()) }
+    }
+
+    @Test fun `prestore failure response loss retries the same persisted timestamp and receipt`() = runTest {
+        val h = OwnedRootHarness()
+        h.current = h.current.copy(lifecycleId = FullAppLifecycleId.LC_13)
+        coEvery { h.kms.verifyTextEditTerminalFence(any()) } returns Unit
+        var fail = true
+        coEvery { h.lifecycle.recordClientReceipt(any()) } answers {
+            h.receipts += firstArg<LifecycleClientReceipt>()
+            if (fail) error("response unavailable")
+            h.current.copy(status = LifecycleOperationStatus.FAILED_FINAL, terminalReceiptId = "prestore-terminal").also { h.current = it }
+        }
+        withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_13) + textOwner()) {
+            val plan = h.coordinator.prepareText(targetEvent, root, expiry)
+            assertThat(runCatching { h.coordinator.textStoreNotStarted(plan.childContentId) }.isFailure).isTrue()
+        }
+        fail = false
+        val nextId = "next-edit-operation-0002"
+        withContext(LifecycleOperationContext(nextId, FullAppLifecycleId.LC_13) + textOwner(nextId)) {
+            h.coordinator.prepareText(targetEvent, root, expiry)
+        }
+        assertThat(h.receipts).hasSize(2)
+        assertThat(h.receipts[1]).isEqualTo(h.receipts[0])
+        assertThat(h.store.all(scope)).hasSize(2)
+    }
+
     @Test fun `TEXT root persists owner before protection and blocks duplicate operation after reopen`() = runTest {
         val files = InMemorySensitiveFileStore()
         val roots = object : SecureStorageRoots {
@@ -922,8 +1069,10 @@ class ProtectedCaptionLineageCoordinatorTest {
     }
 
     @Test fun `TEXT edit persists exact parent and inherited expiry and rejects unknown send duplication`() = runTest {
-        val store = MemoryPending()
-        val coordinator = ProtectedCaptionLineageCoordinator(scope, store, FakeLineage(graph), mockk(), mockk())
+        val h = OwnedRootHarness()
+        h.current = h.current.copy(lifecycleId = FullAppLifecycleId.LC_13)
+        val store = h.store
+        val coordinator = h.coordinator
         val owner = textOwner()
         val plan = withContext(LifecycleOperationContext(operationId, FullAppLifecycleId.LC_13) + owner) {
             coordinator.prepareText(targetEvent, root, expiry)
@@ -936,9 +1085,13 @@ class ProtectedCaptionLineageCoordinatorTest {
         assertThat(owner.delegated).isTrue()
         coordinator.protectionOutcomeUnknown(plan.childContentId)
         withContext(LifecycleOperationContext("other-operation-0001", FullAppLifecycleId.LC_13) + textOwner("other-operation-0001")) {
-            expectSuspendFailure<IllegalArgumentException> { coordinator.prepareText(targetEvent, root, expiry) }
+            expectSuspendFailure<ContentProtectionException.SendBindingPending> { coordinator.prepareText(targetEvent, root, expiry) }
         }
         assertThat(store.all(scope).single().contentId).isEqualTo(plan.childContentId.value)
+        assertThat(store.all(scope).single().phase).isEqualTo(CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name)
+        coVerify(exactly = 1) { h.lifecycle.operation(operationId) }
+        coVerify(exactly = 0) { h.kms.verifyTextEditTerminalFence(any()) }
+        coVerify(exactly = 0) { h.kms.registerContentVersion(any()) }
         assertThat(coordinator.textContentIdsForDestruction(plan.childContentId)).containsExactly(root, plan.childContentId)
     }
 
