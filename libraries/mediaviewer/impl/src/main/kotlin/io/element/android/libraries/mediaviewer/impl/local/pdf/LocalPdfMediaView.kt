@@ -41,6 +41,7 @@ internal fun LocalPdfMediaView(
     localMedia: LocalMedia?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onFileDisplayStateChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -53,6 +54,9 @@ internal fun LocalPdfMediaView(
     val validLease = lease?.takeIf { leaseIsValid }
     var failure by remember(localMedia?.uri) { mutableStateOf<Throwable?>(null) }
     var available by remember(validLease) { mutableStateOf(validLease != null) }
+    LaunchedEffect(available, failure) {
+        if (!available || failure != null) onFileDisplayStateChanged(false)
+    }
 
     LaunchedEffect(lease, validLease) {
         if (validLease == null) {
@@ -101,6 +105,7 @@ internal fun LocalPdfMediaView(
 
     if (available && validLease != null) {
         MediaPdfView(
+            onFileDisplayStateChanged = onFileDisplayStateChanged,
             localMediaViewState = localMediaViewState,
             localMedia = localMedia,
             onClick = onClick,

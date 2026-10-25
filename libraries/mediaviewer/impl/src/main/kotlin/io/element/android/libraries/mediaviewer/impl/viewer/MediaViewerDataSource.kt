@@ -224,6 +224,7 @@ class MediaViewerDataSource(
                             pagerKey = pagerKeysHandler.getKey(mediaItem),
                             segmentedVideo = segmentedVideo,
                             mediaItemId = mediaItemId,
+                            isFileMessage = mediaItem is MediaItem.File,
                         )
                     )
                 }

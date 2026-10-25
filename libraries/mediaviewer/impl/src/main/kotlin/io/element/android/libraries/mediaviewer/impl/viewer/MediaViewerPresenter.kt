@@ -115,6 +115,13 @@ class MediaViewerPresenter(
 
         fun handleEvent(event: MediaViewerEvent) {
             when (event) {
+                is MediaViewerEvent.FileDisplayed -> {
+                    val current = data.value.getOrNull(currentIndex.intValue)
+                    if (!inputs.isOneTimeView && current == event.data && event.data.isFileMessage &&
+                        event.data.downloadedMedia.value is AsyncData.Success) {
+                        event.data.eventId?.let(navigator::onFileOpened)
+                    }
+                }
                 is MediaViewerEvent.LoadMedia -> {
                     coroutineScope.downloadMedia(data = event.data, jobs = mediaLoadJobs)
                 }

@@ -22,6 +22,7 @@ interface MediaGalleryEntryPoint : FeatureEntryPoint {
     ): Node
 
     interface Callback : Plugin {
+        fun onFileOpened(eventId: EventId) = Unit
         fun onBackClick()
         fun viewInTimeline(eventId: EventId)
         fun forward(eventId: EventId, fromPinnedEvents: Boolean)

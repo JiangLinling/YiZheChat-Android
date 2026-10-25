@@ -56,6 +56,7 @@ sealed interface MediaViewerPageData {
         override val pagerKey: Long,
         val segmentedVideo: SegmentedVideoCandidate? = null,
         val mediaItemId: UniqueId = UniqueId("media-viewer-data"),
+        val isFileMessage: Boolean = false,
     ) : MediaViewerPageData
 }
 

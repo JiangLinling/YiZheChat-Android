@@ -48,6 +48,7 @@ internal fun LocalOfficeMediaView(
     mediaInfo: MediaInfo,
     modifier: Modifier = Modifier,
     renderMode: LocalMediaRenderMode = LocalMediaRenderMode.STANDALONE,
+    onFileDisplayStateChanged: (Boolean) -> Unit = {},
 ) {
     val standaloneTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() +
         officeDocumentTopBarContentHeight
@@ -91,6 +92,7 @@ internal fun LocalOfficeMediaView(
         hostLease = filePreviewLease,
         requireHostLease = true,
         onState = { state ->
+            onFileDisplayStateChanged(state == LocalOfficePreviewState.READY)
             localMediaViewState.isReady = state in setOf(
                 LocalOfficePreviewState.READY,
                 LocalOfficePreviewState.UNSUPPORTED,
@@ -102,6 +104,7 @@ internal fun LocalOfficeMediaView(
             )
         },
         onClose = { reason: LocalOfficeCloseReason, cleanup: LocalOfficeCleanupResult ->
+            onFileDisplayStateChanged(false)
             localMediaViewState.isReady = true
             Timber.d(
                 "LC-16 local Office viewer closed reason=%s webReleased=%s sourceClosed=%s payloadCleared=%s hostLeaseReleased=%s pendingRecovery=%s",

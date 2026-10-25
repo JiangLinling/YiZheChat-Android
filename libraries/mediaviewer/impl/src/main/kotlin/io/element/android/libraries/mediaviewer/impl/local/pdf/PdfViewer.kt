@@ -47,6 +47,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.runtime.rememberUpdatedState
 import io.element.android.compound.theme.ElementTheme
 import io.element.android.libraries.architecture.AsyncData
 import io.element.android.libraries.designsystem.preview.ElementPreview
@@ -71,6 +73,7 @@ fun PdfViewer(
     backgroundColor: Color = Color.Transparent,
     showPageIndicator: Boolean = false,
     loadingText: String? = null,
+    onFileDisplayStateChanged: (Boolean) -> Unit = {},
 ) {
     BoxWithConstraints(
         modifier = modifier
@@ -91,6 +94,7 @@ fun PdfViewer(
         val pdfPages = pdfViewerState.getPages()
         Box(modifier = Modifier.fillMaxSize()) {
             PdfPagesView(
+                onFileDisplayStateChanged = onFileDisplayStateChanged,
                 pdfPages = pdfPages,
                 lazyListState = pdfViewerState.lazyListState,
                 topContentPadding = topContentPadding,
@@ -165,6 +169,7 @@ private fun PdfPagesView(
     backgroundColor: Color,
     loadingText: String?,
     modifier: Modifier = Modifier,
+    onFileDisplayStateChanged: (Boolean) -> Unit = {},
 ) {
     when (pdfPages) {
         is AsyncData.Uninitialized,
@@ -182,6 +187,7 @@ private fun PdfPagesView(
                 .padding(top = topContentPadding),
         )
         is AsyncData.Success -> PdfPagesContentView(
+            onFileDisplayStateChanged = onFileDisplayStateChanged,
             pdfPages = pdfPages.data,
             lazyListState = lazyListState,
             topContentPadding = topContentPadding,
@@ -254,6 +260,7 @@ private fun PdfPagesContentView(
     topContentPadding: Dp,
     backgroundColor: Color,
     modifier: Modifier = Modifier,
+    onFileDisplayStateChanged: (Boolean) -> Unit = {},
 ) {
     LazyColumn(
         modifier = modifier
@@ -268,7 +275,7 @@ private fun PdfPagesContentView(
         }
         items(pdfPages.size) { index ->
             val pdfPage = pdfPages[index]
-            PdfPageView(pdfPage)
+            PdfPageView(pdfPage, onFileDisplayStateChanged)
         }
     }
 }
@@ -276,7 +283,9 @@ private fun PdfPagesContentView(
 @Composable
 private fun PdfPageView(
     pdfPage: PdfPage,
+    onFileDisplayStateChanged: (Boolean) -> Unit = {},
 ) {
+    val currentOnFileDisplayed = rememberUpdatedState(onFileDisplayStateChanged)
     val pdfPageState by pdfPage.stateFlow.collectAsState()
     DisposableEffect(pdfPage) {
         pdfPage.load()
@@ -290,7 +299,11 @@ private fun PdfPageView(
                 bitmap = state.bitmap.asImageBitmap(),
                 contentDescription = stringResource(id = CommonStrings.a11y_page_n, pdfPage.pageIndex + 1),
                 contentScale = ContentScale.FillWidth,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().onGloballyPositioned { coordinates ->
+                    if (coordinates.isAttached && coordinates.size.width > 0 && coordinates.size.height > 0) {
+                        currentOnFileDisplayed.value(true)
+                    }
+                }
             )
         }
         is PdfPage.State.Loading -> {

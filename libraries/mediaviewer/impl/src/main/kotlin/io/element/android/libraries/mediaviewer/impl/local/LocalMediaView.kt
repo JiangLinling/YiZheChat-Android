@@ -48,16 +48,19 @@ fun LocalMediaView(
     officePreviewDeviceId: String? = null,
     isOneTimeView: Boolean = false,
     localMediaRenderMode: LocalMediaRenderMode = LocalMediaRenderMode.STANDALONE,
+    onFileDisplayStateChanged: (Boolean) -> Unit = {},
 ) {
     val mimeType = mediaInfo?.mimeType
     when {
         mimeType.isMimeTypeImage() -> MediaImageView(
+            onFileDisplayStateChanged = if (isOneTimeView) ({}) else onFileDisplayStateChanged,
             localMediaViewState = localMediaViewState,
             localMedia = localMedia,
             modifier = modifier,
             onClick = onClick,
         )
         mimeType.isMimeTypeVideo() -> MediaVideoView(
+            onFileDisplayStateChanged = if (isOneTimeView) ({}) else onFileDisplayStateChanged,
             isDisplayed = isDisplayed,
             localMediaViewState = localMediaViewState,
             bottomPaddingInPixels = bottomPaddingInPixels,
@@ -70,6 +73,7 @@ fun LocalMediaView(
         mediaInfo.isOfficeDocument() -> {
             if (!isOneTimeView) {
                 LocalOfficeMediaView(
+                    onFileDisplayStateChanged = onFileDisplayStateChanged,
                     localMediaViewState = localMediaViewState,
                     localMedia = localMedia,
                     mediaInfo = requireNotNull(mediaInfo),
@@ -87,17 +91,20 @@ fun LocalMediaView(
             }
         }
         mimeType == MimeTypes.PlainText -> TextFileView(
+            onFileDisplayStateChanged = if (isOneTimeView) ({}) else onFileDisplayStateChanged,
             localMedia = localMedia,
             textFileViewer = textFileViewer,
             modifier = modifier,
         )
         mimeType == MimeTypes.Pdf -> LocalPdfMediaView(
+            onFileDisplayStateChanged = if (isOneTimeView) ({}) else onFileDisplayStateChanged,
             localMediaViewState = localMediaViewState,
             localMedia = localMedia,
             modifier = modifier,
             onClick = onClick,
         )
         mediaInfo.isZipArchive() -> MediaArchiveView(
+            onFileDisplayStateChanged = if (isOneTimeView) ({}) else onFileDisplayStateChanged,
             localMediaViewState = localMediaViewState,
             localMedia = localMedia,
             modifier = modifier,

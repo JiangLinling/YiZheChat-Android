@@ -37,11 +37,14 @@ import io.element.android.libraries.matrix.test.timeline.FakeTimeline
 import io.element.android.libraries.mediaviewer.api.MediaViewerEntryPoint
 import io.element.android.libraries.mediaviewer.api.anApkMediaInfo
 import io.element.android.libraries.mediaviewer.api.local.LocalMediaFactory
+import io.element.android.libraries.mediaviewer.api.local.LocalMedia
+import androidx.compose.runtime.MutableState
 import io.element.android.libraries.mediaviewer.impl.R
 import io.element.android.libraries.mediaviewer.impl.datasource.FakeMediaGalleryDataSource
 import io.element.android.libraries.mediaviewer.impl.datasource.MediaGalleryDataSource
 import io.element.android.libraries.mediaviewer.impl.details.MediaBottomSheetState
 import io.element.android.libraries.mediaviewer.impl.model.GroupedMediaItems
+import io.element.android.libraries.mediaviewer.impl.model.MediaItem
 import io.element.android.libraries.mediaviewer.impl.model.aMediaItemImage
 import io.element.android.libraries.mediaviewer.impl.model.aMediaItemLoadingIndicator
 import io.element.android.libraries.mediaviewer.impl.segmented.product.SegmentedVideoPlaybackOwnerFactory
@@ -73,6 +76,79 @@ private val TESTED_MEDIA_INFO = anApkMediaInfo(
 
 @Suppress("LargeClass")
 class MediaViewerPresenterTest {
+    @Test
+    fun `file display records only a successfully loaded current non burn page`() = runTest {
+        for (oneTime in listOf(false, true)) {
+            val gallery = FakeMediaGalleryDataSource(startLambda = {})
+            val navigator = mockk<MediaViewerNavigator>(relaxed = true)
+            val presenter = createMediaViewerPresenter(
+                localMediaFactory = localMediaFactory,
+                eventId = AN_EVENT_ID,
+                mode = MediaViewerEntryPoint.MediaViewerMode.TimelineFilesAndAudios(Timeline.Mode.Live),
+                mediaGalleryDataSource = gallery,
+                mediaViewerNavigator = navigator,
+                isOneTimeView = oneTime,
+            )
+            presenter.test {
+                awaitFirstItem()
+                gallery.emitGroupedMediaItems(AsyncData.Success(GroupedMediaItems(
+                    imageAndVideoItems = persistentListOf(),
+                    fileItems = persistentListOf(MediaItem.File(UniqueId("qa-opened-file"), AN_EVENT_ID, TESTED_MEDIA_INFO, aMediaSource())),
+                )))
+                val current = awaitItem()
+                val item = current.listData.single() as MediaViewerPageData.MediaViewerData
+                current.eventSink(MediaViewerEvent.FileDisplayed(item))
+                verify(exactly = 0) { navigator.onFileOpened(any()) }
+                @Suppress("UNCHECKED_CAST")
+                val downloaded = item.downloadedMedia as MutableState<AsyncData<LocalMedia>>
+                downloaded.value = AsyncData.Success(LocalMedia(mockMediaUri, TESTED_MEDIA_INFO))
+                current.eventSink(MediaViewerEvent.FileDisplayed(item.copy(eventId = AN_EVENT_ID_2)))
+                verify(exactly = 0) { navigator.onFileOpened(any()) }
+                current.eventSink(MediaViewerEvent.FileDisplayed(item))
+                verify(exactly = if (oneTime) 0 else 1) { navigator.onFileOpened(AN_EVENT_ID) }
+                downloaded.value = AsyncData.Failure(IllegalStateException("QA_VIEW_CANCELLED"))
+                current.eventSink(MediaViewerEvent.FileDisplayed(item))
+                verify(exactly = if (oneTime) 0 else 1) { navigator.onFileOpened(AN_EVENT_ID) }
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+    }
+
+    @Test
+    fun `file display tracks image and video files but never ordinary gallery media`() = runTest {
+        for (mime in listOf("image/png", "video/mp4")) {
+            for (asFile in listOf(false, true)) {
+                val info = TESTED_MEDIA_INFO.copy(mimeType = mime)
+                val source = aMediaSource()
+                val item = if (asFile) MediaItem.File(UniqueId("file-boundary"), AN_EVENT_ID, info, source)
+                    else if (mime == "image/png") MediaItem.Image(UniqueId("image-boundary"), AN_EVENT_ID, info, source, null)
+                    else MediaItem.Video(UniqueId("video-boundary"), AN_EVENT_ID, info, source, null)
+                val gallery = FakeMediaGalleryDataSource(startLambda = {})
+                val navigator = mockk<MediaViewerNavigator>(relaxed = true)
+                val mode = if (asFile) MediaViewerEntryPoint.MediaViewerMode.TimelineFilesAndAudios(Timeline.Mode.Live)
+                    else MediaViewerEntryPoint.MediaViewerMode.TimelineImagesAndVideos(Timeline.Mode.Live)
+                val presenter = createMediaViewerPresenter(localMediaFactory = localMediaFactory, eventId = AN_EVENT_ID,
+                    mode = mode, mediaGalleryDataSource = gallery, mediaViewerNavigator = navigator)
+                presenter.test {
+                    awaitFirstItem()
+                    gallery.emitGroupedMediaItems(AsyncData.Success(GroupedMediaItems(
+                        imageAndVideoItems = if (asFile) persistentListOf() else persistentListOf(item),
+                        fileItems = if (asFile) persistentListOf(item) else persistentListOf(),
+                    )))
+                    val current = awaitItem()
+                    val page = current.listData.single() as MediaViewerPageData.MediaViewerData
+                    assertThat(page.isFileMessage).isEqualTo(asFile)
+                    @Suppress("UNCHECKED_CAST")
+                    val downloaded = page.downloadedMedia as MutableState<AsyncData<LocalMedia>>
+                    downloaded.value = AsyncData.Success(LocalMedia(mockMediaUri, info))
+                    current.eventSink(MediaViewerEvent.FileDisplayed(page))
+                    verify(exactly = if (asFile) 1 else 0) { navigator.onFileOpened(AN_EVENT_ID) }
+                    cancelAndIgnoreRemainingEvents()
+                }
+            }
+        }
+    }
+
     @get:Rule
     val warmUpRule = WarmUpRule()
 
@@ -1054,6 +1130,7 @@ internal fun TestScope.createMediaViewerPresenter(
         startLambda = { },
     ),
     canShowInfo: Boolean = true,
+    isOneTimeView: Boolean = false,
     mediaViewerNavigator: MediaViewerNavigator = FakeMediaViewerNavigator(),
     segmentedVideoPlaybackOwnerFactory: SegmentedVideoPlaybackOwnerFactory? = null,
     room: JoinedRoom = FakeJoinedRoom(
@@ -1065,6 +1142,7 @@ internal fun TestScope.createMediaViewerPresenter(
             eventId = eventId,
             mode = mode,
             canShowInfo = canShowInfo,
+            isOneTimeView = isOneTimeView,
         ),
         navigator = mediaViewerNavigator,
         dataSource = MediaViewerDataSource(
@@ -1090,6 +1168,7 @@ internal fun createMediaViewerEntryPointParams(
     eventId: EventId? = null,
     mode: MediaViewerEntryPoint.MediaViewerMode = MediaViewerEntryPoint.MediaViewerMode.SingleMedia,
     canShowInfo: Boolean = true,
+    isOneTimeView: Boolean = false,
 ) = MediaViewerEntryPoint.Params(
     mode = mode,
     eventId = eventId,
@@ -1097,6 +1176,7 @@ internal fun createMediaViewerEntryPointParams(
     mediaSource = aMediaSource(),
     thumbnailSource = null,
     canShowInfo = canShowInfo,
+    isOneTimeView = isOneTimeView,
 )
 
 private class CancellationAwareMediaLoader : MatrixMediaLoader by FakeMatrixMediaLoader() {

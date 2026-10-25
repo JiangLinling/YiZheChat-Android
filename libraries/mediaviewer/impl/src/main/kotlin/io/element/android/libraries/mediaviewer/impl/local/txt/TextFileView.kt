@@ -41,8 +41,9 @@ fun TextFileView(
     localMedia: LocalMedia?,
     textFileViewer: TextFileViewer,
     modifier: Modifier = Modifier,
+    onFileDisplayStateChanged: (Boolean) -> Unit = {},
 ) {
-    val data = remember { mutableStateOf<AsyncData<ImmutableList<String>>>(AsyncData.Uninitialized) }
+    val data = remember(localMedia?.uri) { mutableStateOf<AsyncData<ImmutableList<String>>>(AsyncData.Uninitialized) }
     val context = LocalContext.current
     DisposableEffect(localMedia?.uri) {
         onDispose { data.value = AsyncData.Uninitialized }
@@ -53,7 +54,7 @@ fun TextFileView(
             // Load the file content
             val result = runCatchingExceptions { withContext(Dispatchers.IO) {
                 context.contentResolver.openInputStream(localMedia.uri).use {
-                    it?.bufferedReader()?.readLines()?.toList().orEmpty()
+                    requireNotNull(it) { "Protected text source is unavailable." }.bufferedReader().readLines().toList()
                 }
             } }
             data.value = if (result.isSuccess) {
@@ -61,6 +62,14 @@ fun TextFileView(
             } else {
                 AsyncData.Failure(result.exceptionOrNull() ?: Exception("An error occurred"))
             }
+        }
+    }
+    val currentOnFileDisplayed = androidx.compose.runtime.rememberUpdatedState(onFileDisplayStateChanged)
+    LaunchedEffect(data.value, localMedia?.uri) {
+        currentOnFileDisplayed.value(false)
+        if (data.value is AsyncData.Success) {
+            androidx.compose.runtime.withFrameNanos { }
+            currentOnFileDisplayed.value(true)
         }
     }
     TextFileContentView(

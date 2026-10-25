@@ -31,18 +31,20 @@ fun MediaPdfView(
     loadingText: String? = null,
     onSourceFailure: (Throwable) -> Unit = {},
     runtimeFactory: (() -> FilePreviewRuntime?)? = null,
+    onFileDisplayStateChanged: (Boolean) -> Unit = {},
 ) {
     val currentOnSourceFailure = rememberUpdatedState(onSourceFailure)
     val pdfViewerState = rememberPdfViewerState(
         model = localMedia?.uri,
         zoomableState = localMediaViewState.zoomableState,
-        onFailure = { currentOnSourceFailure.value(it) },
+        onFailure = { onFileDisplayStateChanged(false); currentOnSourceFailure.value(it) },
         runtimeFactory = runtimeFactory,
     )
     if (manageLocalReadyState) {
         localMediaViewState.isReady = pdfViewerState.isLoaded
     }
     PdfViewer(
+        onFileDisplayStateChanged = onFileDisplayStateChanged,
         pdfViewerState = pdfViewerState,
         onClick = onClick,
         topContentPadding = topContentPadding,

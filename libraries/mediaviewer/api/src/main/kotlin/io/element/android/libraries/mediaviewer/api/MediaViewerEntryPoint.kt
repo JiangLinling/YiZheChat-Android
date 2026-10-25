@@ -32,6 +32,8 @@ interface MediaViewerEntryPoint : FeatureEntryPoint {
     interface Callback : Plugin {
         fun onDone()
         fun onPlaybackEnded() = onDone()
+        /** Actual local file display only; no Matrix read/burn receipt or access grant. */
+        fun onFileOpened(eventId: EventId) = Unit
         fun viewInTimeline(eventId: EventId)
         fun forwardEvent(eventId: EventId, fromPinnedEvents: Boolean)
     }

@@ -20,8 +20,32 @@ import io.element.android.tests.testutils.lambda.lambdaError
 import io.element.android.tests.testutils.node.TestParentNode
 import org.junit.Rule
 import org.junit.Test
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
+import io.element.android.libraries.mediaviewer.api.MediaViewerEntryPoint
+import io.element.android.libraries.mediaviewer.api.anApkMediaInfo
+import io.element.android.libraries.matrix.api.media.MediaSource
+import io.element.android.libraries.matrix.test.AN_EVENT_ID
+import com.bumble.appyx.core.node.node
 
 class DefaultMediaGalleryEntryPointTest {
+    @Test
+    fun `gallery forwards the exact file display to its room owner`() {
+        val child = slot<MediaViewerEntryPoint.Callback>()
+        val owner = mockk<MediaGalleryEntryPoint.Callback>(relaxed = true)
+        val entry = mockk<MediaViewerEntryPoint>()
+        val context = BuildContext.root(null)
+        every { entry.createNode(any(), any(), any(), capture(child)) } answers { node(context) {} }
+        val flow = MediaGalleryFlowNode(context, listOf(owner), entry)
+        flow.resolve(MediaGalleryFlowNode.NavTarget.MediaViewer(
+            MediaViewerEntryPoint.MediaViewerMode.SingleMedia, AN_EVENT_ID, anApkMediaInfo(), MediaSource("mxc://qa/file"), null,
+        ), context)
+        child.captured.onFileOpened(AN_EVENT_ID)
+        verify(exactly = 1) { owner.onFileOpened(AN_EVENT_ID) }
+    }
+
     @get:Rule
     val instantTaskExecutorRule = InstantTaskExecutorRule()
 

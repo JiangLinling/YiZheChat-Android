@@ -112,6 +112,10 @@ class MediaGalleryFlowNode(
             }
             is NavTarget.MediaViewer -> {
                 val callback = object : MediaViewerEntryPoint.Callback {
+                    override fun onFileOpened(eventId: EventId) {
+                        callback.onFileOpened(eventId)
+                    }
+
                     override fun onDone() {
                         overlay.hide()
                     }

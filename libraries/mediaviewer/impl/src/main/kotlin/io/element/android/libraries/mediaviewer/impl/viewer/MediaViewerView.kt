@@ -305,6 +305,9 @@ fun MediaViewerView(
                                 officePreviewAccountId = officePreviewAccountId,
                                 officePreviewDeviceId = officePreviewDeviceId,
                                 isOneTimeView = isOneTimeView,
+                                onFileDisplayed = {
+                                    if (isDisplayed && !isOneTimeView) state.eventSink(MediaViewerEvent.FileDisplayed(dataForPage))
+                                },
                             )
                             // Bottom bar
                             if (!dataForPage.mediaInfo.isOfficeDocument()) {
@@ -405,6 +408,7 @@ private fun MediaViewerPage(
     officePreviewAccountId: String?,
     officePreviewDeviceId: String?,
     isOneTimeView: Boolean,
+    onFileDisplayed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val currentShowOverlay by rememberUpdatedState(showOverlay)
@@ -421,6 +425,9 @@ private fun MediaViewerPage(
         modifier = modifier,
     ) {
         val downloadedMedia by data.downloadedMedia
+        val renderedUri = (downloadedMedia as? AsyncData.Success)?.data?.uri
+        var fileContentReady by remember(data.mediaLoadIdentity, renderedUri) { mutableStateOf(false) }
+        FileDisplayReceiptEffect(fileContentReady && data.isFileMessage, isDisplayed, downloadedMedia is AsyncData.Success, isOneTimeView, onFileDisplayed)
         val showProgress = rememberShowProgress(downloadedMedia)
 
         Box(
@@ -446,6 +453,7 @@ private fun MediaViewerPage(
 
                 val renderMedia: @Composable (LocalMedia?) -> Unit = { localMedia ->
                     LocalMediaView(
+                        onFileDisplayStateChanged = { fileContentReady = it },
                         modifier = Modifier.fillMaxSize(),
                         isDisplayed = isDisplayed,
                         bottomPaddingInPixels = bottomPaddingInPixels,

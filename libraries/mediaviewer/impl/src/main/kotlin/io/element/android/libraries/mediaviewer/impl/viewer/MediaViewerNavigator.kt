@@ -14,4 +14,5 @@ interface MediaViewerNavigator {
     fun onViewInTimelineClick(eventId: EventId)
     fun onForwardClick(eventId: EventId, fromPinnedEvents: Boolean)
     fun onItemDeleted()
+    fun onFileOpened(eventId: EventId) = Unit
 }

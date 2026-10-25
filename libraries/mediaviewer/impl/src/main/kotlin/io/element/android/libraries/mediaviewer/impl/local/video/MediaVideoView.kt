@@ -46,6 +46,7 @@ import androidx.media3.common.Player.STATE_READY
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import io.element.android.compound.theme.ElementTheme
@@ -92,6 +93,7 @@ fun MediaVideoView(
     audioFocus: AudioFocus?,
     onPlaybackEnded: () -> Unit = {},
     modifier: Modifier = Modifier,
+    onFileDisplayStateChanged: (Boolean) -> Unit = {},
 ) {
     val continuous = localMedia?.uri?.let(SegmentedVideoPlaybackRegistry::resolve)?.continuous == true
     val exoPlayer = rememberExoPlayer(forAudioOnly = false, continuousProtectedVideo = continuous, progressiveProtectedVideo = localMedia?.progressiveVideo != null)
@@ -105,6 +107,7 @@ fun MediaVideoView(
             autoplay = autoplay,
             audioFocus = audioFocus,
             onPlaybackEnded = onPlaybackEnded,
+            onFileDisplayStateChanged = onFileDisplayStateChanged,
             modifier = modifier,
         )
     }
@@ -121,6 +124,7 @@ private fun ExoPlayerMediaVideoView(
     autoplay: Boolean,
     audioFocus: AudioFocus?,
     onPlaybackEnded: () -> Unit,
+    onFileDisplayStateChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var mediaPlayerControllerState: MediaPlayerControllerState by remember {
@@ -149,6 +153,29 @@ private fun ExoPlayerMediaVideoView(
     localMediaViewState.playableState = playableState
 
     val currentOnPlaybackEnded by rememberUpdatedState(onPlaybackEnded)
+    val currentOnFileDisplay by rememberUpdatedState(onFileDisplayStateChanged)
+    val currentMediaUri by rememberUpdatedState(localMedia?.uri)
+    DisposableEffect(exoPlayer, localMedia?.uri) {
+        val sourceUri = localMedia?.uri
+        var active = true
+        currentOnFileDisplay(false)
+        val frameListener = object : AnalyticsListener {
+            override fun onRenderedFirstFrame(eventTime: AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
+                // EventTime identifies the rendered source; currentMediaItem alone could already be a new source.
+                if (!active || sourceUri == null || currentMediaUri != sourceUri || eventTime.timeline.isEmpty ||
+                    eventTime.windowIndex !in 0 until eventTime.timeline.windowCount) return
+                val renderedUri = eventTime.timeline.getWindow(eventTime.windowIndex, Timeline.Window())
+                    .mediaItem.localConfiguration?.uri
+                if (renderedUri == sourceUri) currentOnFileDisplay(true)
+            }
+        }
+        exoPlayer.addAnalyticsListener(frameListener)
+        onDispose {
+            active = false
+            exoPlayer.removeAnalyticsListener(frameListener)
+            currentOnFileDisplay(false)
+        }
+    }
     var hasPreparedPlayableMedia by remember { mutableStateOf(false) }
     var segmentedPlaybackFailedClosed by remember { mutableStateOf(false) }
     LaunchedEffect(localMedia?.uri) {
@@ -171,6 +198,7 @@ private fun ExoPlayerMediaVideoView(
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                currentOnFileDisplay(false)
                 currentProgressiveVideo?.let {
                     val rootCause = generateSequence<Throwable>(error) { it.cause }.take(16).last()
                     Timber.tag("YiZheProgressiveVideo").w("player_error code=%d root_type=%s",

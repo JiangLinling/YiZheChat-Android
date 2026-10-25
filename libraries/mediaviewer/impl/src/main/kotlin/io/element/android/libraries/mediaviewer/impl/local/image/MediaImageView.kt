@@ -11,6 +11,11 @@ package io.element.android.libraries.mediaviewer.impl.local.image
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -36,6 +41,7 @@ fun MediaImageView(
     localMedia: LocalMedia?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onFileDisplayStateChanged: (Boolean) -> Unit = {},
 ) {
     if (LocalInspectionMode.current) {
         Image(
@@ -45,7 +51,21 @@ fun MediaImageView(
         )
     } else {
         val context = LocalContext.current
-        val zoomableImageState = rememberZoomableImageState(localMediaViewState.zoomableState)
+        val zoomableImageState = key(localMedia?.uri) {
+            rememberZoomableImageState(localMediaViewState.zoomableState)
+        }
+        val currentOnFileDisplay = rememberUpdatedState(onFileDisplayStateChanged)
+        DisposableEffect(localMedia?.uri) {
+            currentOnFileDisplay.value(false)
+            onDispose { currentOnFileDisplay.value(false) }
+        }
+        LaunchedEffect(localMedia?.uri, zoomableImageState.isImageDisplayed) {
+            currentOnFileDisplay.value(false)
+            if (localMedia?.uri != null && zoomableImageState.isImageDisplayed) {
+                withFrameNanos { }
+                currentOnFileDisplay.value(true)
+            }
+        }
         localMediaViewState.isReady = zoomableImageState.isImageDisplayed
         val boundedModel = remember(
             localMedia?.uri,

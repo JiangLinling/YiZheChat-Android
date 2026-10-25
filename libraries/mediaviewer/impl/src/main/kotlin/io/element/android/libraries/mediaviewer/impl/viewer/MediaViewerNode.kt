@@ -92,6 +92,10 @@ class MediaViewerNode(
         callback.onDone()
     }
 
+    override fun onFileOpened(eventId: EventId) {
+        if (!inputs.isOneTimeView) callback.onFileOpened(eventId)
+    }
+
     private val mediaGallerySource = if (inputs.mode == MediaViewerEntryPoint.MediaViewerMode.SingleMedia) {
         SingleMediaGalleryDataSource.createFrom(inputs)
     } else {

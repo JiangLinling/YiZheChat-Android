@@ -40,6 +40,7 @@ internal fun MediaArchiveView(
     localMediaViewState: LocalMediaViewState,
     localMedia: LocalMedia?,
     modifier: Modifier = Modifier,
+    onFileDisplayStateChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     var result by remember(localMedia?.uri) { mutableStateOf<Result<List<SafeArchiveEntry>>?>(null) }
@@ -56,6 +57,14 @@ internal fun MediaArchiveView(
             }
         }
         localMediaViewState.isReady = result?.isSuccess == true
+    }
+    val currentOnFileDisplayed = androidx.compose.runtime.rememberUpdatedState(onFileDisplayStateChanged)
+    LaunchedEffect(result, localMedia?.uri) {
+        currentOnFileDisplayed.value(false)
+        if (result?.isSuccess == true) {
+            androidx.compose.runtime.withFrameNanos { }
+            currentOnFileDisplayed.value(true)
+        }
     }
     when {
         result == null -> Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
