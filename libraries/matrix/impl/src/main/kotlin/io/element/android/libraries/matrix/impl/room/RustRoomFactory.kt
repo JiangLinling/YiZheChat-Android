@@ -8,8 +8,8 @@
 
 package io.element.android.libraries.matrix.impl.room
 
-import io.element.android.appconfig.TimelineConfig
 import io.element.android.appconfig.NextDeploymentConfig
+import io.element.android.appconfig.TimelineConfig
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
 import io.element.android.libraries.featureflag.api.FeatureFlagService
 import io.element.android.libraries.featureflag.api.FeatureFlags
@@ -42,10 +42,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.MediaType.Companion.toMediaType
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.DateDividerMode
 import org.matrix.rustcomponents.sdk.Membership
@@ -81,6 +81,11 @@ class RustRoomFactory(
     private val mutex = Mutex()
     private val powerLevelMutationMutex = Mutex()
     private val isDestroyed: AtomicBoolean = AtomicBoolean(false)
+    private val roomOwnerToken = Any()
+
+    fun ownsCurrentRoom(room: JoinedRoom): Boolean =
+        !isDestroyed.get() && room is JoinedRustRoom && room.belongsToClient(roomOwnerToken, sessionId, room.roomId)
+
     private val rtcEventHttpClient by lazy {
         OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
             .callTimeout(10, java.util.concurrent.TimeUnit.SECONDS).build()
@@ -119,10 +124,10 @@ class RustRoomFactory(
         }
 
     suspend fun destroy() {
+        isDestroyed.set(true)
         withContext(NonCancellable + dispatcher) {
             mutex.withLock {
                 Timber.d("Destroying room factory")
-                isDestroyed.set(true)
             }
         }
     }
@@ -191,6 +196,7 @@ class RustRoomFactory(
 
                     GetRoomResult.Joined(
                         JoinedRustRoom(
+                            clientOwnerToken = roomOwnerToken,
                             baseRoom = baseRoom,
                             notificationSettingsService = notificationSettingsService,
                             roomContentForwarder = roomContentForwarder,

@@ -172,6 +172,8 @@ class FakeMatrixClient(
         return getRoomResults[roomId] as? JoinedRoom
     }
 
+    override val roomObservationWork = io.element.android.libraries.core.coroutines.SessionOwnedResourceWork(sessionCoroutineScope)
+
     override suspend fun findDM(userId: UserId): Result<RoomId?> {
         return findDmResult
     }

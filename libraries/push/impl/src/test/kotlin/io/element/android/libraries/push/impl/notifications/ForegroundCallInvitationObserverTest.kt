@@ -3,6 +3,7 @@ package io.element.android.libraries.push.impl.notifications
 import com.google.common.truth.Truth.assertThat
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.notification.CallIntent
+import io.element.android.libraries.matrix.api.roomlist.RoomList
 import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
 import io.element.android.libraries.matrix.api.timeline.item.event.CallLifecycleState
 import io.element.android.libraries.matrix.api.timeline.item.event.CallNotifyContent
@@ -10,10 +11,12 @@ import io.element.android.libraries.matrix.test.*
 import io.element.android.libraries.matrix.test.notification.FakeNotificationService
 import io.element.android.libraries.matrix.test.notification.aNotificationData
 import io.element.android.libraries.matrix.test.room.FakeJoinedRoom
+import io.element.android.libraries.matrix.test.roomlist.FakeDynamicRoomList
 import io.element.android.libraries.matrix.test.timeline.FakeTimeline
 import io.element.android.libraries.push.impl.notifications.fixtures.aNotifiableCallEvent
 import io.element.android.libraries.push.impl.notifications.model.NotifiableRingingCallEvent
 import io.element.android.services.appnavstate.api.*
+import io.element.android.services.appnavstate.test.FakeActiveRoomsHolder
 import io.element.android.services.appnavstate.test.FakeAppNavigationStateService
 import io.element.android.services.toolbox.test.systemclock.FakeSystemClock
 import io.mockk.every
@@ -51,13 +54,15 @@ class ForegroundCallInvitationObserverTest {
                 Result.success(aNotificationData().copy(eventId = it))
             }))
         }
-        val client = FakeMatrixClient(notificationService = service).apply { givenGetRoomResult(A_ROOM_ID, room) }
+        val client = FakeMatrixClient(notificationService = service, sessionCoroutineScope = backgroundScope).apply { givenGetRoomResult(A_ROOM_ID, room) }
         val resolved = mutableListOf<EventId>()
         val resolver = FakeCallNotificationEventResolver { _, data, _ ->
             resolved += data.eventId
             Result.success(aNotifiableCallEvent().copy(eventId = data.eventId, expirationTimestamp = 120_000))
         }
-        val observer = ForegroundCallInvitationObserver(nav, FakeMatrixClientProvider { Result.success(client) }, resolver, clock)
+        (client.roomListService.allRooms as FakeDynamicRoomList).loadingState.value =
+            RoomList.LoadingState.Loaded(1)
+        val observer = ForegroundCallInvitationObserver(nav, FakeMatrixClientProvider { Result.success(client) }, resolver, clock, FakeActiveRoomsHolder())
         val seen = mutableListOf<NotifiableRingingCallEvent>()
         observer.invitations().onEach { seen += it }.launchIn(backgroundScope)
         runCurrent()
@@ -83,9 +88,11 @@ class ForegroundCallInvitationObserverTest {
         ))
         val items = MutableStateFlow<List<MatrixTimelineItem>>(emptyList())
         val room = spyk(FakeJoinedRoom(liveTimeline = FakeTimeline(timelineItems = items)))
-        val client = FakeMatrixClient().apply { givenGetRoomResult(A_ROOM_ID, room) }
+        val client = FakeMatrixClient(sessionCoroutineScope = backgroundScope).apply { givenGetRoomResult(A_ROOM_ID, room) }
+        (client.roomListService.allRooms as FakeDynamicRoomList).loadingState.value =
+            RoomList.LoadingState.Loaded(1)
         val observer = ForegroundCallInvitationObserver(
-            nav, FakeMatrixClientProvider { Result.success(client) }, FakeCallNotificationEventResolver(), FakeSystemClock(),
+            nav, FakeMatrixClientProvider { Result.success(client) }, FakeCallNotificationEventResolver(), FakeSystemClock(), FakeActiveRoomsHolder(),
         )
         observer.invitations().launchIn(backgroundScope)
         runCurrent()
@@ -103,9 +110,11 @@ class ForegroundCallInvitationObserverTest {
         ))
         val items = MutableStateFlow<List<MatrixTimelineItem>>(emptyList())
         val room = spyk(FakeJoinedRoom(liveTimeline = FakeTimeline(timelineItems = items)))
-        val client = FakeMatrixClient().apply { givenGetRoomResult(A_ROOM_ID, room) }
+        val client = FakeMatrixClient(sessionCoroutineScope = backgroundScope).apply { givenGetRoomResult(A_ROOM_ID, room) }
+        (client.roomListService.allRooms as FakeDynamicRoomList).loadingState.value =
+            RoomList.LoadingState.Loaded(1)
         val observer = ForegroundCallInvitationObserver(
-            nav, FakeMatrixClientProvider { Result.success(client) }, FakeCallNotificationEventResolver(), FakeSystemClock(),
+            nav, FakeMatrixClientProvider { Result.success(client) }, FakeCallNotificationEventResolver(), FakeSystemClock(), FakeActiveRoomsHolder(),
         )
         val job = observer.invitations().launchIn(backgroundScope)
         runCurrent()

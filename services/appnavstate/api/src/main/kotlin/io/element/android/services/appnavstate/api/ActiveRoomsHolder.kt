@@ -11,6 +11,8 @@ package io.element.android.services.appnavstate.api
 import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.room.JoinedRoom
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * Holds the active rooms for a given session so they can be reused instead of instantiating new ones.
@@ -31,10 +33,17 @@ interface ActiveRoomsHolder {
      */
     fun getActiveRoomMatching(sessionId: SessionId, roomId: RoomId): JoinedRoom?
 
+    /** Only changes of this exact held room are emitted; a room ID is not client provenance. */
+    fun observeActiveRoomMatching(sessionId: SessionId, roomId: RoomId): Flow<JoinedRoom?> =
+        flowOf(getActiveRoomMatching(sessionId, roomId))
+
     /**
      * Removes any room matching the provided [sessionId] and [roomId].
      */
     fun removeRoom(sessionId: SessionId, roomId: RoomId)
+
+    /** A retiring owner must not remove a replacement with the same session and room ID. */
+    fun removeRoom(room: JoinedRoom) = removeRoom(room.sessionId, room.roomId)
 
     /**
      * Clears all the rooms for the given sessionId.

@@ -17,7 +17,9 @@ import io.element.android.libraries.featureflag.api.FeatureFlags
 import io.element.android.libraries.matrix.api.core.DeviceId
 import io.element.android.libraries.matrix.api.core.EventId
 import io.element.android.libraries.matrix.api.core.RoomAlias
+import io.element.android.libraries.matrix.api.core.RoomId
 import io.element.android.libraries.matrix.api.core.SendHandle
+import io.element.android.libraries.matrix.api.core.SessionId
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.encryption.identity.IdentityStateChange
 import io.element.android.libraries.matrix.api.notificationsettings.NotificationSettingsService
@@ -38,6 +40,7 @@ import io.element.android.libraries.matrix.api.room.roomNotificationSettings
 import io.element.android.libraries.matrix.api.room.threads.ThreadsListService
 import io.element.android.libraries.matrix.api.roomdirectory.RoomVisibility
 import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
+import io.element.android.libraries.matrix.api.timeline.PendingSendLifetime
 import io.element.android.libraries.matrix.api.timeline.Timeline
 import io.element.android.libraries.matrix.api.timeline.item.event.LiveLocationContent
 import io.element.android.libraries.matrix.api.widget.MatrixWidgetDriver
@@ -57,14 +60,15 @@ import io.element.android.libraries.matrix.impl.timeline.MatrixProtectedContentA
 import io.element.android.libraries.matrix.impl.timeline.RustTimeline
 import io.element.android.libraries.matrix.impl.timeline.item.event.TimelineEventContentMapper
 import io.element.android.libraries.matrix.impl.util.mxCallbackFlow
-import io.element.android.libraries.matrix.impl.widget.RustWidgetDriver
 import io.element.android.libraries.matrix.impl.widget.RtcWidgetStickyMetadata
+import io.element.android.libraries.matrix.impl.widget.RustWidgetDriver
 import io.element.android.libraries.matrix.impl.widget.generateWidgetWebViewUrl
+import io.element.android.libraries.matrix.impl.widget.getElementCallRequiredPermissionsForDeployment
 import io.element.android.services.toolbox.api.systemclock.SystemClock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted.Companion.WhileSubscribed
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.SharingStarted.Companion.WhileSubscribed
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -74,9 +78,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.DateDividerMode
 import org.matrix.rustcomponents.sdk.IdentityStatusChangeListener
 import org.matrix.rustcomponents.sdk.KnockRequestsListener
@@ -90,9 +94,7 @@ import org.matrix.rustcomponents.sdk.TimelineFocus
 import org.matrix.rustcomponents.sdk.TypingNotificationsListener
 import org.matrix.rustcomponents.sdk.WidgetCapabilities
 import org.matrix.rustcomponents.sdk.WidgetCapabilitiesProvider
-import io.element.android.libraries.matrix.impl.widget.getElementCallRequiredPermissionsForDeployment
 import timber.log.Timber
-import io.element.android.libraries.matrix.api.timeline.PendingSendLifetime
 import uniffi.matrix_sdk.RoomPowerLevelChanges
 import uniffi.matrix_sdk_ui.TimelineEventFocusThreadMode
 import uniffi.matrix_sdk_ui.TimelineReadReceiptTracking
@@ -114,7 +116,13 @@ class JoinedRustRoom(
     private val redactRtcMembershipEvent: (suspend (String) -> Unit)? = null,
     private val updateRawUserPowerLevels: (suspend (Map<String, Long>) -> Unit)? = null,
     private val powerLevelMutationMutex: Mutex = Mutex(),
+    private val clientOwnerToken: Any? = null,
 ) : JoinedRoom, BaseRoom by baseRoom {
+    private val clientOwnership = RoomClientOwnership(clientOwnerToken, baseRoom.sessionId, baseRoom.roomId)
+
+    internal fun belongsToClient(token: Any, sessionId: SessionId, roomId: RoomId): Boolean =
+        clientOwnership.belongsTo(token, sessionId, roomId)
+
     // Create a dispatcher for all room methods...
     private val roomDispatcher = coroutineDispatchers.io.limitedParallelism(32)
     private val innerRoom = baseRoom.innerRoom
@@ -647,6 +655,8 @@ class JoinedRustRoom(
     override fun close() = destroy()
 
     override fun destroy() {
+        // A pending send may defer native destruction, but new observers must stop borrowing now.
+        clientOwnership.close()
         pendingSends.close()
     }
 

@@ -220,6 +220,7 @@ class RustMatrixClient(
     override val deviceId: DeviceId = DeviceId(innerClient.deviceId())
     private val accountVaultId = deriveAccountVaultId(sessionId.value, deviceId.value)
     override val sessionCoroutineScope = appCoroutineScope.childScope(dispatchers.main, "Matrix session")
+    override val roomObservationWork = io.element.android.libraries.core.coroutines.SessionOwnedResourceWork(sessionCoroutineScope)
     private val sessionDispatcher = dispatchers.io.limitedParallelism(64)
     private val authenticatedApiHttpClient = OkHttpClient()
     private val ephemeralMediaHttpClient = authenticatedApiHttpClient.newBuilder()
@@ -554,6 +555,8 @@ class RustMatrixClient(
     override suspend fun getJoinedRoom(roomId: RoomId): JoinedRoom? = withContext(sessionDispatcher) {
         (roomFactory.getJoinedRoomOrPreview(roomId, emptyList()) as? GetRoomResult.Joined)?.joinedRoom
     }
+
+    override fun ownsCurrentRoom(room: JoinedRoom): Boolean = roomFactory.ownsCurrentRoom(room)
 
     /**
      * Wait for the room to be available in the client with the correct membership for the current user.

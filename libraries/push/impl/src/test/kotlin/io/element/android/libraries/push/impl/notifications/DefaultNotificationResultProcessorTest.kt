@@ -309,6 +309,7 @@ class DefaultNotificationResultProcessorTest {
             io.element.android.services.appnavstate.test.FakeAppNavigationStateService(),
             io.element.android.libraries.matrix.test.FakeMatrixClientProvider(),
             FakeCallNotificationEventResolver(), systemClock,
+            io.element.android.services.appnavstate.test.FakeActiveRoomsHolder(),
         ),
         coroutineScope = coroutineScope,
     )

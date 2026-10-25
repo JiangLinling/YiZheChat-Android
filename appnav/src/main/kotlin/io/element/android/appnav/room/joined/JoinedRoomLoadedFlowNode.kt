@@ -108,8 +108,8 @@ class JoinedRoomLoadedFlowNode(
         lifecycle.subscribe(
             onCreate = {
                 Timber.v("OnCreate => ${inputs.room.roomId}")
-                appNavigationStateService.onNavigateToRoom(id, inputs.room.roomId)
                 activeRoomsHolder.addRoom(inputs.room)
+                appNavigationStateService.onNavigateToRoom(id, inputs.room.roomId)
                 sendMessageWatcher?.start()
                 fetchRoomMembers()
                 trackVisitedRoom()
@@ -126,7 +126,7 @@ class JoinedRoomLoadedFlowNode(
                 // If we're just going through an activity recreation there's no need to destroy the Room object
                 // Destroying it would actually cause an issue where its methods can no longer be called
                 if (currentActivity?.isChangingConfigurations != true) {
-                    activeRoomsHolder.removeRoom(inputs.room.sessionId, inputs.room.roomId)
+                    activeRoomsHolder.removeRoom(inputs.room)
                     inputs.room.destroy()
                 }
                 appNavigationStateService.onLeavingRoom(id)

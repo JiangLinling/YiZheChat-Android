@@ -8,6 +8,7 @@
 
 package io.element.android.libraries.matrix.api
 
+import io.element.android.libraries.core.coroutines.SessionOwnedResourceWork
 import io.element.android.libraries.core.data.tryOrNull
 import io.element.android.libraries.matrix.api.analytics.SdkStoreSizes
 import io.element.android.libraries.matrix.api.auth.OpenIdToken
@@ -72,10 +73,14 @@ interface MatrixClient {
     val mediaPreviewService: MediaPreviewService
     val matrixMediaLoader: MatrixMediaLoader
     val sessionCoroutineScope: CoroutineScope
+    /** One bounded local-room acquisition/cleanup owner per actual client, never room authority. */
+    val roomObservationWork: SessionOwnedResourceWork
     val ignoredUsersFlow: StateFlow<ImmutableList<UserId>>
     val roomMembershipObserver: RoomMembershipObserver
     val ownBeaconInfoUpdates: Flow<BeaconInfoUpdate>
     suspend fun getJoinedRoom(roomId: RoomId): JoinedRoom?
+    /** Process-local creation provenance only; this never grants content or RTC authorization. */
+    fun ownsCurrentRoom(room: JoinedRoom): Boolean = false
     suspend fun getRoom(roomId: RoomId): BaseRoom?
     suspend fun findDM(userId: UserId): Result<RoomId?>
 

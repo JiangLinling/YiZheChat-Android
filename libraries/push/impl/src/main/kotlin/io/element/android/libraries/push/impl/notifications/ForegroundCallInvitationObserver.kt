@@ -3,16 +3,23 @@ package io.element.android.libraries.push.impl.notifications
 import dev.zacsweers.metro.Inject
 import io.element.android.appconfig.NextDeploymentConfig
 import io.element.android.libraries.matrix.api.MatrixClientProvider
+import io.element.android.libraries.matrix.api.exception.NotificationResolverException
+import io.element.android.libraries.matrix.api.room.JoinedRoom
+import io.element.android.libraries.matrix.api.roomlist.awaitLoaded
 import io.element.android.libraries.matrix.api.timeline.MatrixTimelineItem
 import io.element.android.libraries.matrix.api.timeline.item.event.CallNotifyContent
-import io.element.android.libraries.matrix.api.exception.NotificationResolverException
 import io.element.android.libraries.push.impl.notifications.model.NotifiableRingingCallEvent
+import io.element.android.services.appnavstate.api.ActiveRoomsHolder
 import io.element.android.services.appnavstate.api.AppNavigationStateService
 import io.element.android.services.appnavstate.api.NavigationState
 import io.element.android.services.toolbox.api.systemclock.SystemClock
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.*
 import timber.log.Timber
+import java.util.Optional
+import kotlin.coroutines.EmptyCoroutineContext
 
 /** A visible room can be marked read before its push is delivered. Resolve fresh invitations
  * from its authenticated timeline through the same notification policy as a push. */
@@ -22,6 +29,7 @@ class ForegroundCallInvitationObserver(
     private val clients: MatrixClientProvider,
     private val resolver: CallNotificationEventResolver,
     private val clock: SystemClock,
+    private val activeRoomsHolder: ActiveRoomsHolder,
 ) {
     @OptIn(ExperimentalCoroutinesApi::class)
     fun invitations(): Flow<NotifiableRingingCallEvent> {
@@ -55,60 +63,86 @@ class ForegroundCallInvitationObserver(
         }
     }
 
-    private fun roomInvitations(nav: NavigationState.Room): Flow<NotifiableRingingCallEvent> =
-            flow {
-                val client = clients.getOrRestore(nav.parentSession.sessionId).getOrNull() ?: return@flow
-                val room = client.getJoinedRoom(nav.roomId) ?: return@flow
-                Timber.d("Foreground RTC room subscription started: %s", nav.roomId)
-                try {
-                    val seen = mutableSetOf<io.element.android.libraries.matrix.api.core.EventId>()
-                    room.liveTimeline.timelineItems.collect { items ->
-                        val candidates = items.filterIsInstance<MatrixTimelineItem.Event>().map { it.event }
-                            .filter { !client.isMe(it.sender) && it.content is CallNotifyContent }
-                            .groupBy { it.sender }.values.mapNotNull { it.maxByOrNull { event -> event.timestamp } }
-                        for (event in candidates) {
-                            val id = event.eventId ?: continue
-                            val content = event.content as CallNotifyContent
-                            Timber.d("Foreground RTC candidate: id=%s age=%d state=%s seen=%s", id,
-                                clock.epochMillis() - event.timestamp, content.lifecycleState, id in seen)
-                            if (id in seen || content.lifecycleState != null || client.sessionId in content.declinedBy ||
-                                event.timestamp > clock.epochMillis() || clock.epochMillis() - event.timestamp >= 90_000) continue
-                            val notification = client.notificationService.getNotifications(mapOf(nav.roomId to listOf(id)))
-                                .getOrNull()?.get(id) ?: continue
-                            val data = notification.getOrNull() ?: run {
-                                if (notification.exceptionOrNull() != NotificationResolverException.EventFilteredOut) return@run null
-                                val info = room.info()
-                                val settings = client.notificationSettingsService
-                                val callsEnabled = settings.isCallEnabled().getOrNull() == true
-                                val mode = settings.getRoomNotificationSettings(nav.roomId, info.isEncrypted == true, info.isDm)
-                                    .getOrNull()?.mode
-                                val member = room.getUpdatedMember(event.sender).getOrNull()
-                                val authority = if (callsEnabled && mode != null && mode != io.element.android.libraries.matrix.api.room.RoomNotificationMode.MUTE &&
-                                    (info.isDm || info.isDirect) && info.joinedMembersCount == 2L &&
-                                    member?.membership == io.element.android.libraries.matrix.api.room.RoomMembershipState.JOIN && !member.isIgnored
-                                ) room.loadRtcNotification(id).getOrNull() else null
-                                val recovered = recoverForegroundRingingNotification(
-                                    event, info, client.sessionId, callsEnabled, mode, clock.epochMillis(), authority,
-                                )
-                                Timber.d("Foreground RTC filtered invitation: callsEnabled=%s mode=%s recovered=%s", callsEnabled, mode, recovered != null)
-                                recovered
-                            } ?: continue
-                            val ringing = resolver.resolveEvent(client.sessionId, data).getOrNull() as? NotifiableRingingCallEvent
-                                ?: continue
-                            if (ringing.expirationTimestamp <= clock.epochMillis()) continue
-                            seen += id
-                            if (seen.size > 128) seen.remove(seen.first())
-                            Timber.d("Foreground RTC invitation resolved through notification policy")
-                            emit(ringing)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun roomInvitations(nav: NavigationState.Room): Flow<NotifiableRingingCallEvent> = flow {
+        // Switching between a borrowed and owned Room must not ring an invitation twice.
+        val seen = mutableSetOf<io.element.android.libraries.matrix.api.core.EventId>()
+        emitAll(
+            activeRoomsHolder.observeActiveRoomMatching(nav.parentSession.sessionId, nav.roomId).flatMapLatest { held ->
+                flow observation@{
+                    val client = clients.getOrRestore(nav.parentSession.sessionId).getOrNull() ?: return@observation
+                    var ownedRoom: JoinedRoom? = null
+                    try {
+                        val room = held?.takeIf {
+                            it.sessionId == client.sessionId && it.roomId == nav.roomId && client.ownsCurrentRoom(it)
+                        } ?: run {
+                            // Any room-list wait remains cancellable before acquiring native handles.
+                            client.roomListService.allRooms.awaitLoaded()
+                            // Existing session-owned acquisition keeps navigation cancellable and
+                            // closes a late result instead of transferring it to a retired observer.
+                            client.roomObservationWork.execute<Optional<JoinedRoom>>(
+                                userInitiated = false,
+                                context = EmptyCoroutineContext,
+                                discard = { result -> result.ifPresent(JoinedRoom::close) },
+                                onCleanupFailure = { Timber.w("Foreground RTC owned room cleanup remains pending") },
+                            ) { retain ->
+                                Optional.ofNullable(client.getJoinedRoom(nav.roomId)).also(retain)
+                            }.orElse(null).also {
+                                ownedRoom = it
+                            }
+                        } ?: return@observation
+                        currentCoroutineContext().ensureActive()
+                        Timber.d("Foreground RTC room subscription started: %s owned=%s", nav.roomId, ownedRoom != null)
+                        room.liveTimeline.timelineItems.collect { items ->
+                            val candidates = items.filterIsInstance<MatrixTimelineItem.Event>().map { it.event }
+                                .filter { !client.isMe(it.sender) && it.content is CallNotifyContent }
+                                .groupBy { it.sender }.values.mapNotNull { it.maxByOrNull { event -> event.timestamp } }
+                            for (event in candidates) {
+                                val id = event.eventId ?: continue
+                                val content = event.content as CallNotifyContent
+                                Timber.d("Foreground RTC candidate: id=%s age=%d state=%s seen=%s", id,
+                                    clock.epochMillis() - event.timestamp, content.lifecycleState, id in seen)
+                                if (id in seen || content.lifecycleState != null || client.sessionId in content.declinedBy ||
+                                    event.timestamp > clock.epochMillis() || clock.epochMillis() - event.timestamp >= 90_000) continue
+                                val notification = client.notificationService.getNotifications(mapOf(nav.roomId to listOf(id)))
+                                    .getOrNull()?.get(id) ?: continue
+                                val data = notification.getOrNull() ?: run {
+                                    if (notification.exceptionOrNull() != NotificationResolverException.EventFilteredOut) return@run null
+                                    val info = room.info()
+                                    val settings = client.notificationSettingsService
+                                    val callsEnabled = settings.isCallEnabled().getOrNull() == true
+                                    val mode = settings.getRoomNotificationSettings(nav.roomId, info.isEncrypted == true, info.isDm)
+                                        .getOrNull()?.mode
+                                    val member = room.getUpdatedMember(event.sender).getOrNull()
+                                    val authority = if (callsEnabled && mode != null && mode != io.element.android.libraries.matrix.api.room.RoomNotificationMode.MUTE &&
+                                        (info.isDm || info.isDirect) && info.joinedMembersCount == 2L &&
+                                        member?.membership == io.element.android.libraries.matrix.api.room.RoomMembershipState.JOIN && !member.isIgnored
+                                    ) room.loadRtcNotification(id).getOrNull() else null
+                                    val recovered = recoverForegroundRingingNotification(
+                                        event, info, client.sessionId, callsEnabled, mode, clock.epochMillis(), authority,
+                                    )
+                                    Timber.d("Foreground RTC filtered invitation: callsEnabled=%s mode=%s recovered=%s", callsEnabled, mode, recovered != null)
+                                    recovered
+                                } ?: continue
+                                val ringing = resolver.resolveEvent(client.sessionId, data).getOrNull() as? NotifiableRingingCallEvent
+                                    ?: continue
+                                if (ringing.expirationTimestamp <= clock.epochMillis()) continue
+                                seen += id
+                                if (seen.size > 128) seen.remove(seen.first())
+                                Timber.d("Foreground RTC invitation resolved through notification policy")
+                                emit(ringing)
+                            }
                         }
+                    } finally {
+                        // The UI alone owns a borrowed Room. Close only this observer's fallback.
+                        ownedRoom?.close()
+                        Timber.d("Foreground RTC room subscription stopped: %s", nav.roomId)
                     }
-                } finally {
-                    // This observer acquired its own room. Retire its timeline and owner scopes
-                    // when navigation changes or observation is cancelled.
-                    room.close()
-                    Timber.d("Foreground RTC room subscription stopped: %s", nav.roomId)
                 }
-            }.catch { Timber.w(it, "Foreground RTC observer unavailable; push delivery remains active") }
+            }
+        )
+    }.catch { Timber.w(it, "Foreground RTC observer unavailable; push delivery remains active") }
+
 }
 
 internal fun isFreshForegroundCallHint(
