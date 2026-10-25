@@ -14,7 +14,6 @@ import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.SingleIn
 import io.element.android.libraries.di.annotations.ApplicationContext
 import io.element.android.security.contentprotection.api.AccountPrivateProfileKey
-import io.element.android.security.contentprotection.api.RecoveryReleaseAuthorityChanged
 import io.element.android.security.contentprotection.api.AcquireRoomEpochRequest
 import io.element.android.security.contentprotection.api.BurnAfterReadEndResult
 import io.element.android.security.contentprotection.api.BurnAfterReadSession
@@ -42,6 +41,7 @@ import io.element.android.security.contentprotection.api.OfflineLease
 import io.element.android.security.contentprotection.api.OfflineLeaseMode
 import io.element.android.security.contentprotection.api.OpenBurnAfterReadRequest
 import io.element.android.security.contentprotection.api.PendingDeviceRecovery
+import io.element.android.security.contentprotection.api.RecoveryReleaseAuthorityChanged
 import io.element.android.security.contentprotection.api.RegisterContentVersionRequest
 import io.element.android.security.contentprotection.api.RegisterContentVersionResult
 import io.element.android.security.contentprotection.api.ReleaseKmsShareRequest
@@ -56,6 +56,7 @@ import io.element.android.security.contentprotection.api.RoomLifecycleProfileKin
 import io.element.android.security.contentprotection.api.RoomLifecycleRecoveryPolicy
 import io.element.android.security.contentprotection.api.StartDeviceRecoveryRequest
 import io.element.android.security.contentprotection.api.StoreKmsShareRequest
+import io.element.android.security.contentprotection.api.TextEditTerminalFenceQuery
 import io.element.android.security.contentprotection.api.TrustedRedactionReason
 import io.element.android.security.dataprotection.api.LifecycleStageTiming
 import io.element.android.security.dataprotection.api.currentLifecycleOperationContext
@@ -69,10 +70,10 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
-import kotlinx.serialization.json.contentOrNull
 import okhttp3.CertificatePinner
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -108,6 +109,65 @@ class HttpKmsShareClient(
     @Volatile private var cachedApi: CachedApi? = null
     private val secureRandom = java.security.SecureRandom()
 
+    override suspend fun verifyTextEditTerminalFence(query: TextEditTerminalFenceQuery) {
+        try {
+            verifyTerminalEditObservation(query)
+        } catch (failure: IllegalArgumentException) {
+            throw ContentProtectionException.AuthenticationFailed(failure)
+        }
+    }
+
+    private suspend fun verifyTerminalEditObservation(query: TextEditTerminalFenceQuery) {
+        val operation = requireNotNull(currentLifecycleOperationContext())
+        require(operation.lifecycleId == io.element.android.security.dataprotection.api.FullAppLifecycleId.LC_13)
+        require(operation.operationId != query.originalOperationId)
+        require(query.childContentId !in setOf(query.parentContentId, query.rootContentId))
+        require(query.parentExpiresAtEpochMillis > System.currentTimeMillis() && query.terminalReceiptId.isNotBlank())
+        val installation = deviceShareKeyService.descriptor().installationId
+        val nonce = ByteArray(24).also(secureRandom::nextBytes).base64()
+        val request = JsonObject(mapOf(
+            "original_operation_id" to JsonPrimitive(query.originalOperationId),
+            "child_content_id" to JsonPrimitive(query.childContentId),
+            "parent_content_id" to JsonPrimitive(query.parentContentId),
+            "root_content_id" to JsonPrimitive(query.rootContentId),
+            "expected_event_id_sha256" to JsonPrimitive(query.expectedEventIdSha256),
+            "parent_expires_at" to JsonPrimitive(query.parentExpiresAtEpochMillis),
+            "request_nonce_b64" to JsonPrimitive(nonce),
+        ))
+        val envelope = requireBody(executeAuthorized { api, authorization -> api.textEditTerminalFence(authorization, request) })
+        val payload = requireNotNull(envelope["payload_b64"]).jsonPrimitive.content.decodeBase64(16_384)
+        val signature = requireNotNull(envelope["server_signature_b64"]).jsonPrimitive.content.decodeBase64(MAX_SIGNATURE_BYTES)
+        try {
+            val configuration = requireConfiguration()
+            verifySignature(configuration, payload.copyOf(), signature.copyOf())
+            val proof = ERROR_JSON.parseToJsonElement(payload.decodeToString()).jsonObject
+            val expected = request + mapOf(
+                "purpose" to JsonPrimitive("TEXT_EDIT_TERMINAL_FENCE_V1"),
+                "current_operation_id" to JsonPrimitive(operation.operationId),
+                "account_id_hash" to JsonPrimitive(query.accountIdHash),
+                "installation_id" to JsonPrimitive(installation),
+                "matrix_device_id_hash" to JsonPrimitive(query.matrixDeviceIdHash),
+                "room_id_hash" to JsonPrimitive(query.roomIdHash),
+                "terminal_receipt_id" to JsonPrimitive(query.terminalReceiptId),
+                "terminal_state" to JsonPrimitive("FAILED_FINAL"),
+                "store_fence_policy" to JsonPrimitive("LC13_TEXT_ORIGINAL_OPERATION_V1"),
+            )
+            if (proof.keys != expected.keys + "observed_at_ms" || expected.any { (key, value) -> proof[key] != value }) {
+                throw ContentProtectionException.AuthenticationFailed()
+            }
+            val observedAt = requireNotNull(proof["observed_at_ms"]).jsonPrimitive.long
+            val now = System.currentTimeMillis()
+            if (observedAt > now + configuration.clockRollbackToleranceMillis ||
+                observedAt < now - 60_000 - configuration.clockRollbackToleranceMillis
+            ) {
+                throw ContentProtectionException.AuthenticationFailed()
+            }
+        } finally {
+            payload.fill(0)
+            signature.fill(0)
+        }
+    }
+
     override suspend fun recoverTextVersions(
         contentId: ContentId,
         accountIdHash: String,
@@ -120,7 +180,9 @@ class HttpKmsShareClient(
         val installationId = deviceShareKeyService.descriptor().installationId
         val response = requireTextRecoveryBody(executeAuthorized { api, authorization -> api.recoverTextVersions(contentId.value, authorization) })
         if (response.contentId != contentId.value || response.operationId != operation.operationId || response.installationId != installationId ||
-            response.nodes.size !in 1..4096) throw ContentProtectionException.AccessDenied()
+            response.nodes.size !in 1..4096) {
+                throw ContentProtectionException.AccessDenied()
+            }
         val now = System.currentTimeMillis()
         val target = response.nodes.singleOrNull { it.contentId == contentId.value } ?: throw ContentProtectionException.AccessDenied()
         if (target.matrixEventIdSha256 != eventIdHash || target.expiresAtEpochMillis != expiresAtEpochMillis) {
@@ -130,11 +192,18 @@ class HttpKmsShareClient(
             it.contentKind == "TEXT" && it.ownerAccountIdHash == accountIdHash && it.roomIdSha256 == roomIdHash &&
                 it.senderInstallationId == installationId && it.rootContentId == target.rootContentId &&
                 it.createdAtEpochMillis in 1..it.expiresAtEpochMillis && it.expiresAtEpochMillis > now
-        }) throw ContentProtectionException.AccessDenied()
+        }) {
+            throw ContentProtectionException.AccessDenied()
+        }
         return response.nodes.map {
             io.element.android.security.contentprotection.api.ContentVersionNode(
-                ContentId(it.contentId), ContentId(it.rootContentId), it.parentContentId?.let(::ContentId), it.operationId,
-                it.matrixEventIdSha256, it.createdAtEpochMillis, it.expiresAtEpochMillis,
+                ContentId(it.contentId),
+                ContentId(it.rootContentId),
+                it.parentContentId?.let(::ContentId),
+                it.operationId,
+                it.matrixEventIdSha256,
+                it.createdAtEpochMillis,
+                it.expiresAtEpochMillis,
             )
         }
     }
@@ -173,8 +242,11 @@ class HttpKmsShareClient(
         require(action in setOf("prepare", "release", "fetch", "open", "sync", "delete", "put"))
         val request = ERROR_JSON.parseToJsonElement(requestJson).jsonObject
         val response = executeAuthorized { api, authorization ->
-            if (action == "put") api.putPrivateResource(authorization, request)
-            else api.privateResource(action, authorization, request)
+            if (action == "put") {
+                api.putPrivateResource(authorization, request)
+            } else {
+                api.privateResource(action, authorization, request)
+            }
         }
         if (response.code() == 409) throw IllegalStateException("PRIVATE_RESOURCE_CONFLICT")
         val envelope = requirePrivateProfileEnsureBody(response)
@@ -188,7 +260,9 @@ class HttpKmsShareClient(
             val body = ERROR_JSON.parseToJsonElement(payload.decodeToString()).jsonObject
             if (body["protocol_version"]?.jsonPrimitive?.content != "1" ||
                 body["account_id_hash"] != request["account_id_hash"] || body["request_nonce_b64"] != request["request_nonce_b64"]
-            ) throw ContentProtectionException.AuthenticationFailed()
+            ) {
+                throw ContentProtectionException.AuthenticationFailed()
+            }
             val serverTime = requireNotNull(body["server_time_ms"]).jsonPrimitive.long
             if (kotlin.math.abs(System.currentTimeMillis() - serverTime) > MAX_PRIVATE_PROFILE_RESPONSE_AGE_MILLIS) {
                 throw ContentProtectionException.AuthenticationFailed()
@@ -208,7 +282,9 @@ class HttpKmsShareClient(
                     (action == "release" && body["version_id"] != request["version_id"]) ||
                     expiry - issued !in 1..ceiling || issued > serverTime ||
                     (!extended && policy != "account-private-resource-online-v1")
-                ) throw ContentProtectionException.AuthenticationFailed()
+                ) {
+                    throw ContentProtectionException.AuthenticationFailed()
+                }
             }
             return payload.decodeToString()
         } finally {
@@ -226,8 +302,11 @@ class HttpKmsShareClient(
                 api.releasePrivateProfileKey(
                     authorization,
                     PrivateProfileReleaseKeyBody(
-                        PRIVATE_PROFILE_PROTOCOL_VERSION, accountIdHash,
-                        descriptor.installationId, descriptor.keyId, requestNonce.base64(),
+                        PRIVATE_PROFILE_PROTOCOL_VERSION,
+                        accountIdHash,
+                        descriptor.installationId,
+                        descriptor.keyId,
+                        requestNonce.base64(),
                     ),
                 )
             })
@@ -303,11 +382,20 @@ class HttpKmsShareClient(
     }
 
     override suspend fun resolveRoomLifecycle(roomId: String): ResolvedRoomLifecycle {
+        return resolveRoomLifecycleSnapshot(roomId, null)
+    }
+
+    override suspend fun resolveRoomLifecycle(roomId: String, maximumMessageExpiresAtEpochMillis: Long): ResolvedRoomLifecycle {
+        if (maximumMessageExpiresAtEpochMillis <= System.currentTimeMillis()) throw ContentProtectionException.Expired()
+        return resolveRoomLifecycleSnapshot(roomId, maximumMessageExpiresAtEpochMillis)
+    }
+
+    private suspend fun resolveRoomLifecycleSnapshot(roomId: String, maximumExpiry: Long?): ResolvedRoomLifecycle {
         require(roomId.startsWith("!") && ':' in roomId && roomId.length <= 255 && roomId.none(Char::isWhitespace))
         val body = requireBody(executeAuthorized { api, authorization ->
             api.resolveRoomLifecycle(
                 authorization,
-                RoomLifecycleResolveBody(ROOM_LIFECYCLE_PROTOCOL_VERSION, roomId),
+                RoomLifecycleResolveBody(ROOM_LIFECYCLE_PROTOCOL_VERSION, roomId, maximumExpiry),
             )
         })
         val roomDigest = MessageDigest.getInstance(SHA256).digest(roomId.encodeToByteArray())
@@ -351,8 +439,8 @@ class HttpKmsShareClient(
                 body.retentionMillis > MAX_ROOM_RETENTION_MILLIS ||
                 body.maximumOfflineMillis > MAX_ROOM_OFFLINE_MILLIS ||
                 body.messageExpiresAtEpochMillis <= current ||
-                body.messageExpiresAtEpochMillis < body.issuedAtEpochMillis + body.retentionMillis ||
-                body.messageExpiresAtEpochMillis - body.issuedAtEpochMillis - body.retentionMillis >= ONE_DAY_MILLIS
+                maximumExpiry?.let { body.messageExpiresAtEpochMillis > it } == true ||
+                !validResolvedExpiry(body, maximumExpiry)
             ) {
                 throw ContentProtectionException.AuthenticationFailed()
             }
@@ -381,6 +469,21 @@ class HttpKmsShareClient(
             contractDigest?.fill(0)
             calculatedContractDigest?.fill(0)
         }
+    }
+
+    private fun validResolvedExpiry(body: RoomLifecycleResolveResponse, maximumExpiry: Long?): Boolean {
+        val earliestDefault = body.issuedAtEpochMillis + body.retentionMillis
+        if (maximumExpiry == null) {
+            return body.messageExpiresAtEpochMillis >= earliestDefault &&
+                body.messageExpiresAtEpochMillis - earliestDefault < ONE_DAY_MILLIS
+        }
+        // Match the existing authority's first Asia/Shanghai 03:00 on or after eligibility.
+        // Only the signed issued-at is used, so crossing midnight locally cannot change the result.
+        val zone = java.time.ZoneId.of("Asia/Shanghai")
+        val eligible = java.time.Instant.ofEpochMilli(earliestDefault).atZone(zone)
+        val sameDay = eligible.toLocalDate().atTime(3, 0).atZone(zone)
+        val deadline = if (sameDay < eligible) sameDay.plusDays(1) else sameDay
+        return body.messageExpiresAtEpochMillis == minOf(deadline.toInstant().toEpochMilli(), maximumExpiry)
     }
 
     override suspend fun assignCreatedRoomLifecycle(
@@ -506,7 +609,8 @@ class HttpKmsShareClient(
         return body.toStatus().also {
             // Fixed enum/boolean codes only: never log the response, account or installation.
             LifecycleStageTiming.point(
-                "recovery_status", identity = it.state.name,
+                "recovery_status",
+                identity = it.state.name,
                 scope = if (it.standardAuthorized) "STANDARD_AUTHORIZED" else "STANDARD_PENDING",
             )
             if (it.accountIdHash != request.accountIdHash || it.newInstallationId != request.newInstallationId) {
@@ -1424,8 +1528,11 @@ class HttpKmsShareClient(
                 }
             }.getOrNull()
             val detail = runCatching { payload?.get("detail")?.jsonPrimitive?.content }.getOrNull()
-            if (detail in setOf("account has no approved recipient devices", "an account has no approved recipient devices",
-                    "authorized device set changed; refresh recipients and retry")) {
+            if (detail in setOf(
+                    "account has no approved recipient devices",
+                    "an account has no approved recipient devices",
+                    "authorized device set changed; refresh recipients and retry"
+                )) {
                 throw ContentProtectionException.RecipientDeviceUnavailable()
             }
             val error = payload?.let { runCatching { ERROR_JSON.decodeFromJsonElement(ControlPlaneErrorResponse.serializer(), it) }.getOrNull() }
@@ -1714,14 +1821,18 @@ class HttpKmsShareClient(
         }
         if (permission == null || permission.scope != "PROGRESSIVE_VIDEO_V1" ||
             body.leaseMode != OfflineLeaseMode.ONLINE_REQUIRED.name
-        ) throw ContentProtectionException.AuthenticationFailed()
+        ) {
+            throw ContentProtectionException.AuthenticationFailed()
+        }
         val maximumDeadline = runCatching { Math.addExact(body.issuedAtEpochMillis, 3_600_000L) }
             .getOrElse { throw ContentProtectionException.AuthenticationFailed(it) }
         if (permission.expiresAtEpochMillis <= body.serverTimeEpochMillis ||
             permission.expiresAtEpochMillis < body.expiresAtEpochMillis ||
             permission.expiresAtEpochMillis > request.policy.expiresAtEpochMillis ||
             permission.expiresAtEpochMillis > maximumDeadline
-        ) throw ContentProtectionException.Expired()
+        ) {
+            throw ContentProtectionException.Expired()
+        }
         val releasePayload = releaseResponsePayload(body)
         try {
             val payload = ByteArrayOutputStream().use { bytes ->
@@ -1734,7 +1845,9 @@ class HttpKmsShareClient(
                 bytes.toByteArray()
             }
             verifySignature(configuration, payload, permission.serverSignature.decodeBase64(MAX_SIGNATURE_BYTES))
-        } finally { releasePayload.fill(0) }
+        } finally {
+            releasePayload.fill(0)
+        }
         return permission.expiresAtEpochMillis
     }
 
@@ -2113,6 +2226,12 @@ class HttpKmsShareClient(
 }
 
 private interface KmsApi {
+    @POST("v1/content-version-lineage/text-edit-terminal-fences")
+    suspend fun textEditTerminalFence(
+        @Header("Authorization") authorization: String,
+        @Body body: JsonObject,
+    ): Response<JsonObject>
+
     @GET("v1/content-version-lineage/text-members/{contentId}")
     suspend fun recoverTextVersions(
         @Path("contentId") contentId: String,
@@ -2394,6 +2513,7 @@ private data class PrivateProfileDocumentResponseBody(
 private data class RoomLifecycleResolveBody(
     @SerialName("protocol_version") val protocolVersion: Int,
     @SerialName("room_id") val roomId: String,
+    @SerialName("maximum_message_expires_at_ms") val maximumMessageExpiresAtEpochMillis: Long? = null,
 )
 
 @Serializable
@@ -2908,8 +3028,11 @@ class DeviceProofKmsAuthorizationProvider(
         var unavailableReason = "provider_exception"
         return try {
             val trust = proofStage(trace, "kms_proof_trust_current") {
-                if (trace == null) deviceTrustService.current()
-                else deviceTrustService.current(diagnosticSink(trace, DeviceTrustDiagnosticCall.CURRENT))
+                if (trace == null) {
+                    deviceTrustService.current()
+                } else {
+                    deviceTrustService.current(diagnosticSink(trace, DeviceTrustDiagnosticCall.CURRENT))
+                }
             }
             if (trust.attestationVersion <= 0 || trust.installationId.isBlank()) {
                 proofUnavailable(trace, "not_enrolled")
@@ -2929,11 +3052,14 @@ class DeviceProofKmsAuthorizationProvider(
                 )
             ).encodeToByteArray()
             val signed = proofStage(trace, "kms_proof_sign_control") {
-                if (trace == null) deviceTrustService.signControlStatement(KMS_PROOF_MAGIC + payload)
-                else deviceTrustService.signControlStatement(
+                if (trace == null) {
+                    deviceTrustService.signControlStatement(KMS_PROOF_MAGIC + payload)
+                } else {
+                    deviceTrustService.signControlStatement(
                     KMS_PROOF_MAGIC + payload,
                     diagnosticSink(trace, DeviceTrustDiagnosticCall.SIGN_CONTROL),
                 )
+                }
             }
             if (signed.installationId != trust.installationId) unavailableReason = "identity_changed"
             check(signed.installationId == trust.installationId)
@@ -2958,20 +3084,40 @@ class DeviceProofKmsAuthorizationProvider(
                 // Original request/operation only; no trust record, key, signature, payload, nonce or exception text.
                 Timber.tag("YiZheDeviceTrust").d(
                     "stage=%s call=%s request=%s operation=%s start_ns=%d end_ns=%d duration_us=%d outcome=%s",
-                    stage.name, call.name, trace.requestId, operation, start, end, (end - start) / 1_000L, outcome.name,
+                    stage.name,
+                    call.name,
+                    trace.requestId,
+                    operation,
+                    start,
+                    end,
+                    (end - start) / 1_000L,
+                    outcome.name,
                 )
             }
         }
 
     private suspend fun <T> proofStage(trace: KmsTransportTrace?, stage: String, block: suspend () -> T): T =
-        if (trace == null) block() else LifecycleStageTiming.measure(
-            stage, identity = trace.requestId, scope = trace.action, operationId = trace.operationId, block = block,
+        if (trace == null) {
+            block()
+        } else {
+            LifecycleStageTiming.measure(
+            stage,
+                identity = trace.requestId,
+                scope = trace.action,
+                operationId = trace.operationId,
+                block = block,
         )
+        }
 
     private fun proofUnavailable(trace: KmsTransportTrace?, reason: String) {
-        if (trace != null) LifecycleStageTiming.observed(
-            "kms_proof_unavailable", trace.requestId, reason, trace.operationId,
+        if (trace != null) {
+            LifecycleStageTiming.observed(
+            "kms_proof_unavailable",
+                trace.requestId,
+                reason,
+                trace.operationId,
         )
+        }
     }
 
     override suspend fun isAvailable(): Boolean = runCatching {

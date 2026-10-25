@@ -25,6 +25,8 @@ data class ProtectContentRequest(
     val offlineLeaseMode: OfflineLeaseMode = OfflineLeaseMode.ONLINE_REQUIRED,
     val lifecycle: ContentLifecycle = ContentLifecycle(),
     val roomLifecycle: ResolvedRoomLifecycle? = null,
+    /** Additional immutable upper bound from a validated version parent; retained across contract refresh. */
+    val maximumMessageExpiresAtEpochMillis: Long? = null,
 )
 
 data class ReleaseContentRequest(
@@ -43,6 +45,7 @@ data class ReleaseContentRequest(
 
 enum class TimelineContentReleaseClass {
     FOREGROUND_VISIBLE,
+
     /** Owned, finite initial render demand; never a claim of actual visibility or authorization. */
     FOREGROUND_BOOTSTRAP,
     HISTORY_PREFETCH,
@@ -144,6 +147,9 @@ interface ContentProtectionService {
     fun closeTimelineReleaseScope(scopeId: String, ownerToken: TimelineReleaseScopeOwnerToken) = Unit
 
     suspend fun resolveRoomLifecycle(roomId: String): ResolvedRoomLifecycle =
+        throw ContentProtectionException.KmsUnavailable()
+
+    suspend fun resolveRoomLifecycle(roomId: String, maximumMessageExpiresAtEpochMillis: Long): ResolvedRoomLifecycle =
         throw ContentProtectionException.KmsUnavailable()
 
     suspend fun assignCreatedRoomLifecycle(roomId: String, profileKind: RoomLifecycleProfileKind): Boolean =
@@ -266,6 +272,10 @@ interface DeviceShareKeyService {
 }
 
 interface KmsShareClient {
+    /** Verify a fresh signed absence/fence fact; never erase a resource or rewrite the old terminal. */
+    suspend fun verifyTextEditTerminalFence(query: TextEditTerminalFenceQuery): Unit =
+        throw ContentProtectionException.AccessDenied()
+
     /** Existing TEXT authority only, bound to the current LC-13 operation and exact original target. */
     suspend fun recoverTextVersions(
         contentId: ContentId,
@@ -302,6 +312,9 @@ interface KmsShareClient {
     ): EncryptedPrivateProfileDocument = throw ContentProtectionException.KmsUnavailable()
 
     suspend fun resolveRoomLifecycle(roomId: String): ResolvedRoomLifecycle =
+        throw ContentProtectionException.KmsUnavailable()
+
+    suspend fun resolveRoomLifecycle(roomId: String, maximumMessageExpiresAtEpochMillis: Long): ResolvedRoomLifecycle =
         throw ContentProtectionException.KmsUnavailable()
 
     suspend fun assignCreatedRoomLifecycle(roomId: String, profileKind: RoomLifecycleProfileKind): Boolean =

@@ -481,6 +481,7 @@ sealed class ContentProtectionException(message: String, cause: Throwable? = nul
     class KmsUnavailable(cause: Throwable? = null) : ContentProtectionException("KMS is unavailable or not configured.", cause)
     class SendBindingPending : ContentProtectionException("Original send event binding is awaiting confirmation.")
     class VersionLineageUnavailable : ContentProtectionException("The original message version history is unavailable; edit was not submitted.")
+    class VersionEditNotSubmitted(cause: Throwable) : ContentProtectionException("The edit did not reach the content store or Matrix.", cause)
 
     /** A rejected epoch grants no key material. A later retry must rebuild the current audience and device projection. */
     class RoomEpochConflict(val reason: Reason) : ContentProtectionException("Room security state changed; synchronize and retry.") {

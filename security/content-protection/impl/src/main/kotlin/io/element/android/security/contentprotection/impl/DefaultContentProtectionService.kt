@@ -254,6 +254,9 @@ class DefaultContentProtectionService internal constructor(
     override suspend fun resolveRoomLifecycle(roomId: String): ResolvedRoomLifecycle =
         kmsShareClient.resolveRoomLifecycle(roomId)
 
+    override suspend fun resolveRoomLifecycle(roomId: String, maximumMessageExpiresAtEpochMillis: Long): ResolvedRoomLifecycle =
+        kmsShareClient.resolveRoomLifecycle(roomId, maximumMessageExpiresAtEpochMillis)
+
     override suspend fun assignCreatedRoomLifecycle(
         roomId: String,
         profileKind: RoomLifecycleProfileKind,
@@ -398,6 +401,7 @@ class DefaultContentProtectionService internal constructor(
         private val keyLock = Any()
         private val admissionMutex = Mutex()
         private val lastLocalCheckElapsed = AtomicLong(Long.MIN_VALUE)
+
         // Same 250 ms local inspection bound as the viewer probe. No online reacquisition is added.
         private val localInspectionMillis = 250L
         private var closed = false
@@ -417,7 +421,11 @@ class DefaultContentProtectionService internal constructor(
                 request.header.formatVersion >= ContentProtectionFormat.CURRENT_VERSION &&
                 request.header.offlineLeaseMode == OfflineLeaseMode.ONLINE_REQUIRED &&
                 request.header.roomEpoch != null && request.header.deviceShareEnvelopes.isEmpty()
-            ) StageThreeReleaseRetentionAuthority.ONLINE_KMS else StageThreeReleaseRetentionAuthority.LOCAL_POLICY,
+            ) {
+                StageThreeReleaseRetentionAuthority.ONLINE_KMS
+            } else {
+                StageThreeReleaseRetentionAuthority.LOCAL_POLICY
+            },
         )
 
         suspend fun prepareReadAuthority() {
@@ -455,7 +463,9 @@ class DefaultContentProtectionService internal constructor(
                 is ProtectedMediaAuthorityTimeReading.Available -> {
                     val deadline = if (request.progressiveVideoPlayback) {
                         requireNotNull(released.progressivePlaybackDeadlineEpochMillis)
-                    } else description.authorizationDeadlineEpochMillis
+                    } else {
+                        description.authorizationDeadlineEpochMillis
+                    }
                     if (time.epochMillis >= deadline) throw ContentProtectionException.Expired()
                 }
                 else -> throw ContentProtectionException.AuthenticationFailed()
@@ -619,7 +629,9 @@ class DefaultContentProtectionService internal constructor(
         if (parent.externalReadBinding != null || parent.localAuthorityId != null || original.progressiveVideoPlayback ||
             original.burnSessionId != null || original.header.lifecycle.mode != MessageLifecycleMode.FOLLOW_ROOM ||
             original.header.kind != io.element.android.security.contentprotection.api.ContentKind.ATTACHMENT ||
-            original.header.offlineLeaseMode != OfflineLeaseMode.ONLINE_REQUIRED) return null
+            original.header.offlineLeaseMode != OfflineLeaseMode.ONLINE_REQUIRED) {
+                return null
+            }
         val now = parent.trustedTime.read(authorityClock, runtimeBindingProvider) as? ProtectedMediaAuthorityTimeReading.Available
             ?: throw ContentProtectionException.AuthenticationFailed()
         if (parent.description.authorizationDeadlineEpochMillis - now.epochMillis > 20_000L) return null
@@ -641,14 +653,19 @@ class DefaultContentProtectionService internal constructor(
             check(description.authorityId != previous.authorityId && description.requestNonceSha256Hex != previous.requestNonceSha256Hex)
             check(description.authorizationDeadlineEpochMillis > previous.authorizationDeadlineEpochMillis)
             val candidate = IssuedProtectedMediaReleaseAuthority(
-                mediaAuthorityIssuer, description, requireNotNull(released.mediaAuthorityTime), renewalRequest = original,
+                mediaAuthorityIssuer,
+                description,
+                requireNotNull(released.mediaAuthorityTime),
+                renewalRequest = original,
             )
             if (validateProtectedMediaReleaseAuthority(candidate, description, 0) != ProtectedMediaReleaseAuthorityDecision.VALIDATED) {
                 candidate.close()
                 throw ContentProtectionException.AuthenticationFailed()
             }
-            Timber.d("Secure media fresh grant verified stage=foreground_read_admission authorizationWindowMillis=%d",
-                description.authorizationDeadlineEpochMillis - description.serverTimeEpochMillis)
+            Timber.d(
+                "Secure media fresh grant verified stage=foreground_read_admission authorizationWindowMillis=%d",
+                description.authorizationDeadlineEpochMillis - description.serverTimeEpochMillis
+            )
             return candidate
         } finally {
             released.contentKey.zero()
@@ -788,12 +805,19 @@ class DefaultContentProtectionService internal constructor(
     }
 
     private suspend fun ProtectContentRequest.withFreshLifecycleContract(): ProtectContentRequest {
-        val refreshed = kmsShareClient.resolveRoomLifecycle(roomId)
+        // A refresh may tighten an edit further, never extend the child deadline already selected.
+        val maximumExpiry = maximumMessageExpiresAtEpochMillis?.let { minOf(it, policy.expiresAtEpochMillis) }
+        val refreshed = if (maximumExpiry == null) {
+            kmsShareClient.resolveRoomLifecycle(roomId)
+        } else {
+            kmsShareClient.resolveRoomLifecycle(roomId, maximumExpiry)
+        }
         val expectedRoomHash = sha256(roomId.encodeToByteArray())
         try {
             if (refreshed.protocolVersion != ROOM_LIFECYCLE_CONTRACT_PROTOCOL_VERSION ||
                 !MessageDigest.isEqual(expectedRoomHash, refreshed.roomIdSha256) ||
-                refreshed.messageExpiresAtEpochMillis <= createdAtEpochMillis
+                refreshed.messageExpiresAtEpochMillis <= createdAtEpochMillis ||
+                maximumExpiry?.let { refreshed.messageExpiresAtEpochMillis > it } == true
             ) {
                 throw ContentProtectionException.AuthenticationFailed()
             }
@@ -1394,6 +1418,11 @@ class DefaultContentProtectionService internal constructor(
         require(request.createdAtEpochMillis > 0)
         require(request.policy.policyVersion > 0)
         require(request.policy.expiresAtEpochMillis > request.createdAtEpochMillis)
+        request.maximumMessageExpiresAtEpochMillis?.let { maximumExpiry ->
+            require(maximumExpiry > request.createdAtEpochMillis)
+            require(request.policy.expiresAtEpochMillis <= maximumExpiry)
+            require(request.roomLifecycle?.protocolVersion == ROOM_LIFECYCLE_CONTRACT_PROTOCOL_VERSION)
+        }
         if (request.lifecycle.mode == MessageLifecycleMode.BURN_AFTER_READ) {
             require(request.lifecycle.conversationKind != null)
             require(request.offlineLeaseMode == OfflineLeaseMode.ONLINE_REQUIRED)
@@ -2096,10 +2125,12 @@ private class OnlineKmsReleaseBatcher(
         val cancellation = synchronized(timelineStateLock) {
             if (activeTimelineScopeOwners[scopeId] == ownerToken) {
                 timelineViewportStates[scopeId]?.let { state ->
-                    timelineViewportStates[scopeId] = state.copy(bootstrapRequestIds = state.bootstrapRequestIds - requestIds,
+                    timelineViewportStates[scopeId] = state.copy(
+                        bootstrapRequestIds = state.bootstrapRequestIds - requestIds,
                         initialBootstrapRequestIds = state.initialBootstrapRequestIds - requestIds,
                         bootstrapRetired = state.bootstrapRetired ||
-                            state.initialBootstrapRequestIds.isNotEmpty() && (state.initialBootstrapRequestIds - requestIds).isEmpty())
+                            state.initialBootstrapRequestIds.isNotEmpty() && (state.initialBootstrapRequestIds - requestIds).isEmpty()
+                    )
                 }
                 timelineScheduler.cancelViewportRequests(scopeId, requestIds)
             } else {

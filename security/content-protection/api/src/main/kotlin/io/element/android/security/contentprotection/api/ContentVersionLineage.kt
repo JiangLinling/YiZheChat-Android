@@ -13,6 +13,20 @@ data class ContentVersionLineageScope(
     val roomId: String,
 )
 
+/** Original encrypted local journal identity; this is not a claim of a historical server intent. */
+data class TextEditTerminalFenceQuery(
+    val originalOperationId: String,
+    val childContentId: String,
+    val parentContentId: String,
+    val rootContentId: String,
+    val expectedEventIdSha256: String,
+    val parentExpiresAtEpochMillis: Long,
+    val accountIdHash: String,
+    val matrixDeviceIdHash: String,
+    val roomIdHash: String,
+    val terminalReceiptId: String,
+)
+
 data class ContentVersionNode(
     val contentId: ContentId,
     val rootContentId: ContentId,
