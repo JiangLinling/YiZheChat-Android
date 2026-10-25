@@ -34,7 +34,9 @@ import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-enum class CaptionPendingPhase { AWAITING_BINDING, PROTECTION_OUTCOME_UNKNOWN, SERVER_REGISTERED, LINEAGE_COMMITTED, DESTRUCTION_PENDING }
+enum class CaptionPendingPhase {
+    AWAITING_BINDING, KMS_STORE_STARTED, PRESTORE_REJECTED, PROTECTION_OUTCOME_UNKNOWN, SERVER_REGISTERED, LINEAGE_COMMITTED, DESTRUCTION_PENDING,
+}
 
 @Serializable
 data class CaptionServiceReceiptOwner(
@@ -59,6 +61,7 @@ data class CaptionPending(
     val createdAt: Long? = null,
     val serviceReceiptOwner: CaptionServiceReceiptOwner? = null,
     val serviceAppliedAt: Long? = null,
+    val preStoreRejectedAt: Long? = null,
 )
 
 @Serializable

@@ -17,6 +17,7 @@ import io.element.android.security.contentprotection.api.ContentVersionLineageSc
 import io.element.android.security.contentprotection.api.ContentVersionLineageStore
 import io.element.android.security.contentprotection.api.ContentVersionNode
 import io.element.android.security.contentprotection.api.KmsShareClient
+import io.element.android.security.contentprotection.api.TextEditTerminalFenceQuery
 import io.element.android.security.contentprotection.api.RegisterContentVersionRequest
 import io.element.android.security.dataprotection.api.AppOperationalStateCoordinator
 import io.element.android.security.dataprotection.api.LifecycleClientReceipt
@@ -167,7 +168,10 @@ class ProtectedCaptionLineageCoordinator(
                 require(context.lifecycleId == FullAppLifecycleId.LC_13 && owner.operationId == context.operationId &&
                     owner.roomIdHash == digest(scope.roomId))
                 val current = pending.all(scope)
-                require(current.none { it.operationId == context.operationId || it.targetEventId == targetEventId }) {
+                val fencedChildren = reconcileFailedTextPreparations(current, targetEventId, expectedRoot, owner)
+                require(current.none {
+                    (it.operationId == context.operationId || it.targetEventId == targetEventId) && it.contentId !in fencedChildren
+                }) {
                     "TEXT edit outcome is pending; reconcile the original operation before another edit."
                 }
                 val rootId = lineage.rootForContent(scope, contentId)
@@ -188,6 +192,85 @@ class ProtectedCaptionLineageCoordinator(
                 owner.delegated = true
                 ProtectedCaptionEditPlan(targetEventId, context.operationId, child)
             }
+        }
+    }
+
+    /** Keep failed attempts as cleanup debt; only this call's fresh verified exact children may be skipped. */
+    private suspend fun reconcileFailedTextPreparations(
+        current: List<CaptionPending>,
+        targetEventId: String,
+        root: ContentId,
+        owner: TextVersionReceiptOwner,
+    ): Set<String> {
+        val fenced = mutableSetOf<String>()
+        val operationId = requireNotNull(currentLifecycleOperationContext()).operationId
+        for (item in current.filter { it.targetEventId == targetEventId && it.operationId != operationId }) {
+            require(item.lifecycleId == FullAppLifecycleId.LC_13.name && item.rootContentId == root.value)
+            require(item.phase in setOf(CaptionPendingPhase.AWAITING_BINDING.name,
+                CaptionPendingPhase.KMS_STORE_STARTED.name, CaptionPendingPhase.PRESTORE_REJECTED.name,
+                CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name, CaptionPendingPhase.DESTRUCTION_PENDING.name))
+            val receiptOwner = requireNotNull(item.serviceReceiptOwner)
+            require(receiptOwner.accountIdHash == owner.accountIdHash && receiptOwner.matrixDeviceIdHash == owner.matrixDeviceIdHash &&
+                receiptOwner.roomIdHash == owner.roomIdHash)
+            var original = lifecycle.operation(item.operationId)
+            if (item.phase == CaptionPendingPhase.PRESTORE_REJECTED.name && !original.status.isTerminal) {
+                original = deliverTextPrestoreFailure(item)
+            }
+            if (original.status != LifecycleOperationStatus.FAILED_FINAL) throw ContentProtectionException.SendBindingPending()
+            require(original.operationId == item.operationId && original.lifecycleId == FullAppLifecycleId.LC_13 &&
+                original.status == LifecycleOperationStatus.FAILED_FINAL &&
+                original.subjects.accountIdHash == receiptOwner.accountIdHash &&
+                original.subjects.matrixDeviceIdHash == receiptOwner.matrixDeviceIdHash &&
+                original.subjects.roomIdHash == receiptOwner.roomIdHash)
+            kms.verifyTextEditTerminalFence(TextEditTerminalFenceQuery(
+                item.operationId, item.contentId, requireNotNull(item.parentContentId), item.rootContentId,
+                digest(targetEventId), item.parentExpiresAt, receiptOwner.accountIdHash, receiptOwner.matrixDeviceIdHash,
+                receiptOwner.roomIdHash, requireNotNull(original.terminalReceiptId),
+            ))
+            // Only the rejected child is fenced. The original parent/root must remain readable and editable.
+            pending.fenceDestruction(scope, item.contentId)
+            pending.put(scope, item.copy(phase = CaptionPendingPhase.DESTRUCTION_PENDING.name))
+            check(pending.isDestructionFenced(scope, item.contentId))
+            check(pending.all(scope).single { it.operationId == item.operationId }.phase == CaptionPendingPhase.DESTRUCTION_PENDING.name)
+            fenced += item.contentId
+        }
+        return fenced
+    }
+
+    /** Persist before the remote call. A crash here remains conservative even if the call never starts. */
+    suspend fun textStoreStarting(contentId: ContentId) = withPendingContentLock(contentId) {
+        val item = pending.all(scope).single { it.contentId == contentId.value }
+        require(item.lifecycleId == FullAppLifecycleId.LC_13.name && item.parentContentId != null)
+        require(item.operationId == currentLifecycleOperationContext()?.operationId)
+        require(item.phase in setOf(CaptionPendingPhase.AWAITING_BINDING.name, CaptionPendingPhase.KMS_STORE_STARTED.name))
+        check(!pending.isDestructionFenced(scope, contentId.value))
+        pending.put(scope, item.copy(phase = CaptionPendingPhase.KMS_STORE_STARTED.name))
+    }
+
+    /** Only the producer whose before-store callback did not run may record this local fact. */
+    suspend fun textStoreNotStarted(contentId: ContentId) = withPendingContentLock(contentId) {
+        val item = pending.all(scope).single { it.contentId == contentId.value }
+        require(item.lifecycleId == FullAppLifecycleId.LC_13.name && item.parentContentId != null)
+        require(item.operationId == currentLifecycleOperationContext()?.operationId)
+        // A persisted STARTED marker can never be downgraded after a crash or an uncertain callback write.
+        require(item.phase == CaptionPendingPhase.AWAITING_BINDING.name)
+        val rejected = item.copy(phase = CaptionPendingPhase.PRESTORE_REJECTED.name, preStoreRejectedAt = System.currentTimeMillis())
+        pending.put(scope, rejected)
+        deliverTextPrestoreFailure(rejected)
+    }
+
+    private suspend fun deliverTextPrestoreFailure(item: CaptionPending): LifecycleOperation {
+        require(item.phase == CaptionPendingPhase.PRESTORE_REJECTED.name && item.lifecycleId == FullAppLifecycleId.LC_13.name)
+        val owner = requireNotNull(item.serviceReceiptOwner)
+        val receipt = LifecycleClientReceipt(
+            item.operationId, LifecycleComponent.ANDROID_SERVICE, LifecyclePhase.CLIENT_APPLIED,
+            "TEXT_EDIT_SHARE_NOT_STORED", "text-edit-prestore:${item.contentId}", requireNotNull(item.preStoreRejectedAt),
+        )
+        return lifecycle.recordClientReceipt(receipt).also { result ->
+            require(result.operationId == item.operationId && result.lifecycleId == FullAppLifecycleId.LC_13 &&
+                result.status == LifecycleOperationStatus.FAILED_FINAL && !result.terminalReceiptId.isNullOrBlank() &&
+                result.subjects.accountIdHash == owner.accountIdHash && result.subjects.matrixDeviceIdHash == owner.matrixDeviceIdHash &&
+                result.subjects.roomIdHash == owner.roomIdHash)
         }
     }
 
@@ -282,7 +365,7 @@ class ProtectedCaptionLineageCoordinator(
     /** Protection may have created a KMS share before it failed; retain the identity for reconciliation. */
     suspend fun protectionOutcomeUnknown(contentId: ContentId) = withPendingContentLock(contentId) {
         pending.all(scope).firstOrNull { it.contentId == contentId.value }
-            ?.takeIf { it.phase == CaptionPendingPhase.AWAITING_BINDING.name }
+            ?.takeIf { it.phase in setOf(CaptionPendingPhase.AWAITING_BINDING.name, CaptionPendingPhase.KMS_STORE_STARTED.name) }
             ?.let { pending.put(scope, it.copy(phase = CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name)) }
     }
 
@@ -336,7 +419,8 @@ class ProtectedCaptionLineageCoordinator(
             commitLocal(item)
             return@withPendingContentLock
         }
-        require(item.phase in setOf(CaptionPendingPhase.AWAITING_BINDING.name, CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name) &&
+        require(item.phase in setOf(CaptionPendingPhase.AWAITING_BINDING.name, CaptionPendingPhase.KMS_STORE_STARTED.name,
+            CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name) &&
             item.eventIdSha256 == null)
         val originalLifecycle = FullAppLifecycleId.valueOf(item.lifecycleId)
         val continuesLiveTextRoot = liveSendOperation != null && originalLifecycle == FullAppLifecycleId.LC_13 &&
@@ -416,6 +500,8 @@ class ProtectedCaptionLineageCoordinator(
                 .filter { it.contentId == contentId.value || it.rootContentId == contentId.value }
                 .filter { it.phase in setOf(
                     CaptionPendingPhase.AWAITING_BINDING.name,
+                    CaptionPendingPhase.KMS_STORE_STARTED.name,
+                    CaptionPendingPhase.PRESTORE_REJECTED.name,
                     CaptionPendingPhase.PROTECTION_OUTCOME_UNKNOWN.name,
                     CaptionPendingPhase.SERVER_REGISTERED.name,
                     CaptionPendingPhase.LINEAGE_COMMITTED.name,

@@ -3,6 +3,7 @@ package io.element.android.features.messages.impl.attachments.preview.error
 
 import io.element.android.libraries.ui.strings.R
 import io.element.android.security.contentprotection.api.ContentProtectionException
+import io.element.android.security.contentprotection.api.StageThreeGateDenied
 import io.element.android.libraries.matrix.ui.components.contactFailureMessageResource
 
 /** A transport failure cannot establish the recipient's presence or logout state. */
@@ -17,6 +18,9 @@ internal fun protectedSendErrorResource(failure: Throwable): Int {
             is ContentProtectionException.RoomEpochConflict -> return io.element.android.features.messages.impl.R.string.error_room_epoch_conflict
             is ContentProtectionException.SendBindingPending -> return R.string.error_send_confirmation_pending
             is ContentProtectionException.VersionLineageUnavailable -> return R.string.error_text_version_unavailable
+            is ContentProtectionException.VersionEditNotSubmitted -> return R.string.error_text_edit_not_submitted
+            is StageThreeGateDenied -> return R.string.error_share_security_rejected
+            is ContentProtectionException.Expired -> return R.string.error_share_content_expired
         }
         current = current?.cause
     }

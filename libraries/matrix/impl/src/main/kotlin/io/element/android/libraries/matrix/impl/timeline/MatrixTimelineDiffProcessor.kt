@@ -1063,9 +1063,16 @@ internal class MatrixTimelineDiffProcessor(
             val (visibleItems, historyItems) = classifyForCurrentViewport(uncachedChangedItems, changedVisibleItemKeys)
             // New arrivals retain their existing HISTORY_PREFETCH authorization even while the
             // user reads older messages. Only the nearby backlog is speculative prefetch.
-            val recentItems = uncachedChangedItems.filter { itemKey(it) in recentTailKeys && it !in visibleItems }
+            // Without a measured viewport, startup-tail membership is only a scheduling
+            // fallback. A later incremental arrival must not be trapped in generation-zero
+            // VISIBLE work behind an old in-flight history item. Preserve its actual
+            // HISTORY_PREFETCH authorization and use the existing bounded recent lane.
+            val startupRecentKeys = recentTailKeys.takeIf { changedVisibleItemKeys == null }.orEmpty()
+            val recentItems = uncachedChangedItems.filter {
+                itemKey(it) in recentTailKeys && (it !in visibleItems || itemKey(it) in startupRecentKeys)
+            }
             pendingDecrypts.offer(
-                visible = visibleItems,
+                visible = visibleItems.filterNot { itemKey(it) in startupRecentKeys },
                 history = historyItems.filterNot { itemKey(it) in recentTailKeys },
                 recentHistory = recentItems,
                 recentProjectionKeys = recentTailKeys,
@@ -2377,9 +2384,15 @@ internal class PendingDecryptQueue(
         }
     }
 
-    /** Two existing foreground workers borrow bootstrap work after a real measurement. */
+    /** Two existing foreground workers prefer measured work, then help authenticated recent arrivals or bootstrap. */
     fun pollForeground(): PendingDecryptWork? = synchronized(this) {
         val work = removeFirstAvailable(visible, DecryptPriority.VISIBLE, measuredOnly = true)?.also { recordVisiblePoll() }
+            // Recent work keeps HISTORY_PREFETCH authorization. Borrowing these existing workers
+            // does not admit ordinary backlog or occupy the reserved measured-visible worker.
+            ?: removeFirstAvailable(recentHistory, DecryptPriority.HISTORY, recentHistory = true)?.also {
+                // The dedicated history lane still chooses backlog after the original burst bound.
+                recentPollsSinceBacklog = minOf(recentPollsSinceBacklog + 1, historyFairnessVisibleBurst)
+            }
             ?: if (recentPollsSinceBacklog < historyFairnessVisibleBurst) {
                 firstBootstrapKey()?.let { key ->
                     checkNotNull(history.remove(key)).toPendingWork(key, DecryptPriority.HISTORY).copy(bootstrapHistory = true)
@@ -2395,7 +2408,8 @@ internal class PendingDecryptQueue(
     }
 
     fun hasForegroundWork(): Boolean = synchronized(this) {
-        hasReservedVisibleWork() || recentPollsSinceBacklog < historyFairnessVisibleBurst && firstBootstrapKey() != null
+        hasReservedVisibleWork() || recentHistory.keys.any { it !in inFlight } ||
+            recentPollsSinceBacklog < historyFairnessVisibleBurst && firstBootstrapKey() != null
     }
 
     fun pollVisibleOrHistory(): PendingDecryptWork? = synchronized(this) {

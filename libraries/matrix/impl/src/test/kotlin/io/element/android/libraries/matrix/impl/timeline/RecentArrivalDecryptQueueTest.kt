@@ -72,6 +72,66 @@ class RecentArrivalDecryptQueueTest {
     }
 
     @Test
+    fun `idle foreground helps recent arrival while history is in flight without draining backlog`() {
+        val queue = queue()
+        queue.offer(emptyList(), listOf(item("blocked")))
+        val blocked = checkNotNull(queue.pollVisibleOrHistory())
+        queue.offer(
+            emptyList(), listOf(item("backlog")), recentHistory = listOf(item("recent")),
+            timelineScopeId = "current-scope", rawStateGeneration = 2L, releaseGeneration = 17L,
+        )
+        assertThat(queue.hasForegroundWork()).isTrue()
+        assertThat(queue.pollReservedVisible()).isNull()
+        val recent = checkNotNull(queue.pollForeground())
+        assertThat(recent.key).isEqualTo("event:recent")
+        assertThat(recent.priority).isEqualTo(DecryptPriority.HISTORY)
+        assertThat(recent.recentHistory).isTrue()
+        assertThat(recent.bootstrapHistory).isFalse()
+        assertThat(recent.timelineScopeId).isEqualTo("current-scope")
+        assertThat(recent.rawStateGeneration).isEqualTo(2L)
+        assertThat(recent.releaseGeneration).isEqualTo(17L)
+        queue.complete(recent)
+        assertThat(queue.hasForegroundWork()).isFalse()
+        assertThat(queue.pollForeground()).isNull()
+        assertThat(queue.pollReservedVisible()).isNull()
+        queue.complete(blocked)
+        assertThat(queue.pollVisibleOrHistory()?.key).isEqualTo("event:backlog")
+    }
+
+    @Test
+    fun `recent borrowing leaves measured visible priority and reserved worker intact`() {
+        val queue = queue()
+        queue.offer(
+            listOf(item("visible")), emptyList(), recentHistory = listOf(item("recent")),
+            timelineScopeId = "current-scope", releaseGeneration = 7L,
+        )
+        val measured = checkNotNull(queue.pollForeground())
+        assertThat(measured.key).isEqualTo("event:visible")
+        assertThat(measured.priority).isEqualTo(DecryptPriority.VISIBLE)
+        queue.complete(measured)
+        assertThat(queue.pollReservedVisible()).isNull()
+        val recent = checkNotNull(queue.pollForeground())
+        assertThat(recent.key).isEqualTo("event:recent")
+        assertThat(recent.priority).isEqualTo(DecryptPriority.HISTORY)
+    }
+
+    @Test
+    fun `foreground recent borrowing preserves dedicated history backlog fairness`() {
+        val queue = queue(burst = 2)
+        queue.offer(emptyList(), listOf(item("backlog")), recentHistory = (0..2).map { item("recent-$it") })
+        repeat(2) {
+            val recent = checkNotNull(queue.pollForeground())
+            assertThat(recent.priority).isEqualTo(DecryptPriority.HISTORY)
+            queue.complete(recent)
+        }
+        val backlog = checkNotNull(queue.pollVisibleOrHistory())
+        assertThat(backlog.key).isEqualTo("event:backlog")
+        assertThat(backlog.recentHistory).isFalse()
+        queue.complete(backlog)
+        assertThat(queue.pollForeground()?.key).isEqualTo("event:recent-2")
+    }
+
+    @Test
     fun `recent arrival precedes backlog without claiming visible priority`() {
         val queue = queue()
         queue.offer(emptyList(), listOf(item("old")))
@@ -219,11 +279,9 @@ class RecentArrivalDecryptQueueTest {
         processor.commitDiffs(TimelineDiffTransaction(scope, 2L, 1L,
             listOf(TimelineDiff.PushBack(raw("live-arrival")))))
         runCurrent()
-        assertThat(observed.any { it.requestId == "event:live-arrival" }).isFalse()
-
-        // Free just one already-running history worker, not all forty history operations.
-        historyPermits.trySend(Unit)
-        runCurrent()
+        // The existing idle foreground workers may help without releasing the blocked history lane.
+        assertThat(observed.any { it.requestId == "event:live-arrival" }).isTrue()
+        assertThat(observed.count { it.requestId.startsWith("event:history-") }).isAtMost(1)
         advanceTimeBy(MatrixTimelineDiffProcessor.HISTORY_DECRYPT_BATCH_WINDOW_MILLIS + 1)
         runCurrent()
         val arrival = observed.single { it.requestId == "event:live-arrival" }

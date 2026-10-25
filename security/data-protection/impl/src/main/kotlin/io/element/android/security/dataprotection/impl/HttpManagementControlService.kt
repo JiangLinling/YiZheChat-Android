@@ -1011,10 +1011,9 @@ class HttpManagementControlService(
     ): LifecycleOperation = withContext(Dispatchers.IO) {
         // An older authority must reject an unsupported failure endpoint rather than accidentally
         // treating a local recovery rejection as an APPLIED success receipt.
-        val receiptRoute = if (receipt.resultCode in setOf("RECOVERY_SECRET_STORAGE_REJECTED", "MATRIX_AUTHENTICATION_REJECTED")) {
-            "client-failures"
-        } else {
-            "client-receipts"
+        val receiptRoute = when (receipt.resultCode) {
+            "RECOVERY_SECRET_STORAGE_REJECTED", "MATRIX_AUTHENTICATION_REJECTED", "TEXT_EDIT_SHARE_NOT_STORED" -> "client-failures"
+            else -> "client-receipts"
         }
         val body = json.encodeToString(
             LifecycleClientReceiptWire(

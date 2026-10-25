@@ -1643,12 +1643,23 @@ private class DefaultMatrixProtectedContentAdapter(
         require(protectedContentKind(message) == ContentKind.TEXT && !message.isBurnAfterRead)
         val binding = decryptionCacheKey(eventId, message)
         val plan = captionLineageCoordinator.prepareText(eventId, binding.contentId, binding.expiresAtEpochMillis)
+        var childStoreStarted = false
         return try {
             protect(ContentKind.TEXT, ProtectedMatrixPayload(payloadType = PAYLOAD_TEXT, body = body, htmlBody = htmlBody,
-                messageType = MsgType.MSG_TYPE_TEXT.name, asPlainText = false), plan.childContentId)
+                messageType = MsgType.MSG_TYPE_TEXT.name, asPlainText = false), plan.childContentId,
+                beforeKmsStore = {
+                    captionLineageCoordinator.textStoreStarting(plan.childContentId)
+                    childStoreStarted = true
+                })
         } catch (failure: Exception) {
-            withContext(NonCancellable) { runCatching { captionLineageCoordinator.protectionOutcomeUnknown(plan.childContentId) }
+            withContext(NonCancellable) { runCatching {
+                if (childStoreStarted) captionLineageCoordinator.protectionOutcomeUnknown(plan.childContentId)
+                else captionLineageCoordinator.textStoreNotStarted(plan.childContentId)
+            }
                 .onFailure(failure::addSuppressed) }
+            if (!childStoreStarted && failure !is kotlinx.coroutines.CancellationException) {
+                throw ContentProtectionException.VersionEditNotSubmitted(failure)
+            }
             throw failure
         }
     }
@@ -3872,12 +3883,9 @@ private class DefaultMatrixProtectedContentAdapter(
         val echoAuthorizationRevision = authorizationRevision()
         val echoPreviewRevision = protectedPreviewAuthorizationGate.authorizationRevision.value
         val request = LifecycleStageTiming.measure("send_policy_and_recipients", contentId?.value.orEmpty()) {
-            val fresh = protectionRequest(kind, contentId, audienceAccountIdHashes, lifecycle)
             val parentExpiry = contentId?.let { captionLineageCoordinator.parentExpiry(it) }
-            if (parentExpiry == null) fresh else {
-                require(parentExpiry > clock.epochMillis())
-                fresh.copy(policy = fresh.policy.copy(expiresAtEpochMillis = minOf(parentExpiry, fresh.policy.expiresAtEpochMillis)))
-            }
+            if (parentExpiry != null && parentExpiry <= clock.epochMillis()) throw ContentProtectionException.Expired()
+            protectionRequest(kind, contentId, audienceAccountIdHashes, lifecycle, parentExpiry)
         }
         LifecycleStageTiming.point("send_content_bind", request.contentId.value)
         val plaintext = LifecycleStageTiming.measure("send_payload_encode", request.contentId.value) {
@@ -3951,6 +3959,7 @@ private class DefaultMatrixProtectedContentAdapter(
         contentId: ContentId? = null,
         requestedAudienceAccountIdHashes: Set<String>? = null,
         lifecycle: ContentLifecycle = ContentLifecycle(),
+        maximumMessageExpiresAtEpochMillis: Long? = null,
     ): ProtectContentRequest {
         val active = policyProvider.current().policy
         val now = clock.epochMillis()
@@ -3966,7 +3975,8 @@ private class DefaultMatrixProtectedContentAdapter(
         val (roomLifecycle, snapshots) = readProtectedSendPrerequisites(
             resolveRoom = {
                 LifecycleStageTiming.measure("send_room_contract", contentId?.value.orEmpty()) {
-                    contentProtectionService.resolveRoomLifecycle(roomId.value)
+                    if (maximumMessageExpiresAtEpochMillis == null) contentProtectionService.resolveRoomLifecycle(roomId.value)
+                    else contentProtectionService.resolveRoomLifecycle(roomId.value, maximumMessageExpiresAtEpochMillis)
                 }
             },
             resolveRecipients = {
@@ -4020,6 +4030,7 @@ private class DefaultMatrixProtectedContentAdapter(
             ),
             lifecycle = lifecycle,
             roomLifecycle = roomLifecycle,
+            maximumMessageExpiresAtEpochMillis = maximumMessageExpiresAtEpochMillis,
         )
     }
 

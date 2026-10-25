@@ -1,4 +1,7 @@
 <resources>
+    <string name="error_text_edit_not_submitted">Changes were not submitted. Your edit has been kept; try again later.</string>
+    <string name="error_share_security_rejected">Content was not sent because a security check failed. Check the message and device status before trying again.</string>
+    <string name="error_share_content_expired">This content has expired. Changes were not sent.</string>
     <string name="error_text_version_unavailable">This message’s edit history is unavailable. Changes were not submitted and your draft has been kept.</string>
     <string name="error_share_recipient_device_unavailable">Not sent: a recipient’s device authorization has expired or changed. They may have signed out, switched devices, or not finished verification. Ask them to sign in and verify their device, then retry shortly. In a group, this may concern one member.</string>
     <string name="error_share_security_access_denied">Sending was not authorized. Check your account and device verification status, then retry. Contact your administrator if access remains blocked.</string>
