@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "unified-source-20261026-r88-partial-registration-exit",
-  "frozen_utc": "2026-10-25T16:51:31.902342+00:00",
+  "revision": "unified-source-20261026-r88-r2-startup-restriction",
+  "frozen_utc": "2026-10-25T17:03:15.191547+00:00",
   "required_features": {
     "encryption_phase": [
       "libraries/matrix/api/src/main/kotlin/io/element/android/libraries/matrix/api/timeline/item/event/LocalEventSendState.kt",
@@ -294,7 +294,7 @@
     "app/src/main/kotlin/io/element/android/x/intent/SafeUriHandler.kt": "a3ab36769598daa29a3f6c7d127d90e2b2fc20bb337943a8651a695c8cee38f6",
     "app/src/main/kotlin/io/element/android/x/oidc/DefaultOAuthRedirectUrlProvider.kt": "239cf8a71a432f137433096e079c514e516c218616295c74d7b513bb49a54673",
     "app/src/main/kotlin/io/element/android/x/security/AccountVaultLifecycleCoordinator.kt": "b3f9e59732a8f9cf0c9f9c03c3154c54acb87a8e67ed5d8a64175193a371f48a",
-    "app/src/main/kotlin/io/element/android/x/security/ManagementControlCoordinator.kt": "febeed109da14f590cc9b7c4834730f03119e13cba0cb43d1ab724a3e956a30d",
+    "app/src/main/kotlin/io/element/android/x/security/ManagementControlCoordinator.kt": "0eebbbae47b74543e6c653eee411ef5cd0dc020b397f38aacbcb6ab9974df2d2",
     "app/src/main/kotlin/io/element/android/x/security/ManagementControlWorker.kt": "d56534fdfb669b4110090846e41862d161202fdc010cd6542a9b7554b4f57a5e",
     "app/src/main/kotlin/io/element/android/x/security/ManagementSyncReceiver.kt": "b0c5128ae016079f0d464b2e4258065ed147670655a1c56e39e80606f8a420ec",
     "app/src/main/kotlin/io/element/android/x/security/UnifiedProtectedPreviewAuthorizationGate.kt": "3849b22a55edbbd22ebe9046f2c865bbd4f6bf33f6ea3ee7d2cded57f60e7378",
@@ -333,7 +333,7 @@
     "app/src/test/kotlin/io/element/android/x/oidc/DefaultOAuthRedirectUrlProviderTest.kt": "4f8f124c524129bcf2bc6c360489c06d87cd9b922994908b37e6a1108930ba3e",
     "app/src/test/kotlin/io/element/android/x/security/AccountVaultLifecycleCoordinatorTest.kt": "cf311075c6c4acdbf9d9e53f15159b134e5a9ac11bd3399fe950c87d41db4cfe",
     "app/src/test/kotlin/io/element/android/x/security/ManagementControlCoordinatorTest.kt": "c31de1ce9f3bf3c1c3502231dcfbd66a822a5813c77fd8d5baeecd791db6db28",
-    "app/src/test/kotlin/io/element/android/x/security/ManagementControlRestrictionTest.kt": "ceb9c97f2eb6fd8d6cf6a9a937eb600e2eb6600fc74265e3f4c404a5e76db017",
+    "app/src/test/kotlin/io/element/android/x/security/ManagementControlRestrictionTest.kt": "3f3d0e79f467e07973ea9bc73d9e67c8486db02690f1e83ead802daf1940470d",
     "app/src/test/kotlin/io/element/android/x/update/AppUpdateGatePolicyTest.kt": "3df8e248d3715787a973c4d8f1f13d0d8166e331233c37bfcaa351ff1ccb5e08",
     "app/src/testBackgroundBinding/kotlin/io/element/android/x/backgroundtest/ConnectedForegroundRetryTest.kt": "6839ceb8d8e47674be2d63784a20d5b1684cf007fe8bc85f39f1e24a9d2833f9",
     "appconfig/build.gradle.kts": "2842edb466ad0b7e46efcf7ad9df992adb3b4cf04f74123beb851f9f6d01de70",
