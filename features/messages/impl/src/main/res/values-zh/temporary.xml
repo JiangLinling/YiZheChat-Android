@@ -62,7 +62,8 @@
     <string name="screen_room_file_sending">发送中</string>
     <string name="screen_room_file_send_failed">发送失败 · 点击重试</string>
     <string name="screen_room_file_sent">已发送</string>
-    <string name="screen_room_file_tap_to_download">未下载</string>
+    <string name="screen_room_file_tap_to_download">点击查看</string>
+    <string name="screen_room_file_opened">已打开</string>
     <string name="screen_room_burn_after_read_title">闪阅消息</string>
     <string name="screen_room_burn_after_read_close">关闭并销毁</string>
     <string name="screen_room_burn_after_read_loading">正在安全打开…</string>

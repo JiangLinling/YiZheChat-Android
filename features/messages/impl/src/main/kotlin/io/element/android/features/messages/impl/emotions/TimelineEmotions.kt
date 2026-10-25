@@ -60,7 +60,7 @@ internal class TimelineEmotionState {
 
 @Composable
 internal fun TimelineEmotions(state: TimelineState, playback: TimelineEmotionState, scopeId: String, liveEdge: Boolean, blocked: Boolean,
-    protection: TimelineProtectionState) {
+    protection: TimelineProtectionState, measurementCurrent: Boolean = true) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycle by lifecycleOwner.lifecycle.currentStateFlow.collectAsState()
     val resumed = lifecycle.isAtLeast(Lifecycle.State.RESUMED)
@@ -79,8 +79,12 @@ internal fun TimelineEmotions(state: TimelineState, playback: TimelineEmotionSta
         !protection.hideMediaContent(event.eventId, event.isMine) &&
         event.eventId !in state.destroyingBurnAfterReadEventIds && event.eventId !in state.destroyingMessageRemovalEventIds &&
         event.eventId !in state.pendingMessageRemovalEventIds
-    LaunchedEffect(state.timelineItems, resumed, options.autoplay, liveEdge, blocked, protection) {
+    LaunchedEffect(state.timelineItems, resumed, options.autoplay, liveEdge, blocked, protection, measurementCurrent) {
         if (!resumed || blocked) playback.request = null
+        val autoplayAllowed = resumed && !blocked && options.autoplay && state.isLive
+        // Never consume a fresh arrival using the previous list's geometry. An empty room still
+        // initializes the baseline, and background/blocked/history observations still retire arrivals.
+        if (autoplayAllowed && !measurementCurrent && events.isNotEmpty()) return@LaunchedEffect
         val id = gate.observe(events.map { event -> EmotionArrival(event.displayId.value, event.sentTimeMillis,
             eligible = eligible(event) && (event.origin == TimelineItemEventOrigin.LOCAL || event.origin == TimelineItemEventOrigin.SYNC),
             awaitingLiveDecryption = event.origin == TimelineItemEventOrigin.SYNC &&
@@ -88,7 +92,7 @@ internal fun TimelineEmotions(state: TimelineState, playback: TimelineEmotionSta
                 event.content.isProtectedContentShell,
         ) },
             // A new eligible live message replaces the current effect instead of being consumed while it is busy.
-            System.currentTimeMillis(), resumed && !blocked && options.autoplay && state.isLive && liveEdge)
+            System.currentTimeMillis(), autoplayAllowed && liveEdge)
         if (id != null) playback.request = id to System.nanoTime()
     }
     val request = playback.request

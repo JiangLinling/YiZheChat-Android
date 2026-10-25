@@ -452,9 +452,10 @@ fun TimelineView(
 
                 io.element.android.features.messages.impl.emotions.TimelineEmotions(
                     state = state, playback = emotionPlayback, scopeId = viewportScopeId,
-                    liveEdge = lazyListState.firstVisibleItemIndex <= 1,
+                    liveEdge = state.isLive && isTimelineAtLiveEdge(state.timelineItems, lazyListState.layoutInfo),
                     blocked = selectionMode || talkbackActive,
                     protection = timelineProtectionState,
+                    measurementCurrent = hasCurrentTimelineMeasurement(state.timelineItems, lazyListState.layoutInfo),
                 )
                 if (useReverseLayout) {
                     FloatingDateBadgeOverlay(
@@ -560,14 +561,14 @@ private fun TimelineViewportAnchorKeeper(
     val firstVisibleIndex = lazyListState.firstVisibleItemIndex
     val firstVisibleOffset = lazyListState.firstVisibleItemScrollOffset
     val userScrollInProgress = lazyListState.isScrollInProgress
-    val currentAnchor = (timelineItems.getOrNull(firstVisibleIndex) as? TimelineItem.Event)?.let { item ->
+    val currentAnchor = timelineItems.getOrNull(firstVisibleIndex)?.takeIf { it.events().isNotEmpty() }?.let { item ->
         TimelineViewportAnchorCandidate(
             itemId = item.identifier().value,
             scrollOffset = firstVisibleOffset,
             distanceFromFirstVisibleItem = 0,
         )
     }
-    val currentIsAtLiveEdge = isLive && firstVisibleIndex < 3
+    val currentIsAtLiveEdge = isLive && isTimelineAtLiveEdge(timelineItems, lazyListState.layoutInfo)
     val initialSnapshot = TimelineViewportSnapshot(
         source = timelineItems,
         anchor = currentAnchor,
@@ -963,9 +964,11 @@ private fun BoxScope.TimelineScrollHelper(
     val coroutineScope = rememberCoroutineScope()
     val firstNewInsetPx = with(androidx.compose.ui.platform.LocalDensity.current) { 16.dp.roundToPx() }
     val isScrollFinished by remember { derivedStateOf { !lazyListState.isScrollInProgress } }
-    val canAutoScroll by remember {
+    val latestItemsForScroll by rememberUpdatedState(state.timelineItems)
+    val latestIsLive by rememberUpdatedState(isLive)
+    val canAutoScroll by remember(lazyListState) {
         derivedStateOf {
-            lazyListState.firstVisibleItemIndex < 3 && isLive
+            latestIsLive && isTimelineAtLiveEdge(latestItemsForScroll, lazyListState.layoutInfo)
         }
     }
     var jumpToLiveHandled by remember { mutableStateOf(true) }
@@ -1034,9 +1037,7 @@ private fun BoxScope.TimelineScrollHelper(
         if (removalStarted) {
             // Only preserve the live bottom edge when it was already visible. A user reading older
             // history must not be pulled away by a remote redaction or burn-after-read event.
-            // Index zero may be a virtual typing/read-receipt row. Match the timeline's existing
-            // near-bottom rule so a fully visible latest message at index one or two is still pinned.
-            pinBottomThroughTerminalRemoval = isLive && lazyListState.firstVisibleItemIndex < 3
+            pinBottomThroughTerminalRemoval = isLive && isTimelineAtLiveEdge(state.timelineItems, lazyListState.layoutInfo)
         }
         terminalRemovalWasActive = terminalRemovalInProgress
 
@@ -1137,7 +1138,7 @@ private fun NewMessageGeometryObserver(state: TimelineState, list: LazyListState
             TimelineEvent.NewMessageHintGeometry(
                 aboveViewport = above,
                 targetVisible = measured != null && !above && !list.isScrollInProgress,
-                atLiveEdge = current.isLive && list.firstVisibleItemIndex < 3,
+                atLiveEdge = current.isLive && isTimelineAtLiveEdge(current.timelineItems, layout),
             )
         }.filterNotNull().distinctUntilChanged().collectLatest { geometry ->
             delay(200L) // Wait for entry / media layout to settle; a keyboard alone cannot create a new batch.

@@ -29,6 +29,49 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class TimelineEmotionsTest {
+    @Test fun `first arrival in empty room waits for current measurement and plays once`() = assertMeasurementArrival(true, false)
+
+    @Test fun `arrival measured in history is consumed without replay on returning to latest`() = assertMeasurementArrival(false, false)
+
+    @Test fun `blocked arrival is consumed even while measurement is pending`() = assertMeasurementArrival(true, true)
+
+    private fun assertMeasurementArrival(measuredAtLatest: Boolean, initiallyBlocked: Boolean) = runAndroidComposeUiTest<ComponentActivity> {
+        val state = mutableStateOf(aTimelineState())
+        val measured = mutableStateOf(false)
+        val latest = mutableStateOf(false)
+        val blocked = mutableStateOf(initiallyBlocked)
+        val playback = TimelineEmotionState()
+        setSafeContent {
+            Box(Modifier.fillMaxSize()) {
+                TimelineEmotions(state.value, playback, "measurement", latest.value, blocked.value,
+                    aTimelineProtectionState(), measurementCurrent = measured.value)
+            }
+        }
+        waitForIdle()
+        mainClock.autoAdvance = false
+        val incoming = aTimelineItemEvent(content = aTimelineItemTextContent(body = "🎆")).copy(
+            displayId = UniqueId("incoming"), sentTimeMillis = System.currentTimeMillis(), origin = TimelineItemEventOrigin.SYNC,
+        )
+        runOnIdle { state.value = aTimelineState(timelineItems = persistentListOf(incoming)); Snapshot.sendApplyNotifications() }
+        mainClock.advanceTimeBy(100)
+        runOnIdle { assertEquals(null, playback.request) }
+        runOnIdle {
+            measured.value = true
+            latest.value = measuredAtLatest
+            blocked.value = false
+            Snapshot.sendApplyNotifications()
+        }
+        mainClock.advanceTimeBy(100)
+        val expected = if (measuredAtLatest && !initiallyBlocked) "incoming" else null
+        runOnIdle { assertEquals(expected, playback.request?.first) }
+        runOnIdle { latest.value = true; Snapshot.sendApplyNotifications() }
+        mainClock.advanceTimeBy(100)
+        runOnIdle { assertEquals(expected, playback.request?.first) }
+        mainClock.advanceTimeBy(4500)
+        runOnIdle { assertEquals(null, playback.request) }
+        mainClock.autoAdvance = true
+    }
+
     @Test fun `a new scene replaces an unfinished scene on its first arrival`() = assertConsecutiveArrival("❤️", "🎆", "fireworks")
 
     @Test fun `repeated copies of the same emotion each start their own playback`() = assertConsecutiveArrival("🎆", "🎆", "fireworks")

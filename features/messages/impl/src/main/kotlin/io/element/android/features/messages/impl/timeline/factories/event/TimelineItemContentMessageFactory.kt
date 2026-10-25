@@ -265,6 +265,7 @@ class TimelineItemContentMessageFactory(
                     thumbnailSource = messageType.info?.thumbnailSource,
                     mediaSource = messageType.source,
                     mimeType = messageType.info?.mimetype ?: MimeTypes.fromFileExtension(fileExtension),
+                    eventId = eventId?.value,
                     formattedFileSize = fileSizeFormatter.format(messageType.info?.size ?: 0),
                     fileExtension = fileExtension,
                     isBurnAfterRead = content.isBurnAfterRead,

@@ -99,6 +99,9 @@ import io.element.android.services.analyticsproviders.api.trackers.captureIntera
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import io.element.android.features.messages.api.MessageReferenceStore
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.withContext
 import kotlinx.parcelize.Parcelize
@@ -120,6 +123,7 @@ class MessagesFlowNode(
     private val analyticsService: AnalyticsService,
     private val locationService: LocationService,
     private val room: BaseRoom,
+    private val messageReferences: MessageReferenceStore,
     private val roomMemberProfilesCache: RoomMemberProfilesCache,
     private val roomNamesCache: RoomNamesCache,
     private val mentionSpanUpdater: MentionSpanUpdater,
@@ -389,6 +393,19 @@ class MessagesFlowNode(
                     isOneTimeView = navTarget.isOneTimeView,
                 )
                 val callback = object : MediaViewerEntryPoint.Callback {
+                    override fun onFileOpened(eventId: EventId) {
+                        if (navTarget.isOneTimeView) return
+                        lifecycleScope.launch {
+                            try {
+                                messageReferences.markFileOpened(room.roomId, eventId)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                timber.log.Timber.w("Unable to persist local file display metadata")
+                            }
+                        }
+                    }
+
                     override fun onDone() {
                         finish(Timeline.BurnAfterReadEndReason.VIEW_CLOSED)
                     }

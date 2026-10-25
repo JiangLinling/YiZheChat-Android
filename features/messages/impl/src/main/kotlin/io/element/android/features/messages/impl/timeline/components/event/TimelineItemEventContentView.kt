@@ -126,7 +126,7 @@ fun TimelineItemEventContentView(
             modifier = modifier
         )
         is TimelineItemFileContent -> TimelineItemFileView(
-            content = content,
+            content = presenterFactories.rememberPresenter<TimelineItemFileContent, TimelineItemFileContent>(content).present(),
             onContentLayoutChange = onContentLayoutChange,
             modifier = modifier,
             isMine = isMine,

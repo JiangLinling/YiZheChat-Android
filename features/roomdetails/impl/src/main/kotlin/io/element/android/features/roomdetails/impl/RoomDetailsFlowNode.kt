@@ -77,6 +77,7 @@ class RoomDetailsFlowNode(
     private val pollHistoryEntryPoint: PollHistoryEntryPoint,
     private val elementCallEntryPoint: ElementCallEntryPoint,
     private val room: JoinedRoom,
+    private val messageReferences: io.element.android.features.messages.api.MessageReferenceStore,
     private val analyticsService: AnalyticsService,
     private val messagesEntryPoint: MessagesEntryPoint,
     private val knockRequestsListEntryPoint: KnockRequestsListEntryPoint,
@@ -371,6 +372,18 @@ class RoomDetailsFlowNode(
             }
             is NavTarget.MediaGallery -> {
                 val callback = object : MediaGalleryEntryPoint.Callback {
+                    override fun onFileOpened(eventId: EventId) {
+                        room.roomCoroutineScope.launch {
+                            try {
+                                messageReferences.markFileOpened(room.roomId, eventId)
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                timber.log.Timber.w("Unable to persist gallery file display metadata")
+                            }
+                        }
+                    }
+
                     override fun onBackClick() {
                         backstack.pop()
                     }

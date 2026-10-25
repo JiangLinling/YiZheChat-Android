@@ -73,6 +73,7 @@ class DefaultMessagesEntryPointTest {
                 analyticsService = FakeAnalyticsService(),
                 locationService = FakeLocationService(),
                 room = FakeBaseRoom(),
+                messageReferences = io.element.android.features.messages.impl.local.FakeMessageReferenceStore(),
                 roomMemberProfilesCache = RoomMemberProfilesCache(),
                 roomNamesCache = RoomNamesCache(),
                 mentionSpanUpdater = object : MentionSpanUpdater {

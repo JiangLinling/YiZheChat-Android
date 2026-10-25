@@ -11,8 +11,10 @@
 package io.element.android.features.messages.impl.timeline
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.AndroidComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -21,11 +23,14 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.v2.runAndroidComposeUiTest
 import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import io.element.android.features.messages.impl.timeline.components.MessageShieldData
 import io.element.android.features.messages.impl.timeline.components.aCriticalShield
 import io.element.android.features.messages.impl.timeline.model.TimelineItem
+import io.element.android.features.messages.impl.timeline.model.GroupedEventsKind
+import io.element.android.features.messages.impl.timeline.model.NewEventState
 import io.element.android.features.messages.impl.timeline.model.event.aTimelineItemImageContent
 import io.element.android.features.messages.impl.timeline.model.event.aTimelineItemUnknownContent
 import io.element.android.features.messages.impl.timeline.model.virtual.TimelineItemLoadingIndicatorModel
@@ -51,6 +56,52 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class TimelineViewTest {
+    @Test
+    fun `a new incoming event preserves the partly scrolled three image grid`() = assertThreeImageCommit(resetPosition = false)
+
+    @Test
+    fun `a reset before incoming group reconstruction preserves the partly scrolled three image grid`() = assertThreeImageCommit(resetPosition = true)
+
+    private fun assertThreeImageCommit(resetPosition: Boolean) = runAndroidComposeUiTest<ComponentActivity> {
+        val grid = TimelineItem.GroupedEvents(
+            id = UniqueId("three-image-grid"),
+            events = List(3) { aTimelineItemEvent(content = aTimelineItemImageContent()) }.toImmutableList(),
+            aggregatedReadReceipts = persistentListOf(),
+            kind = GroupedEventsKind.MEDIA_ALBUM,
+        )
+        val originalRows = (listOf(grid) + List(10) { aTimelineItemEvent(content = aTimelineItemUnknownContent()) }).toImmutableList()
+        val state = mutableStateOf(aTimelineState(timelineItems = originalRows, isLive = true, focusedEventIndex = -1))
+        val list = LazyListState()
+        setTimelineView(state.value, stateProvider = { state.value }, lazyListState = list, modifier = Modifier.height(220.dp))
+        waitForIdle()
+        runOnIdle { list.requestScrollToItem(0, 70) }
+        waitForIdle()
+        var gridOffset = 0
+        runOnIdle {
+            assertThat(list.firstVisibleItemIndex).isEqualTo(0)
+            gridOffset = list.layoutInfo.visibleItemsInfo.single { it.key == grid.id }.offset
+            assertThat(gridOffset).isLessThan(0)
+            if (resetPosition) list.requestScrollToItem(0)
+            val rebuilt = if (resetPosition) originalRows.map { row ->
+                when (row) {
+                    is TimelineItem.GroupedEvents -> row.copy(events = row.events.map { it.copy() }.toImmutableList())
+                    is TimelineItem.Event -> row.copy()
+                    else -> row
+                }
+            }.toImmutableList() else originalRows
+            state.value = state.value.copy(
+                timelineItems = (listOf(aTimelineItemEvent(content = aTimelineItemUnknownContent())) + rebuilt).toImmutableList(),
+                newEventState = NewEventState.FromOther,
+            )
+        }
+        mainClock.advanceTimeBy(1000)
+        waitForIdle()
+        runOnIdle {
+            assertThat(list.layoutInfo.visibleItemsInfo.single { it.key == grid.id }.offset).isEqualTo(gridOffset)
+            assertThat(list.firstVisibleItemIndex).isEqualTo(1)
+        }
+    }
+
     @Test
     fun `viewport maps visible rows to raw matrix identities`() {
         val event = aTimelineItemEvent(content = aTimelineItemUnknownContent()).copy(
@@ -358,9 +409,11 @@ private fun AndroidComposeUiTest<ComponentActivity>.setTimelineView(
     onReadReceiptClick: (TimelineItem.Event) -> Unit = EnsureNeverCalledWithParam(),
     onViewportChanged: (List<UniqueId>) -> Unit = {},
     forceJumpToBottomVisibility: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     setSafeContent(clearAndroidUiDispatcher = true) {
         TimelineView(
+            modifier = modifier,
             state = stateProvider(),
             timelineProtectionState = timelineProtectionState,
             onUserDataClick = onUserDataClick,

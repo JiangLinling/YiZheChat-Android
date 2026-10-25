@@ -62,7 +62,8 @@
     <string name="screen_room_file_sending">Sending</string>
     <string name="screen_room_file_send_failed">Failed · tap to retry</string>
     <string name="screen_room_file_sent">Sent</string>
-    <string name="screen_room_file_tap_to_download">Not downloaded</string>
+    <string name="screen_room_file_tap_to_download">Tap to view</string>
+    <string name="screen_room_file_opened">Opened</string>
     <string name="screen_room_burn_after_read_title">Flash read message</string>
     <string name="screen_room_burn_after_read_close">Close and destroy</string>
     <string name="screen_room_burn_after_read_loading">Securely opening…</string>

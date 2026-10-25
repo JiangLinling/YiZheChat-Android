@@ -47,7 +47,11 @@ fun TimelineItemFileView(
         LocalEventSendState.Sending.Event -> stringResource(R.string.screen_room_file_sending)
         is LocalEventSendState.Failed -> stringResource(R.string.screen_room_file_send_failed)
         is LocalEventSendState.Sent -> stringResource(R.string.screen_room_file_sent)
-        null -> stringResource(if (isMine) R.string.screen_room_file_sent else R.string.screen_room_file_tap_to_download)
+        null -> stringResource(when {
+            isMine -> R.string.screen_room_file_sent
+            content.isOpenedLocally -> R.string.screen_room_file_opened
+            else -> R.string.screen_room_file_tap_to_download
+        })
     }
     val transferProgress = (localSendState as? LocalEventSendState.Sending.MediaWithProgress)?.let { state ->
         if (state.total > 0L) state.progress.toFloat() / state.total.toFloat() else null

@@ -55,6 +55,7 @@ class DefaultRoomDetailsEntryPointTest {
                 pollHistoryEntryPoint = FakePollHistoryEntryPoint(),
                 elementCallEntryPoint = FakeElementCallEntryPoint(),
                 room = FakeJoinedRoom(),
+                messageReferences = io.mockk.mockk(relaxed = true),
                 analyticsService = FakeAnalyticsService(),
                 messagesEntryPoint = FakeMessagesEntryPoint(),
                 knockRequestsListEntryPoint = FakeKnockRequestsListEntryPoint(),

@@ -157,6 +157,7 @@ class RoomDetailsSearchNavigationTest {
             pollHistoryEntryPoint = mockk(),
             elementCallEntryPoint = mockk(),
             room = FakeJoinedRoom(baseRoom = FakeBaseRoom(initialRoomInfo = aRoomInfo(isDirect = isDirect))),
+            messageReferences = mockk(relaxed = true),
             analyticsService = mockk(),
             messagesEntryPoint = messages,
             knockRequestsListEntryPoint = mockk(),

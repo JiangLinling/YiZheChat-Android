@@ -91,6 +91,16 @@ class DefaultMessageReferenceStore(
         }
     }
 
+    override suspend fun markFileOpened(roomId: RoomId, eventId: EventId) {
+        if (!roomId.value.startsWith("!") || !eventId.value.startsWith("$") || eventId.value.length < 2) return
+        mutex.withLock {
+            ensureLoaded()
+            val previous = mutableState.value
+            if (previous.isLocallyDeleted(roomId, eventId) || previous.isFileOpened(roomId, eventId)) return
+            persist(previous.copy(openedFileKeys = previous.openedFileKeys + MessageReferenceState.key(roomId, eventId)))
+        }
+    }
+
     override suspend fun saveReadingNavigation(roomId: RoomId, navigation: RoomReadingNavigation) {
         if (!roomId.value.startsWith("!")) return
         val ids = listOfNotNull(navigation.latestSeenEventId, navigation.firstNewEventId, navigation.batchEndEventId)
@@ -179,6 +189,7 @@ class DefaultMessageReferenceStore(
             val previous = mutableState.value
             val updated = previous.copy(
                 locallyDeletedKeys = previous.locallyDeletedKeys + keys,
+                openedFileKeys = previous.openedFileKeys - keys,
                 // A locally deleted item must not remain discoverable through Favorites.
                 favouriteKeys = previous.favouriteKeys - keys,
                 lastViewedEventIds = previous.lastViewedEventIds.filterNot { (roomId, eventId) ->
@@ -211,6 +222,7 @@ class DefaultMessageReferenceStore(
                 locallyDeletedKeys = previous.locallyDeletedKeys + keys,
                 favouriteKeys = previous.favouriteKeys - keys,
                 unavailableHistoryCutoffTimestamp = maxOf(previousCutoff, cutoffTimestamp),
+                openedFileKeys = previous.openedFileKeys - keys,
                 lastViewedEventIds = previous.lastViewedEventIds.filterNot { (roomId, eventId) ->
                     MessageReferenceState.key(RoomId(roomId), EventId(eventId)) in keys
                 },
@@ -231,6 +243,7 @@ class DefaultMessageReferenceStore(
             locallySuppressedFavouriteKeys = locallySuppressedFavouriteKeys + previous.favouriteKeys.filter { it.startsWith("${roomId.value}\u0000") }
             val updated = previous.copy(
                 conversationCutoffs = previous.conversationCutoffs + (roomId.value to cutoffTimestamp),
+                openedFileKeys = previous.openedFileKeys.filterNotTo(linkedSetOf()) { it.startsWith("${roomId.value}\u0000") },
                 lastViewedEventIds = previous.lastViewedEventIds - roomId.value,
                 readingNavigation = previous.readingNavigation - roomId.value,
                 favouriteKeys = previous.favouriteKeys.filterNotTo(linkedSetOf()) { it.startsWith("${roomId.value}\u0000") },
@@ -257,6 +270,7 @@ class DefaultMessageReferenceStore(
         val oldReference = readReference()
         if (
             updated.favouriteKeys.isEmpty() &&
+            updated.openedFileKeys.isEmpty() &&
             updated.locallyDeletedKeys.isEmpty() &&
             updated.conversationCutoffs.isEmpty() &&
             updated.lastViewedEventIds.isEmpty() &&
@@ -293,6 +307,7 @@ class DefaultMessageReferenceStore(
         .put("locallyDeleted", JSONArray(state.locallyDeletedKeys.sorted()))
         .put("conversationCutoffs", JSONObject(state.conversationCutoffs))
         .put("lastViewedEventIds", JSONObject(state.lastViewedEventIds))
+        .put("openedFiles", JSONArray(state.openedFileKeys.toList()))
         .put("readingNavigation", JSONObject().apply {
             state.readingNavigation.forEach { (roomId, position) ->
                 put(roomId, JSONObject()
@@ -316,6 +331,7 @@ class DefaultMessageReferenceStore(
         locallySuppressedFavouriteKeys = strings("locallySuppressedFavourites")
         return MessageReferenceState(
             favouriteKeys = strings("favourites"),
+            openedFileKeys = strings("openedFiles"),
             locallyDeletedKeys = strings("locallyDeleted"),
             lastViewedEventIds = buildMap {
                 val values = json.optJSONObject("lastViewedEventIds") ?: return@buildMap

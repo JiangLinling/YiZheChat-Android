@@ -40,12 +40,15 @@ data class MessageReferenceState(
     /** Per-room canonical position, without message bodies or a public read receipt. */
     val lastViewedEventIds: Map<String, String> = emptyMap(),
     val readingNavigation: Map<String, RoomReadingNavigation> = emptyMap(),
+    /** This account's actual local file display; never a download or remote read receipt. */
+    val openedFileKeys: Set<String> = emptySet(),
 ) {
     val favourites: Set<MessageReference>
         get() = favouriteKeys.mapNotNullTo(linkedSetOf(), ::reference)
 
     fun isFavourite(roomId: RoomId, eventId: EventId): Boolean = key(roomId, eventId) in favouriteKeys
     fun isLocallyDeleted(roomId: RoomId, eventId: EventId): Boolean = key(roomId, eventId) in locallyDeletedKeys
+    fun isFileOpened(roomId: RoomId, eventId: EventId): Boolean = key(roomId, eventId) in openedFileKeys
     fun conversationCutoff(roomId: RoomId): Long? = conversationCutoffs[roomId.value]
     fun isUnavailableHistoryDismissed(sentTimeMillis: Long): Boolean =
         unavailableHistoryCutoffTimestamp?.let { sentTimeMillis <= it } == true
@@ -70,6 +73,7 @@ interface MessageReferenceStore {
     val state: StateFlow<MessageReferenceState>
 
     suspend fun load()
+    suspend fun markFileOpened(roomId: RoomId, eventId: EventId) = Unit
     suspend fun saveLastViewedPosition(roomId: RoomId, eventId: EventId) = Unit
     suspend fun saveReadingNavigation(roomId: RoomId, navigation: RoomReadingNavigation) = Unit
     suspend fun toggleFavourite(roomId: RoomId, eventId: EventId): Boolean
