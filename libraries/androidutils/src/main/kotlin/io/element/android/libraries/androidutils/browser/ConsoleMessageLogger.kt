@@ -33,11 +33,7 @@ class DefaultConsoleMessageLogger : ConsoleMessageLogger {
             else -> Log.DEBUG
         }
 
-        // Avoid logging any messages that contain "password" to prevent leaking sensitive information
-        if (consoleMessage.message().contains("password=")) {
-            return
-        }
-
+        // The shared Timber ingress redacts before queueing. Do not discard the entire error and its code location.
         val message = buildString {
             append(consoleMessage.sourceId())
             append(":")

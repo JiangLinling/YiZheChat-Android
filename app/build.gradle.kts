@@ -26,13 +26,13 @@ import extension.setupDependencyInjection
 import extension.testCommonDependencies
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import java.net.URI
 import java.security.KeyFactory
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.cert.X509Certificate
 import java.security.interfaces.ECPublicKey
 import java.security.spec.X509EncodedKeySpec
-import java.net.URI
 import java.util.Base64
 import java.util.HexFormat
 import java.util.Locale
@@ -64,7 +64,9 @@ val unifiedSourceManifest = rootProject.file("unified-source-manifest.json")
 val unifiedSourceManifestSha256 = if (isNextBuildRequested) {
     check(unifiedSourceManifest.isFile) { "Next packaging requires the reviewed cumulative source manifest." }
     HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(unifiedSourceManifest.readBytes()))
-} else ""
+} else {
+    ""
+}
 val nextBuildProperties = Properties()
 fun nextBuildProperty(name: String): String = nextBuildProperties.getProperty(name)?.trim().orEmpty().also {
     check(it.isNotBlank() && !it.contains("replace", ignoreCase = true) && !it.contains("placeholder", ignoreCase = true)) {
@@ -101,7 +103,7 @@ val nextManifestValues = if (isNextBuildRequested) {
                 "next.control.baseUrl" to "https://security.yizhesy.cn",
                 "next.kms.baseUrl" to "https://security.yizhesy.cn",
                 "next.officePreview.baseUrl" to "https://security.yizhesy.cn/office-preview",
-                "next.update.cdnBaseUrl" to "https://security.yizhesy.cn",
+                "next.update.cdnBaseUrl" to "https://download.yizhesy.cn",
                 "next.update.fallbackBaseUrl" to "https://security.yizhesy.cn",
                 "next.matrix.homeserverUrl" to "https://matrix.yizhesy.cn",
                 "next.rtc.elementCallBaseUrl" to "https://matrix.yizhesy.cn/element-call",
@@ -709,7 +711,6 @@ val verifyYiZheSecurityReleaseConfig = tasks.register("verifyYiZheSecurityReleas
             "The production release key cannot be opened with the configured key password."
         }
     }
-
 }
 
 val verifyYiZheInternalReleaseConfig = tasks.register("verifyYiZheInternalReleaseConfig") {
@@ -731,6 +732,7 @@ val verifyYiZheInternalReleaseConfig = tasks.register("verifyYiZheInternalReleas
             "yizhe.officePreview.baseUrl",
             "yizhe.officePreview.certificatePin",
         )
+
         // A Next Internal Release embeds the separately reviewed Next authority, while
         // the Stable Internal Release continues to use the existing yizhe.* properties.
         fun internalProperty(name: String): String? = if (isNextBuildRequested) {

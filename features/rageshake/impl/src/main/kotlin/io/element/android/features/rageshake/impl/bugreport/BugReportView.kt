@@ -75,6 +75,7 @@ fun BugReportView(
     onSuccess: () -> Unit,
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier,
+    diagnosticStatus: String? = null,
 ) {
     val eventSink = state.eventSink
     var showDiagnostics by rememberSaveable { mutableStateOf(false) }
@@ -191,6 +192,7 @@ fun BugReportView(
 
             if (showDiagnostics) {
                 SectionTitle(stringResource(R.string.screen_bug_report_include_title))
+                diagnosticStatus?.let { status -> PreferenceRow { Text(status) } }
                 PreferenceSwitch(
                     icon = CompoundIcons.Document(),
                     isChecked = state.formState.sendLogs,

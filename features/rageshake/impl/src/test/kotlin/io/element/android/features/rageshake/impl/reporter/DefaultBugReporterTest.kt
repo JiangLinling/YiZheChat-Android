@@ -53,11 +53,130 @@ import org.robolectric.RuntimeEnvironment
 @RunWith(RobolectricTestRunner::class)
 class DefaultBugReporterTest {
     @Test
+    fun `both debug and release export actual uploader multipart for encrypted backend round trip`() = runTest {
+        for (debug in listOf(true, false)) {
+            val folder = java.nio.file.Files.createTempDirectory("actual-uploader").toFile()
+            val roots = object : io.element.android.security.securestorage.api.SecureStorageRoots {
+                override fun persistentRoot() = java.io.File(folder, "persistent")
+                override fun runtimeRoot() = java.io.File(folder, "runtime")
+            }
+            val store = io.element.android.security.securestorage.impl.DefaultSecureDiagnosticLogStore(
+                roots,
+                io.element.android.security.securestorage.test.FakeDeviceRootKeyService()
+            )
+            store.append(
+                6,
+                "RegistrationClient",
+                "HTTP 503 CERT_DATE_INVALID password=DO_NOT_UPLOAD",
+                java.net.SocketTimeoutException("access_token=DO_NOT_UPLOAD")
+            )
+            assertThat(store.flushBlocking(5000)).isTrue()
+            val provider = DiagnosticSnapshotProvider(store)
+            val bundle = provider.get()
+            val server = MockWebServer()
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"report_id":"bug-1234567890abcdef12345678","diagnostics":${bundle.manifest}}"""))
+            server.start()
+            var success = false
+            createDefaultBugReporter(server = server, buildMeta = aBuildMeta(
+                isDebuggable = debug,
+                applicationId = "com.yizhe.chat.internal",
+                versionName = "diagnostic-chain-fixture"
+            ), diagnosticProvider = provider)
+                .sendBugReport(true, true, false, "专项诊断链路验证：注册连接超时与证书错误", listener = object : BugReporterListener {
+                    override fun onUploadCancelled() = Unit
+                    override fun onUploadFailed(reason: String?) {
+                        error(reason.orEmpty())
+                    }
+                    override fun onProgress(progress: Int) = Unit
+                    override fun onUploadSucceed() {
+                        success = true
+                    }
+                })
+            assertThat(success).isTrue()
+            val request = server.takeRequest()
+            assertThat(bundle.text).doesNotContain("DO_NOT_UPLOAD")
+            System.getProperty("diagnostic.fixture.dir")?.let { path ->
+                java.io.File(path, if (debug) "debug" else "internal-release").apply { mkdirs() }.also {
+                    java.io.File(it, "android-diagnostics.jsonl.gz").writeBytes(bundle.compressed)
+                    java.io.File(it, "android-manifest.json").writeText(bundle.manifest)
+                    java.io.File(it, "android-upload-request.bin").writeBytes(request.body.readByteArray())
+                    java.io.File(it, "android-upload-content-type.txt").writeText(request.getHeader("Content-Type")!!)
+                }
+            }
+            server.shutdown()
+        }
+    }
+    @Test
+    fun `release upload never reports success on HTTP200 without matching stored log receipt`() = runTest {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+        server.start()
+        var failure: String? = null
+        var success = false
+        createDefaultBugReporter(
+            server = server,
+            buildMeta = aBuildMeta(isDebuggable = false)
+        ).sendBugReport(true, true, false, "diagnostic receipt failure test", listener = object : BugReporterListener {
+                override fun onUploadCancelled() = Unit
+                override fun onUploadFailed(reason: String?) {
+                    failure = reason
+                }
+                override fun onProgress(progress: Int) = Unit
+                override fun onUploadSucceed() {
+                    success = true
+                }
+            })
+        assertThat(server.takeRequest().method).isEqualTo("POST")
+        assertThat(success).isFalse()
+        assertThat(failure).contains("服务器未确认")
+        server.shutdown()
+    }
+
+    @Test
+    fun `selected empty logs are rejected before any transport and never claim upload success`() = runTest {
+        val server = MockWebServer()
+        server.start()
+        val logs = FakeDiagnosticLogStore().apply {
+            result = result.copy(
+                events = emptyList(),
+            state = io.element.android.security.securestorage.api.DiagnosticCollectionState.EMPTY
+            )
+        }
+        var failure: String? = null
+        var success = false
+        createDefaultBugReporter(
+            server = server,
+            logs = logs
+        ).sendBugReport(true, false, false, "empty log failure test", listener = object : BugReporterListener {
+                override fun onUploadCancelled() = Unit
+                override fun onUploadFailed(reason: String?) {
+                    failure = reason
+                }
+                override fun onProgress(progress: Int) = Unit
+                override fun onUploadSucceed() {
+                    success = true
+                }
+            })
+        assertThat(server.requestCount).isEqualTo(0)
+        assertThat(success).isFalse()
+        assertThat(failure).contains("尚无运行日志")
+        server.shutdown()
+    }
+
+    @Test
+    fun `backend detail error and status fallbacks stay clear Chinese`() {
+        assertThat(parseBugReportErrorMessage("""{"detail":"运行日志没有有效记录，请重新采集"}""", 422)).contains("没有有效记录")
+        assertThat(parseBugReportErrorMessage("""{"error":{"message":"请稍后重试"}}""", 503)).isEqualTo("请稍后重试")
+        assertThat(parseBugReportErrorMessage("""{"error":"service unavailable"}""", 503)).contains("暂时不可用")
+        assertThat(bugReportFallback(429)).contains("过于频繁")
+        assertThat(bugReportFallback(413)).contains("过大")
+    }
+    @Test
     fun `test sendBugReport success`() = runTest {
         val server = MockWebServer()
         server.enqueue(
             MockResponse()
-                .setResponseCode(200)
+                .setResponseCode(200).setBody(receipt())
         )
         server.start()
         val sut = createDefaultBugReporter(server = server)
@@ -96,7 +215,8 @@ class DefaultBugReporterTest {
         server.shutdown()
         assertThat(onUploadCancelledCalled).isFalse()
         assertThat(onUploadFailedCalled).isFalse()
-        assertThat(progressValues.size).isEqualTo(EXPECTED_NUMBER_OF_PROGRESS_VALUE)
+        assertThat(progressValues.last()).isEqualTo(100)
+        assertThat(progressValues.zipWithNext().all { (before, after) -> after >= before }).isTrue()
         assertThat(onUploadSucceedCalled).isTrue()
     }
 
@@ -105,7 +225,7 @@ class DefaultBugReporterTest {
         val server = MockWebServer()
         server.enqueue(
             MockResponse()
-                .setResponseCode(200)
+                .setResponseCode(200).setBody(receipt())
         )
         server.start()
 
@@ -161,11 +281,13 @@ class DefaultBugReporterTest {
         assertThat(foundValues["number_of_accounts"]).isEqualTo("1")
         assertThat(foundValues["text"]).isEqualTo("a bug occurred")
         assertThat(foundValues["device_keys"]).isEqualTo("curve25519:CURVECURVECURVE, ed25519:EDKEYEDKEYEDKY")
-        assertThat(foundValues["file"]).contains(fakePushRules)
+        assertThat(foundValues["notification_diagnostics"]).contains("rule_count")
+        assertThat(foundValues["file"]).isNull()
 
         // device_key now added given they are not null
         // so is the file value for the included push_rules
-        assertThat(progressValues.size).isEqualTo(EXPECTED_NUMBER_OF_PROGRESS_VALUE + 2)
+        assertThat(progressValues.last()).isEqualTo(100)
+        assertThat(progressValues.zipWithNext().all { (before, after) -> after >= before }).isTrue()
 
         server.shutdown()
     }
@@ -175,7 +297,7 @@ class DefaultBugReporterTest {
         val server = MockWebServer()
         server.enqueue(
             MockResponse()
-                .setResponseCode(200)
+                .setResponseCode(200).setBody(receipt())
         )
         server.start()
 
@@ -230,7 +352,8 @@ class DefaultBugReporterTest {
         assertThat(foundValues["device_keys"]).isEqualTo("curve25519:CURVECURVECURVE, ed25519:EDKEYEDKEYEDKY")
 
         // device_key now added given they are not null
-        assertThat(progressValues.size).isEqualTo(EXPECTED_NUMBER_OF_PROGRESS_VALUE + 1)
+        assertThat(progressValues.last()).isEqualTo(100)
+        assertThat(progressValues.zipWithNext().all { (before, after) -> after >= before }).isTrue()
 
         server.shutdown()
     }
@@ -240,7 +363,7 @@ class DefaultBugReporterTest {
         val server = MockWebServer()
         server.enqueue(
             MockResponse()
-                .setResponseCode(200)
+                .setResponseCode(200).setBody(receipt())
         )
         server.start()
 
@@ -278,7 +401,7 @@ class DefaultBugReporterTest {
         val server = MockWebServer()
         server.enqueue(
             MockResponse()
-                .setResponseCode(200)
+                .setResponseCode(200).setBody(receipt())
         )
         server.start()
 
@@ -303,7 +426,6 @@ class DefaultBugReporterTest {
         val request = server.takeRequest()
 
         val foundValues = collectValuesFromFormData(request)
-        println("## FOUND VALUES $foundValues")
         assertThat(foundValues["device_keys"]).isNull()
         assertThat(foundValues["device_id"]).isEqualTo("undefined")
         assertThat(foundValues["user_id"]).isEqualTo("undefined")
@@ -380,8 +502,9 @@ class DefaultBugReporterTest {
         server.shutdown()
         assertThat(onUploadCancelledCalled).isFalse()
         assertThat(onUploadFailedCalled).isTrue()
-        assertThat(onUploadFailedReason).isEqualTo("An error body")
-        assertThat(progressValues.size).isEqualTo(EXPECTED_NUMBER_OF_PROGRESS_VALUE)
+        assertThat(onUploadFailedReason).isEqualTo("反馈提交失败，请稍后重试")
+        assertThat(progressValues.last()).isEqualTo(100)
+        assertThat(progressValues.zipWithNext().all { (before, after) -> after >= before }).isTrue()
         assertThat(onUploadSucceedCalled).isFalse()
     }
 
@@ -425,11 +548,7 @@ class DefaultBugReporterTest {
         runCurrent()
         updateWriteToFilesConfigurationResult.assertions().isCalledOnce()
         assertThat(param).isNotNull()
-        assertThat(param).isInstanceOf(WriteToFilesConfiguration.Enabled::class.java)
-        assertThat((param as WriteToFilesConfiguration.Enabled).directory.replace('\\', '/')).endsWith("/cache/logs/server.org")
-        assertThat((param as WriteToFilesConfiguration.Enabled).filenamePrefix).isEqualTo("logs")
-        assertThat((param as WriteToFilesConfiguration.Enabled).numberOfFiles).isEqualTo(24)
-        assertThat((param as WriteToFilesConfiguration.Enabled).filenameSuffix).isEqualTo(".log")
+        assertThat(param).isInstanceOf(WriteToFilesConfiguration.Disabled::class.java)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -487,11 +606,7 @@ class DefaultBugReporterTest {
         runCurrent()
         updateWriteToFilesConfigurationResult.assertions().isCalledOnce()
         assertThat(param).isNotNull()
-        assertThat(param).isInstanceOf(WriteToFilesConfiguration.Enabled::class.java)
-        assertThat((param as WriteToFilesConfiguration.Enabled).directory.replace('\\', '/')).endsWith("/cache/logs")
-        assertThat((param as WriteToFilesConfiguration.Enabled).filenamePrefix).isEqualTo("logs")
-        assertThat((param as WriteToFilesConfiguration.Enabled).numberOfFiles).isEqualTo(24)
-        assertThat((param as WriteToFilesConfiguration.Enabled).filenameSuffix).isEqualTo(".log")
+        assertThat(param).isInstanceOf(WriteToFilesConfiguration.Disabled::class.java)
     }
 
     @Test
@@ -517,6 +632,8 @@ class DefaultBugReporterTest {
         crashDataStore: CrashDataStore = FakeCrashDataStore(),
         server: MockWebServer = MockWebServer(),
         tracingService: TracingService = FakeTracingService(),
+        logs: FakeDiagnosticLogStore = FakeDiagnosticLogStore(),
+        diagnosticProvider: DiagnosticSnapshotProvider = DiagnosticSnapshotProvider(logs),
     ): DefaultBugReporter {
         return DefaultBugReporter(
             context = RuntimeEnvironment.getApplication(),
@@ -532,10 +649,12 @@ class DefaultBugReporterTest {
             sdkMetadata = FakeSdkMetadata("123456789"),
             matrixClientProvider = matrixClientProvider,
             tracingService = tracingService,
+            diagnosticSnapshots = diagnosticProvider,
         )
     }
 
-    companion object {
-        private const val EXPECTED_NUMBER_OF_PROGRESS_VALUE = 17
+    private suspend fun receipt(): String {
+        val bundle = DiagnosticSnapshotProvider(FakeDiagnosticLogStore()).get()
+        return """{"report_id":"bug-1234567890abcdef12345678","diagnostics":${bundle.manifest}}"""
     }
 }

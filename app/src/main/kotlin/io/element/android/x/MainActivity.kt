@@ -29,13 +29,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.ClipboardManager
@@ -59,8 +59,8 @@ import io.element.android.compound.theme.ElementTheme
 import io.element.android.features.lockscreen.api.LockScreenEntryPoint
 import io.element.android.features.lockscreen.api.LockScreenLockState
 import io.element.android.features.lockscreen.api.LockScreenService
-import io.element.android.features.lockscreen.api.handleSecureFlag
 import io.element.android.features.lockscreen.api.applyScreenCaptureProtection
+import io.element.android.features.lockscreen.api.handleSecureFlag
 import io.element.android.features.lockscreen.api.shouldHideProtectedContent
 import io.element.android.libraries.androidutils.clipboard.ClipboardIngress
 import io.element.android.libraries.androidutils.clipboard.InAppClipboard
@@ -78,14 +78,14 @@ import io.element.android.services.appnavstate.api.ROOM_OPENED_FROM_NOTIFICATION
 import io.element.android.x.di.AppBindings
 import io.element.android.x.intent.SafeUriHandler
 import io.element.android.x.update.AppUpdateGate
-import java.io.FileDescriptor
-import java.io.PrintWriter
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import java.io.FileDescriptor
+import java.io.PrintWriter
 
 private val loggerTag = LoggerTag("MainActivity")
 private const val MAX_SYSTEM_SPLASH_VISIBLE_MILLIS = 30_000L
@@ -153,7 +153,9 @@ open class MainActivity : NodeActivity() {
                 protectedForegroundVisible = mainContentShown && protectedActivityResumed &&
                     !foregroundContentHidden.value && startupLockState == LockScreenLockState.Unlocked,
                 writer = writer,
-            )) return
+            )) {
+                return
+            }
         super.dump(prefix, fd, writer, args)
     }
 
@@ -313,7 +315,9 @@ open class MainActivity : NodeActivity() {
     protected open fun onMainSurfaceColor(color: Int) = Unit
 
     @Composable
-    protected open fun MainContentPresentation(content: @Composable () -> Unit) { content() }
+    protected open fun MainContentPresentation(content: @Composable () -> Unit) {
+        content()
+    }
 
     @Suppress("DEPRECATION")
     @Composable
@@ -362,7 +366,8 @@ open class MainActivity : NodeActivity() {
                             securityRefreshService = appBindings.managementControlCoordinator(),
                             appOperationalStateCoordinator = appBindings.appOperationalStateCoordinator(),
                             modifier = Modifier.fillMaxSize(),
-                            allowRetainedStartup = this@MainActivity.javaClass == MainActivity::class.java && intent.action == Intent.ACTION_MAIN,
+                            allowRetainedStartup = BuildConfig.DEBUG &&
+                                this@MainActivity.javaClass == MainActivity::class.java && intent.action == Intent.ACTION_MAIN,
                         ) {
                             Box(Modifier.fillMaxSize()) {
                                 ExistingAppContent(appBindings)

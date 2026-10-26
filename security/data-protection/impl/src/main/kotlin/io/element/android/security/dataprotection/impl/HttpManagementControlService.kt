@@ -2047,7 +2047,11 @@ class HttpManagementControlService(
         check(packageName == context.packageName) { "Release package does not match this application." }
         check(buildId.matches(BUILD_ID_PATTERN)) { "Release build identity is invalid." }
         check(signingCertificateSha256.matches(ACCOUNT_HASH_PATTERN)) { "Release signing certificate identity is invalid." }
-        check(isAllowedReleaseApkUrl(apkUrl, releaseCdnBaseUrl())) { "Release CDN APK URL is not allowed." }
+        // Existing Internal installations published an origin-primary manifest.
+        // Accept that exact origin during migration; new releases use the CDN.
+        val primaryAllowed = isAllowedReleaseApkUrl(apkUrl, releaseCdnBaseUrl()) ||
+            (configuration.updateChannel == "internal" && isAllowedReleaseApkUrl(apkUrl, releaseFallbackBaseUrl()))
+        check(primaryAllowed) { "Release primary APK URL is not allowed." }
         check(isAllowedReleaseApkUrl(apkFallbackUrl, releaseFallbackBaseUrl())) { "Release fallback APK URL is not allowed." }
     }
 
@@ -2056,7 +2060,8 @@ class HttpManagementControlService(
         onProgress: suspend (AppUpdateDownloadProgress) -> Unit,
     ): PreparedAppUpdate = withContext(Dispatchers.IO) {
         try {
-            Timber.tag(DIAGNOSTIC_TAG).i("YZMGMT_UPDATE_SOURCE=CDN")
+            val primarySource = if (URI(release.apkUrl).host.equals(RELEASE_CDN_HOST, ignoreCase = true)) "CDN" else "ORIGIN_COMPAT"
+            Timber.tag(DIAGNOSTIC_TAG).i("YZMGMT_UPDATE_SOURCE=%s", primarySource)
             downloadWithRetry(release, release.apkUrl, ".cdn.part", onProgress)
         } catch (failure: Throwable) {
             if (!isFallbackEligible(failure)) throw failure
@@ -2099,7 +2104,7 @@ class HttpManagementControlService(
     private fun releaseBaseUrl(nextBaseUrl: String, stableHost: String, label: String): String {
         if (!configuration.isNextDeployment) return "https://$stableHost"
         if (configuration.updateChannel == "internal") {
-            check(nextBaseUrl == "https://security.yizhesy.cn") {
+            check(nextBaseUrl == "https://$stableHost") {
                 "Internal update $label endpoint does not match the formal authority."
             }
             return nextBaseUrl
@@ -2152,9 +2157,19 @@ class HttpManagementControlService(
                 if (resumeOffset > 0L) header("Range", "bytes=$resumeOffset-")
             }
             .build()
+        val transferStarted = System.nanoTime()
+        var transferBytes = 0L
+        var transferHost = URI(downloadUrl).host.orEmpty()
+        var transferStatus = 0
+        var transferCache: String? = null
+        var transferRange: String? = null
         try {
             val digest = MessageDigest.getInstance("SHA-256")
             client.newCall(request).execute().use { response ->
+                transferHost = response.request.url.host
+                transferStatus = response.code
+                transferCache = response.header("X-Cache-Lookup") ?: response.header("X-Cache")
+                transferRange = response.header("Content-Range")
                 if (response.code == 416 && resumeOffset > 0L) {
                     temporary.delete()
                     throw IOException("Saved APK fragment is outside the server range; retry from the beginning.")
@@ -2204,6 +2219,7 @@ class HttpManagementControlService(
                             output.write(buffer, 0, count)
                             digest.update(buffer, 0, count)
                             downloadedBytes += count
+                            transferBytes += count
                             if (downloadedBytes - lastReportedBytes >= DOWNLOAD_PROGRESS_REPORT_BYTES ||
                                 (totalBytes > 0L && downloadedBytes >= totalBytes)
                             ) {
@@ -2233,8 +2249,38 @@ class HttpManagementControlService(
             }
         } catch (failure: Throwable) {
             // Network failures intentionally keep the partial file for the next resume attempt.
+            val category = when (failure) {
+                is java.net.SocketTimeoutException -> "NETWORK_TIMEOUT"
+                is java.net.ConnectException, is java.net.UnknownHostException -> "NETWORK_CONNECTION_FAILED"
+                is javax.net.ssl.SSLException -> "TLS_VALIDATION_FAILED"
+                is HttpStatusException -> "HTTP_RESULT_FAILED"
+                is kotlinx.coroutines.CancellationException -> "DOWNLOAD_CANCELLED"
+                is IllegalStateException -> "DOWNLOAD_INTEGRITY_FAILED"
+                else -> "DOWNLOAD_FAILED"
+            }
+            Timber.tag("UpdateDownload").w(UpdateTransferDiagnostic.facts(
+                transferHost,
+                temporarySuffix == ".origin.part",
+                transferStatus,
+                transferCache,
+                transferRange,
+                resumeOffset,
+                transferBytes,
+                (System.nanoTime() - transferStarted) / 1_000_000,
+                category
+            ))
             throw failure
         }
+        Timber.tag("UpdateDownload").i(UpdateTransferDiagnostic.facts(
+            transferHost,
+            temporarySuffix == ".origin.part",
+            transferStatus,
+            transferCache,
+            transferRange,
+            resumeOffset,
+            transferBytes,
+            (System.nanoTime() - transferStarted) / 1_000_000
+        ))
         return PreparedAppUpdate(release, target)
     }
 

@@ -28,6 +28,7 @@ setupDependencyInjection()
 
 dependencies {
     implementation(projects.appconfig)
+    implementation(projects.security.secureStorage.api)
     implementation(projects.features.enterprise.api)
     implementation(projects.features.viewfolder.api)
     implementation(projects.services.toolbox.api)
@@ -59,5 +60,7 @@ dependencies {
     testImplementation(projects.features.viewfolder.test)
     testImplementation(projects.libraries.preferences.test)
     testImplementation(projects.services.toolbox.test)
+    testImplementation(projects.security.secureStorage.impl)
+    testImplementation(projects.security.secureStorage.test)
     testImplementation(libs.network.mockwebserver)
 }

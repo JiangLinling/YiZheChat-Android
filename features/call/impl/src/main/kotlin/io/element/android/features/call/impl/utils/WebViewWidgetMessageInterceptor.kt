@@ -102,7 +102,7 @@ class WebViewWidgetMessageInterceptor(
             }
 
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-                Timber.e("Element Call resource failed with code ${error?.errorCode}.")
+                Timber.tag("RTCWebView").e("RTC_WEBVIEW_RESOURCE_FAILED status_code=${error?.errorCode}")
 
                 // Only propagate the error if it happens while loading the current page
                 if (view?.url == request?.url.toString()) {
@@ -113,7 +113,7 @@ class WebViewWidgetMessageInterceptor(
             }
 
             override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
-                Timber.e("Element Call HTTP request failed with status ${errorResponse?.statusCode}.")
+                Timber.tag("RTCWebView").e("RTC_WEBVIEW_HTTP_FAILED http_status=${errorResponse?.statusCode}")
 
                 // Only propagate the error if it happens while loading the current page
                 if (view?.url == request?.url.toString()) {
@@ -124,7 +124,7 @@ class WebViewWidgetMessageInterceptor(
             }
 
             override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
-                Timber.e("Element Call TLS validation failed with code ${error?.primaryError}.")
+                Timber.tag("RTCWebView").e("RTC_WEBVIEW_TLS_FAILED status_code=${error?.primaryError}")
 
                 // Only propagate the error if it happens while loading the current page
                 if (view?.url == error?.url.toString()) {

@@ -122,6 +122,8 @@ interface AppBindings {
 
     fun secureStorageRoots(): SecureStorageRoots
 
+    fun secureDiagnosticLogStore(): io.element.android.security.securestorage.api.SecureDiagnosticLogStore
+
     fun deviceRootKeyService(): DeviceRootKeyService
 
     fun deviceTrustService(): DeviceTrustService

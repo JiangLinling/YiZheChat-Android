@@ -19,6 +19,7 @@ import java.io.StringWriter
 class VectorUncaughtExceptionHandler(
     private val crashDataStore: CrashDataStore,
     private val persistCrashDetails: Boolean = true,
+    private val diagnostics: io.element.android.security.securestorage.api.SecureDiagnosticLogStore? = null,
 ) : Thread.UncaughtExceptionHandler {
     private var previousHandler: Thread.UncaughtExceptionHandler? = null
 
@@ -38,6 +39,16 @@ class VectorUncaughtExceptionHandler(
      */
     @Suppress("PrintStackTrace")
     override fun uncaughtException(thread: Thread, throwable: Throwable) {
+        if (diagnostics != null) {
+            try {
+                diagnostics.append(7, "UncaughtException", "SDK_FATAL_EXCEPTION", throwable, "uncaught-handler")
+                diagnostics.flushBlocking(1500)
+                crashDataStore.setCrashData("发生崩溃，请查看加密诊断日志的实际采集状态")
+            } finally {
+                previousHandler?.uncaughtException(thread, throwable)
+            }
+            return
+        }
         if (!persistCrashDetails) {
             Timber.e("Fatal exception; diagnostic details disabled by production security policy")
             crashDataStore.setCrashData("")

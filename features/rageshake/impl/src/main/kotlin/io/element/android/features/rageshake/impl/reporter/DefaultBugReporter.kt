@@ -16,16 +16,13 @@ import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.SingleIn
 import io.element.android.appconfig.RageshakeConfig
-import io.element.android.features.rageshake.api.logs.createWriteToFilesConfiguration
 import io.element.android.features.rageshake.api.reporter.BugReportAttachment
 import io.element.android.features.rageshake.api.reporter.BugReporter
 import io.element.android.features.rageshake.api.reporter.BugReporterListener
 import io.element.android.features.rageshake.impl.crash.CrashDataStore
 import io.element.android.features.rageshake.impl.screenshot.ScreenshotHolder
-import io.element.android.libraries.androidutils.file.compressFile
 import io.element.android.libraries.androidutils.file.safeDelete
 import io.element.android.libraries.core.coroutine.CoroutineDispatchers
-import io.element.android.libraries.core.data.tryOrNull
 import io.element.android.libraries.core.meta.BuildMeta
 import io.element.android.libraries.core.mimetype.MimeTypes
 import io.element.android.libraries.di.annotations.AppCoroutineScope
@@ -34,6 +31,7 @@ import io.element.android.libraries.matrix.api.MatrixClientProvider
 import io.element.android.libraries.matrix.api.SdkMetadata
 import io.element.android.libraries.matrix.api.core.UserId
 import io.element.android.libraries.matrix.api.tracing.TracingService
+import io.element.android.libraries.matrix.api.tracing.WriteToFilesConfiguration
 import io.element.android.libraries.network.useragent.UserAgentProvider
 import io.element.android.libraries.sessionstorage.api.SessionStore
 import io.element.android.libraries.sessionstorage.api.sessionIdFlow
@@ -56,8 +54,6 @@ import org.json.JSONException
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.File
-import java.io.IOException
-import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.time.Instant
 import java.time.LocalDateTime
@@ -85,6 +81,7 @@ class DefaultBugReporter(
     private val sdkMetadata: SdkMetadata,
     private val matrixClientProvider: MatrixClientProvider,
     private val tracingService: TracingService,
+    private val diagnosticSnapshots: DiagnosticSnapshotProvider,
 ) : BugReporter {
     companion object {
         // filenames
@@ -93,7 +90,6 @@ class DefaultBugReporter(
         private const val MULTIPART_SIZE_RESERVE_BYTES = 1024 * 1024L
     }
 
-    private val logcatCommandDebug = arrayOf("logcat", "-d", "-v", "threadtime", "*:*")
     private var currentTracingLogLevel: String? = null
 
     private val baseLogDirectory = File(context.cacheDir, LOG_DIRECTORY_NAME)
@@ -112,7 +108,7 @@ class DefaultBugReporter(
                 .distinctUntilChanged()
                 .onEach { logSubfolder ->
                     setCurrentLogDirectory(logSubfolder)
-                    tracingService.updateWriteToFilesConfiguration(createWriteToFilesConfiguration(buildMeta.isDebuggable))
+                    tracingService.updateWriteToFilesConfiguration(WriteToFilesConfiguration.Disabled)
                 }
                 .launchIn(appCoroutineScope)
         }
@@ -139,32 +135,15 @@ class DefaultBugReporter(
         var response: Response? = null
 
         // Start at something like 1000 lines to have some 'buffer' in case unexpected lines were added
-        var totalLogLines = 1000L
 
         try {
             var serverError: String? = null
             withContext(coroutineDispatchers.io) {
-                val crashCallStack = crashDataStore.crashInfo().first()
-                val bugDescription = buildBugDescription(
-                    problemDescription = problemDescription,
-                    crashCallStack = crashCallStack,
-                    includeCrashLogs = buildMeta.isDebuggable && withCrashLogs,
-                )
-                val gzippedFiles = mutableListOf<File>()
-                var filesTooBig = emptyList<String>()
-
-                if (buildMeta.isDebuggable && (withCrashLogs || withDevicesLogs)) {
-                    saveLogCat()
-                        ?.takeIf { it.length() < RageshakeConfig.MAX_LOG_CONTENT_SIZE }
-                        ?.takeIf { countLogLines(it) + totalLogLines < RageshakeConfig.MAX_LOG_LINES_SIZE }
-                        ?.let { logCatFile ->
-                            compressFile(logCatFile).also {
-                                logCatFile.safeDelete()
-                            }
-                        }
-                        ?.let { gzippedLogcat ->
-                            gzippedFiles.add(0, gzippedLogcat)
-                        }
+                val bugDescription = problemDescription.take(MAX_BUG_DESCRIPTION_CHARS)
+                val diagnostics = if (withDevicesLogs || withCrashLogs) diagnosticSnapshots.get() else null
+                if (diagnostics != null && !diagnostics.canUpload) {
+                    serverError = diagnostics.summary
+                    return@withContext
                 }
                 val sessionData = sessionStore.getLatestSession()
                 val numberOfAccounts = sessionStore.numberOfSessions()
@@ -173,6 +152,7 @@ class DefaultBugReporter(
                 // build the multi part request
                 val builder = BugReporterMultipartBody.Builder()
                     .addFormDataPart("text", bugDescription)
+                    .addFormDataPart("logs_requested", (withDevicesLogs || withCrashLogs).toString())
                     .addFormDataPart("app", RageshakeConfig.BUG_REPORT_APP_NAME)
                     .addFormDataPart("user_agent", userAgentProvider.provide())
                     .addFormDataPart("user_id", userId?.toString() ?: "undefined")
@@ -191,103 +171,38 @@ class DefaultBugReporter(
                     .addFormDataPart("label", buildMeta.flavorDescription)
                     .addFormDataPart("branch_name", buildMeta.gitBranchName)
 
-                userId?.let {
-                    matrixClientProvider.getOrNull(it)?.let { client ->
-                        val curveKey = client.encryptionService.deviceCurve25519()
-                        val edKey = client.encryptionService.deviceEd25519()
-                        if (curveKey != null && edKey != null) {
-                            builder.addFormDataPart("device_keys", "curve25519:$curveKey, ed25519:$edKey")
-                        }
-
-                        if (buildMeta.isDebuggable && sendPushRules) {
-                            client.notificationSettingsService.getRawPushRules().getOrNull()?.let { pushRules ->
-                                val logLines = pushRules.lineSequence().count()
-
-                                if (totalLogLines + logLines < RageshakeConfig.MAX_LOG_LINES_SIZE) {
-                                    builder.addFormDataPart(
-                                        name = "file",
-                                        filename = "push_rules.json",
-                                        body = pushRules.toByteArray().toRequestBody(MimeTypes.Json.toMediaTypeOrNull())
-                                    )
-                                } else {
-                                    Timber.w("Could not upload push rules because it would exceed the max log lines size")
-                                }
-                            }
-                        }
-                    }
+                if (sendPushRules && userId != null) {
+                    val rawRules = matrixClientProvider.getOrNull(userId)?.notificationSettingsService?.getRawPushRules()?.getOrNull()
+                    // Only collection status and structural count; never upload rule patterns, users, rooms or bodies.
+                    val ruleCount = rawRules?.let { Regex("\"enabled\"\\s*:").findAll(it).count() }
+                    builder.addFormDataPart("notification_diagnostics", JSONObject()
+                        .put("collected", ruleCount != null).put("rule_count", ruleCount ?: JSONObject.NULL).toString())
                 }
-
-                if (buildMeta.isDebuggable && withDevicesLogs) {
-                    val files = getLogFiles().sortedByDescending { it.lastModified() }
-                    val filesBySize = files.groupBy {
-                        it.length() < RageshakeConfig.MAX_LOG_CONTENT_SIZE
-                    }.toMutableMap()
-
-                    filesBySize[true].orEmpty().mapNotNullTo(gzippedFiles) { file ->
-                        val logLines = countLogLines(file)
-                        totalLogLines += logLines
-
-                        when {
-                            totalLogLines > RageshakeConfig.MAX_LOG_LINES_SIZE -> {
-                                // Add it to the list of omitted files too
-                                (filesBySize.getOrPut(false) { mutableListOf() } as MutableList<File>).add(file)
-
-                                Timber.e(
-                                    "Could not upload file ${file.name} because it would exceed the max log lines size " +
-                                        "($totalLogLines/${RageshakeConfig.MAX_LOG_LINES_SIZE}"
-                                )
-
-                                totalLogLines -= logLines
-
-                                null
-                            }
-                            file.extension == "gz" -> file
-                            else -> compressFile(file)
-                        }
-                    }
-                    filesTooBig = filesBySize[false].orEmpty().map { it.name }
+                userId?.let { matrixClientProvider.getOrNull(it)?.encryptionService }?.let { encryption ->
+                    val curve = encryption.deviceCurve25519()
+                    val ed = encryption.deviceEd25519()
+                    if (curve != null && ed != null) builder.addFormDataPart("device_keys", "curve25519:$curve, ed25519:$ed")
                 }
+                if (withCrashLogs) builder.addFormDataPart("label", "crash")
 
-                if (filesTooBig.isNotEmpty()) {
-                    builder.addFormDataPart("omitted_logs", filesTooBig.toString())
-                }
-
-                if (buildMeta.isDebuggable && crashCallStack.isNotEmpty() && withCrashLogs) {
-                    builder.addFormDataPart("label", "crash")
-                }
                 currentTracingLogLevel?.let {
                     builder.addFormDataPart("tracing_log_level", it)
                 }
                 if (buildMeta.isEnterpriseBuild) {
                     builder.addFormDataPart("label", "Enterprise")
                 }
-                // add the gzipped files, don't cancel the whole upload if only some file failed to upload
-                val attachmentBytes = attachments.sumOf { it.file.length() }
-                val maximumLogBytes = (RageshakeConfig.MAX_LOG_UPLOAD_SIZE - attachmentBytes - MULTIPART_SIZE_RESERVE_BYTES)
-                    .coerceAtLeast(0L)
-                var totalUploadedSize = 0L
-                var uploadedSomeLogs = false
-                for (file in gzippedFiles) {
-                    try {
-                        val requestBody = file.asRequestBody(MimeTypes.OctetStream.toMediaTypeOrNull())
-                        totalUploadedSize += requestBody.contentLength()
-                        // If we are about to upload more than the max request size, stop here
-                        if (totalUploadedSize > maximumLogBytes) {
-                            Timber.e("Could not upload file ${file.name} because it would exceed the max request size")
-                            break
-                        }
-                        builder.addFormDataPart("compressed-log", file.name, requestBody)
-                        uploadedSomeLogs = true
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        Timber.e(e, "## sendBugReport() : fail to attach file ${file.name}")
+                if (diagnostics != null) {
+                    val attachmentBytes = attachments.sumOf { it.file.length() }
+                    if (diagnostics.compressed.size + attachmentBytes + MULTIPART_SIZE_RESERVE_BYTES > RageshakeConfig.MAX_LOG_UPLOAD_SIZE) {
+                        serverError = "日志与附件超过上传限制，请减少附件后重试"
+                        return@withContext
                     }
-                }
-                bugReportFiles.addAll(gzippedFiles)
-                if (gzippedFiles.isNotEmpty() && !uploadedSomeLogs) {
-                    serverError = "Couldn't upload any logs, please retry."
-                    return@withContext
+                    builder.addFormDataPart("diagnostics", diagnostics.manifest)
+                    builder.addFormDataPart(
+                        "compressed-log",
+                        "diagnostics-${diagnostics.snapshot.id}.jsonl.gz",
+                        diagnostics.compressed.toRequestBody(MimeTypes.OctetStream.toMediaTypeOrNull())
+                    )
                 }
                 if (withScreenshot) {
                     screenshotHolder.getFileUri()
@@ -342,17 +257,27 @@ class DefaultBugReporter(
                     throw e
                 } catch (e: Exception) {
                     Timber.e(e, "Error executing the request")
-                    errorMessage = e.localizedMessage
+                    errorMessage = "网络连接失败，请稍后重试"
                 }
                 val responseCode = response?.code
                 // if the upload failed, try to retrieve the reason
-                if (responseCode != HttpURLConnection.HTTP_OK) {
+                if (responseCode == HttpURLConnection.HTTP_OK && diagnostics != null) {
+                    val receipt = runCatching { JSONObject(response?.body?.string().orEmpty()) }.getOrNull()
+                    val stored = receipt?.optJSONObject("diagnostics")
+                    val expected = JSONObject(diagnostics.manifest)
+                    if (receipt?.optString("report_id")?.matches(Regex("bug-[0-9a-f]{24}")) != true || stored == null ||
+                        stored.optString("snapshot_id") != diagnostics.snapshot.id ||
+                        stored.optLong("record_count", -1) != diagnostics.snapshot.recordCount.toLong() ||
+                        stored.optLong("uncompressed_bytes", -1) != expected.getLong("uncompressed_bytes")) {
+                        serverError = "服务器未确认收到这份运行日志，请刷新日志后重试"
+                    }
+                } else if (responseCode != HttpURLConnection.HTTP_OK) {
                     serverError = if (errorMessage != null) {
-                        "Failed with error $errorMessage"
+                        errorMessage
                     } else {
                         val responseBody = response?.body
                         if (responseBody == null) {
-                            "Failed with error $responseCode"
+                            bugReportFallback(responseCode)
                         } else {
                             try {
                                 val inputStream = responseBody.byteStream()
@@ -365,13 +290,13 @@ class DefaultBugReporter(
                                     throw e
                                 } catch (e: JSONException) {
                                     Timber.e(e, "Json conversion failed")
-                                    "Failed with error $responseCode"
+                                    bugReportFallback(responseCode)
                                 }
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Exception) {
                                 Timber.e(e, "## sendBugReport() : failed to parse error")
-                                "Failed with error $responseCode"
+                                bugReportFallback(responseCode)
                             }
                         }
                     }
@@ -432,85 +357,29 @@ class DefaultBugReporter(
         currentTracingLogLevel = logLevel
     }
 
-    /**
-     * @return the files on the log directory.
-     */
-    private fun getLogFiles(): List<File> {
-        return tryOrNull(
-            onException = { Timber.e(it, "## getLogFiles() failed") }
-        ) {
-            val logDirectory = logDirectory()
-            logDirectory.listFiles()
-                ?.filter {
-                    it.isFile &&
-                        !it.name.endsWith(LOG_CAT_FILENAME)
-                }
-        }.orEmpty()
-    }
-
-    // ==============================================================================================================
-    // Logcat management
-    // ==============================================================================================================
-
-    /**
-     * Save the logcat.
-     *
-     * @return the file if the operation succeeds
-     */
-    override fun saveLogCat(): File? {
-        if (!buildMeta.isDebuggable) return null
-        val file = File(baseLogDirectory, LOG_CAT_FILENAME)
-        if (file.exists()) {
-            file.safeDelete()
-        }
-        return try {
-            file.writer().use {
-                getLogCatContent(it)
-            }
-            file
-        } catch (e: Exception) {
-            Timber.e(e, "## saveLogCat() : fail to write logcat")
-            null
-        }
-    }
-
-    /**
-     * Retrieves the logs.
-     *
-     * @param streamWriter the stream writer
-     */
-    private fun getLogCatContent(streamWriter: OutputStreamWriter) {
-        val logcatProcess = tryOrNull {
-            Runtime.getRuntime().exec(logcatCommandDebug)
-        } ?: return
-        try {
-            val separator = System.lineSeparator()
-            logcatProcess.inputStream
-                .reader()
-                .buffered(RageshakeConfig.MAX_LOG_UPLOAD_SIZE.toInt())
-                .forEachLine { line ->
-                    streamWriter.append(line)
-                    streamWriter.append(separator)
-                }
-        } catch (e: IOException) {
-            Timber.e(e, "getLogCatContent fails")
-        }
-    }
-
-    private fun countLogLines(file: File): Int {
-        return file.reader().useLines { it.count() }
-    }
+    // The viewer and upload read the installation-bound encrypted snapshot. Never dump raw logcat.
+    override fun saveLogCat(): File? = null
 }
 
 internal fun parseBugReportErrorMessage(serverErrorJson: String, responseCode: Int?): String {
     val responseJSON = JSONObject(serverErrorJson)
-    return when (val error = responseJSON.opt("error")) {
+    val message = when (val error = responseJSON.opt("error")) {
         is JSONObject -> error.optString("message")
             .takeIf { it.isNotBlank() }
-            ?: error.toString()
+            .orEmpty()
         is String -> error
-        else -> "Failed with error $responseCode"
+        else -> responseJSON.optString("detail").takeIf { responseJSON.opt("detail") is String }.orEmpty()
     }
+    return message.take(300).takeIf { it.any { character -> character in '\u4e00'..'\u9fff' } } ?: bugReportFallback(responseCode)
+}
+
+internal fun bugReportFallback(code: Int?): String = when (code) {
+    413 -> "日志与附件过大，请减少附件后重试"
+    429 -> "提交过于频繁，请稍后重试"
+    422 -> "反馈或日志内容不完整，请刷新日志后重试"
+    401, 403 -> "反馈提交未获授权，请重新登录后重试"
+    500, 502, 503, 504 -> "反馈服务暂时不可用，请稍后重试"
+    else -> "反馈提交失败，请稍后重试"
 }
 
 internal fun buildBugDescription(

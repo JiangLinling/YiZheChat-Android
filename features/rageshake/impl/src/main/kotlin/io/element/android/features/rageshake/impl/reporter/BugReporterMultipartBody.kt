@@ -23,6 +23,8 @@ import okio.Buffer
 import okio.BufferedSink
 import okio.ByteString
 import okio.ByteString.Companion.encodeUtf8
+import okio.ForwardingSink
+import okio.buffer
 import java.io.IOException
 import java.util.UUID
 
@@ -48,8 +50,6 @@ class BugReporterMultipartBody internal constructor(
             ?.takeIf { contentLength > 0 }
             ?.onWrite(totalWrittenBytes, contentLength)
     }
-
-    private val contentLengthSize = mutableListOf<Long>()
 
     fun setWriteListener(listener: BugReporterMultipartBodyListener?) {
         this.listener = listener
@@ -119,7 +119,17 @@ class BugReporterMultipartBody internal constructor(
 
     @Throws(IOException::class)
     override fun writeTo(sink: BufferedSink) {
-        writeOrCountBytes(sink, false)
+        contentLength()
+        var written = 0L
+        val progressSink = object : ForwardingSink(sink) {
+            override fun write(source: Buffer, byteCount: Long) {
+                super.write(source, byteCount)
+                written += byteCount
+                onWrite(written)
+            }
+        }.buffer()
+        writeOrCountBytes(progressSink, false)
+        progressSink.flush()
     }
 
     /**
@@ -140,9 +150,6 @@ class BugReporterMultipartBody internal constructor(
         if (countBytes) {
             byteCountBuffer = Buffer()
             sink = byteCountBuffer
-            // ELEMENT-START
-            contentLengthSize.clear()
-            // ELEMENT-END
         }
 
         for (p in 0 until parts.size) {
@@ -183,19 +190,8 @@ class BugReporterMultipartBody internal constructor(
 
             if (countBytes) {
                 byteCount += contentLength
-                // ELEMENT-START
-                contentLengthSize.add(byteCount)
-                // ELEMENT-END
             } else {
                 body.writeTo(sink)
-                // ELEMENT-START
-                // warn the listener of upload progress
-                // sink.buffer().size() does not give the right value
-                // assume that some data are popped
-                contentLengthSize.getOrNull(p)?.let { writtenByte ->
-                    onWrite(writtenByte)
-                }
-                // ELEMENT-END
             }
 
             sink.write(CRLF)
